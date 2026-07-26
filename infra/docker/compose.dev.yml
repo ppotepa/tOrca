@@ -1,0 +1,53 @@
+services:
+  server:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.server
+    environment:
+      TORCHAT_BIND: 0.0.0.0:8080
+      TORCHAT_DATABASE_URL: postgres://torchat:local-development-only@postgres:5432/torchat
+      RUST_LOG: info
+      TORCHAT_ONION_URL: ${TORCHAT_ONION_URL:-}
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: torchat
+      POSTGRES_USER: torchat
+      POSTGRES_PASSWORD: local-development-only
+    volumes:
+      - postgres_dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U torchat -d torchat"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  tor:
+    build:
+      context: .
+      dockerfile: Dockerfile.tor
+    depends_on:
+      server:
+        condition: service_started
+    volumes:
+      - tor_dev:/var/lib/tor
+    ports:
+      - "127.0.0.1:9050:9050"
+    healthcheck:
+      test: ["CMD-SHELL", "test -s /var/lib/tor/hidden_service/hostname"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  postgres_dev:
+  tor_dev:

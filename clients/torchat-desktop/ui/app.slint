@@ -1,0 +1,297 @@
+import { LineEdit, VerticalBox, HorizontalBox, ScrollView } from "std-widgets.slint";
+
+export struct ChatMessageView {
+    body: string,
+    meta: string,
+    outgoing: bool,
+}
+
+component NavButton inherits Rectangle {
+    in property <string> label;
+    in property <string> icon;
+    in property <bool> active;
+    callback clicked();
+    height: 46px;
+    border-radius: 13px;
+    background: active ? #263b5b : transparent;
+    Text { x: 15px; text: root.icon; color: active ? #8db9ff : #7889a4; font-size: 17px; vertical-alignment: center; }
+    Text { x: 48px; text: root.label; color: active ? #f6f9ff : #aebbd0; font-size: 14px; font-weight: active ? 700 : 500; vertical-alignment: center; }
+    TouchArea { clicked => root.clicked(); }
+}
+
+component ContactCard inherits Rectangle {
+    in property <string> value;
+    in property <bool> selected;
+    callback clicked();
+    height: 72px;
+    border-radius: 15px;
+    background: selected ? #253d60 : #172131;
+    Rectangle {
+        x: 14px; y: 16px; width: 40px; height: 40px; border-radius: 20px; background: #3f6596;
+        Text { text: "●"; color: #e8f1ff; font-size: 15px; horizontal-alignment: center; vertical-alignment: center; }
+    }
+    Text { x: 68px; y: 15px; width: parent.width - 84px; text: root.value; color: #f1f5fc; font-size: 14px; font-weight: 600; overflow: elide; }
+    Text { x: 68px; y: 40px; text: "lokalny kontakt · E2EE"; color: #7789a6; font-size: 10px; }
+    TouchArea { clicked => root.clicked(); }
+}
+
+component PrimaryButton inherits Rectangle {
+    in property <string> label;
+    callback clicked();
+    height: 38px;
+    border-radius: 11px;
+    background: #4c7fc4;
+    Text { text: root.label; color: white; font-size: 12px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+    TouchArea { clicked => root.clicked(); }
+}
+
+export component MainWindow inherits Window {
+    title: "TorChat";
+    min-width: 980px;
+    min-height: 660px;
+    background: #0b111b;
+
+    in-out property <string> screen: "splash";
+    in-out property <string> status: "Uruchamianie Tor…";
+    in-out property <string> status-phase: "starting";
+    in-out property <int> status-progress: 0;
+    in-out property <string> nickname: "Bob";
+    in-out property <string> fingerprint: "";
+    in-out property <string> installation-id: "";
+    in-out property <string> active-tab: "Czaty";
+    in-out property <string> selected-contact: "";
+    in-out property <string> composer: "";
+    in-out property <string> search: "";
+    in-out property <string> error-text: "";
+    in-out property <string> own-invite: "";
+    in-out property <string> invite-input: "";
+    in-out property <image> own-qr;
+    in-out property <[string]> contacts: [];
+    in-out property <[ChatMessageView]> messages: [];
+    callback connect-clicked();
+    callback tab-changed(string);
+    callback contact-selected(string);
+    callback search-clicked(string);
+    callback send-clicked(string);
+    callback invite-submit(string);
+
+    if root.screen == "splash": Rectangle {
+        background: #0b111b;
+        Rectangle {
+            width: 104px; height: 104px; border-radius: 30px; background: #416fae;
+            x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2 - 65px;
+            Text { text: "◉"; color: white; font-size: 50px; horizontal-alignment: center; vertical-alignment: center; }
+        }
+        Text { y: parent.height / 2 + 56px; width: parent.width; text: "TorChat"; color: #f5f8ff; font-size: 30px; font-weight: 800; horizontal-alignment: center; }
+        Text { y: parent.height / 2 + 99px; width: parent.width; text: "private conversations over onion"; color: #71839f; font-size: 12px; horizontal-alignment: center; }
+    }
+
+    if root.screen == "connection": Rectangle {
+        background: #0b111b;
+        Rectangle {
+            width: 520px; height: 360px; border-radius: 26px; background: #121c2b;
+            x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+            VerticalBox {
+                padding: 42px; spacing: 20px; alignment: center;
+                Rectangle {
+                    width: 72px; height: 72px; border-radius: 22px;
+                    background: root.status-phase == "error" ? #6e303b : root.status-phase == "connected" ? #28694d : #604f2a;
+                    Text { text: "◉"; color: white; font-size: 34px; horizontal-alignment: center; vertical-alignment: center; }
+                }
+                Text { text: "Bezpieczne połączenie Tor"; color: #f4f7fd; font-size: 23px; font-weight: 750; horizontal-alignment: center; }
+                Text { text: root.status; color: #a2b1c7; font-size: 13px; horizontal-alignment: center; }
+                Rectangle {
+                    height: 8px; border-radius: 4px; background: #263246;
+                    Rectangle { width: parent.width * root.status-progress / 100; height: parent.height; border-radius: 4px; background: #578fd8; }
+                }
+                Text { text: root.status-progress + "%"; color: #7587a4; font-size: 11px; horizontal-alignment: center; }
+                if root.error-text != "": Text { text: root.error-text; color: #ff9da7; font-size: 11px; wrap: word-wrap; horizontal-alignment: center; }
+                PrimaryButton { width: 150px; label: "Spróbuj ponownie"; clicked => root.connect-clicked(); }
+            }
+        }
+    }
+
+    if root.screen == "main": VerticalBox {
+        padding: 0px; spacing: 0px;
+        Rectangle {
+            height: 68px; background: #111a28; border-width: 1px; border-color: #202e43;
+            HorizontalBox {
+                padding-left: 24px; padding-right: 24px; spacing: 16px;
+                Rectangle {
+                    width: 38px; height: 38px; border-radius: 12px; background: #416fae;
+                    Text { text: "◉"; color: white; font-size: 20px; horizontal-alignment: center; vertical-alignment: center; }
+                }
+                VerticalBox {
+                    width: 150px; alignment: center; spacing: 0px;
+                    Text { text: "TorChat"; color: #f4f7ff; font-size: 19px; font-weight: 750; }
+                    Text { text: "DESKTOP · DEV"; color: #68809f; font-size: 9px; font-weight: 700; }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                Rectangle {
+                    width: 270px; height: 34px; border-radius: 17px; background: #192537;
+                    Text {
+                        x: 14px; width: parent.width - 28px; text: "●  " + root.status;
+                        color: root.status-phase == "connected" ? #6edaa0 : root.status-phase == "error" ? #ff8f9b : #e8b965;
+                        font-size: 11px; overflow: elide; vertical-alignment: center;
+                    }
+                }
+                Text { text: "@" + root.nickname; color: #b7c3d6; font-size: 13px; vertical-alignment: center; }
+            }
+        }
+
+        HorizontalBox {
+            spacing: 0px;
+            Rectangle {
+                width: 236px; background: #111a28;
+                VerticalBox {
+                    padding: 18px; spacing: 8px;
+                    Text { text: "NAWIGACJA"; color: #60718d; font-size: 9px; font-weight: 700; }
+                    NavButton { label: "Czaty"; icon: "▣"; active: root.active-tab == "Czaty"; clicked => { root.active-tab = "Czaty"; root.tab-changed("Czaty"); } }
+                    NavButton { label: "Kontakty"; icon: "♧"; active: root.active-tab == "Kontakty"; clicked => { root.active-tab = "Kontakty"; root.tab-changed("Kontakty"); } }
+                    NavButton { label: "Tożsamość"; icon: "◎"; active: root.active-tab == "Tożsamość"; clicked => { root.active-tab = "Tożsamość"; root.tab-changed("Tożsamość"); } }
+                    Rectangle { height: 10px; }
+                    Rectangle { height: 1px; background: #202e43; }
+                    Rectangle { height: 10px; }
+                    Rectangle {
+                        height: 62px; border-radius: 13px; background: #172233;
+                        Text { x: 13px; y: 11px; text: "●  Onion status"; color: root.status-phase == "connected" ? #73dba5 : #e8b965; font-size: 11px; }
+                        Text { x: 13px; y: 34px; width: parent.width - 26px; text: root.status; color: #70819d; font-size: 9px; overflow: elide; }
+                    }
+                    Rectangle { vertical-stretch: 1; }
+                    Text { text: "MLS end-to-end encrypted"; color: #6e7f98; font-size: 10px; horizontal-alignment: center; }
+                    Text { text: "Serwer nie zapisuje wiadomości"; color: #52627a; font-size: 9px; horizontal-alignment: center; }
+                }
+            }
+
+            Rectangle {
+                background: #0b111b;
+                VerticalBox {
+                    padding: 26px; spacing: 16px;
+                    if root.error-text != "": Rectangle {
+                        height: 38px; border-radius: 10px; background: #3a202a;
+                        Text { x: 14px; width: parent.width - 28px; text: root.error-text; color: #ffadb5; font-size: 11px; overflow: elide; vertical-alignment: center; }
+                    }
+
+                    if root.active-tab == "Kontakty": VerticalBox {
+                        spacing: 16px;
+                        HorizontalBox {
+                            Text { text: "Kontakty"; color: #f4f7ff; font-size: 27px; font-weight: 750; }
+                            Rectangle { horizontal-stretch: 1; }
+                            Text { text: root.contacts.length + " kontaktów"; color: #71829c; font-size: 11px; vertical-alignment: center; }
+                        }
+                        Rectangle {
+                            height: 46px; border-radius: 13px; background: #172233;
+                            HorizontalBox {
+                                padding-left: 14px; padding-right: 8px; spacing: 8px;
+                                Text { text: "⌕"; color: #8090a8; font-size: 18px; vertical-alignment: center; }
+                                LineEdit { text <=> root.search; placeholder-text: "Szukaj po nicku"; horizontal-stretch: 1; }
+                                PrimaryButton { width: 82px; height: 32px; label: "Szukaj"; clicked => root.search-clicked(root.search); }
+                            }
+                        }
+                        ScrollView {
+                            vertical-stretch: 1;
+                            VerticalBox {
+                                spacing: 9px;
+                                for contact in root.contacts: ContactCard {
+                                    value: contact; selected: root.selected-contact == contact;
+                                    clicked => root.contact-selected(contact);
+                                }
+                            }
+                        }
+                    }
+
+                    if root.active-tab == "Czaty": VerticalBox {
+                        spacing: 14px;
+                        HorizontalBox {
+                            Text { text: "Czaty"; color: #f4f7ff; font-size: 27px; font-weight: 750; }
+                            Rectangle { horizontal-stretch: 1; }
+                            Text { text: "E2EE · live relay"; color: #6edaa0; font-size: 10px; vertical-alignment: center; }
+                        }
+                        if root.selected-contact == "": Rectangle {
+                            vertical-stretch: 1; border-radius: 20px; background: #121c2b;
+                            Text { text: "Wybierz kontakt lub sparuj urządzenie przez QR"; color: #8191aa; font-size: 14px; horizontal-alignment: center; vertical-alignment: center; }
+                        }
+                        if root.selected-contact != "": VerticalBox {
+                            spacing: 11px;
+                            Rectangle {
+                                height: 58px; border-radius: 15px; background: #172233;
+                                Text { x: 18px; y: 10px; text: root.selected-contact; color: #f4f7ff; font-size: 15px; font-weight: 700; }
+                                Text { x: 18px; y: 35px; text: "onion online · fingerprint niezweryfikowany"; color: #7688a4; font-size: 9px; }
+                            }
+                            Rectangle {
+                                vertical-stretch: 1; border-radius: 18px; background: #121c2b;
+                                ScrollView {
+                                    VerticalBox {
+                                        padding: 18px; spacing: 10px;
+                                        for message in root.messages: Rectangle {
+                                            height: 58px; background: transparent;
+                                            Rectangle {
+                                                width: parent.width * 0.72;
+                                                height: 54px;
+                                                x: message.outgoing ? parent.width - self.width : 0px;
+                                                border-radius: 15px;
+                                                background: message.outgoing ? #244c3d : #1a283b;
+                                                Text {
+                                                    x: 14px; y: 8px; width: parent.width - 28px;
+                                                    text: message.body; color: #edf3fb; font-size: 12px;
+                                                    overflow: elide;
+                                                }
+                                                Text {
+                                                    x: 14px; y: 34px; width: parent.width - 28px;
+                                                    text: message.meta;
+                                                    color: message.outgoing ? #8ecab0 : #7f91aa;
+                                                    font-size: 9px; horizontal-alignment: right;
+                                                    overflow: elide;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            Rectangle {
+                                height: 52px; border-radius: 14px; background: #172233;
+                                HorizontalBox {
+                                    padding-left: 14px; padding-right: 8px; spacing: 8px;
+                                    LineEdit { text <=> root.composer; placeholder-text: "Napisz bezpieczną wiadomość…"; horizontal-stretch: 1; }
+                                    PrimaryButton { width: 92px; height: 36px; label: "Wyślij  ›"; clicked => root.send-clicked(root.composer); }
+                                }
+                            }
+                        }
+                    }
+
+                    if root.active-tab == "Tożsamość": HorizontalBox {
+                        spacing: 22px;
+                        Rectangle {
+                            width: 340px; border-radius: 20px; background: #121c2b;
+                            VerticalBox {
+                                padding: 28px; spacing: 14px;
+                                Text { text: "Tożsamość DEV"; color: #f4f7ff; font-size: 24px; font-weight: 750; }
+                                Text { text: "@" + root.nickname; color: #8eb9fa; font-size: 17px; font-weight: 650; }
+                                Text { text: "FINGERPRINT"; color: #647692; font-size: 9px; font-weight: 700; }
+                                Text { text: root.fingerprint; color: #ccd7e8; font-size: 12px; wrap: word-wrap; }
+                                Text { text: "INSTALLATION ID"; color: #647692; font-size: 9px; font-weight: 700; }
+                                Text { text: root.installation-id; color: #8c9db6; font-size: 10px; wrap: word-wrap; }
+                                Rectangle { vertical-stretch: 1; }
+                                Text { text: "Kod QR zawiera publiczne ID i jednorazowy KeyPackage MLS."; color: #6f819c; font-size: 10px; wrap: word-wrap; }
+                                HorizontalBox {
+                                    spacing: 8px;
+                                    LineEdit { text <=> root.invite-input; placeholder-text: "Wklej kod zaproszenia…"; horizontal-stretch: 1; }
+                                    PrimaryButton { width: 90px; label: "Połącz"; clicked => root.invite-submit(root.invite-input); }
+                                }
+                            }
+                        }
+                        Rectangle {
+                            border-radius: 20px; background: #121c2b;
+                            VerticalBox {
+                                padding: 24px; spacing: 12px; alignment: center;
+                                Text { text: "Mój kod QR"; color: #f4f7ff; font-size: 20px; font-weight: 700; horizontal-alignment: center; }
+                                Image { source: root.own-qr; width: 300px; height: 300px; image-fit: contain; }
+                                Text { text: "Zeskanuj go Androidem, aby utworzyć rozmowę."; color: #7587a2; font-size: 10px; horizontal-alignment: center; }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

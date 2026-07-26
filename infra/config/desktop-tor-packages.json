@@ -1,0 +1,16 @@
+{
+  "version": "15.0.19",
+  "tor_version": "0.4.9.11",
+  "packages": {
+    "windows-x86_64": {
+      "url": "https://archive.torproject.org/tor-package-archive/torbrowser/15.0.19/tor-expert-bundle-windows-x86_64-15.0.19.tar.gz",
+      "sha256": "6AC067402C7B4A3DC37887ED3754B3914B67FDC220C966190683E9CCF91ABF0F",
+      "binary": "tor/tor.exe"
+    },
+    "linux-x86_64": {
+      "url": "https://archive.torproject.org/tor-package-archive/torbrowser/15.0.19/tor-expert-bundle-linux-x86_64-15.0.19.tar.gz",
+      "sha256": "5A8F19F5F119B5FA2A8FD799A3A532E3236AD36164241800D6302E32F0E1C2A9",
+      "binary": "tor/tor"
+    }
+  }
+}

@@ -1,0 +1,7 @@
+# Shared desktop/client reference configuration.
+# Android uses the equivalent bundled template in apps/mobile assets.
+ClientOnly 1
+SocksPort 127.0.0.1:<SOCKS_PORT>
+DataDirectory <DATA_DIRECTORY>
+AvoidDiskWrites 1
+Log notice stdout

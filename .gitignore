@@ -1,0 +1,30 @@
+# Rust
+/target/
+**/target/
+
+# Android/Gradle
+.gradle/
+build/
+*/build/
+local.properties
+*.keystore
+*.jks
+
+# IDE / OS
+.idea/
+*.iml
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local secrets and runtime data
+.env
+.env.*
+!*.env.example
+data/
+secrets/
+tmp/
+*.log
+
+# Generated protocol artifacts
+protocol/generated/

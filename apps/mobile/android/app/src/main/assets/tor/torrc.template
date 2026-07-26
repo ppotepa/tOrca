@@ -1,0 +1,7 @@
+# Shared TorChat Android client configuration.
+# This file is public and contains no identity, onion-service or bridge keys.
+ClientOnly 1
+SocksPort 127.0.0.1:<SOCKS_PORT>
+DataDirectory <DATA_DIRECTORY>
+AvoidDiskWrites 1
+Log notice stdout

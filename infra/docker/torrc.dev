@@ -1,0 +1,7 @@
+DataDirectory /var/lib/tor
+# The development desktop uses this same Tor daemon as its local SOCKS proxy.
+# Docker publishes it only on the host loopback interface.
+SocksPort 0.0.0.0:9050
+Log notice stdout
+HiddenServiceDir /var/lib/tor/hidden_service
+HiddenServicePort 80 server:8080
