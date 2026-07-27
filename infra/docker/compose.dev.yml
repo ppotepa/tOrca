@@ -5,11 +5,12 @@ services:
       dockerfile: infra/docker/Dockerfile.server
     environment:
       TORCHAT_BIND: 0.0.0.0:8080
-      TORCHAT_DATABASE_URL: postgres://torchat:local-development-only@postgres:5432/torchat
+      TORCHAT_DATABASE_URL: postgres://torchat:${TORCHAT_DATABASE_PASSWORD:?TORCHAT_DATABASE_PASSWORD is required}@postgres:5432/torchat
       RUST_LOG: info
       TORCHAT_ONION_URL: ${TORCHAT_ONION_URL:-}
+      TORCHAT_PAIRING_SECRET: ${TORCHAT_PAIRING_SECRET:?TORCHAT_PAIRING_SECRET is required}
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:${TORCHAT_HTTP_PORT:-8080}:8080"
     depends_on:
       postgres:
         condition: service_healthy
@@ -22,7 +23,7 @@ services:
     environment:
       POSTGRES_DB: torchat
       POSTGRES_USER: torchat
-      POSTGRES_PASSWORD: local-development-only
+      POSTGRES_PASSWORD: ${TORCHAT_DATABASE_PASSWORD:?TORCHAT_DATABASE_PASSWORD is required}
     volumes:
       - postgres_dev:/var/lib/postgresql/data
     healthcheck:
@@ -41,7 +42,7 @@ services:
     volumes:
       - tor_dev:/var/lib/tor
     ports:
-      - "127.0.0.1:9050:9050"
+      - "127.0.0.1:${TORCHAT_SOCKS_PORT:-9050}:9050"
     healthcheck:
       test: ["CMD-SHELL", "test -s /var/lib/tor/hidden_service/hostname"]
       interval: 5s

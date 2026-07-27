@@ -9,13 +9,19 @@ param(
     [string]$PairingCode,
     [ValidateSet("Alice", "Bob")][string]$DevProfile = "Alice",
     [switch]$NoDevPair,
-    [switch]$ResetDevState
+    [switch]$ResetDevState,
+    [switch]$Release,
+    [switch]$Keep,
+    [ValidateSet('local','staging','production')][string]$Environment = 'local'
 )
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$mobileRoot = Join-Path $repoRoot "apps\mobile"
-$apk = Join-Path $mobileRoot "build\app\outputs\flutter-apk\app-debug.apk"
+$mobileRoot = Join-Path $repoRoot "mobile"
+$variant = if ($Release) { "release" } else { "debug" }
+$apk = Join-Path $mobileRoot "build\app\outputs\flutter-apk\app-$variant.apk"
+. (Join-Path $PSScriptRoot "internal\environment.ps1")
+$environmentState = Ensure-TorChatEnvironment $repoRoot $Environment
 
 function Get-ConnectedDevices {
     @(adb devices 2>$null | Where-Object { $_ -match '^\S+\s+device$' } | ForEach-Object { ($_ -split '\s+')[0] })
@@ -89,7 +95,8 @@ if (-not ((Get-ConnectedDevices) -contains $DeviceAddress)) {
 }
 
 if (-not $SkipServer) {
-    & (Join-Path $PSScriptRoot "start-dev.ps1") -Rebuild:$Rebuild
+    if ($Environment -ne 'local') { throw "Android deployment for '$Environment' uses its remote host; use -SkipServer." }
+    & (Join-Path $PSScriptRoot 'start-dev.ps1') -Rebuild:$Rebuild -Environment local
     if ($LASTEXITCODE -ne 0) { throw "Development stack failed to start." }
 }
 
@@ -102,15 +109,25 @@ if (-not $SkipCoreBuild) {
 if (-not $SkipApkBuild) {
     Push-Location $mobileRoot
     try {
+        Import-TorChatEnvironment $environmentState -RequireOnion
+        $previousConfigFile = $env:TORCHAT_CONFIG_FILE
+        $env:TORCHAT_CONFIG_FILE = $environmentState.Paths.RuntimeEnvironment
         $previousProfile = $env:TORCHAT_DEV_PROFILE
         $previousPair = $env:TORCHAT_DEV_PAIR
-        $env:TORCHAT_DEV_PROFILE = $DevProfile
-        $env:TORCHAT_DEV_PAIR = if ($NoDevPair) { "false" } else { "true" }
-        flutter build apk --debug
+        if (-not $Release) {
+            $fixturesEnabled = $environmentState.Values['TORCHAT_FIXTURES'] -eq 'true' -and -not $NoDevPair
+            $env:TORCHAT_DEV_PROFILE = if ($fixturesEnabled) { $DevProfile } else { "" }
+            $env:TORCHAT_DEV_PAIR = if ($fixturesEnabled) { "true" } else { "false" }
+        } else {
+            Remove-Item Env:TORCHAT_DEV_PROFILE -ErrorAction SilentlyContinue
+            $env:TORCHAT_DEV_PAIR = "false"
+        }
+        flutter build apk --$variant
         if ($LASTEXITCODE -ne 0) { throw "Flutter APK build failed." }
     } finally {
         $env:TORCHAT_DEV_PROFILE = $previousProfile
         $env:TORCHAT_DEV_PAIR = $previousPair
+        $env:TORCHAT_CONFIG_FILE = $previousConfigFile
         Pop-Location
     }
 } elseif (-not (Test-Path -LiteralPath $apk)) {
@@ -119,12 +136,27 @@ if (-not $SkipApkBuild) {
 
 $savedErrorActionPreference = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
-$installOutput = @(adb -s $DeviceAddress install -r --no-streaming $apk 2>&1)
+$installArgs = @("-s", $DeviceAddress, "install", "-r")
+$installArgs += @("--no-streaming", $apk)
+# Reinstall in place for every variant. Android preserves Keystore-backed
+# identity and SQLCipher state across a signed update. A destructive reset is
+# deliberately available only through `torchat reset -Confirm -Scope client`
+# (or the explicit debug-only -ResetDevState switch below).
+$installOutput = @(& adb @installArgs 2>&1)
 $installExitCode = $LASTEXITCODE
 $ErrorActionPreference = $savedErrorActionPreference
 if ($installExitCode -ne 0) {
     $details = ($installOutput -join " ").Trim()
-    throw "Flutter APK installation failed: $details`nOn the phone enable Developer options > Install via USB (and USB debugging security settings, if present), unlock the phone and accept the installation prompt, then run the script again."
+    if ($details -match "INSTALL_FAILED_USER_RESTRICTED") {
+        $manufacturer = (& adb -s $DeviceAddress shell getprop ro.product.manufacturer 2>$null | Out-String).Trim()
+        $deviceHint = if ($manufacturer -match "Xiaomi|Redmi|POCO") {
+            "On Xiaomi/HyperOS enable Developer options > USB debugging (Security settings) and Install via USB; accept any Xiaomi-account/security confirmation and keep the phone unlocked."
+        } else {
+            "On the phone enable Developer options > Install via USB (and USB debugging security settings, if present), unlock the phone and accept the installation prompt."
+        }
+        throw "Android blocked APK installation from ADB (INSTALL_FAILED_USER_RESTRICTED). $deviceHint`nThen run the script again."
+    }
+    throw "Flutter APK installation failed: $details"
 }
 adb -s $DeviceAddress shell am force-stop org.torchat.mobile
 if ($LASTEXITCODE -ne 0) { throw "Could not stop the previous Flutter mobile process." }

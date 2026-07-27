@@ -5,7 +5,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repo = Resolve-Path (Join-Path $PSScriptRoot "..\..")
-$jni = Join-Path $repo "apps\mobile\android\app\src\main\jniLibs"
+$jni = Join-Path $repo "mobile\android\app\src\main\jniLibs"
 
 if (-not (Get-Command cargo-ndk -ErrorAction SilentlyContinue)) {
     cargo install cargo-ndk --locked

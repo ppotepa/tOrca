@@ -1,6 +1,6 @@
 # TorChat handoff
 
-Updated: 2026-07-26
+Updated: 2026-07-27
 
 ## Project goal
 
@@ -22,9 +22,9 @@ Location: `D:\git\torchat`
 
 ```text
 torchat/
-├── apps/mobile/              # Flutter mobile client
-├── clients/torchat-desktop/  # Slint desktop client for Windows/Linux
-├── crates/torchat-core/       # shared Rust security/protocol core
+├── mobile/                   # Flutter mobile client
+├── desktop/                  # Rust Tor/MLS runtime sidecar
+├── common/torchat-core/      # shared Rust security/protocol core
 ├── server/torchat-server/     # Rust delivery server
 ├── protocol/                  # protocol contract placeholder
 ├── infra/                     # Docker, Tor and deployment configuration
@@ -109,7 +109,7 @@ POST /v1/sessions
 10. Added OpenMLS as the maintained MLS boundary and a minimal Android
     Gradle/Compose project with Android Keystore and cleartext blocking.
 11. Verified Rust tests, Compose config and Android debug APK build.
-12. Added the Slint desktop client sharing `torchat-core`, with persistent
+12. Added the native desktop runtime sharing `torchat-core`, with persistent
     identity, SOCKS transport and chat UI.
 13. Fixed the server Docker build for the expanded workspace: the image now
     copies `clients` and `infra/db`, and uses Rust 1.94 required by OpenMLS.
@@ -129,18 +129,17 @@ POST /v1/sessions
 19. Added the Flutter mobile client flow, Android MethodChannel/EventChannel
     bridge, canonical onion build configuration and a TorChat foreground
     service that owns Tor, relay, MLS receive processing and notifications.
-20. Moved the native Android runtime into `apps/mobile`, removed Gradle's
+20. Moved the native Android runtime into `mobile`, removed Gradle's
     dependency on the old Compose tree, and added a C ABI plus Dart FFI
     wrapper for identity/MLS operations.
-21. Removed the old TUI client and replaced it with a lightweight Slint
-    desktop client using the same API, identity rules, relay payloads and MLS
-    state as Flutter mobile.
+21. Removed the old TUI client and aligned the desktop runtime with Flutter
+    through the shared API, identity rules, relay payloads and MLS state.
 22. Added checked-in Alice/Bob developer identities and a two-sided MLS
     fixture. A Rust integration test proves encrypted mobile/desktop messages
     decrypt in both directions and survive snapshot restore.
 23. Added encrypted persistent desktop state, Android SQLCipher state,
     conversation restore, delivery receipts and local-only message history.
-24. Added modern Flutter and Slint shells with splash, Tor/onion connection
+24. Added the modern Flutter shell with splash, Tor/onion connection
     state, chats, contacts, identity, QR and message composer views.
 25. Kept focused public scripts for start, stop, Android deploy and desktop
     run; helpers live under `scripts/internal`.
@@ -205,7 +204,40 @@ POST /v1/sessions
     can display a fresh QR invite and accept a pasted invite code, then creates
     the MLS conversation and sends the Welcome through Tor.
 
+40. Added a server-backed contact-request inbox. PostgreSQL now stores only the
+    request state, public directory cards and the signed public invite payload;
+    it never stores Welcome frames, message envelopes, ciphertexts or MLS
+    state. Requests support inbox/outbox listing, accept/reject/cancel/complete
+    transitions and symmetric contact creation after completion.
+41. Targeted invites now include the recipient installation ID. The accepting
+    client signs a fresh invite for the requester and the MLS Welcome carries
+    the invite ID, so the receiver can bind the handshake to the exact request.
+    Android's background service synchronizes accepted requests and starts the
+    conversation without requiring the Flutter UI to stay open.
+42. Desktop runtime now has a Zaproszenia flow with accept/reject actions. Both
+    clients can search the directory, create a request and keep local message
+    queues while Tor reconnects.
+43. Added the canonical release workflow. The first `full-deploy -Release`
+    starts a separate Compose project, generates one persistent v3 onion,
+    writes it to the tracked `infra/config/release.env`, builds the release APK
+    with that endpoint, clears Android/desktop state by default and launches
+    both clients without Alice/Bob fixtures. `-Keep` preserves client state;
+    the release Tor/Postgres volumes are never removed by the workflow.
+44. Desktop now follows the real first-run flow: it no longer assumes Bob,
+    asks for and persists a nickname locally, publishes it after Tor connects,
+    exposes a "Wyślij zaproszenie" action from directory contacts, and keeps
+    the inbox/acceptance flow in the same navigation model as Flutter. Release
+    SQLCipher was protected from JNI field shrinking after Android reported a
+    native `mNativeHandle` crash. Full deploy no longer opens duplicate desktop
+    clients or visible PowerShell windows.
+
 ## Current limitations
+
+- The desktop migration is complete: Flutter is the only UI on Windows/Linux;
+  Rust is a headless Tor/MLS sidecar using the JSON-lines runtime contract.
+- The new public `torchat.ps1` profile workflow is available for `local`.
+  Staging host provisioning is defined but requires a real encrypted Linux
+  host and its public onion manifest.
 
 - The relay is deliberately live-only. It has no envelope table and no offline
   queue; an offline recipient produces `recipient_offline`.
@@ -215,8 +247,8 @@ POST /v1/sessions
   are lost when the server restarts.
 - Directory contacts expose public identity metadata but not reusable MLS
   KeyPackages. A non-development first conversation still requires QR exchange.
-- Alice/Bob fixtures and private keys are public development data. They bypass
-  the QR setup only in debug builds and must never be used in production.
+- Alice/Bob fixtures and private keys remain available only for debug workflow.
+  Release builds compile no development identity or fixture.
 - Wi-Fi ADB and debug APK installation currently work on the physical Xiaomi.
   Background desktop-to-Android delivery is verified; the remaining manual
   check is opening Bob in Flutter and confirming the stored message renders in
@@ -229,14 +261,27 @@ POST /v1/sessions
 - Invite reuse is blocked by the MLS pending-member rotation and a local
   consumed-invite registry. The current desktop UI accepts pasted invite text;
   native desktop camera/QR scanning can be added later.
-- No production release signing, iOS Tor integration, abuse controls or
-  independent cryptographic review has been completed.
+- The local release APK uses the Android debug keystore so it can be installed
+  for testing. Production keystore/CI signing, iOS Tor integration, abuse
+  controls and independent cryptographic review are still outstanding.
 
 ## Development workflow
 
 ```powershell
 cd D:\Git\torchat
 .\scripts\torchat.ps1 full-deploy
+```
+
+Release-like clean deployment (generates the onion on first run):
+
+```powershell
+.\scripts\torchat.ps1 full-deploy -Release
+```
+
+Keep the release identities and local stores across a redeploy:
+
+```powershell
+.\scripts\torchat.ps1 full-deploy -Release -Keep
 ```
 
 Focused commands:
@@ -249,24 +294,19 @@ Focused commands:
 .\scripts\torchat.ps1 stop
 ```
 
-Legacy focused scripts remain available:
+Use the unified command entry point:
 
 ```powershell
-.\scripts\rebuild-dev.ps1
-.\scripts\start-dev.ps1
-.\scripts\deploy-android.ps1 -ResetDevState
-.\scripts\run-desktop.ps1
+.\scripts\torchat.ps1 full -Environment local
 ```
 
 Automated verification:
 
 ```powershell
-.\scripts\run-desktop.ps1 -SkipServer -HeadlessSmoke
-.\scripts\run-desktop.ps1 -SkipServer -ResetDevState `
-  -HeadlessSend "Wiadomość testowa z desktopu"
+.\scripts\torchat.ps1 test -Environment local
 ```
 
-The second command requires the Alice Android client to be online. Stop with:
+The full command requires an unlocked Android device for deployment. Stop with:
 
 ```powershell
 .\scripts\stop-dev.ps1
@@ -276,13 +316,14 @@ Do not use `down -v` unless local development data is intentionally disposable.
 
 ## Next implementation order
 
-1. Unlock the phone and confirm the installed client opens on the main chats
-   screen instead of remaining on the Tor connection screen.
-2. Keep Android Alice and desktop Bob online; verify one delivered MLS message
-   in each direction and persistence after both clients restart.
-3. Add relay integration/security tests, rate limits and replay protection.
-4. Add production onion configuration, release signing and longer Android
-   background/battery tests.
+1. Install the generated release APK on an unlocked phone and verify the
+   foreground service reaches the configured release onion.
+2. Run desktop release with `-Keep`, exchange invite codes, and verify one
+   delivered MLS message in each direction after both clients restart.
+3. Add API integration tests for request authorization, expiry and state
+   transitions, plus rate limits and replay protection.
+4. Replace local debug signing with production keystore/CI signing and run
+   longer Android background/battery tests.
 5. Arrange an independent cryptographic review before production claims.
 
 ## Handoff rule

@@ -1,6 +1,6 @@
 # TorChat
 
-Privacy-oriented Flutter mobile and Slint desktop chat accessed exclusively
+Privacy-oriented Flutter chat for Android and desktop accessed exclusively
 through a Tor v3 onion service.
 
 ## Architecture decision
@@ -24,42 +24,47 @@ The mobile clients own identity keys, device keys, ratchet state, local encrypte
 - Tor: one or more v3 onion services in front of the API; the API binds only to loopback/private networking.
 - Deployment: Docker/Podman, separate database, queue and onion-service volumes; no public clearnet listener in the privacy deployment.
 
-## Development commands
+## Stable development workflow
 
 ```powershell
-.\scripts\torchat.ps1 full-deploy
-.\scripts\torchat.ps1 start
-.\scripts\torchat.ps1 deploy-android
-.\scripts\torchat.ps1 desktop
-.\scripts\torchat.ps1 status
-.\scripts\torchat.ps1 stop
+.\scripts\torchat.ps1 doctor -Environment local
+.\scripts\torchat.ps1 env up -Environment local
+.\scripts\torchat.ps1 build -Environment local -Target all
+.\scripts\torchat.ps1 deploy -Environment local -Target android
+.\scripts\torchat.ps1 status -Environment local
+.\scripts\torchat.ps1 env down -Environment local
 ```
 
-The full development deployment rebuilds the Rust/Flutter clients and Docker
-stack, verifies the canonical onion, discovers Wi-Fi ADB, installs and starts
-Android Alice, then launches desktop Bob in a separate window. It preserves
-development volumes and uses the single endpoint from `infra/config/dev.env`.
+`local` creates a private persistent Docker stack and a stable onion per
+workstation. Its generated endpoint and database password live only in
+`.torchat/runtime/local/`; they are never committed. Normal deployment keeps
+the app identity and encrypted local history. A destructive reset requires an
+explicit `reset -Confirm` command.
 
-The underlying scripts remain available for focused work:
+Android updates are installed in place, including release APKs: they preserve
+the Android Keystore identity and encrypted local database. The desktop
+runtime likewise uses `.torchat/clients/desktop/identity.key` when launched
+through `torchat run`; neither client should show onboarding after a normal
+restart or deploy.
+
+`staging` is a separate Linux-hosted onion service. Developer machines never
+start or own that service; they build clients against the public onion from the
+staging manifest.
+
+Use `scripts/torchat.ps1` as the single command entry point. The old focused
+desktop/rebuild scripts were removed:
 
 ```powershell
-.\scripts\start-dev.ps1
-.\scripts\start-dev.ps1 -Rebuild
-.\scripts\rebuild-dev.ps1
-.\scripts\deploy-android.ps1 -ResetDevState
-.\scripts\run-desktop.ps1
-.\scripts\stop-dev.ps1
+.\scripts\torchat.ps1 full -Environment local
 ```
 
-All development clients read the single endpoint from
-`infra/config/dev.env`. The Android relay and desktop client use Tor; Wi-Fi is
-only used by ADB to install the APK.
+All clients use the exact v3 onion selected by the environment manifest. The
+Android relay and desktop runtime use Tor; Wi-Fi is only used by ADB to install
+the APK.
 
-`rebuild-dev.ps1` performs the complete clean handoff from source code to a
-running environment: Rust and Flutter checks, debug APK build, Docker image
-rebuild, forced container recreation and a final healthcheck through the onion
-service. It preserves PostgreSQL and onion volumes. Use `-NoCache` only when
-the Docker layer cache must be discarded.
+`torchat.ps1 full` performs the complete local handoff: Docker rebuild, client
+builds, Android deployment and Flutter Windows start. It preserves PostgreSQL,
+onion volumes and client identity state.
 
 ## Non-negotiable rules
 
@@ -73,8 +78,9 @@ the Docker layer cache must be discarded.
 
 ```text
 torchat/
-├── apps/mobile/               # Flutter mobile client
-├── crates/torchat-core/       # shared Rust identity/protocol/security core
+├── mobile/                    # Flutter Android/iOS client
+├── desktop/                   # Rust Tor/MLS runtime sidecar
+├── common/torchat-core/       # shared Rust identity/protocol/security core
 ├── server/torchat-server/     # untrusted delivery service
 ├── protocol/                  # client/server contract and test vectors
 ├── infra/                     # Tor, database and deployment configuration
@@ -84,9 +90,9 @@ torchat/
 
 ## Current status
 
-The Rust server, PostgreSQL, stable development onion, Flutter Android client,
-Slint desktop client, OpenMLS direct-chat fixture and encrypted local stores
-are implemented. `cargo test --workspace`, Flutter analysis/tests/APK build,
+The Rust server, PostgreSQL, stable development onion and shared Flutter client
+are implemented. The Rust sidecar owns desktop Tor/MLS/runtime state.
+`cargo test --workspace`, Flutter analysis/tests/APK build,
 Docker build and a real desktop managed-Tor smoke connection pass.
 
 The development Xiaomi is deployable over Wi-Fi ADB. See [`HANDOFF.md`](HANDOFF.md)

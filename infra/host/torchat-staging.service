@@ -1,0 +1,17 @@
+[Unit]
+Description=TorChat staging onion stack
+Requires=docker.service
+After=docker.service
+ConditionPathIsMountPoint=/srv/torchat
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=/etc/torchat/staging.env
+WorkingDirectory=/opt/torchat
+ExecStart=/usr/bin/docker compose --project-name torchat-staging --env-file /etc/torchat/staging.env -f infra/docker/compose.host.yml up -d --build --remove-orphans
+ExecStop=/usr/bin/docker compose --project-name torchat-staging --env-file /etc/torchat/staging.env -f infra/docker/compose.host.yml down
+TimeoutStartSec=180
+
+[Install]
+WantedBy=multi-user.target

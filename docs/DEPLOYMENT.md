@@ -89,6 +89,27 @@ Backups must be encrypted before leaving the host and tested by restoring into a
 
 ## Development versus production
 
+## Environment profiles and operator flow
+
+TorChat distinguishes three profiles rather than treating a local test as a
+release deployment:
+
+- `local` is a private Docker Compose project per workstation. Named volumes
+  preserve PostgreSQL and the onion key; the public endpoint plus generated
+  local password live under `.torchat/runtime/local` and are not source files.
+- `staging` is one shared Linux host. It owns the persistent onion key and
+  PostgreSQL data on `/srv/torchat/staging`; workstations only build/install
+  clients configured with its public onion.
+- `production` follows the staging storage model but cannot be considered a
+  distributable release until signing and operational review are configured.
+
+The host stack is defined by `infra/docker/compose.host.yml`. Run
+`infra/host/bootstrap-staging.sh /opt/torchat` only after the encrypted mount
+is available; it creates protected directories and installs the systemd unit.
+The host operator supplies `/etc/torchat/staging.env` containing
+`TORCHAT_SECURE_ROOT` and the public `TORCHAT_ONION_URL`. Onion private keys
+and database secrets never leave the secure mount.
+
 ### Development on Windows/Docker Desktop
 
 Use ordinary named volumes or bind mounts for convenience. Docker Desktop's virtual disk protection is not our production threat model, and developers must use synthetic data only.

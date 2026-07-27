@@ -21,7 +21,19 @@ if (-not (Test-Path -LiteralPath $archive)) {
     Write-Host "[torchat] Downloading Tor Expert Bundle $($manifest.version) for $platform..."
     Invoke-WebRequest -Uri $package.url -OutFile $archive
 }
-$actualHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash
+if (Get-Command Get-FileHash -ErrorAction SilentlyContinue) {
+    $actualHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash
+} else {
+    # Windows PowerShell installations can run with the Utility module
+    # unavailable. Keep checksum verification working without weakening it.
+    $stream = [System.IO.File]::OpenRead($archive)
+    try {
+        $digest = [System.Security.Cryptography.SHA256]::Create().ComputeHash($stream)
+        $actualHash = ([System.BitConverter]::ToString($digest) -replace '-', '').ToUpperInvariant()
+    } finally {
+        $stream.Dispose()
+    }
+}
 if ($actualHash -ne $package.sha256) {
     throw "Tor package checksum mismatch. Expected $($package.sha256), got $actualHash."
 }

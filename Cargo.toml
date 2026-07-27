@@ -1,9 +1,9 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/torchat-core",
+    "common/torchat-core",
     "server/torchat-server",
-    "clients/torchat-desktop",
+    "desktop",
 ]
 
 [workspace.package]

@@ -2,26 +2,23 @@
 
 From the repository root:
 
-Set the single development endpoint in `infra/config/dev.env`. The same file
-is consumed by the Android deploy and Docker verification scripts.
+Use `scripts/torchat.ps1 env -Action up -Environment local`. The generated
+manifest in `.torchat/runtime/local` is consumed by Docker and clients.
 
 Automated start/rebuild and verification:
 
 ```powershell
-.\scripts\start-dev.ps1
-.\scripts\start-dev.ps1 -Rebuild
-.\scripts\rebuild-dev.ps1
+.\scripts\torchat.ps1 env -Action up -Environment local
+.\scripts\torchat.ps1 build -Environment local -Target all
 ```
 
-The first command still uses Compose's incremental `--build`; `-Rebuild`
-explicitly runs the build stage first. The script preserves the PostgreSQL
-named volume.
-`rebuild-dev.ps1` additionally verifies the complete Rust/Flutter codebase,
+The environment command preserves the PostgreSQL named volume. The build
+command additionally verifies the complete Rust/Flutter codebase,
 builds the Android APK, force-recreates all containers and checks `/health`
 through the v3 onion. Its fast backend-only form is:
 
 ```powershell
-.\scripts\rebuild-dev.ps1 -SkipChecks -SkipMobileBuild
+.\scripts\torchat.ps1 build -Environment local -SkipChecks
 ```
 
 Use `docker compose -f infra/docker/compose.dev.yml down -v` only when you

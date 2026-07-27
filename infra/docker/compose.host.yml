@@ -1,0 +1,59 @@
+services:
+  server:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.server
+    environment:
+      TORCHAT_BIND: 0.0.0.0:8080
+      TORCHAT_DATABASE_URL_FILE: /run/secrets/database_url
+      RUST_LOG: ${RUST_LOG:-info}
+      TORCHAT_ONION_URL: ${TORCHAT_ONION_URL:?TORCHAT_ONION_URL is required}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev
+    secrets:
+      - database_url
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: torchat
+      POSTGRES_USER: torchat
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    volumes:
+      - type: bind
+        source: ${TORCHAT_SECURE_ROOT:?TORCHAT_SECURE_ROOT is required}/postgres
+        target: /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U torchat -d torchat"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    secrets:
+      - postgres_password
+
+  tor:
+    build:
+      context: .
+      dockerfile: Dockerfile.tor
+    depends_on:
+      server:
+        condition: service_started
+    volumes:
+      - type: bind
+        source: ${TORCHAT_SECURE_ROOT:?TORCHAT_SECURE_ROOT is required}/onion
+        target: /var/lib/tor
+    healthcheck:
+      test: ["CMD-SHELL", "test -s /var/lib/tor/hidden_service/hostname"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+secrets:
+  database_url:
+    file: ${TORCHAT_SECURE_ROOT}/secrets/database_url
+  postgres_password:
+    file: ${TORCHAT_SECURE_ROOT}/secrets/postgres_password
