@@ -34,7 +34,7 @@ class WindowsRuntime extends Object
     final server =
         Platform.environment['TORCHAT_ONION_URL'] ??
         Platform.environment['TORCHAT_SERVER_URL'];
-    final args = ['--stdio-runtime'];
+    final args = ['--stdio-engine'];
     if (server != null && server.isNotEmpty) {
       args.addAll(['--server-url', server]);
     }

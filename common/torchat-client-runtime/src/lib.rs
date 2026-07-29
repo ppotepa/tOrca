@@ -37,8 +37,8 @@ pub use models::{
     MessageSendEffect, MessageState, MessageTransportOutcome, PairingAcknowledgeEffect,
     PairingAvailableAction, PairingCancelEffect, PairingConfirmContactEffect, PairingItem,
     PairingPeerOutcome, PairingPreparation, PairingSendEffect, PairingSendKind, PairingSyncResult,
-    RuntimeBootstrap, RuntimeEnvelope, RuntimeFixture, RuntimeIdentity, RuntimeProfile,
-    RuntimeSendEffect, RuntimeTorStatus, RuntimeTransportFact, VerificationState,
+    ReceiptSendEffect, RuntimeBootstrap, RuntimeEnvelope, RuntimeFixture, RuntimeIdentity,
+    RuntimeProfile, RuntimeSendEffect, RuntimeTorStatus, RuntimeTransportFact, VerificationState,
     WelcomeAcceptedResult, pairing_available_actions,
 };
 pub use pairing_rules::{
@@ -87,7 +87,7 @@ mod tests {
         assert_eq!(fixture.pairing_send_effects.len(), 2);
         assert_eq!(fixture.pairing_peer_outcomes.len(), 3);
         assert_eq!(fixture.pairing_sync_result.acknowledgements.len(), 1);
-        assert!(fixture.welcome_accepted_result.confirm_contact.is_some());
+        assert!(fixture.pairing_completion_result.confirm_contact.is_some());
         assert_eq!(fixture.pairing_inbox_item.state, InviteState::Pending);
         assert_eq!(fixture.pairing_outbox_item.state, InviteState::Pending);
 
@@ -105,14 +105,9 @@ mod tests {
     }
 
     #[test]
-    fn legacy_states_round_trip() {
-        let message: crate::models::MessageState =
-            serde_json::from_str("\"PENDING\"").expect("queued alias");
-        assert_eq!(message, crate::models::MessageState::Queued);
-
-        let conversation: ConversationState =
-            serde_json::from_str("\"NEW\"").expect("legacy alias");
-        assert_eq!(conversation, ConversationState::Pending);
+    fn canonical_states_reject_legacy_aliases() {
+        assert!(serde_json::from_str::<crate::models::MessageState>("\"PENDING\"").is_err());
+        assert!(serde_json::from_str::<ConversationState>("\"NEW\"").is_err());
     }
 
     #[test]

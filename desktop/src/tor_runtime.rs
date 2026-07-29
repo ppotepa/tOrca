@@ -5,12 +5,10 @@ use std::{
     net::TcpListener,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
-        mpsc,
-    },
+    sync::{Arc, Mutex, mpsc},
 };
+#[cfg(test)]
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Clone, Debug)]
 pub struct TorStatus {
@@ -18,13 +16,16 @@ pub struct TorStatus {
     pub label: String,
     pub detail: String,
     pub progress: i32,
+    #[cfg(test)]
     pub latency_ms: Option<u64>,
+    #[cfg(test)]
     pub retry_attempt: u32,
 }
 
 pub struct TorRuntime {
     child: Option<Arc<Mutex<Child>>>,
     socks_url: String,
+    #[cfg(test)]
     ready: Arc<AtomicBool>,
 }
 
@@ -33,16 +34,19 @@ impl TorRuntime {
         let (tx, rx) = mpsc::channel();
         let _ = tx.send(TorStatus {
             phase: "external".into(),
-            label: "Zewnętrzny Tor SOCKS".into(),
-            detail: "Zewnętrzny Tor SOCKS".into(),
+            label: "External Tor SOCKS".into(),
+            detail: "External Tor SOCKS".into(),
             progress: 70,
+            #[cfg(test)]
             latency_ms: None,
+            #[cfg(test)]
             retry_attempt: 0,
         });
         (
             Self {
                 child: None,
                 socks_url,
+                #[cfg(test)]
                 ready: Arc::new(AtomicBool::new(true)),
             },
             rx,
@@ -79,11 +83,6 @@ impl TorRuntime {
         fs::write(
             &torrc,
             format!(
-                // Keep Tor's directory and descriptor cache in this private
-                // per-client directory. AvoidDiskWrites made every desktop
-                // restart behave like a cold Tor client despite a persistent
-                // data directory, which is particularly costly for onion
-                // services.
                 "DataDirectory {}\n{}{}SocksPort 127.0.0.1:{socks_port}\nControlPort 127.0.0.1:{control_port}\nCookieAuthentication 1\nLog notice stdout\n",
                 tor_path(data_dir),
                 geoip_config,
@@ -109,21 +108,26 @@ impl TorRuntime {
         let stderr = child.stderr.take().context("capture Tor errors")?;
         let child = Arc::new(Mutex::new(child));
         let (tx, rx) = mpsc::channel();
+        #[cfg(test)]
         let ready = Arc::new(AtomicBool::new(false));
         let _ = tx.send(TorStatus {
             phase: "starting".into(),
-            label: "Uruchamianie Tor…".into(),
-            detail: "Uruchamianie Tor…".into(),
+            label: "Starting Tor".into(),
+            detail: "Starting Tor".into(),
             progress: 0,
+            #[cfg(test)]
             latency_ms: None,
+            #[cfg(test)]
             retry_attempt: 0,
         });
 
         let status_tx = tx.clone();
+        #[cfg(test)]
         let status_ready = ready.clone();
         std::thread::spawn(move || {
             for line in BufReader::new(stdout).lines().map_while(Result::ok) {
                 if let Some(progress) = bootstrap_progress(&line) {
+                    #[cfg(test)]
                     if progress >= 100 {
                         status_ready.store(true, Ordering::Release);
                     }
@@ -134,17 +138,19 @@ impl TorRuntime {
                             "bootstrapping".into()
                         },
                         label: if progress >= 100 {
-                            "Tor gotowy, łączenie z onion…".into()
+                            "Tor ready, connecting to onion".into()
                         } else {
                             format!("Bootstrap Tor: {progress}%")
                         },
                         detail: if progress >= 100 {
-                            "Tor gotowy, łączenie z onion…".into()
+                            "Tor ready, connecting to onion".into()
                         } else {
                             format!("Bootstrap Tor: {progress}%")
                         },
                         progress: progress.clamp(0, 100) * 70 / 100,
+                        #[cfg(test)]
                         latency_ms: None,
+                        #[cfg(test)]
                         retry_attempt: 0,
                     });
                 }
@@ -159,7 +165,9 @@ impl TorRuntime {
                         label: line,
                         detail: String::new(),
                         progress: 0,
+                        #[cfg(test)]
                         latency_ms: None,
+                        #[cfg(test)]
                         retry_attempt: 0,
                     });
                 }
@@ -170,6 +178,7 @@ impl TorRuntime {
             Self {
                 child: Some(child),
                 socks_url: format!("socks5h://127.0.0.1:{socks_port}"),
+                #[cfg(test)]
                 ready,
             },
             rx,
@@ -180,6 +189,7 @@ impl TorRuntime {
         &self.socks_url
     }
 
+    #[cfg(test)]
     pub fn readiness(&self) -> Arc<AtomicBool> {
         self.ready.clone()
     }

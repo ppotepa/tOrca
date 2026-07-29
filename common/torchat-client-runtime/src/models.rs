@@ -82,7 +82,6 @@ pub struct ContactRecord {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ConversationState {
-    #[serde(alias = "NEW")]
     Pending,
     Verifying,
     Active,
@@ -127,7 +126,7 @@ impl TryFrom<&str> for ConversationState {
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         match value.trim().to_ascii_uppercase().as_str() {
-            "PENDING" | "NEW" => Ok(Self::Pending),
+            "PENDING" => Ok(Self::Pending),
             "VERIFYING" => Ok(Self::Verifying),
             "ACTIVE" => Ok(Self::Active),
             "OFFLINE" => Ok(Self::Offline),
@@ -151,7 +150,6 @@ pub struct ConversationSummary {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum MessageState {
-    #[serde(alias = "PENDING")]
     Queued,
     Sending,
     Sent,
@@ -225,6 +223,16 @@ pub struct MessageSendEffect {
     pub body: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReceiptSendEffect {
+    pub envelope_id: String,
+    pub message_id: String,
+    pub conversation_id: String,
+    pub recipient_installation_id: String,
+    pub received_at: i64,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum MessageTransportOutcome {
@@ -238,6 +246,7 @@ pub enum MessageTransportOutcome {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RuntimeSendEffect {
     pub message: Option<MessageSendEffect>,
+    pub receipt: Option<ReceiptSendEffect>,
     pub pairing: Option<PairingSendEffect>,
 }
 
@@ -245,6 +254,17 @@ impl From<MessageSendEffect> for RuntimeSendEffect {
     fn from(effect: MessageSendEffect) -> Self {
         Self {
             message: Some(effect),
+            receipt: None,
+            pairing: None,
+        }
+    }
+}
+
+impl From<ReceiptSendEffect> for RuntimeSendEffect {
+    fn from(effect: ReceiptSendEffect) -> Self {
+        Self {
+            message: None,
+            receipt: Some(effect),
             pairing: None,
         }
     }
@@ -254,6 +274,7 @@ impl From<PairingSendEffect> for RuntimeSendEffect {
     fn from(effect: PairingSendEffect) -> Self {
         Self {
             message: None,
+            receipt: None,
             pairing: Some(effect),
         }
     }
@@ -262,6 +283,9 @@ impl From<PairingSendEffect> for RuntimeSendEffect {
 impl RuntimeSendEffect {
     pub fn recipient_installation_id(&self) -> &str {
         if let Some(effect) = &self.message {
+            return &effect.recipient_installation_id;
+        }
+        if let Some(effect) = &self.receipt {
             return &effect.recipient_installation_id;
         }
         if let Some(effect) = &self.pairing {
@@ -277,11 +301,18 @@ impl RuntimeSendEffect {
     pub fn pairing(&self) -> Option<&PairingSendEffect> {
         self.pairing.as_ref()
     }
+
+    pub fn receipt(&self) -> Option<&ReceiptSendEffect> {
+        self.receipt.as_ref()
+    }
 }
 
 impl Serialize for RuntimeSendEffect {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         if let Some(effect) = &self.message {
+            return effect.serialize(serializer);
+        }
+        if let Some(effect) = &self.receipt {
             return effect.serialize(serializer);
         }
         if let Some(effect) = &self.pairing {
@@ -295,9 +326,19 @@ impl<'de> Deserialize<'de> for RuntimeSendEffect {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value = serde_json::Value::deserialize(deserializer)?;
         if value.get("messageId").is_some() {
+            if value.get("body").is_none() && value.get("receivedAt").is_some() {
+                return serde_json::from_value::<ReceiptSendEffect>(value)
+                    .map(|receipt| Self {
+                        message: None,
+                        receipt: Some(receipt),
+                        pairing: None,
+                    })
+                    .map_err(serde::de::Error::custom);
+            }
             return serde_json::from_value::<MessageSendEffect>(value)
                 .map(|message| Self {
                     message: Some(message),
+                    receipt: None,
                     pairing: None,
                 })
                 .map_err(serde::de::Error::custom);
@@ -306,6 +347,7 @@ impl<'de> Deserialize<'de> for RuntimeSendEffect {
             return serde_json::from_value::<PairingSendEffect>(value)
                 .map(|pairing| Self {
                     message: None,
+                    receipt: None,
                     pairing: Some(pairing),
                 })
                 .map_err(serde::de::Error::custom);
@@ -560,7 +602,7 @@ pub struct RuntimeFixture {
     pub pairing_send_effects: Vec<PairingSendEffect>,
     pub pairing_peer_outcomes: Vec<PairingPeerOutcome>,
     pub pairing_sync_result: PairingSyncResult,
-    pub welcome_accepted_result: WelcomeAcceptedResult,
+    pub pairing_completion_result: WelcomeAcceptedResult,
     pub message_send_effect: MessageSendEffect,
     pub message_transport_outcomes: Vec<MessageTransportOutcome>,
     pub events: Vec<RuntimeEvent>,

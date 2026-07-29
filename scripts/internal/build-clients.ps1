@@ -71,11 +71,11 @@ Push-Location $repoRoot
 try {
     if ($Target -in @('windows','all')) {
         & (Join-Path $PSScriptRoot 'build-desktop-runtime.ps1') -Release:$Release
-        if (-not $?) { throw 'Desktop Rust runtime build failed.' }
+        if (-not $?) { throw 'Desktop Rust engine client build failed.' }
     }
     if ($Target -in @('android','all')) {
         & (Join-Path $PSScriptRoot 'build-android-core.ps1')
-        if (-not $?) { throw 'Android Rust core build failed.' }
+        if (-not $?) { throw 'Android Rust engine build failed.' }
     }
     Push-Location $mobileRoot
     try {

@@ -1,14 +1,29 @@
 # Rust
 /target/
 **/target/
+Cargo.lock.bak
 
-# Android/Gradle
+# Flutter / Dart
+mobile/.dart_tool/
+mobile/.flutter-plugins
+mobile/.flutter-plugins-dependencies
+mobile/.packages
+mobile/build/
+mobile/coverage/
+
+# Android / Gradle
 .gradle/
+**/.gradle/
 build/
-*/build/
+**/build/
 local.properties
 *.keystore
 *.jks
+mobile/android/app/src/main/jniLibs/**/*.so
+
+# Desktop build outputs
+desktop/target/
+desktop/build/
 
 # IDE / OS
 .idea/
@@ -27,6 +42,11 @@ tmp/
 .torchat/
 .codegraph/
 *.log
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
 
-# Generated protocol artifacts
+# Generated protocol artifacts not used as checked-in host contracts
 protocol/generated/

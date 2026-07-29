@@ -12,18 +12,21 @@ $roots = @(
 )
 
 $legacy = @(
+    'ChatController',
+    'RuntimeCommandAdapter',
+    'RuntimeStateSnapshot',
+    'RuntimeSessionHost',
+    'RuntimeJsonHandle',
     'queueMessage',
     'updateMessageState',
     'markState(',
     'set_message_state(',
     'RuntimeCommand::QueueMessage',
-    'RuntimeCommand::UpdateMessageState',
-    'RuntimeContract.QUEUE_MESSAGE',
-    'RuntimeContract.UPDATE_MESSAGE_STATE'
+    'RuntimeCommand::UpdateMessageState'
 )
 
 foreach ($needle in $legacy) {
-    $hits = rg -n -F --glob '!concat.txt' $needle $roots 2>$null
+    $hits = rg -n -F --glob '!concat.txt' --glob '!scripts/internal/check-legacy-cleanup.ps1' $needle $roots 2>$null
     if ($hits) {
         throw "Legacy path still present: $needle"
     }

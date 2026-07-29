@@ -19,29 +19,9 @@ class RuntimeRepository {
 
   Future<PairingItem> submitPairingCode(String code) async =>
       await _runtime.submitPairingCode(code);
-  Future<PairingPreparation> prepareAcceptInvite(String id) {
-    return _runtime.prepareAcceptPairing(id);
-  }
-
   Future<void> acceptPairing(String id) => _runtime.acceptPairing(id);
 
-  Future<RuntimeSendEffect> commitAcceptInvite(
-    String id,
-    String offerInviteId,
-    String offerPayload,
-  ) {
-    return _runtime.commitAcceptPairing(id, offerInviteId, offerPayload);
-  }
-
-  Future<PairingPreparation> prepareRejectInvite(String id) {
-    return _runtime.prepareRejectPairing(id);
-  }
-
   Future<void> rejectPairing(String id) => _runtime.rejectPairing(id);
-
-  Future<RuntimeSendEffect> commitRejectInvite(String id) {
-    return _runtime.commitRejectPairing(id);
-  }
 
   Future<void> archiveInvite(String id) {
     final runtime = _runtime;
@@ -55,15 +35,7 @@ class RuntimeRepository {
     return (runtime as PairingArchiveRuntime).archivePairing(id);
   }
 
-  Future<PairingCancelEffect> prepareCancelPairing(String id) {
-    return _runtime.prepareCancelPairing(id);
-  }
-
   Future<void> cancelPairing(String id) => _runtime.cancelPairing(id);
-
-  Future<void> confirmPairingCancelled(String id) {
-    return _runtime.confirmPairingCancelled(id);
-  }
 
   Future<void> verifyContact(String id) => _runtime.verifyContact(id);
   Future<List<ContactRecord>> contacts() async => await _runtime.contacts();

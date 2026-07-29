@@ -1,1 +1,0 @@
-SELECT * FROM contacts ORDER BY nickname COLLATE NOCASE ASC;

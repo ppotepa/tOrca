@@ -48,27 +48,7 @@ pub struct Cli {
     #[arg(long)]
     pub dev_peer_identity_file: Option<PathBuf>,
 
-    /// Start the complete runtime without a window and exit after the relay is
-    /// connected. Used by deployment smoke tests.
-    #[arg(long, default_value_t = false)]
-    pub headless_smoke: bool,
-
-    /// Connect without a window, request one real relay pairing code and
-    /// print it. Used by deployment smoke tests.
-    #[arg(long, default_value_t = false)]
-    pub headless_pairing_code: bool,
-
-    /// Connect without a window, submit one 8-digit pairing code and print
-    /// the created request id. Used by relay pairing smoke tests.
-    #[arg(long)]
-    pub headless_submit_pairing_code: Option<String>,
-
-    /// Connect without a window, send one encrypted development message and
-    /// exit after the Android peer confirms delivery.
-    #[arg(long)]
-    pub headless_send: Option<String>,
-
-    /// Run the runtime as a JSON-lines sidecar for the Flutter client.
-    #[arg(long, default_value_t = false)]
-    pub stdio_runtime: bool,
+    /// Explicit shared-engine JSON-lines sidecar.
+    #[arg(long, hide = true, default_value_t = false)]
+    pub stdio_engine: bool,
 }

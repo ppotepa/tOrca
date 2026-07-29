@@ -1,0 +1,16 @@
+[package]
+name = "torchat-client-engine-ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "C ABI for the shared TorChat client engine"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
+torchat-client-engine = { path = "../torchat-client-engine" }
+

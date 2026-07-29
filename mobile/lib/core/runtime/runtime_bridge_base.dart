@@ -25,12 +25,12 @@ mixin RuntimeBridgeMethods
 
   @override
   Future<RuntimeIdentity?> identity() async => RuntimePayload.fromDynamicOrNull(
-    await callRuntime(RuntimeContract.identity),
+    await callRuntime(RuntimeContract.getIdentity),
   )?.identity();
 
   @override
   Future<RuntimeProfile?> profile() async => RuntimePayload.fromDynamicOrNull(
-    await callRuntime(RuntimeContract.profile),
+    await callRuntime(RuntimeContract.getProfile),
   )?.profile();
 
   @override
@@ -88,66 +88,8 @@ mixin RuntimeBridgeMethods
   );
 
   @override
-  Future<PairingPreparation> prepareAcceptPairing(String pairingId) async =>
-      RuntimePayload.fromDynamic(
-        await callRuntime(
-          RuntimeContract.prepareAcceptPairing,
-          RuntimeArguments.pairingId(pairingId),
-        ),
-      ).pairingPreparation();
-
-  @override
-  Future<RuntimeSendEffect> commitAcceptPairing(
-    String pairingId,
-    String offerInviteId,
-    String offerPayload,
-  ) async => RuntimePayload.fromDynamic(
-    await callRuntime(
-      RuntimeContract.commitAcceptPairing,
-      RuntimeArguments.map({
-        'pairingId': pairingId,
-        'offerInviteId': offerInviteId,
-        'offerPayload': offerPayload,
-      }),
-    ),
-  ).runtimeSendEffect();
-
-  @override
-  Future<PairingPreparation> prepareRejectPairing(String pairingId) async =>
-      RuntimePayload.fromDynamic(
-        await callRuntime(
-          RuntimeContract.prepareRejectPairing,
-          RuntimeArguments.pairingId(pairingId),
-        ),
-      ).pairingPreparation();
-
-  @override
-  Future<RuntimeSendEffect> commitRejectPairing(String pairingId) async =>
-      RuntimePayload.fromDynamic(
-        await callRuntime(
-          RuntimeContract.commitRejectPairing,
-          RuntimeArguments.pairingId(pairingId),
-        ),
-      ).runtimeSendEffect();
-
-  @override
   Future<void> archivePairing(String pairingId) => callRuntime(
     RuntimeContract.archivePairing,
-    RuntimeArguments.pairingId(pairingId),
-  );
-
-  @override
-  Future<PairingCancelEffect> prepareCancelPairing(String pairingId) async =>
-      RuntimePayload.fromDynamic(
-        await callRuntime(
-          RuntimeContract.prepareCancelPairing,
-          RuntimeArguments.pairingId(pairingId),
-        ),
-      ).pairingCancelEffect();
-
-  @override
-  Future<void> confirmPairingCancelled(String pairingId) => callRuntime(
-    RuntimeContract.confirmPairingCancelled,
     RuntimeArguments.pairingId(pairingId),
   );
 
@@ -160,19 +102,19 @@ mixin RuntimeBridgeMethods
   @override
   Future<List<ContactRecord>> contacts() async =>
       RuntimePayload.listFromDynamicOrNull(
-        await callRuntime(RuntimeContract.contacts),
+        await callRuntime(RuntimeContract.listContacts),
       ).map((payload) => payload.contact()).toList();
 
   @override
   Future<List<ConversationSummary>> conversations() async =>
       RuntimePayload.listFromDynamicOrNull(
-        await callRuntime(RuntimeContract.conversations),
+        await callRuntime(RuntimeContract.listConversations),
       ).map((payload) => payload.conversation()).toList();
 
   @override
   Future<List<ChatMessage>> messages(String id) async =>
       RuntimePayload.listFromDynamicOrNull(
-        await callRuntime(RuntimeContract.messages, RuntimeArguments.id(id)),
+        await callRuntime(RuntimeContract.listMessages, RuntimeArguments.id(id)),
       ).map((payload) => payload.message()).toList();
 
   @override

@@ -54,8 +54,6 @@ fn manifest_method_names_match_runtime_serialization() {
     expected.extend(internal);
 
     let actual = serialized(&[
-        RuntimeMethod::BootstrapRuntime,
-        RuntimeMethod::ReportTorStatus,
         RuntimeMethod::ApplyRemoteProfile,
         RuntimeMethod::ReportRuntimeError,
         RuntimeMethod::ReportRuntimeLog,
@@ -70,20 +68,7 @@ fn manifest_method_names_match_runtime_serialization() {
         RuntimeMethod::MergePairingInbox,
         RuntimeMethod::PairingOutbox,
         RuntimeMethod::MergePairingOutbox,
-        RuntimeMethod::AcceptPairing,
-        RuntimeMethod::RejectPairing,
-        RuntimeMethod::CancelPairing,
-        RuntimeMethod::PrepareAcceptPairing,
-        RuntimeMethod::CommitAcceptPairing,
-        RuntimeMethod::WelcomeAccepted,
-        RuntimeMethod::BootstrapContact,
-        RuntimeMethod::PrepareRejectPairing,
-        RuntimeMethod::CommitRejectPairing,
         RuntimeMethod::ArchivePairing,
-        RuntimeMethod::PrepareCancelPairing,
-        RuntimeMethod::ConfirmPairingCancelled,
-        RuntimeMethod::PreparePendingSendEffects,
-        RuntimeMethod::ApplyPairingPeerOutcome,
         RuntimeMethod::VerifyContact,
         RuntimeMethod::Contacts,
         RuntimeMethod::Conversations,
@@ -92,8 +77,6 @@ fn manifest_method_names_match_runtime_serialization() {
         RuntimeMethod::CloseConversation,
         RuntimeMethod::StartConversation,
         RuntimeMethod::SendMessage,
-        RuntimeMethod::ReceiveMessage,
-        RuntimeMethod::ApplyMessageTransportOutcome,
     ]);
 
     let expected_set = expected.into_iter().collect::<BTreeSet<_>>();

@@ -10,10 +10,7 @@
       "submitPairingCode",
       "pairingInbox",
       "pairingOutbox",
-      "acceptPairing",
-      "rejectPairing",
       "archivePairing",
-      "cancelPairing",
       "verifyContact",
       "contacts",
       "conversations",
@@ -24,26 +21,12 @@
       "sendMessage"
     ],
     "internal": [
-      "bootstrapRuntime",
-      "reportTorStatus",
       "applyRemoteProfile",
       "reportRuntimeError",
       "reportRuntimeLog",
       "prepareSubmitPairingCode",
       "mergePairingInbox",
-      "mergePairingOutbox",
-      "prepareAcceptPairing",
-      "commitAcceptPairing",
-      "welcomeAccepted",
-      "bootstrapContact",
-      "prepareRejectPairing",
-      "commitRejectPairing",
-      "prepareCancelPairing",
-      "confirmPairingCancelled",
-      "applyPairingPeerOutcome",
-      "preparePendingSendEffects",
-      "receiveMessage",
-      "applyMessageTransportOutcome"
+      "mergePairingOutbox"
     ]
   },
   "events": [

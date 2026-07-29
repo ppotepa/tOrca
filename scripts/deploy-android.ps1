@@ -107,9 +107,9 @@ if (-not $SkipServer) {
 }
 
 if (-not $SkipCoreBuild) {
-    Write-Host "Building Rust identity/MLS core for Flutter Android..."
+    Write-Host "Building Rust client engine for Flutter Android..."
     & (Join-Path $PSScriptRoot "internal\build-android-core.ps1")
-    if ($LASTEXITCODE -ne 0) { throw "Rust Android core build failed." }
+    if ($LASTEXITCODE -ne 0) { throw "Rust Android engine build failed." }
 }
 
 if (-not $SkipApkBuild) {

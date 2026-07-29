@@ -2,7 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:torchat_mobile/client_runtime.dart';
 import 'package:torchat_mobile/main.dart';
 
-class _SplashRuntime implements ClientRuntime, PairingTechnicalRuntime {
+class _SplashRuntime implements ClientRuntime {
   const _SplashRuntime();
 
   @override
@@ -26,41 +26,11 @@ class _SplashRuntime implements ClientRuntime, PairingTechnicalRuntime {
   @override
   Future<List<PairingItem>> pairingOutbox() async => const [];
   @override
-  Future<PairingPreparation> prepareAcceptPairing(String pairingId) async =>
-      const PairingPreparation(
-        pairingId: '',
-        recipientInstallationId: '',
-        capability: '',
-      );
+  Future<void> acceptPairing(String pairingId) async {}
   @override
-  Future<PairingSendEffect> commitAcceptPairing(
-    String pairingId,
-    String offerInviteId,
-    String offerPayload,
-  ) async => const PairingSendEffect(
-    pairingId: '',
-    recipientInstallationId: '',
-    kind: PairingSendKind.offer,
-  );
+  Future<void> rejectPairing(String pairingId) async {}
   @override
-  Future<PairingPreparation> prepareRejectPairing(String pairingId) async =>
-      const PairingPreparation(
-        pairingId: '',
-        recipientInstallationId: '',
-        capability: '',
-      );
-  @override
-  Future<PairingSendEffect> commitRejectPairing(String pairingId) async =>
-      const PairingSendEffect(
-        pairingId: '',
-        recipientInstallationId: '',
-        kind: PairingSendKind.rejection,
-      );
-  @override
-  Future<PairingCancelEffect> prepareCancelPairing(String pairingId) async =>
-      const PairingCancelEffect(pairingId: '');
-  @override
-  Future<void> confirmPairingCancelled(String pairingId) async {}
+  Future<void> cancelPairing(String pairingId) async {}
   @override
   Future<void> verifyContact(String installationId) async {}
   @override

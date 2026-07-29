@@ -27,8 +27,9 @@ paths. Business rules must have one implementation in
 - `server/torchat-server` remains live-only. Do not add server-side message or
   ciphertext storage.
 
-The canonical contract is `common/client-runtime-contract.md`. Keep Android,
-desktop, Flutter, and Rust request names and state values aligned with it.
+The current refactor source of truth is `REFACTO1.MD`. The implementation must
+create the generated engine contract described there and keep Android, desktop,
+Flutter, and Rust request names and state values aligned with that contract.
 
 ## Runtime Ownership
 

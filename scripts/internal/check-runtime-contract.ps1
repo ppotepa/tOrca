@@ -5,41 +5,68 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$manifestPath = Join-Path $repoRoot 'common\client-engine-contract.json'
 
-$required = @(
-    'preparePendingSendEffects',
-    'applyMessageTransportOutcome',
-    'MessageSendEffect',
-    'MessageTransportOutcome'
+if (-not (Test-Path -LiteralPath $manifestPath)) {
+    throw "Missing engine contract manifest: $manifestPath"
+}
+
+$generated = @(
+    (Join-Path $repoRoot 'mobile\android\app\src\main\kotlin\org\torchat\generated\EngineContract.kt'),
+    (Join-Path $repoRoot 'mobile\lib\core\runtime\generated\runtime_contract.g.dart'),
+    (Join-Path $repoRoot 'mobile\lib\core\models\generated\runtime_models.g.dart')
 )
-
-$requiredMissing = @()
-foreach ($needle in $required) {
-    $hits = rg -n --glob '!concat.txt' --glob '!scripts/internal/check-runtime-contract.ps1' --glob '!scripts/internal/check-legacy-cleanup.ps1' --glob '!scripts/internal/check-server-relay-ephemeral.ps1' --glob '!scripts/internal/check-sql-isolation.ps1' $needle $repoRoot 2>$null
-    if (-not $hits) {
-        $requiredMissing += $needle
+foreach ($file in $generated) {
+    if (-not (Test-Path -LiteralPath $file)) {
+        throw "Missing generated contract artifact: $file"
     }
 }
 
-if ($requiredMissing.Count -gt 0) {
-    throw "Missing required runtime contract markers: $($requiredMissing -join ', ')"
+try {
+    $contract = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+} catch {
+    throw "Engine contract manifest is not valid JSON: $manifestPath"
 }
 
-if ($FailOnLegacy) {
-    $legacy = @(
-        'RuntimeCommand::QueueMessage',
-        '"queueMessage" =>',
-        'RuntimeCommand::UpdateMessageState',
-        '"updateMessageState" =>',
-        'RuntimeContract.QUEUE_MESSAGE',
-        'RuntimeContract.UPDATE_MESSAGE_STATE',
-        'markState(',
-        'set_message_state('
-    )
-    foreach ($needle in $legacy) {
-        $hits = rg -n --glob '!concat.txt' $needle $repoRoot 2>$null
-        if ($hits) {
-            throw "Legacy runtime contract path still present: $needle"
+$requiredPublic = @(
+    'connect',
+    'identity',
+    'profile',
+    'setNickname',
+    'refreshPairingCode',
+    'submitPairingCode',
+    'pairingInbox',
+    'pairingOutbox',
+    'acceptPairing',
+    'rejectPairing',
+    'archivePairing',
+    'cancelPairing',
+    'verifyContact',
+    'contacts',
+    'conversations',
+    'messages',
+    'openConversation',
+    'closeConversation',
+    'startConversation',
+    'sendMessage'
+)
+
+$publicMethods = @($contract.methods.public | ForEach-Object { $_.ToString() })
+$missingPublic = @($requiredPublic | Where-Object { $_ -notin $publicMethods })
+if ($missingPublic.Count -gt 0) {
+    throw "Engine contract manifest is missing required public methods: $($missingPublic -join ', ')"
+}
+
+$generatedChecks = @(
+    @{ Path = $generated[0]; Needles = @('const val CONNECT = "connect"', 'const val MESSAGES = "messages"', 'const val PROFILE_READY = "profile_ready"') },
+    @{ Path = $generated[1]; Needles = @("static const connect = 'connect';", "static const messages = 'messages';", "static const profileReady = 'profile_ready';") },
+    @{ Path = $generated[2]; Needles = @("'FORWARDED'", "'WELCOME_PREPARED'") }
+)
+foreach ($check in $generatedChecks) {
+    $content = Get-Content -LiteralPath $check.Path -Raw
+    foreach ($needle in $check.Needles) {
+        if ($content -notlike "*$needle*") {
+            throw "Generated contract artifact is stale: missing '$needle' in $($check.Path)"
         }
     }
 }

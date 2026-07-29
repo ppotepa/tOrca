@@ -1,3 +1,4 @@
+import '../models/generated/runtime_models.g.dart';
 import 'runtime_payload.dart';
 
 class RuntimeResponse {
@@ -18,14 +19,15 @@ class RuntimeResponse {
   final String? eventType;
 
   factory RuntimeResponse.fromDynamic(Object? value) {
-    final payload = RuntimePayload.fromDynamic(value);
+    final response = GeneratedRuntimeResponse.fromDynamic(value);
+    final payload = RuntimePayload(response.payload);
     return RuntimeResponse(
-      id: payload.string('id'),
-      ok: payload['ok'] == true,
+      id: response.id,
+      ok: response.ok,
       payload: payload,
-      result: payload['result'],
-      error: payload.string('error'),
-      eventType: payload.string('type'),
+      result: response.result,
+      error: response.error,
+      eventType: response.eventType,
     );
   }
 

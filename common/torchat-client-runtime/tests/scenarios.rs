@@ -2,7 +2,7 @@ mod support;
 
 use serde_json::{Map, Value, json};
 use support::runtime_from_state;
-use torchat_client_runtime::RuntimeRequest;
+use torchat_client_runtime::{MessageTransportOutcome, RuntimeRequest, RuntimeResponse, RuntimeTorStatus};
 
 #[test]
 fn shared_runtime_scenarios_pass() {
@@ -34,12 +34,7 @@ fn run_scenario(scenario: &Value) {
             command.get("params").cloned().unwrap_or_else(|| json!({})),
             &responses,
         );
-        let response = runtime.dispatch_request(RuntimeRequest {
-            id: None,
-            method,
-            params,
-        });
-        responses.push(serde_json::to_value(response).expect("response json"));
+        responses.push(execute_command(&mut runtime, &method, params));
         events.extend(
             runtime
                 .drain_events()
@@ -99,6 +94,118 @@ fn run_scenario(scenario: &Value) {
             assert_collection_subset(id, "pairingOutbox", expected_outbox, &actual);
         }
     }
+}
+
+fn execute_command(runtime: &mut support::ScenarioRuntime, method: &str, params: Value) -> Value {
+    let response = match method {
+        "runtimeBootstrap" => RuntimeResponse::ok(None, runtime.bootstrap_runtime().expect("bootstrap"))
+            .expect("response"),
+        "runtimeReportTorStatus" => {
+            let status: RuntimeTorStatus =
+                serde_json::from_value(params["status"].clone()).expect("status");
+            runtime.report_tor_status(status);
+            RuntimeResponse::ok(None, true).expect("response")
+        }
+        "runtimeApplyTransportOutcome" => {
+            let message_id = params["messageId"].as_str().expect("messageId");
+            let outcome: MessageTransportOutcome =
+                serde_json::from_value(params["outcome"].clone()).expect("outcome");
+            match runtime.apply_message_transport_outcome(
+                uuid::Uuid::parse_str(message_id).expect("valid messageId"),
+                outcome,
+            ) {
+                Ok(result) => RuntimeResponse::ok(None, result).expect("response"),
+                Err(error) => RuntimeResponse::error(None, error),
+            }
+        }
+        "runtimeFlushPendingSendEffects" => {
+            match runtime.prepare_pending_send_effects() {
+                Ok(result) => RuntimeResponse::ok(None, result).expect("response"),
+                Err(error) => RuntimeResponse::error(None, error),
+            }
+        }
+        "runtimeAcceptPairingPreview" => {
+            match runtime.prepare_accept_pairing(params["pairingId"].as_str().expect("pairingId")) {
+                Ok(result) => RuntimeResponse::ok(None, result).expect("response"),
+                Err(error) => RuntimeResponse::error(None, error),
+            }
+        }
+        "runtimeAcceptPairingCommit" => {
+            match runtime.commit_accept_pairing(
+                params["pairingId"].as_str().expect("pairingId"),
+                params["offerInviteId"].as_str().expect("offerInviteId").to_owned(),
+                params["offerPayload"].as_str().expect("offerPayload").to_owned(),
+            ) {
+                Ok(result) => RuntimeResponse::ok(None, result).expect("response"),
+                Err(error) => RuntimeResponse::error(None, error),
+            }
+        }
+        "runtimeRejectPairingPreview" => {
+            match runtime.prepare_reject_pairing(params["pairingId"].as_str().expect("pairingId")) {
+                Ok(result) => RuntimeResponse::ok(None, result).expect("response"),
+                Err(error) => RuntimeResponse::error(None, error),
+            }
+        }
+        "runtimeRejectPairingCommit" => {
+            match runtime.commit_reject_pairing(params["pairingId"].as_str().expect("pairingId")) {
+                Ok(result) => RuntimeResponse::ok(None, result).expect("response"),
+                Err(error) => RuntimeResponse::error(None, error),
+            }
+        }
+        "runtimeCancelPairingPreview" => {
+            match runtime.prepare_cancel_pairing(params["pairingId"].as_str().expect("pairingId")) {
+                Ok(result) => RuntimeResponse::ok(None, result).expect("response"),
+                Err(error) => RuntimeResponse::error(None, error),
+            }
+        }
+        "runtimeCancelPairingCommit" => {
+            match runtime.confirm_pairing_cancelled(params["pairingId"].as_str().expect("pairingId")) {
+                Ok(()) => RuntimeResponse::ok(None, true).expect("response"),
+                Err(error) => RuntimeResponse::error(None, error),
+            }
+        }
+        "runtimeWelcomeAccepted" => {
+            let contact = serde_json::from_value(params["contact"].clone()).expect("contact");
+            let open_conversation = params
+                .get("openConversation")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let invite_id = params
+                .get("inviteId")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            match runtime.welcome_accepted(contact, open_conversation, invite_id) {
+                Ok(result) => RuntimeResponse::ok(None, result).expect("response"),
+                Err(error) => RuntimeResponse::error(None, error),
+            }
+        }
+        "runtimeApplyPairingPeerOutcome" => {
+            let pairing_id = params["pairingId"].as_str().expect("pairingId");
+            let outcome = serde_json::from_value(params["outcome"].clone()).expect("outcome");
+            match runtime.apply_pairing_peer_outcome(pairing_id, outcome) {
+                Ok(()) => RuntimeResponse::ok(None, true).expect("response"),
+                Err(error) => RuntimeResponse::error(None, error),
+            }
+        }
+        "runtimeReceiveMessage" => {
+            let conversation_id = params["id"].as_str().expect("id");
+            let text = params["text"].as_str().expect("text").to_owned();
+            let message_id = params
+                .get("messageId")
+                .and_then(Value::as_str)
+                .map(|value| uuid::Uuid::parse_str(value).expect("valid messageId"));
+            match runtime.receive_message(conversation_id, text, message_id) {
+                Ok(result) => RuntimeResponse::ok(None, result).expect("response"),
+                Err(error) => RuntimeResponse::error(None, error),
+            }
+        }
+        _ => runtime.dispatch_request(RuntimeRequest {
+            id: None,
+            method: method.to_owned(),
+            params,
+        }),
+    };
+    serde_json::to_value(response).expect("response json")
 }
 
 fn resolve_placeholders(value: Value, responses: &[Value]) -> Value {

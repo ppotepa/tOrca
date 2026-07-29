@@ -62,11 +62,14 @@ pub fn load_existing(path: &Path) -> Result<Identity> {
 }
 
 pub fn state_path(path: Option<&Path>) -> Result<PathBuf> {
-    Ok(path
+    let identity_path = path
         .map(Path::to_path_buf)
         .map(Ok)
-        .unwrap_or_else(default_path)?
-        .with_extension("state.db"))
+        .unwrap_or_else(default_path)?;
+    let parent = identity_path
+        .parent()
+        .context("cannot determine desktop state directory")?;
+    Ok(parent.join("torchat-client-v1.db"))
 }
 
 #[cfg(test)]

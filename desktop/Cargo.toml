@@ -7,20 +7,15 @@ description = "TorChat lightweight desktop client for Windows and Linux"
 
 [dependencies]
 anyhow = "1"
-base64 = "0.22"
-chacha20poly1305 = "0.10"
 clap = { version = "4", features = ["derive", "env"] }
 directories = "6"
 futures-util = "=0.3.32"
-rand = "0.9"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "socks"] }
-rusqlite = { version = "0.38", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
 tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
-tokio-socks = "0.5"
-tokio-tungstenite = "0.29"
 uuid = { version = "1", features = ["v4", "serde"] }
 torchat-core = { path = "../common/torchat-core" }
+torchat-client-engine = { path = "../common/torchat-client-engine" }
 torchat-client-runtime = { path = "../common/torchat-client-runtime" }

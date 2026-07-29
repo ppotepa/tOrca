@@ -20,7 +20,7 @@ try {
                 [IO.Path]::GetFullPath($_.ExecutablePath).Equals($resolvedBinaryPath, [StringComparison]::OrdinalIgnoreCase)
             })
         foreach ($process in $running) {
-            Write-Host "[torchat] Stopping previous desktop runtime (PID $($process.ProcessId)) before rebuild."
+            Write-Host "[torchat] Stopping previous desktop engine client (PID $($process.ProcessId)) before rebuild."
             Stop-Process -Id ([int]$process.ProcessId) -Force -ErrorAction SilentlyContinue
         }
         if ($running.Count -gt 0) { Start-Sleep -Milliseconds 1000 }
@@ -30,11 +30,11 @@ try {
     $previousCompiledOnion = $env:TORCHAT_COMPILED_ONION_URL
     $env:TORCHAT_COMPILED_ONION_URL = $onion
     try { & cargo @cargoArgs } finally { $env:TORCHAT_COMPILED_ONION_URL = $previousCompiledOnion }
-    if ($LASTEXITCODE -ne 0) { throw 'Rust desktop runtime build failed.' }
+    if ($LASTEXITCODE -ne 0) { throw 'Rust desktop engine client build failed.' }
     $isWindowsHost = $env:OS -eq 'Windows_NT'
     $name = if ($isWindowsHost) { 'torchat-desktop.exe' } else { 'torchat-desktop' }
     $source = Join-Path $repoRoot "target\$profile\$name"
-    if (-not (Test-Path -LiteralPath $source)) { throw "Runtime binary missing: $source" }
-    Write-Host "[torchat] Desktop runtime ready: $source"
+    if (-not (Test-Path -LiteralPath $source)) { throw "Desktop engine client binary missing: $source" }
+    Write-Host "[torchat] Desktop engine client ready: $source"
     return (Resolve-Path -LiteralPath $source).Path
 } finally { Pop-Location }

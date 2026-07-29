@@ -91,13 +91,19 @@ function Clear-TorChatDesktopState {
     $clientRoot = Join-Path $repoRoot '.torchat\clients\desktop'
     $identityFile = Join-Path $clientRoot 'identity.key'
     $files = @(
-        (Join-Path $clientRoot 'identity.state.db'),
-        (Join-Path $clientRoot 'identity.state.db-wal'),
-        (Join-Path $clientRoot 'identity.state.db-shm'),
+        (Join-Path $clientRoot 'torchat-client-v1.db'),
+        (Join-Path $clientRoot 'torchat-client-v1.db-wal'),
+        (Join-Path $clientRoot 'torchat-client-v1.db-shm'),
         $identityFile
     )
     foreach ($file in $files) {
         if (Test-Path -LiteralPath $file) {
+            $resolved = [IO.Path]::GetFullPath($file)
+            $clientRootPath = [IO.Path]::GetFullPath($clientRoot).TrimEnd([IO.Path]::DirectorySeparatorChar) +
+                [IO.Path]::DirectorySeparatorChar
+            if (-not $resolved.StartsWith($clientRootPath, [StringComparison]::OrdinalIgnoreCase)) {
+                throw "Refusing to remove path outside desktop client state directory: $resolved"
+            }
             for ($attempt = 1; $attempt -le 5; $attempt++) {
                 try {
                     Remove-Item -LiteralPath $file -Force -ErrorAction Stop
@@ -113,7 +119,7 @@ function Clear-TorChatDesktopState {
     if ($remaining.Count -gt 0) {
         throw "Desktop client state reset is incomplete: $($remaining -join ', ')"
     }
-    Write-Host '[torchat] Cleared desktop client identity and encrypted local state.'
+    Write-Host '[torchat] Cleared desktop client identity and developer local engine state.'
 }
 
 function Stop-TorChatFlutterWindows {
@@ -243,8 +249,6 @@ switch ($operation) {
         try {
             cargo test -p torchat-client-runtime
             if ($LASTEXITCODE -ne 0) { throw 'torchat-client-runtime unit tests failed.' }
-            cargo test -p torchat-desktop runtime_conformance
-            if ($LASTEXITCODE -ne 0) { throw 'torchat-desktop runtime conformance tests failed.' }
         } finally {
             Pop-Location
         }

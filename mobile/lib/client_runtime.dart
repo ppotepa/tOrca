@@ -24,16 +24,6 @@ abstract interface class ClientRuntime {
   Future<void> acceptPairing(String pairingId);
   Future<void> rejectPairing(String pairingId);
   Future<void> cancelPairing(String pairingId);
-  Future<PairingPreparation> prepareAcceptPairing(String pairingId);
-  Future<RuntimeSendEffect> commitAcceptPairing(
-    String pairingId,
-    String offerInviteId,
-    String offerPayload,
-  );
-  Future<PairingPreparation> prepareRejectPairing(String pairingId);
-  Future<RuntimeSendEffect> commitRejectPairing(String pairingId);
-  Future<PairingCancelEffect> prepareCancelPairing(String pairingId);
-  Future<void> confirmPairingCancelled(String pairingId);
 }
 
 /// Optional capability used by production runtimes. Keeping it separate from

@@ -6,7 +6,7 @@ import 'package:torchat_mobile/core/models/domain.dart';
 import 'package:torchat_mobile/core/runtime/runtime_contract.dart';
 
 Map<String, dynamic> manifest() => Map<String, dynamic>.from(
-  jsonDecode(File('../common/client-runtime-contract.json').readAsStringSync())
+  jsonDecode(File('../common/client-engine-contract.json').readAsStringSync())
       as Map,
 );
 
@@ -19,45 +19,30 @@ void main() {
     final methods = Map<String, dynamic>.from(contract['methods'] as Map);
 
     expect(strings(methods['public']), [
+      RuntimeContract.bootstrap,
       RuntimeContract.connect,
-      RuntimeContract.identity,
-      RuntimeContract.profile,
+      RuntimeContract.getIdentity,
+      RuntimeContract.getProfile,
+      RuntimeContract.pairingInbox,
+      RuntimeContract.pairingOutbox,
+      RuntimeContract.listContacts,
+      RuntimeContract.listConversations,
+      RuntimeContract.listMessages,
       RuntimeContract.setNickname,
       RuntimeContract.refreshPairingCode,
       RuntimeContract.submitPairingCode,
-      RuntimeContract.pairingInbox,
-      RuntimeContract.pairingOutbox,
       RuntimeContract.acceptPairing,
       RuntimeContract.rejectPairing,
       RuntimeContract.archivePairing,
       RuntimeContract.cancelPairing,
       RuntimeContract.verifyContact,
-      RuntimeContract.contacts,
-      RuntimeContract.conversations,
-      RuntimeContract.messages,
+      RuntimeContract.startConversation,
       RuntimeContract.openConversation,
       RuntimeContract.closeConversation,
-      RuntimeContract.startConversation,
       RuntimeContract.sendMessage,
+      RuntimeContract.platformFact,
+      RuntimeContract.shutdown,
     ]);
-
-    expect(
-      strings(methods['internal']),
-      contains(RuntimeContract.bootstrapRuntime),
-    );
-    expect(
-      strings(methods['internal']),
-      contains(RuntimeContract.applyMessageTransportOutcome),
-    );
-    expect(
-      strings(methods['internal']),
-      contains(RuntimeContract.applyPairingPeerOutcome),
-    );
-    expect(
-      strings(methods['internal']),
-      contains(RuntimeContract.bootstrapContact),
-    );
-
     expect(strings(contract['events']), [
       RuntimeContract.runtimeReady,
       RuntimeContract.torStatus,

@@ -106,7 +106,7 @@
       {"pairingId": "pairing-1"}
     ]
   },
-  "welcomeAcceptedResult": {
+  "pairingCompletionResult": {
     "conversation": {
       "id": "installation-bob",
       "contactInstallationId": "installation-bob",

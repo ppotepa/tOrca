@@ -12,8 +12,8 @@
         }
       },
       "commands": [
-        {"method": "bootstrapRuntime"},
-        {"method": "bootstrapRuntime"}
+        {"method": "runtimeBootstrap"},
+        {"method": "runtimeBootstrap"}
       ],
       "expectedResponses": [
         {"ok": true, "result": true},
@@ -36,7 +36,7 @@
       "id": "02_status_dedup",
       "commands": [
         {
-          "method": "reportTorStatus",
+          "method": "runtimeReportTorStatus",
           "params": {
             "status": {
               "phase": "connected",
@@ -49,7 +49,7 @@
           }
         },
         {
-          "method": "reportTorStatus",
+          "method": "runtimeReportTorStatus",
           "params": {
             "status": {
               "phase": "connected",
@@ -62,7 +62,7 @@
           }
         },
         {
-          "method": "reportTorStatus",
+          "method": "runtimeReportTorStatus",
           "params": {
             "status": {
               "phase": "reconnecting",
@@ -112,11 +112,11 @@
           "params": {"id": "installation-bob", "text": " hello "}
         },
         {
-          "method": "applyMessageTransportOutcome",
+          "method": "runtimeApplyTransportOutcome",
           "params": {"messageId": "$response[0].result.messageId", "outcome": "FORWARDED"}
         },
         {
-          "method": "applyMessageTransportOutcome",
+          "method": "runtimeApplyTransportOutcome",
           "params": {"messageId": "$response[0].result.messageId", "outcome": "DELIVERED"}
         }
       ],
@@ -180,10 +180,10 @@
       },
       "commands": [
         {
-          "method": "applyMessageTransportOutcome",
+          "method": "runtimeApplyTransportOutcome",
           "params": {"messageId": "00000000-0000-0000-0000-000000000001", "outcome": "RETRYABLE_FAILURE"}
         },
-        {"method": "preparePendingSendEffects"}
+        {"method": "runtimeFlushPendingSendEffects"}
       ],
       "expectedResponses": [
         {"ok": true, "result": {"state": "QUEUED"}},
@@ -220,7 +220,7 @@
       },
       "commands": [
         {"method": "openConversation", "params": {"id": "installation-bob"}},
-        {"method": "receiveMessage", "params": {"id": "installation-bob", "text": "hi", "messageId": "00000000-0000-0000-0000-000000000002"}}
+        {"method": "runtimeReceiveMessage", "params": {"id": "installation-bob", "text": "hi", "messageId": "00000000-0000-0000-0000-000000000002"}}
       ],
       "expectedEvents": [
         {"type": "conversation_read_changed", "conversationId": "installation-bob", "unreadCount": 0},
@@ -324,7 +324,7 @@
       },
       "commands": [
         {"method": "closeConversation"},
-        {"method": "receiveMessage", "params": {"id": "installation-bob", "text": "closed hi", "messageId": "00000000-0000-0000-0000-000000000004"}}
+        {"method": "runtimeReceiveMessage", "params": {"id": "installation-bob", "text": "closed hi", "messageId": "00000000-0000-0000-0000-000000000004"}}
       ],
       "expectedEvents": [
         {"type": "message_received", "messageId": "00000000-0000-0000-0000-000000000004", "text": "closed hi"},
@@ -354,7 +354,7 @@
       },
       "commands": [
         {
-          "method": "receiveMessage",
+          "method": "runtimeReceiveMessage",
           "params": {
             "id": "installation-bob",
             "text": "hello",
@@ -362,7 +362,7 @@
           }
         },
         {
-          "method": "receiveMessage",
+          "method": "runtimeReceiveMessage",
           "params": {
             "id": "installation-bob",
             "text": "hello",
@@ -425,7 +425,7 @@
       },
       "commands": [
         {
-          "method": "applyPairingPeerOutcome",
+          "method": "runtimeApplyPairingPeerOutcome",
           "params": {"pairingId": "pairing-2", "outcome": "REJECTION_RECEIVED"}
         }
       ],
@@ -454,7 +454,7 @@
       },
       "commands": [
         {
-          "method": "applyMessageTransportOutcome",
+          "method": "runtimeApplyTransportOutcome",
           "params": {"messageId": "00000000-0000-0000-0000-000000000003", "outcome": "RETRYABLE_FAILURE"}
         }
       ],
@@ -484,9 +484,9 @@
         ]
       },
       "commands": [
-        {"method": "prepareAcceptPairing", "params": {"pairingId": "pairing-accept"}},
+        {"method": "runtimeAcceptPairingPreview", "params": {"pairingId": "pairing-accept"}},
         {
-          "method": "commitAcceptPairing",
+          "method": "runtimeAcceptPairingCommit",
           "params": {
             "pairingId": "pairing-accept",
             "offerInviteId": "offer-1",
@@ -529,8 +529,8 @@
         ]
       },
       "commands": [
-        {"method": "prepareRejectPairing", "params": {"pairingId": "pairing-reject"}},
-        {"method": "commitRejectPairing", "params": {"pairingId": "pairing-reject"}}
+        {"method": "runtimeRejectPairingPreview", "params": {"pairingId": "pairing-reject"}},
+        {"method": "runtimeRejectPairingCommit", "params": {"pairingId": "pairing-reject"}}
       ],
       "expectedResponses": [
         {"ok": true, "result": {"pairingId": "pairing-reject", "recipientInstallationId": "installation-bob", "capability": "chat"}},
@@ -560,8 +560,8 @@
         ]
       },
       "commands": [
-        {"method": "prepareCancelPairing", "params": {"pairingId": "pairing-cancel"}},
-        {"method": "confirmPairingCancelled", "params": {"pairingId": "pairing-cancel"}}
+        {"method": "runtimeCancelPairingPreview", "params": {"pairingId": "pairing-cancel"}},
+        {"method": "runtimeCancelPairingCommit", "params": {"pairingId": "pairing-cancel"}}
       ],
       "expectedResponses": [
         {"ok": true, "result": {"pairingId": "pairing-cancel"}},
@@ -601,7 +601,7 @@
       },
       "commands": [
         {
-          "method": "welcomeAccepted",
+          "method": "runtimeWelcomeAccepted",
           "params": {
             "contact": {
               "installationId": "installation-bob",
@@ -700,7 +700,7 @@
       },
       "commands": [
         {
-          "method": "receiveMessage",
+          "method": "runtimeReceiveMessage",
           "params": {
             "id": "installation-bob",
             "text": "hello",
@@ -708,7 +708,7 @@
           }
         },
         {
-          "method": "receiveMessage",
+          "method": "runtimeReceiveMessage",
           "params": {
             "id": "installation-bob",
             "text": "hello",
@@ -777,13 +777,13 @@
       },
       "commands": [
         {
-          "method": "applyMessageTransportOutcome",
+          "method": "runtimeApplyTransportOutcome",
           "params": {
             "messageId": "00000000-0000-0000-0000-000000000020",
             "outcome": "RETRYABLE_FAILURE"
           }
         },
-        {"method": "preparePendingSendEffects"}
+        {"method": "runtimeFlushPendingSendEffects"}
       ],
       "expectedResponses": [
         {"ok": true, "result": {"state": "QUEUED"}},
@@ -831,7 +831,7 @@
       },
       "commands": [
         {
-          "method": "applyMessageTransportOutcome",
+          "method": "runtimeApplyTransportOutcome",
           "params": {
             "messageId": "00000000-0000-0000-0000-000000000021",
             "outcome": "RETRYABLE_FAILURE"

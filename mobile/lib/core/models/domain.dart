@@ -122,8 +122,6 @@ enum InviteState {
   };
 }
 
-enum PairingSendKind { offer, rejection }
-
 enum PairingAvailableAction {
   accept,
   reject,
@@ -149,45 +147,6 @@ enum PairingAvailableAction {
   };
 }
 
-class PairingPreparation {
-  const PairingPreparation({
-    required this.pairingId,
-    required this.recipientInstallationId,
-    required this.capability,
-  });
-  final String pairingId;
-  final String recipientInstallationId;
-  final String capability;
-
-  factory PairingPreparation.fromMap(Map<String, dynamic> map) =>
-      PairingPreparation(
-        pairingId: _string(map, 'pairingId'),
-        recipientInstallationId: _string(map, 'recipientInstallationId'),
-        capability: _string(map, 'capability'),
-      );
-}
-
-class PairingSendEffect {
-  const PairingSendEffect({
-    required this.pairingId,
-    required this.recipientInstallationId,
-    required this.kind,
-    this.payload = '',
-  });
-  final String pairingId;
-  final String recipientInstallationId;
-  final PairingSendKind kind;
-  final String payload;
-
-  factory PairingSendEffect.fromMap(Map<String, dynamic> map) =>
-      PairingSendEffect(
-        pairingId: _string(map, 'pairingId'),
-        recipientInstallationId: _string(map, 'recipientInstallationId'),
-        kind: _pairingSendKind(_string(map, 'kind')),
-        payload: _string(map, 'payload'),
-      );
-}
-
 class MessageSendEffect {
   const MessageSendEffect({
     required this.messageId,
@@ -209,32 +168,28 @@ class MessageSendEffect {
       );
 }
 
-class RuntimeSendEffect {
-  const RuntimeSendEffect._({this.message, this.pairing});
+class ReceiptSendEffect {
+  const ReceiptSendEffect({
+    required this.envelopeId,
+    required this.messageId,
+    required this.conversationId,
+    required this.recipientInstallationId,
+    required this.receivedAt,
+  });
+  final String envelopeId;
+  final String messageId;
+  final String conversationId;
+  final String recipientInstallationId;
+  final int receivedAt;
 
-  final MessageSendEffect? message;
-  final PairingSendEffect? pairing;
-
-  factory RuntimeSendEffect.fromMap(Map<String, dynamic> map) {
-    if (map.containsKey('messageId')) {
-      return RuntimeSendEffect._(message: MessageSendEffect.fromMap(map));
-    }
-    if (map.containsKey('pairingId')) {
-      return RuntimeSendEffect._(pairing: PairingSendEffect.fromMap(map));
-    }
-    throw FormatException('Unknown runtime send effect');
-  }
-
-  bool get isMessage => message != null;
-  bool get isPairing => pairing != null;
-}
-
-class PairingCancelEffect {
-  const PairingCancelEffect({required this.pairingId});
-  final String pairingId;
-
-  factory PairingCancelEffect.fromMap(Map<String, dynamic> map) =>
-      PairingCancelEffect(pairingId: _string(map, 'pairingId'));
+  factory ReceiptSendEffect.fromMap(Map<String, dynamic> map) =>
+      ReceiptSendEffect(
+        envelopeId: _string(map, 'envelopeId'),
+        messageId: _string(map, 'messageId'),
+        conversationId: _string(map, 'conversationId'),
+        recipientInstallationId: _string(map, 'recipientInstallationId'),
+        receivedAt: _int(map, 'receivedAt'),
+      );
 }
 
 enum MessageState {
@@ -438,9 +393,14 @@ class ChatMessage {
     id: _string(map, 'id'),
     text: _string(map, 'body'),
     outgoing: map['outgoing'] as bool? ?? false,
-    state: MessageState.fromValue(_string(map, 'state')),
+    state: _messageState(map['state']),
     createdAt: _timestamp(map['createdAt'] ?? map['created_at']),
   );
+}
+
+MessageState _messageState(Object? value) {
+  if (value is MessageState) return value;
+  return MessageState.fromValue(value?.toString());
 }
 
 String _timestamp(Object? value) {
@@ -472,11 +432,6 @@ String? _optionalString(Map<String, dynamic> map, String key) {
   final value = map[key];
   return value?.toString();
 }
-
-PairingSendKind _pairingSendKind(String value) =>
-    value.toUpperCase() == 'REJECTION'
-    ? PairingSendKind.rejection
-    : PairingSendKind.offer;
 
 int _int(
   Map<String, dynamic> map,

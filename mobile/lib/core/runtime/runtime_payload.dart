@@ -1,56 +1,54 @@
 import '../models/domain.dart';
+import '../models/generated/runtime_models.g.dart';
 import 'runtime_contract.dart';
 
 class RuntimePayload {
-  RuntimePayload(this._value);
+  RuntimePayload(this._wire);
 
-  final Map<String, dynamic> _value;
+  final GeneratedRuntimePayload _wire;
 
   factory RuntimePayload.fromMap(Map<String, dynamic> value) =>
-      RuntimePayload(Map<String, dynamic>.from(value));
+      RuntimePayload(GeneratedRuntimePayload.fromMap(value));
 
   factory RuntimePayload.fromDynamic(Object? value) =>
-      RuntimePayload.fromMap(Map<String, dynamic>.from(value as Map));
+      RuntimePayload(GeneratedRuntimePayload.fromDynamic(value));
 
   static RuntimePayload? fromDynamicOrNull(Object? value) {
-    if (value == null) return null;
-    return RuntimePayload.fromDynamic(value);
+    final payload = GeneratedRuntimePayload.fromDynamicOrNull(value);
+    return payload == null ? null : RuntimePayload(payload);
   }
 
   static List<RuntimePayload> listFromDynamicOrNull(Object? value) {
-    if (value is! List) return const [];
-    return value
-        .whereType<Map>()
-        .map((item) => RuntimePayload.fromMap(Map<String, dynamic>.from(item)))
+    return GeneratedRuntimePayload.listFromDynamicOrNull(value)
+        .map(RuntimePayload.new)
         .toList();
   }
 
   static List<RuntimePayload> itemsFromDynamicOrNull(Object? value) {
-    if (value is Map && value['items'] is List) {
-      return listFromDynamicOrNull(value['items']);
-    }
-    return listFromDynamicOrNull(value);
+    return GeneratedRuntimePayload.itemsFromDynamicOrNull(value)
+        .map(RuntimePayload.new)
+        .toList();
   }
 
-  String? string(String key) => _value[key]?.toString();
+  String? string(String key) => _wire.string(key);
 
   String stringOr(String key, String fallback) => string(key) ?? fallback;
 
-  num? number(String key) => _value[key] as num?;
+  num? number(String key) => _wire.number(key);
 
-  int? intValue(String key) => number(key)?.toInt();
+  int? intValue(String key) => _wire.intValue(key);
 
-  Object? operator [](String key) => _value[key];
+  Object? operator [](String key) => _wire[key];
 
-  Map<String, dynamic> toMap() => Map<String, dynamic>.from(_value);
+  Map<String, dynamic> toMap() => _wire.toMap();
 
   RuntimeIdentity identity() => RuntimeIdentity.fromMap(toMap());
 
   RuntimeProfile profile() => RuntimeProfile.fromMap(toMap());
 
   ContactRecord contact([String key = 'sender']) {
-    final value = _value[key];
-    final map = value is Map ? value : _value;
+    final value = _wire[key];
+    final map = value is Map ? Map<String, dynamic>.from(value) : toMap();
     return ContactRecord.fromMap(Map<String, dynamic>.from(map));
   }
 
@@ -61,11 +59,6 @@ class RuntimePayload {
   PairingItem pairingItem() => PairingItem.fromMap(toMap());
 
   InviteCode inviteCode() => InviteCode.fromMap(toMap());
-  PairingPreparation pairingPreparation() =>
-      PairingPreparation.fromMap(toMap());
-  RuntimeSendEffect runtimeSendEffect() => RuntimeSendEffect.fromMap(toMap());
-  PairingCancelEffect pairingCancelEffect() =>
-      PairingCancelEffect.fromMap(toMap());
 
   RuntimeEvent runtimeEvent() {
     final type = string(RuntimeContract.type);
@@ -105,7 +98,7 @@ class RuntimePayload {
             type == RuntimeContract.messageReceived ||
             type == RuntimeContract.messageStateChanged ||
             type == RuntimeContract.conversationReadChanged) {
-          final payload = Map<String, dynamic>.from(_value)
+          final payload = toMap()
             ..remove(RuntimeContract.type);
           return DataChangedEvent(type, payload);
         }

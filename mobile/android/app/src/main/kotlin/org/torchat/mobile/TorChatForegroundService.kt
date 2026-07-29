@@ -23,31 +23,18 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
-import kotlin.coroutines.coroutineContext
-import org.torchat.chat.ChatController
-import org.torchat.data.DevContacts
-import org.torchat.data.DevFixtures
-import org.torchat.data.EncryptedMessageStore
 import org.torchat.security.LocalSecretStore
 import org.torchat.security.TorRuntime
 import org.torchat.core.NativeIdentity
-import org.torchat.transport.classifyRelayFailure
-import kotlin.random.Random
+import org.torchat.generated.EngineContract
+import java.io.File
 
-/** Owns Tor, relay, MLS receive loop and notifications outside the Flutter UI. */
+/** Owns Tor, engine lifecycle and notifications outside the Flutter UI. */
 class TorChatForegroundService : Service() {
-    private enum class RelayPhase {
-        DISCONNECTED,
-        CONNECTING,
-        AUTHENTICATING,
-        WAITING_FOR_READY,
-        CONNECTED,
-        BACKOFF,
-        STOPPED,
-    }
-
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var runtime: TorRuntime? = null
+    private var engineHost: AndroidEngineHost? = null
+    private var engineEventPump: AndroidEngineEventPump? = null
     @Volatile private var starting = false
     private val pendingTorStatuses = ArrayDeque<JSONObject>()
 
@@ -56,7 +43,7 @@ class TorChatForegroundService : Service() {
         // A service can be stopped and started again in the same process. Do not
         // let a completed deferred from the previous runtime make the new UI
         // skip the bootstrap step.
-        if (activeController == null && ready.isCompleted) {
+        if (activeEngineHost == null && ready.isCompleted) {
             ready = kotlinx.coroutines.CompletableDeferred()
         }
         if (localReady.isCompleted) localReady = kotlinx.coroutines.CompletableDeferred()
@@ -64,7 +51,7 @@ class TorChatForegroundService : Service() {
         startForeground(NOTIFICATION_ID, notification("Uruchamianie Torâ€¦"))
         publish(
             mapOf(
-                RuntimeContract.TYPE to RuntimeContract.TOR_STATUS,
+                EngineContract.TYPE to EngineContract.TOR_STATUS,
                 "phase" to "starting",
                 "label" to "Uruchamianie usÅ‚ugi Tor",
                 "detail" to "Przygotowywanie lokalnego procesu Tor",
@@ -85,24 +72,23 @@ class TorChatForegroundService : Service() {
                         tor.start { progress, summary ->
                             // Native Tor reaching 100% completes the first
                             // phase, not the whole application connection.
-                            val appProgress = (progress * 70 / 100).coerceIn(0, 70)
-                            pendingTorStatuses.add(
-                                torStatusSnapshot(
-                                    phase = if (progress >= 100) "connecting" else "bootstrapping",
-                                    label = if (progress >= 100) {
-                                        "Tor gotowy Â· Å‚Ä…czenie z relayem"
-                                    } else {
-                                        "Tor bootstrap: $progress%"
-                                    },
-                                    detail = summary,
-                                    progress = appProgress,
-                                ),
+                            val snapshot = torStatusSnapshot(
+                                phase = if (progress >= 100) "connecting" else "bootstrapping",
+                                label = if (progress >= 100) {
+                                    "Tor gotowy Â· Å‚Ä…czenie z relayem"
+                                } else {
+                                    "Tor bootstrap: $progress%"
+                                },
+                                detail = summary,
+                                progress = (progress * 70 / 100).coerceIn(0, 70),
                             )
+                            pendingTorStatuses.add(snapshot)
+                            publishTorStatusFact(snapshot)
                             updateNotification("Tor bootstrap: $progress%")
                         }
                     }
                     val secrets = LocalSecretStore(applicationContext)
-                    val store = EncryptedMessageStore(applicationContext, secrets.databasePassphrase())
+                    val databasePassphrase = secrets.databasePassphrase()
                     val identitySeed = if (BuildConfig.DEBUG && BuildConfig.TORCHAT_DEV_IDENTITY_KEY.isNotBlank()) {
                         Base64.decode(
                             BuildConfig.TORCHAT_DEV_IDENTITY_KEY,
@@ -111,23 +97,37 @@ class TorChatForegroundService : Service() {
                     } else {
                         secrets.identityPrivateKey()
                     }
-                    val loadedIdentity = NativeIdentity.fromPrivateKey(identitySeed)
-                    store.mlsInbox()?.let { saved ->
-                        runCatching { loadedIdentity.restoreMls(saved) }
-                    }
-                    val relay = org.torchat.transport.AndroidRelayTransport(BuildConfig.TORCHAT_SERVER_URL, config.socksPort, loadedIdentity)
-                    val controller = ChatController(
-                        loadedIdentity,
-                        store,
-                        relay,
-                        if (BuildConfig.TORCHAT_DEV_PAIR) DevFixtures.load(applicationContext) else emptyMap(),
-                        if (BuildConfig.DEBUG && BuildConfig.TORCHAT_DEV_PROFILE.isNotBlank()) {
-                            BuildConfig.TORCHAT_DEV_PROFILE
-                        } else {
-                            secrets.nickname().orEmpty()
-                        },
+                    val socks5Url = "socks5://127.0.0.1:${config.socksPort}"
+                    val host = AndroidEngineHost.create(
+                        AndroidEngineHost.Config(
+                            databasePath = File(applicationContext.noBackupFilesDir, "torchat-client-v1.db"),
+                            databaseKey = databasePassphrase,
+                            identityPrivateKey = identitySeed,
+                            relayOnionUrl = BuildConfig.TORCHAT_SERVER_URL,
+                            initialSocks5Url = socks5Url,
+                            logDirectory = File(applicationContext.noBackupFilesDir, "engine-logs"),
+                        ),
                     )
-                    activeController = controller
+                    host.start()
+                    engineHost = host
+                    activeEngineHost = host
+                    engineEventPump = AndroidEngineEventPump(
+                        host = host,
+                        scope = scope,
+                        onEvent = ::handleEngineEvent,
+                        onFailure = { error ->
+                            Log.w("TorChat-Engine", "Engine event pump stopped", error)
+                        },
+                    ).also { it.start() }
+                    runCatching {
+                        host.submitCommandAndAwait(JSONObject().put("type", "bootstrap"))
+                    }.onFailure { error ->
+                        Log.w("TorChat-Engine", "Engine bootstrap command failed", error)
+                    }
+                    publishEngineFact(engineAppVisibilityChangedFactJson(foreground = true))
+                    publishEngineFact(engineTorEndpointAvailableFactJson(socks5Url))
+                    pendingTorStatuses.forEach(::publishTorStatusFact)
+                    val loadedIdentity = NativeIdentity.fromPrivateKey(identitySeed)
                     activeIdentity = loadedIdentity
                     val localNickname = if (BuildConfig.DEBUG && BuildConfig.TORCHAT_DEV_PROFILE.isNotBlank()) {
                         BuildConfig.TORCHAT_DEV_PROFILE
@@ -136,98 +136,13 @@ class TorChatForegroundService : Service() {
                     }
                     activeProfile = runtimeProfileResponse(loadedIdentity, localNickname)
                     localReady.complete(Unit)
-                    controller.reportBootstrapRuntime()
-                    while (pendingTorStatuses.isNotEmpty()) {
-                        controller.reportTorStatus(pendingTorStatuses.removeFirst())
-                    }
-                    controller.applyRemoteProfile(activeProfile!!)
-                    controller.publishLocalRuntimeEvents()
+                    publishProfileReady(activeProfile!!)
                     Log.i("TorChat-Runtime", "Foreground service runtime initialized nickname=$localNickname connected=false")
-                    if (BuildConfig.DEBUG && BuildConfig.TORCHAT_DEV_PAIR) {
-                        // The foreground service owns the receive loop. Seed
-                        // the debug conversation here as well as the contact,
-                        // before the relay can deliver an application frame.
-                        // Opening Bob from Flutter then only selects local
-                        // state and never starts another Tor connection.
-                        DevContacts.seed(applicationContext).forEach { contact ->
-                            controller.addContact(contact)
-                            runCatching {
-                                controller.startDevConversation(contact)
-                            }.onFailure { error ->
-                                Log.w("TorChat-Runtime", "Unable to seed dev conversation", error)
-                            }
-                        }
-                    }
-                    val (profile, onionLatencyMs, retryAttempt) =
-                        connectRelayActor(controller, retryAttempt = 0, reconnectDetail = null)
-                            ?: error("TorChat service stopped before the onion relay connected")
-                    activeProfile = profile
-                    controller.applyRemoteProfile(profile)
-                    ready.complete(Unit)
-                    controller.reportTorStatus(
-                        phase = "connected",
-                        label = "PoÅ‚Ä…czono z relayem przez Tor",
-                        detail = "PoÅ‚Ä…czono z relayem przez Tor",
-                        progress = 100,
-                        latencyMs = onionLatencyMs,
-                        retryAttempt = retryAttempt,
-                    )
-                    controller.publishLocalRuntimeEvents()
-                    scope.launch {
-                        while (isActive) {
-                            delay(20_000)
-                            runCatching { controller.syncPairingInbox() }
-                                .onSuccess { incoming ->
-                                    Log.i("TorChat-Pairing", "pairing inbox sync ok count=${incoming.size}")
-                                    controller.publishLocalRuntimeEvents()
-                                }
-                                .onFailure { error -> Log.w("TorChat-Pairing", "Pairing inbox refresh failed", error) }
-                            runCatching {
-                                controller.retryDueMessages()
-                                controller.retryDueReceipts()
-                                controller.resendPendingWelcomes()
-                                controller.publishLocalRuntimeEvents()
-                            }.onFailure { error ->
-                                Log.w("TorChat-Runtime", "Client queue retry failed", error)
-                            }
-                        }
-                    }
-                    scope.launch {
-                        var retryAttempt = 0
-                        while (isActive) {
-                            val disconnected = runCatching {
-                                controller.receiveLoop(onText = { text ->
-                                    controller.publishLocalRuntimeEvents()
-                                }, onWelcome = {
-                                    controller.publishLocalRuntimeEvents()
-                                }, onStateChanged = {
-                                    controller.publishLocalRuntimeEvents()
-                                })
-                            }.exceptionOrNull() ?: continue
-
-                            connectRelayActor(
-                                controller,
-                                disconnected.message ?: "Relay rozÅ‚Ä…czony",
-                                retryAttempt = retryAttempt,
-                            )?.let { latencyMs ->
-                                retryAttempt = 0
-                                controller.reportTorStatus(
-                                    phase = "connected",
-                                    label = "PoÅ‚Ä…czono z relayem przez Tor",
-                                    detail = "PoÅ‚Ä…czono z relayem przez Tor",
-                                    progress = 100,
-                                    latencyMs = latencyMs,
-                                    retryAttempt = 0,
-                                )
-                                controller.publishLocalRuntimeEvents()
-                                updateNotification("TorChat dziaÅ‚a przez Tor")
-                            } ?: break
-                        }
-                    }
+                    host.submitCommandAndAwait(JSONObject().put("type", "connect"))
                     config
                 }.onSuccess {
                     starting = false
-                    updateNotification("TorChat dziaÅ‚a przez Tor")
+                    updateNotification("TorChat uruchomiony")
                 }.onFailure { error ->
                     starting = false
                     Log.e("TorChat-Runtime", "Mobile runtime initialization failed", error)
@@ -240,10 +155,12 @@ class TorChatForegroundService : Service() {
                     failedReady.completeExceptionally(error)
                     ready = kotlinx.coroutines.CompletableDeferred()
                     localReady.completeExceptionally(error)
-                    activeController?.let { controller ->
-                        controller.reportRuntimeError(error.message ?: "TorChat runtime failed")
-                        controller.publishLocalRuntimeEvents()
-                    }
+                    publish(
+                        mapOf(
+                            EngineContract.TYPE to EngineContract.RUNTIME_ERROR,
+                            "message" to (error.message ?: "TorChat runtime failed"),
+                        ),
+                    )
                     updateNotification("BÅ‚Ä…d TorChat")
                     stopSelf(startId)
                 }
@@ -259,12 +176,16 @@ class TorChatForegroundService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
-        runCatching { activeController?.close() }
-            .onFailure { error -> Log.w("TorChat-Runtime", "Runtime shutdown failed", error) }
+        publishEngineFact(engineAppVisibilityChangedFactJson(foreground = false))
+        publishEngineFact(engineTorEndpointLostFactJson("TorChat service stopped"))
+        runCatching { engineHost?.close() }
+            .onFailure { error -> Log.w("TorChat-Engine", "Engine shutdown failed", error) }
         runtime?.release()
         runtime = null
+        engineEventPump = null
+        engineHost = null
         starting = false
-        activeController = null
+        activeEngineHost = null
         activeIdentity = null
         activeProfile = null
         if (!ready.isCompleted) {
@@ -275,14 +196,14 @@ class TorChatForegroundService : Service() {
     }
 
     private fun publish(event: Map<String, Any?>) {
-        if (event[RuntimeContract.TYPE] == RuntimeContract.TOR_STATUS) {
+        if (event[EngineContract.TYPE] == EngineContract.TOR_STATUS) {
             lastTorStatus = event
         }
-        when (event[RuntimeContract.TYPE]) {
-            RuntimeContract.INVITE_RECEIVED,
-            RuntimeContract.MESSAGE_RECEIVED -> {
-                val kind = when (event[RuntimeContract.TYPE]) {
-                    RuntimeContract.INVITE_RECEIVED -> "invite"
+        when (event[EngineContract.TYPE]) {
+            EngineContract.INVITE_RECEIVED,
+            EngineContract.MESSAGE_RECEIVED -> {
+                val kind = when (event[EngineContract.TYPE]) {
+                    EngineContract.INVITE_RECEIVED -> "invite"
                     else -> "message"
                 }
                 val payload = event["payload"]?.toString()
@@ -292,8 +213,69 @@ class TorChatForegroundService : Service() {
         eventListener?.invoke(event)
     }
 
-    private fun ChatController.publishLocalRuntimeEvents() {
-        drainLocalRuntimeEvents().forEach(::publish)
+    private fun publishEngineFact(fact: JSONObject) {
+        runCatching { engineHost?.publishPlatformFact(fact) }
+            .onFailure { error -> Log.w("TorChat-Engine", "Unable to publish engine fact ${fact.optString("type")}", error) }
+    }
+
+    private fun publishProfileReady(profile: org.torchat.transport.ProfileResponse) {
+        publish(
+            mapOf(
+                EngineContract.TYPE to EngineContract.PROFILE_READY,
+                "profile" to profile.toRuntimeMap(),
+            ),
+        )
+    }
+
+    private fun publishTorStatusFact(status: JSONObject) {
+        publishEngineFact(
+            engineTorStatusFactJson(
+                phase = status.optString("phase").ifBlank { "failed" },
+                progress = status.optInt("progress", 0).coerceIn(0, 100),
+                detail = status.optString("detail").ifBlank { status.optString("label", "Tor status update") },
+            ),
+        )
+    }
+
+    private fun handleEngineEvent(event: JSONObject) {
+        val publishedEvents = mapEngineEventToPublishedEvents(event)
+        publishedEvents.forEach(::publish)
+        when (event.optString("type")) {
+            "connection" -> {
+                val status = publishedEvents.firstOrNull()
+                when (status?.get("phase")?.toString().orEmpty()) {
+                    "connected" -> {
+                        if (!ready.isCompleted) {
+                            ready.complete(Unit)
+                        }
+                        updateNotification("TorChat dziaÅ‚a przez Tor")
+                    }
+                    "reconnecting" -> updateNotification("Ponowne Å‚Ä…czenie z relay...")
+                    "connecting" -> updateNotification("Å\u0081Ä…czenie z relay...")
+                }
+            }
+            "log" -> {
+                val message = event.optString("message")
+                Log.i("TorChat-Engine", message.ifBlank { event.toString() })
+            }
+            "fatal" -> {
+                val message = event.optString("message").ifNullOrBlank { "Client engine failed" }
+                Log.e("TorChat-Engine", message)
+                if (!ready.isCompleted) {
+                    ready.completeExceptionally(IllegalStateException(message))
+                }
+            }
+            "notification_requested" -> {
+                val notification = event.optJSONObject("notificationRequested")
+                    ?: event.optJSONObject("notification_requested")
+                    ?: event
+                postAlert(
+                    title = notification.optString("title").ifBlank { "TorChat" },
+                    text = notification.optString("body").ifBlank { "Nowe zdarzenie" },
+                    id = notification.optString("id").hashCode(),
+                )
+            }
+        }
     }
 
     private fun torStatusSnapshot(
@@ -310,146 +292,6 @@ class TorChatForegroundService : Service() {
         .put("progress", progress)
         .put("latencyMs", latencyMs)
         .put("retryAttempt", retryAttempt)
-
-    private data class RelayBootstrapResult(
-        val profile: org.torchat.transport.ProfileResponse,
-        val latencyMs: Long?,
-        val retryAttempt: Int,
-    )
-    private suspend fun connectRelayActor(
-        controller: ChatController,
-        retryAttempt: Int,
-        reconnectDetail: String?,
-    ): RelayBootstrapResult? {
-        var currentAttempt = retryAttempt
-        var onionLatencyMs: Long? = null
-        while (coroutineContext.isActive) {
-            val backoffSeconds = connectionBackoffSeconds(currentAttempt)
-            val attemptNumber = currentAttempt + 1
-            val phase = if (reconnectDetail == null && currentAttempt == retryAttempt) {
-                RelayPhase.CONNECTING
-            } else {
-                RelayPhase.BACKOFF
-            }
-            val detail = reconnectDetail
-                ?: "Laczenie z usluga onion, proba $attemptNumber"
-            controller.reportTorStatus(
-                phase = phase.name.lowercase(),
-                label = detail,
-                detail = detail,
-                progress = 80,
-                retryAttempt = currentAttempt,
-            )
-            Log.i(
-                "TorChat-Tor",
-                "phase=${phase.name.lowercase()} retryAttempt=$currentAttempt nextDelayS=$backoffSeconds detail=$detail",
-            )
-            controller.publishLocalRuntimeEvents()
-            if (reconnectDetail != null || currentAttempt > retryAttempt) {
-                updateNotification("Laczenie z relay...")
-                delay(backoffSeconds * 1_000)
-            }
-            val connected = runCatching {
-                controller.reportTorStatus(
-                    phase = "circuit_building",
-                    label = "Budowanie circuitu onion, proba $attemptNumber",
-                    detail = "Tor zestawia trase do uslugi onion; pierwsze polaczenie moze potrwac kilka minut",
-                    progress = 85,
-                    retryAttempt = currentAttempt,
-                )
-                controller.publishLocalRuntimeEvents()
-                updateNotification("Budowanie circuitu onion...")
-                onionLatencyMs = controller.warmupRelay()
-                controller.reportTorStatus(
-                    phase = RelayPhase.AUTHENTICATING.name.lowercase(),
-                    label = "Circuit onion gotowy, uwierzytelnianie relaya",
-                    detail = "Circuit onion gotowy, uwierzytelnianie relaya",
-                    progress = 90,
-                    latencyMs = onionLatencyMs,
-                    retryAttempt = currentAttempt,
-                )
-                controller.publishLocalRuntimeEvents()
-                if (reconnectDetail == null) {
-                    controller.bootstrapRelay()
-                    if (
-                        BuildConfig.DEBUG &&
-                        BuildConfig.TORCHAT_DEV_PAIR &&
-                        BuildConfig.TORCHAT_DEV_PROFILE.isNotBlank()
-                    ) {
-                        controller.updateNickname(BuildConfig.TORCHAT_DEV_PROFILE)
-                    }
-                }
-                controller.reportTorStatus(
-                    phase = RelayPhase.WAITING_FOR_READY.name.lowercase(),
-                    label = "Handshake WebSocket, oczekiwanie na ready",
-                    detail = "Handshake WebSocket, oczekiwanie na ready",
-                    progress = 92,
-                    latencyMs = onionLatencyMs,
-                    retryAttempt = currentAttempt,
-                )
-                controller.publishLocalRuntimeEvents()
-                if (reconnectDetail == null) {
-                    controller.connectRelay()
-                } else {
-                    runCatching { controller.connectRelay() }
-                        .getOrElse {
-                            controller.bootstrapRelay()
-                            controller.connectRelay()
-                        }
-                }
-                controller.syncPairingInbox()
-                val profile = runCatching { controller.loadProfile() }.getOrElse {
-                    activeProfile ?: throw it
-                }
-                RelayBootstrapResult(profile, onionLatencyMs, currentAttempt)
-            }
-            if (connected.isSuccess) {
-                val result = connected.getOrThrow()
-                Log.i(
-                    "TorChat-Tor",
-                    "phase=${RelayPhase.CONNECTED.name.lowercase()} retryAttempt=$currentAttempt latencyMs=${result.latencyMs}",
-                )
-                return result
-            }
-            val failure = classifyRelayFailure(
-                connected.exceptionOrNull() ?: IllegalStateException("unknown relay failure"),
-            )
-            Log.w(
-                "TorChat-Tor",
-                "phase=${RelayPhase.BACKOFF.name.lowercase()} retryAttempt=$currentAttempt code=${failure.code} retryable=${failure.retryable} nextDelayS=$backoffSeconds detail=${failure.detail}",
-                connected.exceptionOrNull(),
-            )
-            currentAttempt += 1
-        }
-        return null
-    }
-
-    private suspend fun connectRelayActor(
-        controller: ChatController,
-        detail: String,
-        retryAttempt: Int,
-    ): Long? {
-        return connectRelayActor(
-            controller = controller,
-            retryAttempt = retryAttempt,
-            reconnectDetail = detail,
-        )?.latencyMs
-    }
-
-    private fun connectionBackoffSeconds(retryAttempt: Int): Long {
-        val base = when (retryAttempt.coerceAtMost(7)) {
-            0 -> 1L
-            1 -> 2L
-            2 -> 4L
-            3 -> 8L
-            4 -> 15L
-            5 -> 30L
-            6 -> 60L
-            else -> 120L
-        }
-        val jitterPercent = Random(retryAttempt + 17).nextInt(from = -20, until = 21)
-        return (base + base * jitterPercent / 100).coerceAtLeast(1L)
-    }
 
     private fun updateNotification(text: String) {
         getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification(text))
@@ -499,7 +341,7 @@ class TorChatForegroundService : Service() {
         @Volatile private var ready = kotlinx.coroutines.CompletableDeferred<Unit>()
         @Volatile private var localReady = kotlinx.coroutines.CompletableDeferred<Unit>()
         @Volatile var eventListener: ((Map<String, Any?>) -> Unit)? = null
-        @Volatile var activeController: ChatController? = null
+        @Volatile var activeEngineHost: AndroidEngineHost? = null
         @Volatile var activeIdentity: NativeIdentity? = null
         @Volatile var activeProfile: org.torchat.transport.ProfileResponse? = null
         @Volatile var lastTorStatus: Map<String, Any?>? = null
@@ -591,4 +433,7 @@ class TorChatForegroundService : Service() {
         suspend fun awaitLocalReady() = withTimeout(30_000L) { localReady.await() }
     }
 }
+
+private fun String?.ifNullOrBlank(fallback: () -> String): String =
+    if (this.isNullOrBlank()) fallback() else this
 

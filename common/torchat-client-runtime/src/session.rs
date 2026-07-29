@@ -1,12 +1,14 @@
 use crate::RuntimeEvent;
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct RuntimeSession {
     selected_conversation_id: Option<String>,
     events: Vec<RuntimeEvent>,
+    staged_events: Vec<RuntimeEvent>,
     bootstrap_emitted: bool,
     last_tor_status: Option<crate::RuntimeTorStatus>,
     last_runtime_error: Option<String>,
+    transaction_depth: usize,
 }
 
 impl RuntimeSession {
@@ -26,8 +28,36 @@ impl RuntimeSession {
         self.selected_conversation_id = None;
     }
 
+    pub(crate) fn begin_transaction(&mut self) {
+        self.transaction_depth = self.transaction_depth.saturating_add(1);
+    }
+
+    pub(crate) fn commit_transaction(&mut self) {
+        if self.transaction_depth == 0 {
+            return;
+        }
+        self.transaction_depth -= 1;
+        if self.transaction_depth == 0 && !self.staged_events.is_empty() {
+            self.events.append(&mut self.staged_events);
+        }
+    }
+
+    pub(crate) fn rollback_transaction(&mut self) {
+        if self.transaction_depth == 0 {
+            return;
+        }
+        self.transaction_depth -= 1;
+        if self.transaction_depth == 0 {
+            self.staged_events.clear();
+        }
+    }
+
     pub(crate) fn push_event(&mut self, event: RuntimeEvent) {
-        self.events.push(event);
+        if self.transaction_depth > 0 {
+            self.staged_events.push(event);
+        } else {
+            self.events.push(event);
+        }
     }
 
     pub(crate) fn mark_bootstrap_emitted(&mut self) -> bool {
@@ -86,7 +116,7 @@ impl RuntimeSession {
     }
 
     pub fn has_pending_events(&self) -> bool {
-        !self.events.is_empty()
+        !self.events.is_empty() || !self.staged_events.is_empty()
     }
 }
 
@@ -111,6 +141,37 @@ mod tests {
         });
         assert!(session.has_pending_events());
         assert_eq!(session.drain_events().len(), 1);
+        assert!(!session.has_pending_events());
+    }
+
+    #[test]
+    fn session_stages_events_until_commit() {
+        let mut session = RuntimeSession::new();
+        session.begin_transaction();
+        session.push_event(RuntimeEvent::Changed {
+            kind: Some("messages".to_owned()),
+        });
+
+        assert!(session.has_pending_events());
+        assert!(session.drain_events().is_empty());
+
+        session.commit_transaction();
+
+        assert_eq!(session.drain_events().len(), 1);
+        assert!(!session.has_pending_events());
+    }
+
+    #[test]
+    fn session_discards_staged_events_on_rollback() {
+        let mut session = RuntimeSession::new();
+        session.begin_transaction();
+        session.push_event(RuntimeEvent::Changed {
+            kind: Some("messages".to_owned()),
+        });
+
+        session.rollback_transaction();
+
+        assert!(session.drain_events().is_empty());
         assert!(!session.has_pending_events());
     }
 }

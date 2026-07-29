@@ -40,84 +40,54 @@ void main() {
   test('runtime contract exposes canonical method and event names', () {
     expect(
       const [
+        RuntimeContract.bootstrap,
         RuntimeContract.connect,
-        RuntimeContract.bootstrapRuntime,
-        RuntimeContract.reportTorStatus,
-        RuntimeContract.applyRemoteProfile,
-        RuntimeContract.reportRuntimeError,
-        RuntimeContract.reportRuntimeLog,
-        RuntimeContract.identity,
-        RuntimeContract.profile,
+        RuntimeContract.getIdentity,
+        RuntimeContract.getProfile,
+        RuntimeContract.pairingInbox,
+        RuntimeContract.pairingOutbox,
+        RuntimeContract.listContacts,
+        RuntimeContract.listConversations,
+        RuntimeContract.listMessages,
         RuntimeContract.setNickname,
         RuntimeContract.refreshPairingCode,
-        RuntimeContract.prepareSubmitPairingCode,
         RuntimeContract.submitPairingCode,
-        RuntimeContract.pairingInbox,
-        RuntimeContract.mergePairingInbox,
-        RuntimeContract.pairingOutbox,
-        RuntimeContract.mergePairingOutbox,
         RuntimeContract.acceptPairing,
         RuntimeContract.rejectPairing,
-        RuntimeContract.prepareAcceptPairing,
-        RuntimeContract.commitAcceptPairing,
-        RuntimeContract.prepareRejectPairing,
-        RuntimeContract.commitRejectPairing,
         RuntimeContract.archivePairing,
         RuntimeContract.cancelPairing,
-        RuntimeContract.prepareCancelPairing,
-        RuntimeContract.confirmPairingCancelled,
-        RuntimeContract.applyPairingPeerOutcome,
-        RuntimeContract.welcomeAccepted,
         RuntimeContract.verifyContact,
-        RuntimeContract.contacts,
-        RuntimeContract.conversations,
-        RuntimeContract.messages,
+        RuntimeContract.startConversation,
         RuntimeContract.openConversation,
         RuntimeContract.closeConversation,
-        RuntimeContract.startConversation,
         RuntimeContract.sendMessage,
-        RuntimeContract.receiveMessage,
-        RuntimeContract.applyMessageTransportOutcome,
+        RuntimeContract.platformFact,
+        RuntimeContract.shutdown,
       ],
       containsAll(const [
+        'bootstrap',
         'connect',
-        'bootstrapRuntime',
-        'reportTorStatus',
-        'applyRemoteProfile',
-        'reportRuntimeError',
-        'reportRuntimeLog',
-        'identity',
-        'profile',
+        'getIdentity',
+        'getProfile',
+        'pairingInbox',
+        'pairingOutbox',
+        'listContacts',
+        'listConversations',
+        'listMessages',
         'setNickname',
         'refreshPairingCode',
-        'prepareSubmitPairingCode',
         'submitPairingCode',
-        'pairingInbox',
-        'mergePairingInbox',
-        'pairingOutbox',
-        'mergePairingOutbox',
         'acceptPairing',
         'rejectPairing',
-        'prepareAcceptPairing',
-        'commitAcceptPairing',
-        'prepareRejectPairing',
-        'commitRejectPairing',
         'archivePairing',
         'cancelPairing',
-        'prepareCancelPairing',
-        'confirmPairingCancelled',
-        'applyPairingPeerOutcome',
-        'welcomeAccepted',
         'verifyContact',
-        'contacts',
-        'conversations',
-        'messages',
+        'startConversation',
         'openConversation',
         'closeConversation',
-        'startConversation',
         'sendMessage',
-        'receiveMessage',
-        'applyMessageTransportOutcome',
+        'platformFact',
+        'shutdown',
       ]),
     );
     expect(
@@ -910,25 +880,6 @@ class _EventRuntime implements ClientRuntime {
   Stream<RuntimeEvent> get events => Stream.value(event);
 
   @override
-  Future<RuntimeSendEffect> commitAcceptPairing(
-    String pairingId,
-    String offerInviteId,
-    String offerPayload,
-  ) async => RuntimeSendEffect.fromMap(const {
-    'pairingId': '',
-    'recipientInstallationId': '',
-    'kind': 'OFFER',
-  });
-
-  @override
-  Future<RuntimeSendEffect> commitRejectPairing(String pairingId) async =>
-      RuntimeSendEffect.fromMap(const {
-        'pairingId': '',
-        'recipientInstallationId': '',
-        'kind': 'REJECTION',
-      });
-
-  @override
   Future<void> closeConversation() async {}
 
   @override
@@ -965,34 +916,11 @@ class _EventRuntime implements ClientRuntime {
   Future<void> cancelPairing(String pairingId) async {}
 
   @override
-  Future<PairingPreparation> prepareAcceptPairing(String pairingId) async =>
-      const PairingPreparation(
-        pairingId: '',
-        recipientInstallationId: '',
-        capability: '',
-      );
-
-  @override
-  Future<PairingCancelEffect> prepareCancelPairing(String pairingId) async =>
-      const PairingCancelEffect(pairingId: '');
-
-  @override
-  Future<PairingPreparation> prepareRejectPairing(String pairingId) async =>
-      const PairingPreparation(
-        pairingId: '',
-        recipientInstallationId: '',
-        capability: '',
-      );
-
-  @override
   Future<RuntimeProfile?> profile() async => const RuntimeProfile();
 
   @override
   Future<InviteCode?> refreshPairingCode() async =>
       const InviteCode(code: '', expiresAt: 0);
-
-  @override
-  Future<void> confirmPairingCancelled(String pairingId) async {}
 
   @override
   Future<void> sendMessage(String id, String text) async {}
@@ -1155,48 +1083,6 @@ class _StatefulRuntime implements ClientRuntime {
   Future<void> cancelPairing(String pairingId) async {
     _outbox = _outbox.where((item) => item.id != pairingId).toList();
   }
-
-  @override
-  Future<PairingPreparation> prepareAcceptPairing(String pairingId) async =>
-      const PairingPreparation(
-        pairingId: 'pairing-1',
-        recipientInstallationId: 'installation-bob',
-        capability: 'capability',
-      );
-
-  @override
-  Future<RuntimeSendEffect> commitAcceptPairing(
-    String pairingId,
-    String offerInviteId,
-    String offerPayload,
-  ) async => RuntimeSendEffect.fromMap(const {
-    'pairingId': 'pairing-1',
-    'recipientInstallationId': 'installation-bob',
-    'kind': 'OFFER',
-  });
-
-  @override
-  Future<PairingPreparation> prepareRejectPairing(String pairingId) async =>
-      const PairingPreparation(
-        pairingId: 'pairing-1',
-        recipientInstallationId: 'installation-bob',
-        capability: 'capability',
-      );
-
-  @override
-  Future<RuntimeSendEffect> commitRejectPairing(String pairingId) async =>
-      RuntimeSendEffect.fromMap(const {
-        'pairingId': 'pairing-1',
-        'recipientInstallationId': 'installation-bob',
-        'kind': 'REJECTION',
-      });
-
-  @override
-  Future<PairingCancelEffect> prepareCancelPairing(String pairingId) async =>
-      const PairingCancelEffect(pairingId: 'pairing-out');
-
-  @override
-  Future<void> confirmPairingCancelled(String pairingId) async {}
 
   @override
   Future<void> verifyContact(String installationId) async {

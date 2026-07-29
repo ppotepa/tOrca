@@ -1,6 +1,6 @@
 use crate::{
-    ChatMessage, ContactRecord, ConversationSummary, InviteCode, PairingItem, RuntimeIdentity,
-    RuntimeProfile, RuntimeResult,
+    ChatMessage, ContactRecord, ConversationSummary, InviteCode, PairingItem, ReceiptSendEffect,
+    RuntimeIdentity, RuntimeProfile, RuntimeResult,
 };
 
 pub trait RuntimeStorage {
@@ -27,6 +27,12 @@ pub trait RuntimeStorage {
     fn messages(&self, conversation_id: &str) -> RuntimeResult<Vec<ChatMessage>>;
     fn put_message(&mut self, message: ChatMessage) -> RuntimeResult<()>;
     fn pending_messages(&self) -> RuntimeResult<Vec<ChatMessage>>;
+    fn pending_receipts(&self) -> RuntimeResult<Vec<ReceiptSendEffect>> {
+        Ok(Vec::new())
+    }
+    fn expedite_retry_after_ready(&mut self) -> RuntimeResult<()> {
+        Ok(())
+    }
 
     fn message(&self, message_id: &str) -> RuntimeResult<Option<ChatMessage>> {
         for conversation in self.conversations()? {

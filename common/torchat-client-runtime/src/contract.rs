@@ -19,8 +19,6 @@ pub enum RuntimeType {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum RuntimeMethod {
-    BootstrapRuntime,
-    ReportTorStatus,
     ApplyRemoteProfile,
     ReportRuntimeError,
     ReportRuntimeLog,
@@ -35,20 +33,7 @@ pub enum RuntimeMethod {
     MergePairingInbox,
     PairingOutbox,
     MergePairingOutbox,
-    AcceptPairing,
-    RejectPairing,
-    CancelPairing,
-    PrepareAcceptPairing,
-    CommitAcceptPairing,
-    WelcomeAccepted,
-    BootstrapContact,
-    PrepareRejectPairing,
-    CommitRejectPairing,
     ArchivePairing,
-    PrepareCancelPairing,
-    ConfirmPairingCancelled,
-    PreparePendingSendEffects,
-    ApplyPairingPeerOutcome,
     VerifyContact,
     Contacts,
     Conversations,
@@ -57,8 +42,6 @@ pub enum RuntimeMethod {
     CloseConversation,
     StartConversation,
     SendMessage,
-    ReceiveMessage,
-    ApplyMessageTransportOutcome,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -148,10 +131,6 @@ pub enum RuntimeStatusPhase {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "method", content = "params", rename_all = "camelCase")]
 pub enum RuntimeCommand {
-    BootstrapRuntime,
-    ReportTorStatus {
-        status: crate::RuntimeTorStatus,
-    },
     ApplyRemoteProfile {
         profile: crate::RuntimeProfile,
     },
@@ -182,47 +161,6 @@ pub enum RuntimeCommand {
     MergePairingOutbox {
         items: Vec<crate::PairingItem>,
     },
-    PrepareAcceptPairing {
-        pairing_id: String,
-    },
-    CommitAcceptPairing {
-        pairing_id: String,
-        #[serde(rename = "offerInviteId")]
-        offer_invite_id: String,
-        #[serde(rename = "offerPayload")]
-        offer_payload: String,
-    },
-    PrepareRejectPairing {
-        pairing_id: String,
-    },
-    CommitRejectPairing {
-        pairing_id: String,
-    },
-    WelcomeAccepted {
-        contact: crate::ContactRecord,
-        #[serde(default, rename = "openConversation")]
-        open_conversation: bool,
-        #[serde(default, rename = "inviteId")]
-        invite_id: Option<String>,
-    },
-    BootstrapContact {
-        contact: crate::ContactRecord,
-        #[serde(default, rename = "openConversation")]
-        open_conversation: bool,
-        #[serde(default, rename = "inviteId")]
-        invite_id: Option<String>,
-    },
-    PrepareCancelPairing {
-        pairing_id: String,
-    },
-    ConfirmPairingCancelled {
-        pairing_id: String,
-    },
-    PreparePendingSendEffects,
-    ApplyPairingPeerOutcome {
-        pairing_id: String,
-        outcome: crate::PairingPeerOutcome,
-    },
     ArchivePairing {
         pairing_id: String,
     },
@@ -244,16 +182,5 @@ pub enum RuntimeCommand {
     SendMessage {
         id: String,
         text: String,
-    },
-    ReceiveMessage {
-        id: String,
-        text: String,
-        #[serde(default, rename = "messageId")]
-        message_id: Option<String>,
-    },
-    ApplyMessageTransportOutcome {
-        #[serde(rename = "messageId")]
-        message_id: String,
-        outcome: crate::MessageTransportOutcome,
     },
 }
