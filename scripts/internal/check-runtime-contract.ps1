@@ -1,24 +1,16 @@
 [CmdletBinding()]
-param(
-    [switch]$FailOnLegacy
-)
+param()
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $manifestPath = Join-Path $repoRoot 'common\client-engine-contract.json'
+$kotlinPath = Join-Path $repoRoot 'mobile\android\app\src\main\kotlin\org\torchat\generated\EngineContract.kt'
+$dartContractPath = Join-Path $repoRoot 'mobile\lib\core\runtime\generated\runtime_contract.g.dart'
+$dartModelsPath = Join-Path $repoRoot 'mobile\lib\core\models\generated\runtime_models.g.dart'
 
-if (-not (Test-Path -LiteralPath $manifestPath)) {
-    throw "Missing engine contract manifest: $manifestPath"
-}
-
-$generated = @(
-    (Join-Path $repoRoot 'mobile\android\app\src\main\kotlin\org\torchat\generated\EngineContract.kt'),
-    (Join-Path $repoRoot 'mobile\lib\core\runtime\generated\runtime_contract.g.dart'),
-    (Join-Path $repoRoot 'mobile\lib\core\models\generated\runtime_models.g.dart')
-)
-foreach ($file in $generated) {
+foreach ($file in @($manifestPath, $kotlinPath, $dartContractPath, $dartModelsPath)) {
     if (-not (Test-Path -LiteralPath $file)) {
-        throw "Missing generated contract artifact: $file"
+        throw "Missing engine contract artifact: $file"
     }
 }
 
@@ -28,47 +20,184 @@ try {
     throw "Engine contract manifest is not valid JSON: $manifestPath"
 }
 
-$requiredPublic = @(
+function Assert-ExactContractList {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][object[]]$Actual,
+        [Parameter(Mandatory = $true)][string[]]$Expected
+    )
+
+    $actualValues = @($Actual | ForEach-Object { $_.ToString() })
+    $missing = @($Expected | Where-Object { $_ -notin $actualValues })
+    $unexpected = @($actualValues | Where-Object { $_ -notin $Expected })
+    if ($missing.Count -gt 0 -or $unexpected.Count -gt 0) {
+        throw "$Name mismatch. Missing: $($missing -join ', '); unexpected: $($unexpected -join ', ')"
+    }
+}
+
+Assert-ExactContractList 'Public engine methods' $contract.methods.public @(
+    'bootstrap',
     'connect',
-    'identity',
-    'profile',
+    'getIdentity',
+    'getProfile',
+    'pairingInbox',
+    'pairingOutbox',
+    'listContacts',
+    'listConversations',
+    'listMessages',
     'setNickname',
     'refreshPairingCode',
     'submitPairingCode',
-    'pairingInbox',
-    'pairingOutbox',
     'acceptPairing',
     'rejectPairing',
     'archivePairing',
     'cancelPairing',
     'verifyContact',
-    'contacts',
-    'conversations',
-    'messages',
+    'startConversation',
     'openConversation',
     'closeConversation',
-    'startConversation',
-    'sendMessage'
+    'sendMessage',
+    'platformFact',
+    'shutdown'
 )
 
-$publicMethods = @($contract.methods.public | ForEach-Object { $_.ToString() })
-$missingPublic = @($requiredPublic | Where-Object { $_ -notin $publicMethods })
-if ($missingPublic.Count -gt 0) {
-    throw "Engine contract manifest is missing required public methods: $($missingPublic -join ', ')"
-}
+Assert-ExactContractList 'Engine command types' $contract.commandTypes @(
+    'bootstrap',
+    'connect',
+    'get_identity',
+    'get_profile',
+    'pairing_inbox',
+    'pairing_outbox',
+    'list_contacts',
+    'list_conversations',
+    'list_messages',
+    'set_nickname',
+    'refresh_pairing_code',
+    'submit_pairing_code',
+    'accept_pairing',
+    'reject_pairing',
+    'archive_pairing',
+    'cancel_pairing',
+    'verify_contact',
+    'start_conversation',
+    'open_conversation',
+    'close_conversation',
+    'send_message',
+    'platform_fact',
+    'shutdown'
+)
+
+Assert-ExactContractList 'Engine event types' $contract.engineEventTypes @(
+    'response',
+    'runtime',
+    'connection',
+    'notification_requested',
+    'log',
+    'fatal'
+)
+Assert-ExactContractList 'Response statuses' $contract.responseStatuses @('ok', 'error')
+Assert-ExactContractList 'Response payload types' $contract.responsePayloadTypes @('empty', 'json')
+Assert-ExactContractList 'Platform fact types' $contract.platformFactTypes @(
+    'tor_status',
+    'tor_endpoint_available',
+    'tor_endpoint_lost',
+    'app_visibility_changed',
+    'network_changed'
+)
+
+Assert-ExactContractList 'Tor phases' $contract.torPhases @(
+    'starting',
+    'bootstrapping',
+    'ready',
+    'failed'
+)
+Assert-ExactContractList 'Connection states' $contract.connectionStates @(
+    'waiting_for_tor',
+    'disconnected',
+    'connecting',
+    'authenticating',
+    'waiting_for_ready',
+    'connected',
+    'backoff',
+    'stopped'
+)
+Assert-ExactContractList 'Transport phases' $contract.transportPhases @(
+    'starting',
+    'bootstrapping',
+    'connecting',
+    'degraded',
+    'connected',
+    'reconnecting',
+    'offline',
+    'error'
+)
 
 $generatedChecks = @(
-    @{ Path = $generated[0]; Needles = @('const val CONNECT = "connect"', 'const val MESSAGES = "messages"', 'const val PROFILE_READY = "profile_ready"') },
-    @{ Path = $generated[1]; Needles = @("static const connect = 'connect';", "static const messages = 'messages';", "static const profileReady = 'profile_ready';") },
-    @{ Path = $generated[2]; Needles = @("'FORWARDED'", "'WELCOME_PREPARED'") }
+    @{
+        Path = $kotlinPath
+        Needles = @(
+            'const val GET_IDENTITY = "getIdentity"',
+            'const val LIST_MESSAGES = "listMessages"',
+            'const val COMMAND_GET_IDENTITY = "get_identity"',
+            'const val COMMAND_LIST_MESSAGES = "list_messages"',
+            'const val EVENT_RESPONSE = "response"',
+            'const val RESPONSE_STATUS_OK = "ok"',
+            'const val RESPONSE_PAYLOAD_JSON = "json"',
+            'const val ARG_PAIRING_ID = "pairingId"',
+            'const val COMMAND_CONVERSATION_ID = "conversation_id"',
+            'const val CONVERSATION_ID = "conversationId"',
+            'const val TOR_PHASE_READY = "ready"',
+            'const val CONNECTION_STATE_BACKOFF = "backoff"',
+            'const val TRANSPORT_PHASE_RECONNECTING = "reconnecting"',
+            'data class GeneratedEngineResponse',
+            'data class GeneratedEngineEvent',
+            'Engine response is missing payload envelope',
+            'Unknown engine response payload type'
+        )
+    },
+    @{
+        Path = $dartContractPath
+        Needles = @(
+            'abstract final class EngineContract',
+            "static const getIdentity = 'getIdentity';",
+            "static const listMessages = 'listMessages';",
+            "static const commandGetIdentity = 'get_identity';",
+            "static const commandListMessages = 'list_messages';",
+            "static const eventResponse = 'response';",
+            "static const responseStatusOk = 'ok';",
+            "static const responsePayloadJson = 'json';",
+            "static const argPairingId = 'pairingId';",
+            "static const commandConversationId = 'conversation_id';",
+            "static const conversationId = 'conversationId';",
+            "static const torPhaseReady = 'ready';",
+            "static const connectionStateBackoff = 'backoff';",
+            "static const transportPhaseReconnecting = 'reconnecting';"
+        )
+    },
+    @{
+        Path = $dartModelsPath
+        Needles = @(
+            'class GeneratedEngineEvent',
+            'class GeneratedEngineResponse',
+            'expected engine response event',
+            'engine response is missing payload envelope',
+            'unknown engine response payload type',
+            'const generatedTorPhases',
+            'const generatedConnectionStates',
+            'const generatedTransportPhases',
+            "'FORWARDED'",
+            "'WELCOME_PREPARED'"
+        )
+    }
 )
+
 foreach ($check in $generatedChecks) {
     $content = Get-Content -LiteralPath $check.Path -Raw
     foreach ($needle in $check.Needles) {
-        if ($content -notlike "*$needle*") {
-            throw "Generated contract artifact is stale: missing '$needle' in $($check.Path)"
+        if (-not $content.Contains($needle)) {
+            throw "Generated engine contract artifact is stale: missing '$needle' in $($check.Path)"
         }
     }
 }
 
-Write-Host '[torchat] runtime contract check passed'
+Write-Host '[torchat] engine contract check passed'

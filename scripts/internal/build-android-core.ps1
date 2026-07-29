@@ -35,9 +35,11 @@ $abi = switch ($RustTarget) {
 }
 
 $out = Join-Path $jni $abi
+if (Test-Path -LiteralPath $out) {
+    Remove-Item -LiteralPath $out -Recurse -Force
+}
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 cargo ndk -t $RustTarget -o $jni build -p torchat-client-engine-ffi --release
-Copy-Item (Join-Path $repo "target\$RustTarget\release\torchat_client_engine.dll") (Join-Path $out "libtorchat_client_engine.so") -Force -ErrorAction SilentlyContinue
 Copy-Item (Join-Path $repo "target\$RustTarget\release\libtorchat_client_engine.so") (Join-Path $out "libtorchat_client_engine.so") -Force -ErrorAction SilentlyContinue
 if (-not (Test-Path (Join-Path $out "libtorchat_client_engine.so"))) {
     throw "Rust Android engine library was not produced for $abi."

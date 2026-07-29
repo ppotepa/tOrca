@@ -8,9 +8,7 @@ pub mod relay;
 pub mod storage;
 
 pub use actor::ClientEngineActor;
-pub use command::{
-    EngineCommand, EngineCommandEnvelope, PlatformFact, PlatformKind, TorPhase,
-};
+pub use command::{EngineCommand, EngineCommandEnvelope, PlatformFact, PlatformKind, TorPhase};
 pub use config::EngineConfig;
 pub use engine::ClientEngine;
 pub use error::{EngineError, EngineResult};
@@ -19,4 +17,6 @@ pub use event::{
     NotificationRequest,
 };
 pub use relay::{EngineRelay, NoopEngineRelay};
-pub use storage::{ClientDatabase, Migration, MigrationRunner, SqliteRuntimeStorage, SqliteTransaction};
+pub use storage::{
+    ClientDatabase, Migration, MigrationRunner, SqliteRuntimeStorage, SqliteTransaction,
+};

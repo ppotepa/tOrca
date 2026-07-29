@@ -7,7 +7,6 @@ pub use migrations::{Migration, MigrationRunner};
 pub use runtime_storage::SqliteRuntimeStorage;
 pub use sqlite::{
     ClientDatabase, DeliveryReceiptRecord, PairingResponseRecord, PendingWelcomeRecord,
-    ReceivedEnvelopeRecord, RetryDeadline, RetryKind,
-    StoredMessageRecord,
+    ReceivedEnvelopeRecord, RetryDeadline, RetryKind, StoredMessageRecord,
 };
 pub use transaction::SqliteTransaction;

@@ -31,7 +31,7 @@ void main() {
   RuntimeFixture fixture() => RuntimeFixture.fromMap(
     Map<String, dynamic>.from(
       jsonDecode(
-            File('../common/client-runtime-fixtures.json').readAsStringSync(),
+            File('../common/internal-runtime-fixtures.json').readAsStringSync(),
           )
           as Map,
     ),
@@ -40,29 +40,29 @@ void main() {
   test('runtime contract exposes canonical method and event names', () {
     expect(
       const [
-        RuntimeContract.bootstrap,
-        RuntimeContract.connect,
-        RuntimeContract.getIdentity,
-        RuntimeContract.getProfile,
-        RuntimeContract.pairingInbox,
-        RuntimeContract.pairingOutbox,
-        RuntimeContract.listContacts,
-        RuntimeContract.listConversations,
-        RuntimeContract.listMessages,
-        RuntimeContract.setNickname,
-        RuntimeContract.refreshPairingCode,
-        RuntimeContract.submitPairingCode,
-        RuntimeContract.acceptPairing,
-        RuntimeContract.rejectPairing,
-        RuntimeContract.archivePairing,
-        RuntimeContract.cancelPairing,
-        RuntimeContract.verifyContact,
-        RuntimeContract.startConversation,
-        RuntimeContract.openConversation,
-        RuntimeContract.closeConversation,
-        RuntimeContract.sendMessage,
-        RuntimeContract.platformFact,
-        RuntimeContract.shutdown,
+        EngineContract.bootstrap,
+        EngineContract.connect,
+        EngineContract.getIdentity,
+        EngineContract.getProfile,
+        EngineContract.pairingInbox,
+        EngineContract.pairingOutbox,
+        EngineContract.listContacts,
+        EngineContract.listConversations,
+        EngineContract.listMessages,
+        EngineContract.setNickname,
+        EngineContract.refreshPairingCode,
+        EngineContract.submitPairingCode,
+        EngineContract.acceptPairing,
+        EngineContract.rejectPairing,
+        EngineContract.archivePairing,
+        EngineContract.cancelPairing,
+        EngineContract.verifyContact,
+        EngineContract.startConversation,
+        EngineContract.openConversation,
+        EngineContract.closeConversation,
+        EngineContract.sendMessage,
+        EngineContract.platformFact,
+        EngineContract.shutdown,
       ],
       containsAll(const [
         'bootstrap',
@@ -92,17 +92,17 @@ void main() {
     );
     expect(
       const [
-        RuntimeContract.torStatus,
-        RuntimeContract.runtimeReady,
-        RuntimeContract.profileReady,
-        RuntimeContract.inviteReceived,
-        RuntimeContract.inviteStateChanged,
-        RuntimeContract.messageReceived,
-        RuntimeContract.messageStateChanged,
-        RuntimeContract.conversationReadChanged,
-        RuntimeContract.changed,
-        RuntimeContract.runtimeError,
-        RuntimeContract.runtimeLog,
+        EngineContract.torStatus,
+        EngineContract.runtimeReady,
+        EngineContract.profileReady,
+        EngineContract.inviteReceived,
+        EngineContract.inviteStateChanged,
+        EngineContract.messageReceived,
+        EngineContract.messageStateChanged,
+        EngineContract.conversationReadChanged,
+        EngineContract.changed,
+        EngineContract.runtimeError,
+        EngineContract.runtimeLog,
       ],
       containsAll(const [
         'tor_status',
@@ -170,13 +170,13 @@ void main() {
     expect(
       parsed.whereType<DataChangedEvent>().map((event) => event.type),
       containsAll(const [
-        RuntimeContract.runtimeReady,
-        RuntimeContract.inviteReceived,
-        RuntimeContract.inviteStateChanged,
-        RuntimeContract.messageReceived,
-        RuntimeContract.messageStateChanged,
-        RuntimeContract.conversationReadChanged,
-        RuntimeContract.changed,
+        EngineContract.runtimeReady,
+        EngineContract.inviteReceived,
+        EngineContract.inviteStateChanged,
+        EngineContract.messageReceived,
+        EngineContract.messageStateChanged,
+        EngineContract.conversationReadChanged,
+        EngineContract.changed,
       ]),
     );
   });
@@ -916,6 +916,9 @@ class _EventRuntime implements ClientRuntime {
   Future<void> cancelPairing(String pairingId) async {}
 
   @override
+  Future<void> archivePairing(String pairingId) async {}
+
+  @override
   Future<RuntimeProfile?> profile() async => const RuntimeProfile();
 
   @override
@@ -938,6 +941,9 @@ class _EventRuntime implements ClientRuntime {
 
   @override
   Future<void> verifyContact(String installationId) async {}
+
+  @override
+  Future<void> updateAppVisibility(bool foreground) async {}
 }
 
 class _StreamRuntime extends _EventRuntime {
@@ -1085,6 +1091,12 @@ class _StatefulRuntime implements ClientRuntime {
   }
 
   @override
+  Future<void> archivePairing(String pairingId) async {
+    _inbox = _inbox.where((item) => item.id != pairingId).toList();
+    _outbox = _outbox.where((item) => item.id != pairingId).toList();
+  }
+
+  @override
   Future<void> verifyContact(String installationId) async {
     _contacts = _contacts
         .map(
@@ -1192,6 +1204,9 @@ class _StatefulRuntime implements ClientRuntime {
               : item,
         )
         .toList();
-    _events.add(DataChangedEvent(RuntimeContract.messageReceived));
+    _events.add(DataChangedEvent(EngineContract.messageReceived));
   }
+
+  @override
+  Future<void> updateAppVisibility(bool foreground) async {}
 }

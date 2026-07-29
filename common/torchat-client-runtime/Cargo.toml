@@ -3,10 +3,10 @@ name = "torchat-client-runtime"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Shared TorChat client runtime contract and DTOs"
+description = "Internal shared TorChat client domain runtime"
 
 [lib]
-crate-type = ["rlib", "cdylib"]
+crate-type = ["rlib"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

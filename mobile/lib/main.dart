@@ -64,7 +64,7 @@ class ControllerHomePage extends ConsumerStatefulWidget {
   ConsumerState<ControllerHomePage> createState() => _ControllerHomePageState();
 }
 
-class _ControllerHomePageState extends ConsumerState<ControllerHomePage> {
+class _ControllerHomePageState extends ConsumerState<ControllerHomePage> with WidgetsBindingObserver {
   final _search = TextEditingController();
   final _composer = TextEditingController();
   final _nickname = TextEditingController();
@@ -72,6 +72,7 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) ref.read(appControllerProvider.notifier).initialize();
     });
@@ -79,10 +80,25 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _search.dispose();
     _composer.dispose();
     _nickname.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final foreground = switch (state) {
+      AppLifecycleState.resumed => true,
+      AppLifecycleState.inactive ||
+      AppLifecycleState.hidden ||
+      AppLifecycleState.paused ||
+      AppLifecycleState.detached => false,
+    };
+    unawaited(
+      ref.read(clientRuntimeProvider).updateAppVisibility(foreground),
+    );
   }
 
   Future<void> _showInvite() async {
@@ -121,7 +137,7 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage> {
         refresh: controller.refreshInviteCode,
         onChanged: (_) {},
         checkUsed: () async {
-          await controller.refreshData(announceChanges: true);
+          await controller.refreshData();
           final inbox = ref.read(appControllerProvider).inbox;
           return inbox.any(
             (item) =>

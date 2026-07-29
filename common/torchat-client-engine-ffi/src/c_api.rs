@@ -52,16 +52,9 @@ unsafe fn handle_ref<'a>(value: *mut OpaqueEngineHandle) -> Result<&'a EngineHan
         .ok_or_else(|| EngineError::Closed("engine handle is null"))
 }
 
-unsafe fn handle_mut<'a>(
-    value: *mut OpaqueEngineHandle,
-) -> Result<&'a mut EngineHandle, EngineError> {
-    value
-        .cast::<EngineHandle>()
-        .as_mut()
-        .ok_or_else(|| EngineError::Closed("engine handle is null"))
-}
-
-fn state_mut(handle: &EngineHandle) -> Result<std::sync::MutexGuard<'_, EngineHandleState>, EngineError> {
+fn state_mut(
+    handle: &EngineHandle,
+) -> Result<std::sync::MutexGuard<'_, EngineHandleState>, EngineError> {
     handle
         .state
         .lock()
@@ -95,19 +88,24 @@ unsafe fn protected<T>(operation: impl FnOnce() -> Result<T, EngineError>) -> Op
 
 #[unsafe(no_mangle)]
 pub extern "C" fn torchat_client_engine_last_error() -> *mut c_char {
-    LAST_ERROR.with(|slot| {
-        slot.borrow_mut()
-            .take()
-            .map(CString::into_raw)
-            .unwrap_or(std::ptr::null_mut())
-    })
+    catch_unwind(AssertUnwindSafe(|| {
+        LAST_ERROR.with(|slot| {
+            slot.borrow_mut()
+                .take()
+                .map(CString::into_raw)
+                .unwrap_or(std::ptr::null_mut())
+        })
+    }))
+    .unwrap_or(std::ptr::null_mut())
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn torchat_client_engine_free_string(value: *mut c_char) {
-    if !value.is_null() {
-        drop(CString::from_raw(value));
-    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        if !value.is_null() {
+            drop(CString::from_raw(value));
+        }
+    }));
 }
 
 #[unsafe(no_mangle)]
@@ -119,7 +117,7 @@ pub unsafe extern "C" fn torchat_client_engine_new(
         let config: EngineConfig = json::decode(input(config_json, config_len)?)?;
         let runtime = tokio::runtime::Runtime::new()
             .map_err(|error| EngineError::InvalidConfig(error.to_string()))?;
-        let engine = ClientEngine::new(config)?;
+        let engine = runtime.block_on(async { ClientEngine::new(config) })?;
         Ok(into_opaque(Box::new(EngineHandle {
             runtime,
             state: std::sync::Mutex::new(EngineHandleState {
@@ -163,6 +161,9 @@ pub unsafe extern "C" fn torchat_client_engine_submit_json(
         if state.shutdown {
             return Err(EngineError::Closed("engine handle is shutdown"));
         }
+        if !state.started {
+            return Err(EngineError::Closed("engine handle is not started"));
+        }
         handle
             .runtime
             .block_on(state.engine.submit(envelope.request_id, envelope.command))?;
@@ -177,7 +178,7 @@ pub unsafe extern "C" fn torchat_client_engine_poll_json(
     timeout_ms: u64,
 ) -> *mut c_char {
     protected(|| {
-        let handle = handle_mut(value)?;
+        let handle = handle_ref(value)?;
         let mut state = state_mut(handle)?;
         let event = if timeout_ms == 0 {
             state.engine.poll().ok()
@@ -205,6 +206,9 @@ pub unsafe extern "C" fn torchat_client_engine_platform_fact_json(
         if state.shutdown {
             return Err(EngineError::Closed("engine handle is shutdown"));
         }
+        if !state.started {
+            return Err(EngineError::Closed("engine handle is not started"));
+        }
         handle
             .runtime
             .block_on(state.engine.submit_platform_fact("platform-fact", fact))?;
@@ -229,16 +233,145 @@ pub unsafe extern "C" fn torchat_client_engine_shutdown(value: *mut OpaqueEngine
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn torchat_client_engine_free(value: *mut OpaqueEngineHandle) {
-    if !value.is_null() {
-        let _ = protected(|| {
-            let handle = handle_ref(value)?;
-            let mut state = state_mut(handle)?;
+    if value.is_null() {
+        return;
+    }
+    let _ = protected(|| {
+        let handle = Box::from_raw(value.cast::<EngineHandle>());
+        {
+            let mut state = state_mut(&handle)?;
             if !state.shutdown {
                 state.engine.shutdown();
                 state.shutdown = true;
             }
-            Ok(())
-        });
-        drop(Box::from_raw(value.cast::<EngineHandle>()));
+        }
+        drop(handle);
+        Ok(())
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{ffi::CStr, path::PathBuf};
+
+    use serde_json::json;
+
+    use super::*;
+
+    fn temp_database_path(name: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock must be after unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "torchat-client-engine-ffi-{name}-{}-{nanos}.db",
+            std::process::id()
+        ))
+    }
+
+    fn bytes(byte: u8) -> Vec<u8> {
+        vec![byte; 32]
+    }
+
+    fn config_json(database_path: &PathBuf) -> Vec<u8> {
+        json!({
+            "databasePath": database_path,
+            "databaseKey": bytes(3),
+            "identityPrivateKey": bytes(4),
+            "relayOnionUrl": "http://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.onion:80",
+            "initialSocks5Url": null,
+            "logDirectory": null,
+            "platform": "desktop"
+        })
+        .to_string()
+        .into_bytes()
+    }
+
+    fn command_json(command_type: &str) -> Vec<u8> {
+        json!({
+            "requestId": "test-request",
+            "command": {
+                "type": command_type
+            }
+        })
+        .to_string()
+        .into_bytes()
+    }
+
+    unsafe fn take_last_error() -> String {
+        let error = torchat_client_engine_last_error();
+        assert!(!error.is_null(), "expected C API last_error");
+        let text = CStr::from_ptr(error).to_string_lossy().into_owned();
+        torchat_client_engine_free_string(error);
+        text
+    }
+
+    unsafe fn take_string(value: *mut c_char) -> String {
+        assert!(!value.is_null(), "expected C API string");
+        let text = CStr::from_ptr(value).to_string_lossy().into_owned();
+        torchat_client_engine_free_string(value);
+        text
+    }
+
+    #[test]
+    fn submit_after_shutdown_returns_closed_error() {
+        let path = temp_database_path("submit-after-shutdown");
+        let config = config_json(&path);
+        let command = command_json("get_profile");
+
+        unsafe {
+            let handle = torchat_client_engine_new(config.as_ptr(), config.len());
+            assert!(!handle.is_null());
+
+            torchat_client_engine_shutdown(handle);
+            assert_eq!(
+                torchat_client_engine_submit_json(handle, command.as_ptr(), command.len()),
+                -1
+            );
+            assert!(take_last_error().contains("engine handle is shutdown"));
+
+            torchat_client_engine_free(handle);
+        }
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn shutdown_and_free_are_idempotent_before_start() {
+        let path = temp_database_path("double-shutdown");
+        let config = config_json(&path);
+
+        unsafe {
+            let handle = torchat_client_engine_new(config.as_ptr(), config.len());
+            assert!(!handle.is_null());
+
+            torchat_client_engine_shutdown(handle);
+            torchat_client_engine_shutdown(handle);
+            torchat_client_engine_free(handle);
+            torchat_client_engine_free(std::ptr::null_mut());
+        }
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn poll_after_shutdown_returns_empty_json_without_error() {
+        let path = temp_database_path("poll-after-shutdown");
+        let config = config_json(&path);
+
+        unsafe {
+            let handle = torchat_client_engine_new(config.as_ptr(), config.len());
+            assert!(!handle.is_null());
+
+            torchat_client_engine_shutdown(handle);
+            assert_eq!(
+                take_string(torchat_client_engine_poll_json(handle, 0)),
+                "null"
+            );
+
+            torchat_client_engine_free(handle);
+        }
+
+        let _ = std::fs::remove_file(path);
     }
 }

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../runtime/runtime_contract.dart';
+
 enum TransportPhase {
   starting,
   bootstrapping,
@@ -11,14 +13,15 @@ enum TransportPhase {
   error;
 
   static TransportPhase fromValue(String? value) => switch (value) {
-    'connected' || 'api' || 'ready' || 'external' => TransportPhase.connected,
-    'starting' => TransportPhase.starting,
-    'bootstrapping' => TransportPhase.bootstrapping,
-    'onion_connecting' || 'connecting' => TransportPhase.connecting,
-    'degraded' => TransportPhase.degraded,
-    'reconnecting' || 'warning' => TransportPhase.reconnecting,
-    'offline' => TransportPhase.offline,
-    _ => TransportPhase.error,
+    EngineContract.transportPhaseStarting => TransportPhase.starting,
+    EngineContract.transportPhaseBootstrapping => TransportPhase.bootstrapping,
+    EngineContract.transportPhaseConnecting => TransportPhase.connecting,
+    EngineContract.transportPhaseDegraded => TransportPhase.degraded,
+    EngineContract.transportPhaseConnected => TransportPhase.connected,
+    EngineContract.transportPhaseReconnecting => TransportPhase.reconnecting,
+    EngineContract.transportPhaseOffline => TransportPhase.offline,
+    EngineContract.transportPhaseError => TransportPhase.error,
+    final phase => throw FormatException('Unknown transport phase: $phase'),
   };
 
   bool get isConnected => this == TransportPhase.connected;
@@ -52,11 +55,11 @@ enum ConversationState { pending, verifying, active, failed, offline }
 
 extension ConversationStateDisplay on ConversationState {
   String get wireValue => switch (this) {
-    ConversationState.pending => 'PENDING',
-    ConversationState.verifying => 'VERIFYING',
-    ConversationState.active => 'ACTIVE',
-    ConversationState.failed => 'FAILED',
-    ConversationState.offline => 'OFFLINE',
+    ConversationState.pending => EngineContract.conversationStatePending,
+    ConversationState.verifying => EngineContract.conversationStateVerifying,
+    ConversationState.active => EngineContract.conversationStateActive,
+    ConversationState.failed => EngineContract.conversationStateFailed,
+    ConversationState.offline => EngineContract.conversationStateOffline,
   };
 
   String get presenceLabel => switch (this) {
@@ -84,24 +87,24 @@ enum InviteState {
 
   static InviteState fromValue(String? value) =>
       switch (value?.trim().toUpperCase()) {
-        'PENDING' => InviteState.pending,
-        'ACCEPTED' => InviteState.accepted,
-        'REJECTED' => InviteState.rejected,
-        'COMPLETED' => InviteState.completed,
-        'EXPIRED' => InviteState.expired,
-        'ARCHIVED' => InviteState.archived,
-        'CANCELLED' => InviteState.cancelled,
+        EngineContract.inviteStatePending => InviteState.pending,
+        EngineContract.inviteStateAccepted => InviteState.accepted,
+        EngineContract.inviteStateRejected => InviteState.rejected,
+        EngineContract.inviteStateCompleted => InviteState.completed,
+        EngineContract.inviteStateExpired => InviteState.expired,
+        EngineContract.inviteStateArchived => InviteState.archived,
+        EngineContract.inviteStateCancelled => InviteState.cancelled,
         final state => throw FormatException('Unknown invite state: $state'),
       };
 
   String get wireValue => switch (this) {
-    InviteState.pending => 'PENDING',
-    InviteState.accepted => 'ACCEPTED',
-    InviteState.rejected => 'REJECTED',
-    InviteState.completed => 'COMPLETED',
-    InviteState.expired => 'EXPIRED',
-    InviteState.archived => 'ARCHIVED',
-    InviteState.cancelled => 'CANCELLED',
+    InviteState.pending => EngineContract.inviteStatePending,
+    InviteState.accepted => EngineContract.inviteStateAccepted,
+    InviteState.rejected => EngineContract.inviteStateRejected,
+    InviteState.completed => EngineContract.inviteStateCompleted,
+    InviteState.expired => EngineContract.inviteStateExpired,
+    InviteState.archived => EngineContract.inviteStateArchived,
+    InviteState.cancelled => EngineContract.inviteStateCancelled,
   };
 
   String get label => switch (this) {
@@ -130,66 +133,21 @@ enum PairingAvailableAction {
 
   static PairingAvailableAction fromValue(String? value) =>
       switch (value?.trim().toUpperCase()) {
-        'ACCEPT' => PairingAvailableAction.accept,
-        'REJECT' => PairingAvailableAction.reject,
-        'ARCHIVE' => PairingAvailableAction.archive,
-        'CANCEL' => PairingAvailableAction.cancel,
+        EngineContract.pairingActionAccept => PairingAvailableAction.accept,
+        EngineContract.pairingActionReject => PairingAvailableAction.reject,
+        EngineContract.pairingActionArchive => PairingAvailableAction.archive,
+        EngineContract.pairingActionCancel => PairingAvailableAction.cancel,
         final action => throw FormatException(
           'Unknown pairing available action: $action',
         ),
       };
 
   String get wireValue => switch (this) {
-    PairingAvailableAction.accept => 'ACCEPT',
-    PairingAvailableAction.reject => 'REJECT',
-    PairingAvailableAction.archive => 'ARCHIVE',
-    PairingAvailableAction.cancel => 'CANCEL',
+    PairingAvailableAction.accept => EngineContract.pairingActionAccept,
+    PairingAvailableAction.reject => EngineContract.pairingActionReject,
+    PairingAvailableAction.archive => EngineContract.pairingActionArchive,
+    PairingAvailableAction.cancel => EngineContract.pairingActionCancel,
   };
-}
-
-class MessageSendEffect {
-  const MessageSendEffect({
-    required this.messageId,
-    required this.conversationId,
-    required this.recipientInstallationId,
-    required this.body,
-  });
-  final String messageId;
-  final String conversationId;
-  final String recipientInstallationId;
-  final String body;
-
-  factory MessageSendEffect.fromMap(Map<String, dynamic> map) =>
-      MessageSendEffect(
-        messageId: _string(map, 'messageId'),
-        conversationId: _string(map, 'conversationId'),
-        recipientInstallationId: _string(map, 'recipientInstallationId'),
-        body: _string(map, 'body'),
-      );
-}
-
-class ReceiptSendEffect {
-  const ReceiptSendEffect({
-    required this.envelopeId,
-    required this.messageId,
-    required this.conversationId,
-    required this.recipientInstallationId,
-    required this.receivedAt,
-  });
-  final String envelopeId;
-  final String messageId;
-  final String conversationId;
-  final String recipientInstallationId;
-  final int receivedAt;
-
-  factory ReceiptSendEffect.fromMap(Map<String, dynamic> map) =>
-      ReceiptSendEffect(
-        envelopeId: _string(map, 'envelopeId'),
-        messageId: _string(map, 'messageId'),
-        conversationId: _string(map, 'conversationId'),
-        recipientInstallationId: _string(map, 'recipientInstallationId'),
-        receivedAt: _int(map, 'receivedAt'),
-      );
 }
 
 enum MessageState {
@@ -201,20 +159,20 @@ enum MessageState {
 
   static MessageState fromValue(String? value) =>
       switch (value?.trim().toUpperCase()) {
-        'QUEUED' => MessageState.queued,
-        'SENDING' => MessageState.sending,
-        'SENT' => MessageState.sent,
-        'DELIVERED' => MessageState.delivered,
-        'FAILED' => MessageState.failed,
+        EngineContract.messageStateQueued => MessageState.queued,
+        EngineContract.messageStateSending => MessageState.sending,
+        EngineContract.messageStateSent => MessageState.sent,
+        EngineContract.messageStateDelivered => MessageState.delivered,
+        EngineContract.messageStateFailed => MessageState.failed,
         final state => throw FormatException('Unknown message state: $state'),
       };
 
   String get wireValue => switch (this) {
-    MessageState.queued => 'QUEUED',
-    MessageState.sending => 'SENDING',
-    MessageState.sent => 'SENT',
-    MessageState.delivered => 'DELIVERED',
-    MessageState.failed => 'FAILED',
+    MessageState.queued => EngineContract.messageStateQueued,
+    MessageState.sending => EngineContract.messageStateSending,
+    MessageState.sent => EngineContract.messageStateSent,
+    MessageState.delivered => EngineContract.messageStateDelivered,
+    MessageState.failed => EngineContract.messageStateFailed,
   };
 
   String get label => switch (this) {
@@ -277,9 +235,9 @@ class RuntimeIdentity {
   final String publicKey;
 
   factory RuntimeIdentity.fromMap(Map<String, dynamic> map) => RuntimeIdentity(
-    installationId: _string(map, 'installationId', fallback: 'installation_id'),
-    fingerprint: _string(map, 'fingerprint'),
-    publicKey: _string(map, 'publicKey'),
+    installationId: _string(map, EngineContract.installationId),
+    fingerprint: _string(map, EngineContract.fingerprint),
+    publicKey: _string(map, EngineContract.publicKey),
   );
 
   RuntimeProfile toProfile([String nickname = '']) => RuntimeProfile(
@@ -303,10 +261,10 @@ class RuntimeProfile {
   final String publicKey;
 
   factory RuntimeProfile.fromMap(Map<String, dynamic> map) => RuntimeProfile(
-    installationId: _string(map, 'installationId', fallback: 'installation_id'),
-    nickname: _string(map, 'nickname'),
-    fingerprint: _string(map, 'fingerprint'),
-    publicKey: _string(map, 'publicKey'),
+    installationId: _string(map, EngineContract.installationId),
+    nickname: _string(map, EngineContract.nickname),
+    fingerprint: _string(map, EngineContract.fingerprint),
+    publicKey: _string(map, EngineContract.publicKey),
   );
 }
 
@@ -327,12 +285,12 @@ class ContactRecord {
   final String? devFixture;
 
   factory ContactRecord.fromMap(Map<String, dynamic> map) => ContactRecord(
-    id: _string(map, 'installationId', fallback: 'installation_id'),
-    nickname: _string(map, 'nickname', defaultValue: 'Nieznany'),
-    fingerprint: _string(map, 'fingerprint'),
-    publicKey: _string(map, 'publicKey', fallback: 'public_key'),
-    verified: _string(map, 'verification') == 'VERIFIED',
-    devFixture: _optionalString(map, 'dev'),
+    id: _string(map, EngineContract.installationId),
+    nickname: _string(map, EngineContract.nickname, defaultValue: 'Nieznany'),
+    fingerprint: _string(map, EngineContract.fingerprint),
+    publicKey: _string(map, EngineContract.publicKey),
+    verified: _string(map, EngineContract.verification) == 'VERIFIED',
+    devFixture: _optionalString(map, EngineContract.dev),
   );
 }
 
@@ -355,23 +313,23 @@ class ConversationSummary {
   factory ConversationSummary.fromMap(
     Map<String, dynamic> map,
   ) => ConversationSummary(
-    id: _string(map, 'id'),
-    contactId: _string(map, 'contactInstallationId'),
-    preview: _string(map, 'lastMessagePreview', defaultValue: 'Nowa rozmowa'),
-    unread: _int(map, 'unreadCount'),
-    state: _conversationState(_optionalString(map, 'status')),
-    lastMessageAt: _timestamp(map['lastMessageAt'] ?? map['last_message_at']),
+    id: _string(map, EngineContract.id),
+    contactId: _string(map, EngineContract.contactInstallationId),
+    preview: _string(map, EngineContract.lastMessagePreview, defaultValue: 'Nowa rozmowa'),
+    unread: _int(map, EngineContract.unreadCount),
+    state: _conversationState(_optionalString(map, EngineContract.status)),
+    lastMessageAt: _timestamp(map[EngineContract.lastMessageAt]),
   );
 }
 
 ConversationState _conversationState(String? value) => switch (value
     ?.trim()
     .toUpperCase()) {
-  'ACTIVE' => ConversationState.active,
-  'PENDING' => ConversationState.pending,
-  'VERIFYING' => ConversationState.verifying,
-  'FAILED' => ConversationState.failed,
-  'OFFLINE' => ConversationState.offline,
+  EngineContract.conversationStateActive => ConversationState.active,
+  EngineContract.conversationStatePending => ConversationState.pending,
+  EngineContract.conversationStateVerifying => ConversationState.verifying,
+  EngineContract.conversationStateFailed => ConversationState.failed,
+  EngineContract.conversationStateOffline => ConversationState.offline,
   final state => throw FormatException('Unknown conversation state: $state'),
 };
 
@@ -390,11 +348,11 @@ class ChatMessage {
   final String createdAt;
 
   factory ChatMessage.fromMap(Map<String, dynamic> map) => ChatMessage(
-    id: _string(map, 'id'),
-    text: _string(map, 'body'),
-    outgoing: map['outgoing'] as bool? ?? false,
-    state: _messageState(map['state']),
-    createdAt: _timestamp(map['createdAt'] ?? map['created_at']),
+    id: _string(map, EngineContract.id),
+    text: _string(map, EngineContract.body),
+    outgoing: map[EngineContract.outgoing] as bool? ?? false,
+    state: _messageState(map[EngineContract.state]),
+    createdAt: _timestamp(map[EngineContract.createdAt]),
   );
 }
 
@@ -417,32 +375,16 @@ String _timestamp(Object? value) {
 String _string(
   Map<String, dynamic> map,
   String key, {
-  String? fallback,
-  String? fallbackTwo,
   String defaultValue = '',
-}) {
-  final value =
-      _optionalString(map, key) ??
-      (fallback == null ? null : _optionalString(map, fallback)) ??
-      (fallbackTwo == null ? null : _optionalString(map, fallbackTwo));
-  return value ?? defaultValue;
-}
+}) => _optionalString(map, key) ?? defaultValue;
 
 String? _optionalString(Map<String, dynamic> map, String key) {
   final value = map[key];
   return value?.toString();
 }
 
-int _int(
-  Map<String, dynamic> map,
-  String key, {
-  String? fallback,
-  String? fallbackTwo,
-}) {
-  final value =
-      map[key] ??
-      (fallback == null ? null : map[fallback]) ??
-      (fallbackTwo == null ? null : map[fallbackTwo]);
+int _int(Map<String, dynamic> map, String key) {
+  final value = map[key];
   return (value as num?)?.toInt() ?? int.tryParse(value?.toString() ?? '') ?? 0;
 }
 
@@ -452,7 +394,6 @@ class PairingItem {
     required this.status,
     this.availableActions = const [],
     this.peer,
-    this.code = '',
     this.expiresAt = 0,
     this.received = true,
   });
@@ -460,23 +401,20 @@ class PairingItem {
   final InviteState status;
   final List<PairingAvailableAction> availableActions;
   final ContactRecord? peer;
-  final String code;
   final int expiresAt;
   final bool received;
 
   factory PairingItem.fromMap(Map<String, dynamic> map) => PairingItem(
-    id: _string(map, 'pairingId', fallback: 'pairing_id', fallbackTwo: 'id'),
-    status: InviteState.fromValue(
-      _string(map, 'state', fallback: 'status', defaultValue: 'PENDING'),
-    ),
+    id: _string(map, EngineContract.pairingId),
+    status: InviteState.fromValue(_string(map, EngineContract.state)),
     availableActions: _availableActions(map),
-    peer: map['sender'] is Map
-        ? ContactRecord.fromMap(Map<String, dynamic>.from(map['sender'] as Map))
+    peer: map[EngineContract.sender] is Map
+        ? ContactRecord.fromMap(
+            Map<String, dynamic>.from(map[EngineContract.sender] as Map),
+          )
         : null,
-    code: _string(map, 'code'),
-    expiresAt: _int(map, 'expiresAt', fallback: 'expires_at'),
-    received:
-        map['received'] as bool? ?? _optionalString(map, 'kind') != 'sent',
+    expiresAt: _int(map, EngineContract.expiresAt),
+    received: map[EngineContract.received] as bool? ?? false,
   );
 
   ContactRequest asContactRequest() => ContactRequest(
@@ -484,7 +422,6 @@ class PairingItem {
     peer: peer ?? ContactRecord.fromMap(const {}),
     status: status,
     availableActions: availableActions,
-    code: code,
     expiresAt: expiresAt,
   );
 
@@ -497,14 +434,12 @@ class ContactRequest {
     required this.peer,
     required this.status,
     this.availableActions = const [],
-    this.code = '',
     this.expiresAt = 0,
   });
   final String id;
   final ContactRecord peer;
   final InviteState status;
   final List<PairingAvailableAction> availableActions;
-  final String code;
   final int expiresAt;
 
   bool can(PairingAvailableAction action) => availableActions.contains(action);
@@ -516,8 +451,8 @@ class InviteCode {
   final int expiresAt;
 
   factory InviteCode.fromMap(Map<String, dynamic> map) => InviteCode(
-    code: _string(map, 'code'),
-    expiresAt: _int(map, 'expiresAt', fallback: 'expires_at'),
+    code: _string(map, EngineContract.code),
+    expiresAt: _int(map, EngineContract.expiresAt),
   );
 }
 
@@ -531,7 +466,7 @@ extension IterableFirstOrNull<T> on Iterable<T> {
 }
 
 List<PairingAvailableAction> _availableActions(Map<String, dynamic> map) {
-  final value = map['availableActions'];
+  final value = map[EngineContract.availableActions];
   if (value == null) return const [];
   if (value is! List) {
     throw const FormatException('availableActions must be a list');
@@ -619,6 +554,20 @@ class RuntimeErrorEvent extends RuntimeEvent {
 class RuntimeLogEvent extends RuntimeEvent {
   const RuntimeLogEvent(this.message);
   final String message;
+}
+
+class NotificationRequestedEvent extends RuntimeEvent {
+  const NotificationRequestedEvent({
+    required this.id,
+    required this.title,
+    required this.body,
+    this.conversationId,
+  });
+
+  final String id;
+  final String title;
+  final String body;
+  final String? conversationId;
 }
 
 Map<String, dynamic> _map(Map<String, dynamic> map, String key) =>

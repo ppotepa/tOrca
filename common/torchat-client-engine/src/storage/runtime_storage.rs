@@ -5,7 +5,10 @@ use torchat_client_runtime::{
     RuntimeResult, RuntimeStorage, VerificationState,
 };
 
-use super::SqliteTransaction;
+use super::{
+    SqliteTransaction,
+    sqlite::{DeliveryReceiptRecord, PendingWelcomeRecord, ReceivedEnvelopeRecord},
+};
 
 pub struct SqliteRuntimeStorage<'db> {
     transaction: Option<SqliteTransaction<'db>>,
@@ -74,11 +77,9 @@ impl<'db> SqliteRuntimeStorage<'db> {
     ) -> RuntimeResult<Option<T>> {
         let blob: Option<Vec<u8>> = self
             .tx()
-            .query_row(
-                "SELECT value FROM settings WHERE key = ?1;",
-                [key],
-                |row| row.get("value"),
-            )
+            .query_row("SELECT value FROM settings WHERE key = ?1;", [key], |row| {
+                row.get("value")
+            })
             .optional()
             .map_err(storage_error)?;
         blob.map(|value| serde_json::from_slice(&value).map_err(storage_error_json))
@@ -141,6 +142,197 @@ impl<'db> SqliteRuntimeStorage<'db> {
                 "unknown invite state: {other}"
             ))),
         }
+    }
+
+    /// Persists the MLS member inbox inside the same SQL transaction as the
+    /// runtime mutation that consumed it.
+    pub fn put_mls_inbox_snapshot(&mut self, snapshot: &[u8]) -> RuntimeResult<()> {
+        self.put_setting_blob("mls_inbox_snapshot_v1", snapshot)
+    }
+
+    /// Persists a direct-conversation MLS snapshot in the active runtime
+    /// transaction. Engine-owned cryptographic state must never be committed
+    /// separately from the message/contact/conversation rows it protects.
+    pub fn put_conversation_mls_snapshot(
+        &mut self,
+        conversation_id: &str,
+        snapshot: &[u8],
+    ) -> RuntimeResult<()> {
+        self.tx()
+            .execute(
+                "INSERT INTO conversation_mls (conversation_id, snapshot, updated_at)
+                 VALUES (?1, ?2, unixepoch())
+                 ON CONFLICT(conversation_id) DO UPDATE SET
+                    snapshot = excluded.snapshot,
+                    updated_at = unixepoch();",
+                params![conversation_id, snapshot],
+            )
+            .map_err(storage_error)?;
+        Ok(())
+    }
+
+    pub fn put_pending_welcome(&mut self, record: &PendingWelcomeRecord) -> RuntimeResult<()> {
+        self.tx()
+            .execute(
+                "INSERT INTO pending_welcomes (
+                    invite_id, recipient_installation_id, payload, expires_at,
+                    attempt_count, next_attempt_at, last_error
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 ON CONFLICT(invite_id) DO UPDATE SET
+                    recipient_installation_id = excluded.recipient_installation_id,
+                    payload = excluded.payload,
+                    expires_at = excluded.expires_at,
+                    attempt_count = excluded.attempt_count,
+                    next_attempt_at = excluded.next_attempt_at,
+                    last_error = excluded.last_error;",
+                params![
+                    record.invite_id,
+                    record.recipient_installation_id,
+                    record.payload,
+                    record.expires_at,
+                    i64::from(record.attempt_count),
+                    record.next_attempt_at,
+                    record.last_error,
+                ],
+            )
+            .map_err(storage_error)?;
+        Ok(())
+    }
+
+    pub fn remove_pending_welcome(&mut self, invite_id: &str) -> RuntimeResult<()> {
+        self.tx()
+            .execute(
+                "DELETE FROM pending_welcomes WHERE invite_id = ?1;",
+                [invite_id],
+            )
+            .map_err(storage_error)?;
+        Ok(())
+    }
+
+    pub fn consume_invite(&mut self, invite_id: &str) -> RuntimeResult<bool> {
+        let inserted = self
+            .tx()
+            .execute(
+                "INSERT OR IGNORE INTO used_invites (invite_id, used_at)
+                 VALUES (?1, unixepoch());",
+                [invite_id],
+            )
+            .map_err(storage_error)?;
+        Ok(inserted > 0)
+    }
+
+    pub fn put_received_envelope(&mut self, value: &ReceivedEnvelopeRecord) -> RuntimeResult<()> {
+        self.tx()
+            .execute(
+                "INSERT INTO received_envelopes (
+                    sender_installation_id, message_id, ciphertext_hash, received_at, receipt_state
+                 ) VALUES (?1, ?2, ?3, ?4, ?5);",
+                params![
+                    value.sender_installation_id,
+                    value.message_id,
+                    value.ciphertext_hash,
+                    value.received_at,
+                    value.receipt_state,
+                ],
+            )
+            .map_err(storage_error)?;
+        Ok(())
+    }
+
+    pub fn put_delivery_receipt(&mut self, value: &DeliveryReceiptRecord) -> RuntimeResult<()> {
+        self.tx()
+            .execute(
+                "INSERT INTO delivery_receipts (
+                    envelope_id, message_id, conversation_id, original_sender, received_at,
+                    relay_payload, state, attempt_count, next_attempt_at, last_error, created_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11);",
+                params![
+                    value.envelope_id,
+                    value.message_id,
+                    value.conversation_id,
+                    value.original_sender,
+                    value.received_at,
+                    value.relay_payload,
+                    value.state,
+                    i64::from(value.attempt_count),
+                    value.next_attempt_at,
+                    value.last_error,
+                    value.created_at,
+                ],
+            )
+            .map_err(storage_error)?;
+        Ok(())
+    }
+
+    pub fn persist_outbound_encryption(
+        &mut self,
+        message_id: &str,
+        relay_payload: &[u8],
+        conversation_id: &str,
+        snapshot: &[u8],
+    ) -> RuntimeResult<()> {
+        use sha2::Digest as _;
+        let ciphertext_hash = sha2::Sha256::digest(relay_payload).to_vec();
+        let changed = self
+            .tx()
+            .execute(
+                "UPDATE messages
+                 SET relay_payload = ?2, ciphertext_hash = ?3
+                 WHERE id = ?1;",
+                params![message_id, relay_payload, ciphertext_hash],
+            )
+            .map_err(storage_error)?;
+        if changed != 1 {
+            return Err(RuntimeError::Storage(format!(
+                "outgoing message {message_id} was not present in the active transaction"
+            )));
+        }
+        self.put_conversation_mls_snapshot(conversation_id, snapshot)
+    }
+
+    pub fn claim_outgoing_attempt(
+        &mut self,
+        message_id: &str,
+        next_attempt_at: i64,
+        ack_deadline: Option<i64>,
+        last_transport_error: Option<&str>,
+        now_ms: i64,
+    ) -> RuntimeResult<bool> {
+        let changed = self
+            .tx()
+            .execute(
+                "UPDATE messages
+                 SET attempt_count = attempt_count + 1,
+                     last_attempt_at = ?1,
+                     next_attempt_at = ?2,
+                     ack_deadline = ?3,
+                     last_transport_error = ?4
+                 WHERE id = ?5
+                   AND outgoing = 1
+                   AND UPPER(state) IN ('SENDING', 'QUEUED')
+                   AND next_attempt_at <= ?1;",
+                params![
+                    now_ms,
+                    next_attempt_at,
+                    ack_deadline,
+                    last_transport_error,
+                    message_id,
+                ],
+            )
+            .map_err(storage_error)?;
+        Ok(changed > 0)
+    }
+
+    fn put_setting_blob(&self, key: &str, value: &[u8]) -> RuntimeResult<()> {
+        self.tx()
+            .execute(
+                "INSERT INTO settings (key, value)
+                 VALUES (?1, ?2)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value;",
+                params![key, value],
+            )
+            .map_err(storage_error)?;
+        Ok(())
     }
 }
 
@@ -221,16 +413,17 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                 received: true,
                 available_actions: Vec::new(),
                 offer_invite_id,
-                offer_payload: offer_payload.map(|value| String::from_utf8_lossy(&value).into_owned()),
+                offer_payload: offer_payload
+                    .map(|value| String::from_utf8_lossy(&value).into_owned()),
             }))
         })
         .collect()
     }
 
     fn put_pairing_inbox(&mut self, item: PairingItem) -> RuntimeResult<()> {
-        let sender = item.sender.ok_or_else(|| {
-            RuntimeError::Storage("pairing inbox item missing sender".to_owned())
-        })?;
+        let sender = item
+            .sender
+            .ok_or_else(|| RuntimeError::Storage("pairing inbox item missing sender".to_owned()))?;
         let capability = item.capability.ok_or_else(|| {
             RuntimeError::Storage("pairing inbox item missing capability".to_owned())
         })?;
@@ -456,8 +649,14 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
             })
             .map_err(storage_error)?;
         rows.map(|row| {
-            let (id, contact_installation_id, state, last_message_preview, last_message_at, unread_count) =
-                row.map_err(storage_error)?;
+            let (
+                id,
+                contact_installation_id,
+                state,
+                last_message_preview,
+                last_message_at,
+                unread_count,
+            ) = row.map_err(storage_error)?;
             Ok(ConversationSummary {
                 id,
                 contact_installation_id,
@@ -637,7 +836,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                         attempt_count, last_attempt_at, next_attempt_at,
                         ack_deadline, last_transport_error
                  FROM messages
-                 WHERE state IN ('QUEUED', 'SENDING', 'SENT')
+                 WHERE state IN ('QUEUED', 'SENDING')
                    AND next_attempt_at <= CAST(unixepoch('now') * 1000 AS INTEGER)
                  ORDER BY next_attempt_at ASC, created_at ASC, id ASC;",
             )
@@ -720,7 +919,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
             .execute(
                 "UPDATE messages
                  SET next_attempt_at = 0
-                 WHERE state IN ('QUEUED', 'SENDING', 'SENT');",
+                 WHERE state IN ('QUEUED', 'SENDING');",
                 [],
             )
             .map_err(storage_error)?;
@@ -728,7 +927,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
             .execute(
                 "UPDATE delivery_receipts
                  SET next_attempt_at = 0
-                 WHERE state = 'PENDING';",
+                 WHERE state IN ('PENDING', 'SENT');",
                 [],
             )
             .map_err(storage_error)?;
@@ -751,7 +950,8 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
     }
 
     fn message(&self, message_id: &str) -> RuntimeResult<Option<ChatMessage>> {
-        let message = self.tx()
+        let message = self
+            .tx()
             .query_row(
                 "SELECT id, conversation_id, outgoing, body, state, created_at,
                         attempt_count, last_attempt_at, next_attempt_at,

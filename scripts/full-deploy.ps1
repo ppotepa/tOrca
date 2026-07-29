@@ -59,9 +59,10 @@ if ($cleanClientState) {
     $desktopStateRoot = Join-Path $repoRoot '.torchat\clients\desktop'
     foreach ($path in @(
         (Join-Path $desktopStateRoot 'identity.key'),
-        (Join-Path $desktopStateRoot 'identity.state.db'),
-        (Join-Path $desktopStateRoot 'identity.state.db-wal'),
-        (Join-Path $desktopStateRoot 'identity.state.db-shm')
+        (Join-Path $desktopStateRoot 'torchat-client-v1.db'),
+        (Join-Path $desktopStateRoot 'torchat-client-v1.db-wal'),
+        (Join-Path $desktopStateRoot 'torchat-client-v1.db-shm'),
+        (Join-Path $desktopStateRoot 'torchat-client-v1.db-journal')
     )) {
         if (Test-Path -LiteralPath $path) {
             Remove-Item -LiteralPath $path -Force

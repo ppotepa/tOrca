@@ -1,50 +1,11 @@
 use crate::pairing_rules::{PairingAction, merge_pairing_item, normalize_pairing_item};
 use crate::{
     ChatMessage, ContactRecord, ConversationSummary, InviteState, MessageSendEffect,
-    MessageTransportOutcome, PairingItem, RuntimeClock, RuntimeCommand, RuntimeError, RuntimeEvent,
+    MessageTransportOutcome, PairingItem, RuntimeClock, RuntimeError, RuntimeEvent,
     RuntimeIdentity, RuntimeProfile, RuntimeResult, RuntimeSendEffect, RuntimeSession,
     RuntimeStorage, RuntimeTransport,
 };
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct RuntimeRequest {
-    pub id: Option<String>,
-    pub method: String,
-    #[serde(default)]
-    pub params: serde_json::Value,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct RuntimeResponse {
-    pub id: Option<String>,
-    pub ok: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-}
-
-impl RuntimeResponse {
-    pub fn ok<T: Serialize>(id: Option<String>, result: T) -> RuntimeResult<Self> {
-        Ok(Self {
-            id,
-            ok: true,
-            result: Some(serde_json::to_value(result)?),
-            error: None,
-        })
-    }
-
-    pub fn error(id: Option<String>, error: impl std::fmt::Display) -> Self {
-        Self {
-            id,
-            ok: false,
-            result: None,
-            error: Some(error.to_string()),
-        }
-    }
-}
 
 pub struct ClientRuntime<S, T, C> {
     storage: S,
@@ -153,132 +114,6 @@ where
 
     pub fn report_runtime_log(&mut self, message: String) {
         self.session.publish_runtime_log(message);
-    }
-
-    pub fn dispatch_request(&mut self, request: RuntimeRequest) -> RuntimeResponse {
-        let session_before = self.session.clone();
-        self.session.begin_transaction();
-        match self.dispatch_value(&request.method, request.params) {
-            Ok(value) => {
-                self.session.commit_transaction();
-                RuntimeResponse {
-                    id: request.id,
-                    ok: true,
-                    result: Some(value),
-                    error: None,
-                }
-            }
-            Err(error) => {
-                self.session.rollback_transaction();
-                self.restore_session(session_before);
-                RuntimeResponse::error(request.id, error)
-            }
-        }
-    }
-
-    pub fn dispatch_request_with<R>(
-        &mut self,
-        request: RuntimeRequest,
-        on_success: impl FnOnce(&mut Self, RuntimeResponse) -> RuntimeResult<R>,
-    ) -> RuntimeResult<R> {
-        let session_before = self.session.clone();
-        self.session.begin_transaction();
-        match self.dispatch_value(&request.method, request.params) {
-            Ok(value) => {
-                let response = RuntimeResponse {
-                    id: request.id,
-                    ok: true,
-                    result: Some(value),
-                    error: None,
-                };
-                match on_success(self, response) {
-                    Ok(result) => {
-                        self.session.commit_transaction();
-                        Ok(result)
-                    }
-                    Err(error) => {
-                        self.session.rollback_transaction();
-                        self.restore_session(session_before);
-                        Err(error)
-                    }
-                }
-            }
-            Err(error) => {
-                self.session.rollback_transaction();
-                self.restore_session(session_before);
-                Err(error)
-            }
-        }
-    }
-
-    pub fn dispatch_value(
-        &mut self,
-        method: &str,
-        params: serde_json::Value,
-    ) -> RuntimeResult<serde_json::Value> {
-        let command = parse_runtime_command(method, params)?;
-        let value = match command {
-            RuntimeCommand::ApplyRemoteProfile { profile } => {
-                serde_json::to_value(self.apply_remote_profile(profile)?)?
-            }
-            RuntimeCommand::ReportRuntimeError { message } => {
-                self.report_runtime_error(message);
-                serde_json::json!(true)
-            }
-            RuntimeCommand::ReportRuntimeLog { message } => {
-                self.report_runtime_log(message);
-                serde_json::json!(true)
-            }
-            RuntimeCommand::Connect => serde_json::to_value(self.connect()?)?,
-            RuntimeCommand::Identity => serde_json::to_value(self.identity()?)?,
-            RuntimeCommand::Profile => serde_json::to_value(self.profile()?)?,
-            RuntimeCommand::SetNickname { nickname } => {
-                serde_json::to_value(self.set_nickname(nickname)?)?
-            }
-            RuntimeCommand::RefreshPairingCode => {
-                serde_json::to_value(self.refresh_pairing_code()?)?
-            }
-            RuntimeCommand::PrepareSubmitPairingCode { code } => {
-                serde_json::to_value(self.prepare_submit_pairing_code(code)?)?
-            }
-            RuntimeCommand::SubmitPairingCode { code } => {
-                serde_json::to_value(self.submit_pairing_code(code)?)?
-            }
-            RuntimeCommand::PairingInbox => serde_json::to_value(self.pairing_inbox()?)?,
-            RuntimeCommand::MergePairingInbox { items } => {
-                serde_json::to_value(self.merge_pairing_inbox(items)?)?
-            }
-            RuntimeCommand::PairingOutbox => serde_json::to_value(self.pairing_outbox()?)?,
-            RuntimeCommand::MergePairingOutbox { items } => {
-                serde_json::to_value(self.merge_pairing_outbox(items)?)?
-            }
-            RuntimeCommand::Contacts => serde_json::to_value(self.contacts()?)?,
-            RuntimeCommand::Conversations => serde_json::to_value(self.conversations()?)?,
-            RuntimeCommand::Messages { id } => serde_json::to_value(self.messages(&id)?)?,
-            RuntimeCommand::OpenConversation { id } => {
-                self.open_conversation(id)?;
-                serde_json::json!(true)
-            }
-            RuntimeCommand::CloseConversation => {
-                self.close_conversation();
-                serde_json::json!(true)
-            }
-            RuntimeCommand::VerifyContact { installation_id } => {
-                self.verify_contact(&installation_id)?;
-                serde_json::json!(true)
-            }
-            RuntimeCommand::ArchivePairing { pairing_id } => {
-                self.archive_pairing(&pairing_id)?;
-                serde_json::json!(true)
-            }
-            RuntimeCommand::StartConversation { contact_id } => {
-                serde_json::to_value(self.start_conversation(&contact_id)?)?
-            }
-            RuntimeCommand::SendMessage { id, text } => {
-                serde_json::to_value(self.send_message(&id, text)?)?
-            }
-        };
-        Ok(value)
     }
 
     pub fn connect(&mut self) -> RuntimeResult<bool> {
@@ -857,11 +692,12 @@ where
         contact: ContactRecord,
         open_conversation: bool,
     ) -> RuntimeResult<ConversationSummary> {
-        self.promote_contact_with_status(
-            contact,
-            crate::ConversationState::Active,
-            open_conversation,
-        )
+        let status = if contact.verification == crate::VerificationState::Verified {
+            crate::ConversationState::Active
+        } else {
+            crate::ConversationState::Verifying
+        };
+        self.promote_contact_with_status(contact, status, open_conversation)
     }
 
     fn promote_contact_with_status(
@@ -1129,7 +965,9 @@ where
         Ok(effects)
     }
 
-    pub fn prepare_pending_receipt_effects(&mut self) -> RuntimeResult<Vec<crate::ReceiptSendEffect>> {
+    pub fn prepare_pending_receipt_effects(
+        &mut self,
+    ) -> RuntimeResult<Vec<crate::ReceiptSendEffect>> {
         self.storage.pending_receipts()
     }
 
@@ -1366,85 +1204,6 @@ fn transition_invite_state(
             "pairing request cannot be transitioned from its current state".to_owned(),
         )),
     }
-}
-
-fn parse_runtime_command(method: &str, params: serde_json::Value) -> RuntimeResult<RuntimeCommand> {
-    let string = |key: &str| -> RuntimeResult<String> {
-        params
-            .get(key)
-            .and_then(serde_json::Value::as_str)
-            .map(str::to_owned)
-            .ok_or_else(|| RuntimeError::InvalidParams(format!("missing string param '{key}'")))
-    };
-    Ok(match method {
-        "applyRemoteProfile" => {
-            RuntimeCommand::ApplyRemoteProfile {
-                profile: serde_json::from_value(params.get("profile").cloned().ok_or_else(
-                    || RuntimeError::InvalidParams("missing param 'profile'".into()),
-                )?)?,
-            }
-        }
-        "reportRuntimeError" => RuntimeCommand::ReportRuntimeError {
-            message: string("message")?,
-        },
-        "reportRuntimeLog" => RuntimeCommand::ReportRuntimeLog {
-            message: string("message")?,
-        },
-        "connect" => RuntimeCommand::Connect,
-        "identity" => RuntimeCommand::Identity,
-        "profile" => RuntimeCommand::Profile,
-        "setNickname" => RuntimeCommand::SetNickname {
-            nickname: string("nickname")?,
-        },
-        "refreshPairingCode" => RuntimeCommand::RefreshPairingCode,
-        "prepareSubmitPairingCode" => RuntimeCommand::PrepareSubmitPairingCode {
-            code: string("code")?,
-        },
-        "submitPairingCode" => RuntimeCommand::SubmitPairingCode {
-            code: string("code")?,
-        },
-        "pairingInbox" => RuntimeCommand::PairingInbox,
-        "mergePairingInbox" => RuntimeCommand::MergePairingInbox {
-            items: serde_json::from_value(
-                params
-                    .get("items")
-                    .cloned()
-                    .unwrap_or_else(|| serde_json::json!([])),
-            )?,
-        },
-        "pairingOutbox" => RuntimeCommand::PairingOutbox,
-        "mergePairingOutbox" => RuntimeCommand::MergePairingOutbox {
-            items: serde_json::from_value(
-                params
-                    .get("items")
-                    .cloned()
-                    .unwrap_or_else(|| serde_json::json!([])),
-            )?,
-        },
-        "archivePairing" => RuntimeCommand::ArchivePairing {
-            pairing_id: string("pairingId")?,
-        },
-        "verifyContact" => RuntimeCommand::VerifyContact {
-            installation_id: string("installationId")?,
-        },
-        "contacts" => RuntimeCommand::Contacts,
-        "conversations" => RuntimeCommand::Conversations,
-        "messages" => RuntimeCommand::Messages { id: string("id")? },
-        "openConversation" => RuntimeCommand::OpenConversation { id: string("id")? },
-        "closeConversation" => RuntimeCommand::CloseConversation,
-        "startConversation" => RuntimeCommand::StartConversation {
-            contact_id: string("contactId")?,
-        },
-        "sendMessage" => RuntimeCommand::SendMessage {
-            id: string("id")?,
-            text: string("text")?,
-        },
-        other => {
-            return Err(RuntimeError::InvalidCommand(format!(
-                "unknown runtime method '{other}'"
-            )));
-        }
-    })
 }
 
 fn parse_uuid(value: &str) -> RuntimeResult<Uuid> {
@@ -1727,19 +1486,6 @@ mod tests {
             verification: VerificationState::Verified,
             dev: None,
         }
-    }
-
-    #[test]
-    fn dispatcher_rejects_unknown_methods() {
-        let mut runtime = runtime();
-        let response = runtime.dispatch_request(RuntimeRequest {
-            id: Some("1".to_owned()),
-            method: "missing".to_owned(),
-            params: serde_json::json!({}),
-        });
-
-        assert!(!response.ok);
-        assert_eq!(response.id.as_deref(), Some("1"));
     }
 
     #[test]
@@ -2493,7 +2239,7 @@ mod tests {
     }
 
     #[test]
-    fn close_conversation_survives_runtime_reconstruction() {
+    fn close_conversation_clears_selection_across_runtime_reconstruction() {
         let mut runtime = runtime();
         runtime
             .storage
@@ -2515,7 +2261,7 @@ mod tests {
             .receive_message("peer-1", "hello".to_owned(), None)
             .unwrap();
 
-        assert_eq!(runtime.conversations().unwrap()[0].unread_count, 5);
+        assert_eq!(runtime.conversations().unwrap()[0].unread_count, 1);
     }
 
     #[test]
@@ -2534,66 +2280,5 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(messages, vec!["one".to_owned(), "two".to_owned()]);
-    }
-
-    #[test]
-    fn dispatch_request_rolls_back_session_events_on_error() {
-        let mut runtime = runtime();
-        let response = runtime.dispatch_request(RuntimeRequest {
-            id: Some("1".to_owned()),
-            method: "setNickname".to_owned(),
-            params: serde_json::json!({
-                "nickname": "x",
-            }),
-        });
-
-        assert!(!response.ok);
-        assert!(runtime.drain_events().is_empty());
-    }
-
-    #[test]
-    fn dispatch_request_with_defers_events_until_success_callback() {
-        let mut runtime = runtime();
-        let response = runtime
-            .dispatch_request_with(
-                RuntimeRequest {
-                    id: Some("1".to_owned()),
-                    method: "connect".to_owned(),
-                    params: serde_json::json!({}),
-                },
-                |runtime, response| {
-                    assert!(runtime.drain_events().is_empty());
-                    Ok(response)
-                },
-            )
-            .unwrap();
-
-        assert!(response.ok);
-        assert_eq!(runtime.drain_events().len(), 1);
-    }
-
-    #[test]
-    fn dispatch_request_with_restores_session_when_callback_fails() {
-        let mut runtime = runtime();
-        let error = runtime
-            .dispatch_request_with(
-                RuntimeRequest {
-                    id: Some("1".to_owned()),
-                    method: "openConversation".to_owned(),
-                    params: serde_json::json!({
-                        "id": "peer-1",
-                    }),
-                },
-                |_runtime, _response| {
-                    Err::<RuntimeResponse, RuntimeError>(RuntimeError::Storage(
-                        "commit failed".to_owned(),
-                    ))
-                },
-            )
-            .unwrap_err();
-
-        assert!(matches!(error, RuntimeError::Storage(_)));
-        assert_eq!(runtime.session().selected_conversation_id(), None);
-        assert!(runtime.drain_events().is_empty());
     }
 }

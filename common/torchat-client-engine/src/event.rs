@@ -11,10 +11,7 @@ pub enum ConnectionState {
     Authenticating,
     WaitingForReady,
     Connected,
-    Backoff {
-        attempt: u32,
-        retry_in_ms: u64,
-    },
+    Backoff { attempt: u32, retry_in_ms: u64 },
     Stopped,
 }
 
@@ -50,7 +47,11 @@ pub struct EngineFatalError {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(
+    tag = "type",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
 pub enum ResponsePayload {
     #[default]
     Empty,
@@ -73,17 +74,31 @@ pub enum ResponseResult {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(
+    tag = "type",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
 pub enum EngineEvent {
     Response {
         request_id: String,
         result: ResponseResult,
     },
-    Runtime(torchat_client_runtime::RuntimeEvent),
-    Connection(ConnectionSnapshot),
-    NotificationRequested(NotificationRequest),
-    Log(EngineLogEvent),
-    Fatal(EngineFatalError),
+    Runtime {
+        event: torchat_client_runtime::RuntimeEvent,
+    },
+    Connection {
+        snapshot: ConnectionSnapshot,
+    },
+    NotificationRequested {
+        notification: NotificationRequest,
+    },
+    Log {
+        log: EngineLogEvent,
+    },
+    Fatal {
+        error: EngineFatalError,
+    },
 }
 
 pub struct EngineEventReceiver {

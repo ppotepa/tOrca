@@ -84,7 +84,7 @@ function Clear-TorChatDesktopState {
             )
         })
     foreach ($process in $running) {
-        Write-Host "[torchat] Stopping desktop runtime PID $($process.ProcessId) before clearing state."
+        Write-Host "[torchat] Stopping desktop engine host PID $($process.ProcessId) before clearing state."
         Stop-Process -Id ([int]$process.ProcessId) -Force -ErrorAction SilentlyContinue
     }
     if ($running.Count -gt 0) { Start-Sleep -Milliseconds 300 }
@@ -193,7 +193,7 @@ switch ($operation) {
         $tor = & (Join-Path $PSScriptRoot 'internal\ensure-desktop-tor.ps1') $repoRoot
         $env:TORCHAT_TOR_BINARY = $tor.Binary
         $env:TORCHAT_TOR_DATA_DIR = $tor.DataDirectory
-        $env:TORCHAT_RUNTIME_PATH = Join-Path $repoRoot 'target\release\torchat-desktop.exe'
+        $env:TORCHAT_DESKTOP_PATH = Join-Path $repoRoot 'target\release\torchat-desktop.exe'
         $env:TORCHAT_IDENTITY_FILE = Join-Path $repoRoot '.torchat\clients\desktop\identity.key'
         $env:TORCHAT_LOG_DIR = Join-Path $repoRoot '.torchat\logs'
         $variant = if ($Release) { 'Release' } else { 'Debug' }

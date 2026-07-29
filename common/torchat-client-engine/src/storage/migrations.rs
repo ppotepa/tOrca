@@ -26,11 +26,9 @@ impl MigrationRunner {
     pub fn run(&self, connection: &Connection) -> EngineResult<()> {
         for migration in self.migrations {
             let applied: Option<i64> = connection
-                .query_row(
-                    super::sqlite::MIGRATION_LOOKUP,
-                    [migration.name],
-                    |row| row.get("version"),
-                )
+                .query_row(super::sqlite::MIGRATION_LOOKUP, [migration.name], |row| {
+                    row.get("version")
+                })
                 .optional()
                 .map_err(sqlite_error)?;
             if applied == Some(migration.version) {

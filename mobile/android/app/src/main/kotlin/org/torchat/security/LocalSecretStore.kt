@@ -9,7 +9,7 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-/** Uses an Android Keystore AES key to protect the SQLCipher database key. */
+/** Uses an Android Keystore AES key to protect the Rust engine SQLCipher key. */
 class LocalSecretStore(private val context: Context) {
     private val alias = "torchat-local-db-wrap-v1"
     private val prefs = context.getSharedPreferences("torchat-secrets", Context.MODE_PRIVATE)
@@ -48,11 +48,6 @@ class LocalSecretStore(private val context: Context) {
         return decrypt(key, android.util.Base64.decode(encoded, android.util.Base64.NO_WRAP))
     }
 
-    fun nickname(): String? = prefs.getString("nickname", null)
-
-    fun saveNickname(value: String) {
-        prefs.edit().putString("nickname", value.trim()).apply()
-    }
 
     fun clearLocalSecrets() {
         prefs.edit().clear().commit()

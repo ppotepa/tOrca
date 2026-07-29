@@ -24,13 +24,8 @@ abstract interface class ClientRuntime {
   Future<void> acceptPairing(String pairingId);
   Future<void> rejectPairing(String pairingId);
   Future<void> cancelPairing(String pairingId);
-}
-
-/// Optional capability used by production runtimes. Keeping it separate from
-/// the base bridge lets lightweight test doubles model only the operations a
-/// given test needs.
-abstract interface class PairingArchiveRuntime {
   Future<void> archivePairing(String pairingId);
+  Future<void> updateAppVisibility(bool foreground);
 }
 
 ClientRuntime createClientRuntime() => createPlatformRuntime();

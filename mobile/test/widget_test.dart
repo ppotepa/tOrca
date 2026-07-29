@@ -31,6 +31,9 @@ class _SplashRuntime implements ClientRuntime {
   Future<void> rejectPairing(String pairingId) async {}
   @override
   Future<void> cancelPairing(String pairingId) async {}
+
+  @override
+  Future<void> archivePairing(String pairingId) async {}
   @override
   Future<void> verifyContact(String installationId) async {}
   @override
@@ -48,6 +51,9 @@ class _SplashRuntime implements ClientRuntime {
   Future<void> startConversation(String contactId) async {}
   @override
   Future<void> sendMessage(String id, String text) async {}
+
+  @override
+  Future<void> updateAppVisibility(bool foreground) async {}
 }
 
 void main() {

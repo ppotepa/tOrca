@@ -1,4 +1,4 @@
-﻿package org.torchat.mobile
+package org.torchat.mobile
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -13,19 +13,16 @@ import android.util.Base64
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import org.json.JSONObject
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.torchat.security.LocalSecretStore
 import org.torchat.security.TorRuntime
-import org.torchat.core.NativeIdentity
 import org.torchat.generated.EngineContract
 import java.io.File
 
@@ -48,15 +45,15 @@ class TorChatForegroundService : Service() {
         }
         if (localReady.isCompleted) localReady = kotlinx.coroutines.CompletableDeferred()
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, notification("Uruchamianie Torâ€¦"))
+        startForeground(NOTIFICATION_ID, notification("Uruchamianie Tor…"))
         publish(
             mapOf(
                 EngineContract.TYPE to EngineContract.TOR_STATUS,
-                "phase" to "starting",
-                "label" to "Uruchamianie usÅ‚ugi Tor",
-                "detail" to "Przygotowywanie lokalnego procesu Tor",
-                "progress" to 0,
-                "retryAttempt" to 0,
+                EngineContract.PHASE to EngineContract.TRANSPORT_PHASE_STARTING,
+                EngineContract.LABEL to "Uruchamianie usługi Tor",
+                EngineContract.DETAIL to "Przygotowywanie lokalnego procesu Tor",
+                EngineContract.PROGRESS to 0,
+                EngineContract.RETRY_ATTEMPT to 0,
             ),
         )
     }
@@ -73,9 +70,13 @@ class TorChatForegroundService : Service() {
                             // Native Tor reaching 100% completes the first
                             // phase, not the whole application connection.
                             val snapshot = torStatusSnapshot(
-                                phase = if (progress >= 100) "connecting" else "bootstrapping",
+                                phase = if (progress >= 100) {
+                                    EngineContract.TRANSPORT_PHASE_CONNECTING
+                                } else {
+                                    EngineContract.TRANSPORT_PHASE_BOOTSTRAPPING
+                                },
                                 label = if (progress >= 100) {
-                                    "Tor gotowy Â· Å‚Ä…czenie z relayem"
+                                    "Tor gotowy · łączenie z relayem"
                                 } else {
                                     "Tor bootstrap: $progress%"
                                 },
@@ -119,36 +120,39 @@ class TorChatForegroundService : Service() {
                             Log.w("TorChat-Engine", "Engine event pump stopped", error)
                         },
                     ).also { it.start() }
-                    runCatching {
-                        host.submitCommandAndAwait(JSONObject().put("type", "bootstrap"))
-                    }.onFailure { error ->
-                        Log.w("TorChat-Engine", "Engine bootstrap command failed", error)
-                    }
                     publishEngineFact(engineAppVisibilityChangedFactJson(foreground = true))
                     publishEngineFact(engineTorEndpointAvailableFactJson(socks5Url))
                     pendingTorStatuses.forEach(::publishTorStatusFact)
-                    val loadedIdentity = NativeIdentity.fromPrivateKey(identitySeed)
-                    activeIdentity = loadedIdentity
-                    val localNickname = if (BuildConfig.DEBUG && BuildConfig.TORCHAT_DEV_PROFILE.isNotBlank()) {
-                        BuildConfig.TORCHAT_DEV_PROFILE
-                    } else {
-                        secrets.nickname().orEmpty()
+
+                    val debugNickname = BuildConfig.TORCHAT_DEV_PROFILE
+                        .takeIf { BuildConfig.DEBUG }
+                        ?.trim()
+                        .orEmpty()
+                    if (debugNickname.length in 2..32) {
+                        host.submitCommandAndAwait(
+                            engineCommand(EngineContract.COMMAND_SET_NICKNAME)
+                                .put(EngineContract.NICKNAME, debugNickname),
+                        )
                     }
-                    activeProfile = runtimeProfileResponse(loadedIdentity, localNickname)
+                    val profile = host.submitQueryAndAwait(EngineContract.COMMAND_GET_PROFILE)
+                    publishProfileReady(profile)
                     localReady.complete(Unit)
-                    publishProfileReady(activeProfile!!)
-                    Log.i("TorChat-Runtime", "Foreground service runtime initialized nickname=$localNickname connected=false")
-                    host.submitCommandAndAwait(JSONObject().put("type", "connect"))
+                    Log.i(
+                        "TorChat-Engine",
+                        "Foreground service client engine initialized connected=false",
+                    )
+                    host.submitCommandAndAwait(engineCommand(EngineContract.COMMAND_CONNECT))
                     config
                 }.onSuccess {
                     starting = false
                     updateNotification("TorChat uruchomiony")
                 }.onFailure { error ->
                     starting = false
-                    Log.e("TorChat-Runtime", "Mobile runtime initialization failed", error)
+                    Log.e("TorChat-Engine", "Mobile engine initialization failed", error)
                     // Reset the native service before retrying. The SOCKS
                     // listener can remain bound after a failed bootstrap on
                     // some OEM builds, so a simple Activity retry is unsafe.
+                    shutdownEngineHost()
                     runtime?.stop()
                     runtime = null
                     val failedReady = ready
@@ -158,15 +162,15 @@ class TorChatForegroundService : Service() {
                     publish(
                         mapOf(
                             EngineContract.TYPE to EngineContract.RUNTIME_ERROR,
-                            "message" to (error.message ?: "TorChat runtime failed"),
+                            EngineContract.MESSAGE to (error.message ?: "TorChat engine failed"),
                         ),
                     )
-                    updateNotification("BÅ‚Ä…d TorChat")
+                    updateNotification("Błąd TorChat")
                     stopSelf(startId)
                 }
             }
         }
-        // This runtime is the owner of the Tor circuit and the delivery
+        // The client engine is the owner of the Tor circuit and delivery
         // queues. Ask Android to recreate it after a process reclaim; it
         // still cannot survive an explicit force-stop, which is an Android
         // platform guarantee no app may bypass.
@@ -178,16 +182,11 @@ class TorChatForegroundService : Service() {
     override fun onDestroy() {
         publishEngineFact(engineAppVisibilityChangedFactJson(foreground = false))
         publishEngineFact(engineTorEndpointLostFactJson("TorChat service stopped"))
-        runCatching { engineHost?.close() }
-            .onFailure { error -> Log.w("TorChat-Engine", "Engine shutdown failed", error) }
+        shutdownEngineHost()
         runtime?.release()
         runtime = null
-        engineEventPump = null
-        engineHost = null
         starting = false
         activeEngineHost = null
-        activeIdentity = null
-        activeProfile = null
         if (!ready.isCompleted) {
             ready.completeExceptionally(IllegalStateException("TorChat service stopped"))
         }
@@ -195,84 +194,104 @@ class TorChatForegroundService : Service() {
         super.onDestroy()
     }
 
+    private fun shutdownEngineHost() {
+        runCatching { runBlocking { engineEventPump?.stop() } }
+            .onFailure { error -> Log.w("TorChat-Engine", "Engine event pump shutdown failed", error) }
+        engineEventPump = null
+        runCatching { engineHost?.close() }
+            .onFailure { error -> Log.w("TorChat-Engine", "Engine shutdown failed", error) }
+        engineHost = null
+        activeEngineHost = null
+    }
+
     private fun publish(event: Map<String, Any?>) {
         if (event[EngineContract.TYPE] == EngineContract.TOR_STATUS) {
             lastTorStatus = event
-        }
-        when (event[EngineContract.TYPE]) {
-            EngineContract.INVITE_RECEIVED,
-            EngineContract.MESSAGE_RECEIVED -> {
-                val kind = when (event[EngineContract.TYPE]) {
-                    EngineContract.INVITE_RECEIVED -> "invite"
-                    else -> "message"
-                }
-                val payload = event["payload"]?.toString()
-                notifyIncoming(this, kind, payload)
-            }
         }
         eventListener?.invoke(event)
     }
 
     private fun publishEngineFact(fact: JSONObject) {
         runCatching { engineHost?.publishPlatformFact(fact) }
-            .onFailure { error -> Log.w("TorChat-Engine", "Unable to publish engine fact ${fact.optString("type")}", error) }
+            .onFailure { error -> Log.w("TorChat-Engine", "Unable to publish engine fact ${fact.optString(EngineContract.TYPE)}", error) }
     }
 
-    private fun publishProfileReady(profile: org.torchat.transport.ProfileResponse) {
+    private fun publishProfileReady(profile: Any?) {
+        val profileMap = profile as? Map<*, *>
+            ?: error("Engine profile response is not an object")
         publish(
             mapOf(
                 EngineContract.TYPE to EngineContract.PROFILE_READY,
-                "profile" to profile.toRuntimeMap(),
+                EngineContract.PROFILE to profileMap.entries.associate { (key, value) ->
+                    key.toString() to value
+                },
             ),
         )
     }
 
     private fun publishTorStatusFact(status: JSONObject) {
+        val transportPhase = status.optString(EngineContract.PHASE)
+            .ifBlank { EngineContract.TRANSPORT_PHASE_ERROR }
         publishEngineFact(
             engineTorStatusFactJson(
-                phase = status.optString("phase").ifBlank { "failed" },
-                progress = status.optInt("progress", 0).coerceIn(0, 100),
-                detail = status.optString("detail").ifBlank { status.optString("label", "Tor status update") },
+                phase = torPhaseForTransportPhase(transportPhase),
+                progress = status.optInt(EngineContract.PROGRESS, 0).coerceIn(0, 100),
+                detail = status.optString(EngineContract.DETAIL).ifBlank {
+                    status.optString(EngineContract.LABEL, "Tor status update")
+                },
             ),
         )
+    }
+
+    private fun torPhaseForTransportPhase(phase: String): String = when (phase) {
+        EngineContract.TRANSPORT_PHASE_STARTING -> EngineContract.TOR_PHASE_STARTING
+        EngineContract.TRANSPORT_PHASE_BOOTSTRAPPING -> EngineContract.TOR_PHASE_BOOTSTRAPPING
+        EngineContract.TRANSPORT_PHASE_CONNECTING,
+        EngineContract.TRANSPORT_PHASE_CONNECTED,
+        EngineContract.TRANSPORT_PHASE_DEGRADED,
+        EngineContract.TRANSPORT_PHASE_RECONNECTING -> EngineContract.TOR_PHASE_READY
+        EngineContract.TRANSPORT_PHASE_OFFLINE,
+        EngineContract.TRANSPORT_PHASE_ERROR -> EngineContract.TOR_PHASE_FAILED
+        else -> error("Unknown transport phase: $phase")
     }
 
     private fun handleEngineEvent(event: JSONObject) {
         val publishedEvents = mapEngineEventToPublishedEvents(event)
         publishedEvents.forEach(::publish)
-        when (event.optString("type")) {
-            "connection" -> {
+        when (event.optString(EngineContract.TYPE)) {
+            EngineContract.EVENT_CONNECTION -> {
                 val status = publishedEvents.firstOrNull()
-                when (status?.get("phase")?.toString().orEmpty()) {
-                    "connected" -> {
+                when (status?.get(EngineContract.PHASE)?.toString().orEmpty()) {
+                    EngineContract.TRANSPORT_PHASE_CONNECTED -> {
                         if (!ready.isCompleted) {
                             ready.complete(Unit)
                         }
-                        updateNotification("TorChat dziaÅ‚a przez Tor")
+                        updateNotification("TorChat działa przez Tor")
                     }
-                    "reconnecting" -> updateNotification("Ponowne Å‚Ä…czenie z relay...")
-                    "connecting" -> updateNotification("Å\u0081Ä…czenie z relay...")
+                    EngineContract.TRANSPORT_PHASE_RECONNECTING -> updateNotification("Ponowne łączenie z relay...")
+                    EngineContract.TRANSPORT_PHASE_CONNECTING -> updateNotification("Łączenie z relay...")
                 }
             }
-            "log" -> {
-                val message = event.optString("message")
+            EngineContract.EVENT_LOG -> {
+                val log = event.optJSONObject(EngineContract.LOG)
+                val message = log?.optString(EngineContract.MESSAGE).orEmpty()
                 Log.i("TorChat-Engine", message.ifBlank { event.toString() })
             }
-            "fatal" -> {
-                val message = event.optString("message").ifNullOrBlank { "Client engine failed" }
+            EngineContract.EVENT_FATAL -> {
+                val error = event.optJSONObject(EngineContract.ERROR)
+                val message = error?.optString(EngineContract.MESSAGE)
+                    .ifNullOrBlank { "Client engine failed" }
                 Log.e("TorChat-Engine", message)
                 if (!ready.isCompleted) {
                     ready.completeExceptionally(IllegalStateException(message))
                 }
             }
-            "notification_requested" -> {
-                val notification = event.optJSONObject("notificationRequested")
-                    ?: event.optJSONObject("notification_requested")
-                    ?: event
+            EngineContract.EVENT_NOTIFICATION_REQUESTED -> {
+                val notification = event.optJSONObject(EngineContract.NOTIFICATION) ?: return
                 postAlert(
-                    title = notification.optString("title").ifBlank { "TorChat" },
-                    text = notification.optString("body").ifBlank { "Nowe zdarzenie" },
-                    id = notification.optString("id").hashCode(),
+                    title = notification.optString(EngineContract.TITLE).ifBlank { "TorChat" },
+                    text = notification.optString(EngineContract.BODY).ifBlank { "Nowe zdarzenie" },
+                    id = notification.optString(EngineContract.ID).hashCode(),
                 )
             }
         }
@@ -286,12 +305,12 @@ class TorChatForegroundService : Service() {
         latencyMs: Long? = null,
         retryAttempt: Int = 0,
     ) = JSONObject()
-        .put("phase", phase)
-        .put("label", label)
-        .put("detail", detail)
-        .put("progress", progress)
-        .put("latencyMs", latencyMs)
-        .put("retryAttempt", retryAttempt)
+        .put(EngineContract.PHASE, phase)
+        .put(EngineContract.LABEL, label)
+        .put(EngineContract.DETAIL, detail)
+        .put(EngineContract.PROGRESS, progress)
+        .put(EngineContract.LATENCY_MS, latencyMs)
+        .put(EngineContract.RETRY_ATTEMPT, retryAttempt)
 
     private fun updateNotification(text: String) {
         getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification(text))
@@ -312,7 +331,7 @@ class TorChatForegroundService : Service() {
         )
         manager.createNotificationChannel(
             NotificationChannel(ALERT_CHANNEL_ID, "TorChat messages", NotificationManager.IMPORTANCE_HIGH).apply {
-                description = "Nowe wiadomoÅ›ci i zaproszenia"
+                description = "Nowe wiadomości i zaproszenia"
                 enableVibration(true)
                 setSound(
                     android.provider.Settings.System.DEFAULT_NOTIFICATION_URI,
@@ -342,27 +361,7 @@ class TorChatForegroundService : Service() {
         @Volatile private var localReady = kotlinx.coroutines.CompletableDeferred<Unit>()
         @Volatile var eventListener: ((Map<String, Any?>) -> Unit)? = null
         @Volatile var activeEngineHost: AndroidEngineHost? = null
-        @Volatile var activeIdentity: NativeIdentity? = null
-        @Volatile var activeProfile: org.torchat.transport.ProfileResponse? = null
         @Volatile var lastTorStatus: Map<String, Any?>? = null
-
-        fun notifyIncoming(context: Context, kind: String?, payload: String?) {
-            val title = when (kind) {
-                "invite" -> "Nowe zaproszenie"
-                else -> "Nowa wiadomoÅ›Ä‡"
-            }
-            val text = when {
-                !payload.isNullOrBlank() -> payload
-                kind == "invite" -> "Masz nowÄ… proÅ›bÄ™ o rozmowÄ™."
-                else -> "Masz nowÄ… wiadomoÅ›Ä‡."
-            }
-            notifyIncomingNotification(
-                context = context,
-                title = title,
-                text = text,
-                notificationId = ALERT_NOTIFICATION_BASE + ((payload?.hashCode() ?: title.hashCode()) and 0x3fff),
-            )
-        }
 
         private fun notifyIncomingNotification(
             context: Context,
@@ -402,7 +401,7 @@ class TorChatForegroundService : Service() {
                         "TorChat messages",
                         NotificationManager.IMPORTANCE_HIGH,
                     ).apply {
-                        description = "Nowe wiadomoÅ›ci i zaproszenia"
+                        description = "Nowe wiadomości i zaproszenia"
                         enableVibration(true)
                         setSound(
                             android.provider.Settings.System.DEFAULT_NOTIFICATION_URI,

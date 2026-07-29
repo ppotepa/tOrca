@@ -61,45 +61,45 @@ class RuntimePayload {
   InviteCode inviteCode() => InviteCode.fromMap(toMap());
 
   RuntimeEvent runtimeEvent() {
-    final type = string(RuntimeContract.type);
+    final type = string(EngineContract.type);
     switch (type) {
-      case RuntimeContract.runtimeReady:
-        return RuntimeReadyEvent(intValue('protocol') ?? 0);
-      case RuntimeContract.torStatus:
-        final phase = string('phase');
+      case EngineContract.runtimeReady:
+        return RuntimeReadyEvent(intValue(EngineContract.protocol) ?? 0);
+      case EngineContract.torStatus:
+        final phase = string(EngineContract.phase);
         return TorStatusEvent(
           RuntimeTorStatus(
             phase: TransportPhase.fromValue(phase),
-            label: (string('label')?.trim().isNotEmpty ?? false)
-                ? string('label')!
+            label: (string(EngineContract.label)?.trim().isNotEmpty ?? false)
+                ? string(EngineContract.label)!
                 : TransportPhase.fromValue(phase).label,
-            detail: string('detail') ?? '',
-            progress: intValue('progress'),
-            latencyMs: intValue('latencyMs'),
-            retryAttempt: intValue('retryAttempt') ?? intValue('attempt') ?? 0,
+            detail: string(EngineContract.detail) ?? '',
+            progress: intValue(EngineContract.progress),
+            latencyMs: intValue(EngineContract.latencyMs),
+            retryAttempt: intValue(EngineContract.retryAttempt) ?? intValue(EngineContract.attempt) ?? 0,
           ),
         );
-      case RuntimeContract.profileReady:
+      case EngineContract.profileReady:
         return ProfileReadyEvent(
-          RuntimePayload.fromDynamicOrNull(this['profile'])?.profile() ??
+          RuntimePayload.fromDynamicOrNull(this[EngineContract.profile])?.profile() ??
               const RuntimeProfile(),
         );
-      case RuntimeContract.runtimeError:
-        return RuntimeErrorEvent(string('message') ?? 'Runtime error');
-      case RuntimeContract.runtimeLog:
-        return RuntimeLogEvent(string('message') ?? '');
+      case EngineContract.runtimeError:
+        return RuntimeErrorEvent(string(EngineContract.message) ?? 'Runtime error');
+      case EngineContract.runtimeLog:
+        return RuntimeLogEvent(string(EngineContract.message) ?? '');
       default:
         if (type == null || type.isEmpty) {
           throw FormatException('missing runtime event type');
         }
-        if (type == RuntimeContract.changed ||
-            type == RuntimeContract.inviteReceived ||
-            type == RuntimeContract.inviteStateChanged ||
-            type == RuntimeContract.messageReceived ||
-            type == RuntimeContract.messageStateChanged ||
-            type == RuntimeContract.conversationReadChanged) {
+        if (type == EngineContract.changed ||
+            type == EngineContract.inviteReceived ||
+            type == EngineContract.inviteStateChanged ||
+            type == EngineContract.messageReceived ||
+            type == EngineContract.messageStateChanged ||
+            type == EngineContract.conversationReadChanged) {
           final payload = toMap()
-            ..remove(RuntimeContract.type);
+            ..remove(EngineContract.type);
           return DataChangedEvent(type, payload);
         }
         throw FormatException('unknown runtime event type: $type');

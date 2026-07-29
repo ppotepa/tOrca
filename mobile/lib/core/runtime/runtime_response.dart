@@ -1,36 +1,28 @@
 import '../models/generated/runtime_models.g.dart';
-import 'runtime_payload.dart';
 
-class RuntimeResponse {
-  const RuntimeResponse({
-    required this.id,
+class EngineResponse {
+  const EngineResponse({
+    required this.requestId,
     required this.ok,
-    required this.payload,
     required this.result,
-    this.error,
-    this.eventType,
+    this.errorCode,
+    this.errorMessage,
   });
 
-  final String? id;
+  final String requestId;
   final bool ok;
-  final RuntimePayload payload;
   final Object? result;
-  final String? error;
-  final String? eventType;
+  final String? errorCode;
+  final String? errorMessage;
 
-  factory RuntimeResponse.fromDynamic(Object? value) {
-    final response = GeneratedRuntimeResponse.fromDynamic(value);
-    final payload = RuntimePayload(response.payload);
-    return RuntimeResponse(
-      id: response.id,
+  factory EngineResponse.fromDynamic(Object? value) {
+    final response = GeneratedEngineResponse.fromDynamic(value);
+    return EngineResponse(
+      requestId: response.requestId,
       ok: response.ok,
-      payload: payload,
       result: response.result,
-      error: response.error,
-      eventType: response.eventType,
+      errorCode: response.errorCode,
+      errorMessage: response.errorMessage,
     );
   }
-
-  bool get isEvent => id == null;
-  bool get isRuntimeErrorEvent => eventType == 'runtime_error';
 }

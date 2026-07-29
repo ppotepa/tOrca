@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, bail};
+use torchat_client_engine::TorPhase;
 use std::{
     fs,
     io::{BufRead, BufReader},
@@ -12,7 +13,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Clone, Debug)]
 pub struct TorStatus {
-    pub phase: String,
+    pub phase: TorPhase,
     pub label: String,
     pub detail: String,
     pub progress: i32,
@@ -33,7 +34,7 @@ impl TorRuntime {
     pub fn external(socks_url: String) -> (Self, mpsc::Receiver<TorStatus>) {
         let (tx, rx) = mpsc::channel();
         let _ = tx.send(TorStatus {
-            phase: "external".into(),
+            phase: TorPhase::Ready,
             label: "External Tor SOCKS".into(),
             detail: "External Tor SOCKS".into(),
             progress: 70,
@@ -111,7 +112,7 @@ impl TorRuntime {
         #[cfg(test)]
         let ready = Arc::new(AtomicBool::new(false));
         let _ = tx.send(TorStatus {
-            phase: "starting".into(),
+            phase: TorPhase::Starting,
             label: "Starting Tor".into(),
             detail: "Starting Tor".into(),
             progress: 0,
@@ -133,9 +134,9 @@ impl TorRuntime {
                     }
                     let _ = status_tx.send(TorStatus {
                         phase: if progress >= 100 {
-                            "ready".into()
+                            TorPhase::Ready
                         } else {
-                            "bootstrapping".into()
+                            TorPhase::Bootstrapping
                         },
                         label: if progress >= 100 {
                             "Tor ready, connecting to onion".into()
@@ -161,7 +162,7 @@ impl TorRuntime {
                 let lowered = line.to_ascii_lowercase();
                 if lowered.contains("[err]") || lowered.contains("[warn]") {
                     let _ = tx.send(TorStatus {
-                        phase: "warning".into(),
+                        phase: TorPhase::Failed,
                         label: line,
                         detail: String::new(),
                         progress: 0,

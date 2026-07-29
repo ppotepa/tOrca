@@ -126,13 +126,46 @@ JSON shape:
   "requestId": "string",
   "command": {
     "type": "send_message",
-    "conversationId": "peer-1",
+    "conversation_id": "peer-1",
     "body": "hello"
   }
 }
 ```
 
 `requestId` is required for correlating asynchronous responses.
+
+Wire naming is intentionally split into three generated namespaces:
+
+- public Flutter/MethodChannel method names use camelCase, for example
+  `sendMessage`;
+- `EngineCommand` tags and command fields use the exact Rust serde snake_case
+  names, for example `send_message` and `conversation_id`;
+- response DTOs and engine-event fields use camelCase, for example
+  `conversationId`, `requestId`, and `retryAttempt`.
+
+Hosts must use the generated constants and parsers rather than translating
+these names manually.
+
+
+## Response Envelope
+
+Every accepted command produces exactly one `response` event with the same
+`requestId`. Successful responses always contain an explicit payload envelope:
+
+```json
+{
+  "type": "response",
+  "requestId": "string",
+  "result": {
+    "status": "ok",
+    "payload": { "type": "empty" }
+  }
+}
+```
+
+JSON results use `{ "type": "json", "value": ... }`. Missing payloads,
+unknown event types, unknown statuses, and unknown payload types are contract
+errors in generated Kotlin and Dart parsers.
 
 ## PlatformFact
 

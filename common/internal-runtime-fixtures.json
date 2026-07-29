@@ -49,9 +49,13 @@
     "capability": "chat",
     "expiresAt": 1760000060,
     "state": "PENDING",
-    "availableActions": ["ACCEPT", "REJECT"],
+    "availableActions": [
+      "ACCEPT",
+      "REJECT"
+    ],
     "offerInviteId": "invite-1",
-    "offerPayload": "welcome-offer-payload"
+    "offerPayload": "welcome-offer-payload",
+    "received": true
   },
   "pairingOutboxItem": {
     "pairingId": "pairing-2",
@@ -59,7 +63,9 @@
     "expiresAt": 1760000060,
     "state": "PENDING",
     "received": false,
-    "availableActions": ["CANCEL"]
+    "availableActions": [
+      "CANCEL"
+    ]
   },
   "pairingPreparation": {
     "pairingId": "pairing-1",
@@ -99,11 +105,16 @@
         "expiresAt": 1760000060,
         "state": "PENDING",
         "received": true,
-        "availableActions": ["ACCEPT", "REJECT"]
+        "availableActions": [
+          "ACCEPT",
+          "REJECT"
+        ]
       }
     ],
     "acknowledgements": [
-      {"pairingId": "pairing-1"}
+      {
+        "pairingId": "pairing-1"
+      }
     ]
   },
   "pairingCompletionResult": {
@@ -135,16 +146,55 @@
     "PERMANENT_FAILURE"
   ],
   "events": [
-    {"type": "runtime_ready", "protocol": 1},
-    {"type": "tor_status", "phase": "connected", "label": "Połączono z relayem przez Tor", "progress": 100, "latencyMs": 420, "retryAttempt": 0},
-    {"type": "profile_ready", "profile": {"installationId": "installation-alice", "nickname": "Alice", "publicKey": "alice-public-key", "fingerprint": "aa11 bb22 cc33 dd44 ee55 ff66 0011 2233"}},
-    {"type": "invite_received", "pairingId": "pairing-1", "nickname": "Bob"},
-    {"type": "invite_state_changed"},
-    {"type": "message_received", "text": "hello"},
-    {"type": "message_state_changed"},
-    {"type": "conversation_read_changed"},
-    {"type": "changed"},
-    {"type": "runtime_error", "message": "runtime failed"},
-    {"type": "runtime_log", "message": "diagnostic"}
+    {
+      "type": "runtime_ready",
+      "protocol": 1
+    },
+    {
+      "type": "tor_status",
+      "phase": "connected",
+      "label": "Połączono z relayem przez Tor",
+      "progress": 100,
+      "latencyMs": 420,
+      "retryAttempt": 0
+    },
+    {
+      "type": "profile_ready",
+      "profile": {
+        "installationId": "installation-alice",
+        "nickname": "Alice",
+        "publicKey": "alice-public-key",
+        "fingerprint": "aa11 bb22 cc33 dd44 ee55 ff66 0011 2233"
+      }
+    },
+    {
+      "type": "invite_received",
+      "pairingId": "pairing-1",
+      "nickname": "Bob"
+    },
+    {
+      "type": "invite_state_changed"
+    },
+    {
+      "type": "message_received",
+      "text": "hello"
+    },
+    {
+      "type": "message_state_changed"
+    },
+    {
+      "type": "conversation_read_changed"
+    },
+    {
+      "type": "changed"
+    },
+    {
+      "type": "runtime_error",
+      "message": "runtime failed"
+    },
+    {
+      "type": "runtime_log",
+      "message": "diagnostic"
+    }
   ]
 }

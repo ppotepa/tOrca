@@ -5,6 +5,9 @@ import kotlinx.coroutines.withTimeout
 import org.json.JSONArray
 import org.json.JSONObject
 import org.torchat.core.NativeClientEngine
+import org.torchat.generated.EngineContract
+import org.torchat.generated.GeneratedEngineEvent
+import org.torchat.generated.GeneratedEngineResponse
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -25,8 +28,8 @@ class AndroidEngineHost private constructor(
     fun submitCommand(requestId: String, command: JSONObject) {
         submitJson(
             JSONObject()
-                .put("requestId", requestId)
-                .put("command", command)
+                .put(EngineContract.REQUEST_ID, requestId)
+                .put(EngineContract.COMMAND, command)
                 .toString(),
         )
     }
@@ -37,14 +40,13 @@ class AndroidEngineHost private constructor(
         pollJson(timeoutMs)
             .takeUnless { it == "null" }
             ?.let(::JSONObject)
+            ?.also { GeneratedEngineEvent.fromJson(it) }
 
     fun acceptPolledEvent(event: JSONObject): Boolean {
-        if (event.optString("type") != "response") {
+        if (event.optString(EngineContract.TYPE) != EngineContract.EVENT_RESPONSE) {
             return false
         }
-        val requestId = event.optString("requestId")
-            .ifBlank { event.optString("request_id") }
-            .ifBlank { return false }
+        val requestId = event.optString(EngineContract.REQUEST_ID).ifBlank { return false }
         pendingResponses.remove(requestId)?.complete(event)
         return true
     }
@@ -57,14 +59,20 @@ class AndroidEngineHost private constructor(
         }
         return try {
             submitCommand(requestId, command)
-            decodeResponse(withTimeout(timeoutMs) { response.await() })
+            val decoded = GeneratedEngineResponse.fromJson(
+                withTimeout(timeoutMs) { response.await() },
+            )
+            if (!decoded.ok) {
+                error(decoded.errorMessage ?: decoded.errorCode ?: "Engine request failed")
+            }
+            decoded.value
         } finally {
             pendingResponses.remove(requestId)
         }
     }
 
     suspend fun submitQueryAndAwait(type: String, timeoutMs: Long = 10_000L): Any? =
-        submitCommandAndAwait(JSONObject().put("type", type), timeoutMs)
+        submitCommandAndAwait(engineCommand(type), timeoutMs)
 
     fun platformFactJson(factJson: String) {
         engine.platformFactJson(factJson)
@@ -100,69 +108,42 @@ class AndroidEngineHost private constructor(
         val logDirectory: File? = null,
     ) {
         fun toJson(): JSONObject = JSONObject()
-            .put("databasePath", databasePath.absolutePath)
-            .put("databaseKey", bytesJson(databaseKey))
-            .put("identityPrivateKey", bytesJson(identityPrivateKey))
-            .put("relayOnionUrl", relayOnionUrl)
-            .put("initialSocks5Url", initialSocks5Url ?: JSONObject.NULL)
-            .put("logDirectory", logDirectory?.absolutePath ?: JSONObject.NULL)
-            .put("platform", "android")
+            .put(EngineContract.DATABASE_PATH, databasePath.absolutePath)
+            .put(EngineContract.DATABASE_KEY, bytesJson(databaseKey))
+            .put(EngineContract.IDENTITY_PRIVATE_KEY, bytesJson(identityPrivateKey))
+            .put(EngineContract.RELAY_ONION_URL, relayOnionUrl)
+            .put(EngineContract.INITIAL_SOCKS5_URL, initialSocks5Url ?: JSONObject.NULL)
+            .put(EngineContract.LOG_DIRECTORY, logDirectory?.absolutePath ?: JSONObject.NULL)
+            .put(EngineContract.PLATFORM, "android")
     }
 }
 
-private fun decodeResponse(response: JSONObject): Any? {
-    val result = response.optJSONObject("result") ?: error("Engine response missing result envelope")
-    return when (result.optString("status")) {
-        "ok" -> decodeOkPayload(result.optJSONObject("payload"))
-        "error" -> error(result.optString("message").ifBlank { "Engine request failed" })
-        else -> error("Engine response has unknown status: ${result.optString("status")}")
-    }
-}
-
-private fun decodeOkPayload(payload: JSONObject?): Any? {
-    val body = payload ?: return null
-    return when (body.optString("type")) {
-        "empty" -> null
-        "json" -> normalizeJsonValue(body.opt("value"))
-        else -> normalizeJsonValue(body.opt("value"))
-    }
-}
-
-private fun normalizeJsonValue(value: Any?): Any? = when (value) {
-    null, JSONObject.NULL -> null
-    is JSONObject -> value.keys().asSequence().associateWith { key ->
-        normalizeJsonValue(value.opt(key))
-    }
-    is JSONArray -> List(value.length()) { index ->
-        normalizeJsonValue(value.opt(index))
-    }
-    else -> value
-}
+fun engineCommand(type: String): JSONObject = JSONObject()
+    .put(EngineContract.TYPE, type)
 
 fun engineTorStatusFactJson(
     phase: String,
     progress: Int,
     detail: String,
-): JSONObject = JSONObject()
-    .put("type", "tor_status")
-    .put("phase", phase)
-    .put("progress", progress)
-    .put("detail", detail)
+): JSONObject = engineCommand(EngineContract.FACT_TOR_STATUS)
+    .put(EngineContract.PHASE, phase)
+    .put(EngineContract.PROGRESS, progress)
+    .put(EngineContract.DETAIL, detail)
 
-fun engineTorEndpointAvailableFactJson(socks5Url: String): JSONObject = JSONObject()
-    .put("type", "tor_endpoint_available")
-    .put("socks5Url", socks5Url)
+fun engineTorEndpointAvailableFactJson(socks5Url: String): JSONObject =
+    engineCommand(EngineContract.FACT_TOR_ENDPOINT_AVAILABLE)
+        .put(EngineContract.FACT_SOCKS5_URL, socks5Url)
 
-fun engineTorEndpointLostFactJson(reason: String): JSONObject = JSONObject()
-    .put("type", "tor_endpoint_lost")
-    .put("reason", reason)
+fun engineTorEndpointLostFactJson(reason: String): JSONObject =
+    engineCommand(EngineContract.FACT_TOR_ENDPOINT_LOST)
+        .put(EngineContract.REASON, reason)
 
-fun engineAppVisibilityChangedFactJson(foreground: Boolean): JSONObject = JSONObject()
-    .put("type", "app_visibility_changed")
-    .put("foreground", foreground)
+fun engineAppVisibilityChangedFactJson(foreground: Boolean): JSONObject =
+    engineCommand(EngineContract.FACT_APP_VISIBILITY_CHANGED)
+        .put(EngineContract.FOREGROUND, foreground)
 
-fun engineNetworkChangedFactJson(): JSONObject = JSONObject()
-    .put("type", "network_changed")
+fun engineNetworkChangedFactJson(): JSONObject =
+    engineCommand(EngineContract.FACT_NETWORK_CHANGED)
 
 private fun bytesJson(value: ByteArray): JSONArray = JSONArray().apply {
     value.forEach { put(it.toInt() and 0xff) }

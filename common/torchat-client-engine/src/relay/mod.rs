@@ -4,7 +4,9 @@ pub mod error;
 pub mod heartbeat;
 pub mod writer;
 
-use torchat_client_runtime::{InviteCode, MessageTransportOutcome, PairingItem, RuntimeError, RuntimeResult};
+use torchat_client_runtime::{
+    InviteCode, MessageTransportOutcome, PairingItem, RuntimeError, RuntimeResult,
+};
 use torchat_core::relay::RelayEnvelope;
 
 pub use actor::SharedRelayActor;
@@ -33,8 +35,14 @@ pub enum RelayEvent {
 
 pub trait EngineRelay: Send {
     fn set_socks5_url(&mut self, socks5_url: Option<String>);
+    fn shutdown(&mut self);
     fn ensure_session(&mut self) -> RuntimeResult<()>;
-    fn send_envelope(&mut self, recipient: &str, ciphertext: &str) -> RuntimeResult<()>;
+    fn send_envelope(
+        &mut self,
+        message_id: uuid::Uuid,
+        recipient: &str,
+        ciphertext: &str,
+    ) -> RuntimeResult<()>;
     fn poll_event(&mut self) -> Option<RelayEvent>;
     fn refresh_pairing_code(&mut self) -> RuntimeResult<InviteCode>;
     fn submit_pairing_code(&mut self, code: &str) -> RuntimeResult<PairingItem>;
@@ -54,13 +62,20 @@ pub struct NoopEngineRelay;
 impl EngineRelay for NoopEngineRelay {
     fn set_socks5_url(&mut self, _socks5_url: Option<String>) {}
 
+    fn shutdown(&mut self) {}
+
     fn ensure_session(&mut self) -> RuntimeResult<()> {
         Err(RuntimeError::Unavailable(
             RelayUnavailableReason::ActorNotAttached.to_string(),
         ))
     }
 
-    fn send_envelope(&mut self, _recipient: &str, _ciphertext: &str) -> RuntimeResult<()> {
+    fn send_envelope(
+        &mut self,
+        _message_id: uuid::Uuid,
+        _recipient: &str,
+        _ciphertext: &str,
+    ) -> RuntimeResult<()> {
         Err(RuntimeError::Unavailable(
             RelayUnavailableReason::ActorNotAttached.to_string(),
         ))

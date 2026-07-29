@@ -5,6 +5,7 @@ import 'dart:io';
 import 'client_runtime.dart';
 import 'core/runtime/runtime_arguments.dart';
 import 'core/runtime/runtime_bridge_base.dart';
+import 'core/runtime/runtime_contract.dart';
 import 'core/runtime/runtime_line.dart';
 import 'mobile_bridge.dart';
 
@@ -26,7 +27,7 @@ class WindowsRuntime extends Object
   Future<void> _ensureProcess() async {
     if (_process != null) return;
     final executable =
-        Platform.environment['TORCHAT_RUNTIME_PATH'] ?? _findRuntime();
+        Platform.environment['TORCHAT_DESKTOP_PATH'] ?? _findRuntime();
     // The Rust sidecar contains the onion captured during its build. Passing
     // an environment value is deliberately only an explicit development
     // override; the desktop client must remain usable without a LAN/runtime
@@ -117,8 +118,8 @@ class WindowsRuntime extends Object
 
   String _findRuntime() {
     final names = Platform.isWindows
-        ? ['torchat-desktop.exe', 'torchat-runtime.exe']
-        : ['torchat-desktop', 'torchat-runtime'];
+        ? ['torchat-desktop.exe']
+        : ['torchat-desktop'];
     final roots = [Directory.current.path, '${Directory.current.path}/..'];
     for (final root in roots) {
       for (final name in names) {
@@ -134,7 +135,7 @@ class WindowsRuntime extends Object
       }
     }
     throw StateError(
-      'Rust runtime not found; run torchat build --target windows',
+      'TorChat desktop engine host not found; run torchat build --target windows',
     );
   }
 
@@ -142,49 +143,166 @@ class WindowsRuntime extends Object
     if (line.trim().isEmpty) {
       return;
     }
-    try {
-      final frame = RuntimeLine.parse(line);
-      switch (frame) {
-        case RuntimeResponseLine(:final response):
-          if (_pending.containsKey(response.id)) {
-            final completer = _pending.remove(response.id)!;
-            if (response.ok) {
-              completer.complete(response.result);
-            } else {
-              completer.completeError(
-                StateError(response.error ?? 'Runtime error'),
-              );
-            }
+    final frame = EngineLine.parse(line);
+    switch (frame) {
+      case EngineResponseLine(:final response):
+        final completer = _pending.remove(response.requestId);
+        if (completer == null) return;
+        if (response.ok) {
+          completer.complete(response.result);
+        } else {
+          completer.completeError(
+            StateError(
+              response.errorMessage ??
+                  response.errorCode ??
+                  'Client engine request failed',
+            ),
+          );
+        }
+      case EngineRuntimeEventLine(:final payload):
+        try {
+          final event = payload.runtimeEvent();
+          _events.add(event);
+          if (event is RuntimeErrorEvent) {
+            _failPending(StateError(event.message));
           }
-        case RuntimeEventLine(:final response):
-          if (response.isRuntimeErrorEvent) {
-            final error = StateError(response.error ?? 'Runtime error');
-            _events.add(response.payload.runtimeEvent());
-            if (_pending.isNotEmpty) {
-              for (final completer in _pending.values) {
-                completer.completeError(error);
-              }
-              _pending.clear();
-            }
-          } else {
-            _events.add(response.payload.runtimeEvent());
-          }
-        case RuntimeParseErrorLine(:final error):
+        } catch (error) {
           _events.add(RuntimeErrorEvent(error.toString()));
-      }
-    } catch (error) {
-      _events.add(RuntimeErrorEvent(error.toString()));
+        }
+      case final EngineConnectionLine connection:
+        _events.add(connection.runtimeEvent());
+      case EngineNotificationLine(:final notification):
+        _events.add(
+          NotificationRequestedEvent(
+            id: notification[EngineContract.id]?.toString() ?? '',
+            title: notification[EngineContract.title]?.toString() ?? 'TorChat',
+            body: notification[EngineContract.body]?.toString() ?? '',
+            conversationId:
+                notification[EngineContract.conversationId]?.toString(),
+          ),
+        );
+      case EngineLogLine(:final log):
+        final level = log['level']?.toString() ?? '';
+        final message = log['message']?.toString() ?? '';
+        _events.add(
+          RuntimeLogEvent(level.isEmpty ? message : '[$level] $message'),
+        );
+      case EngineFatalLine(:final error):
+        final code = error['code']?.toString() ?? 'engine_fatal';
+        final message = error['message']?.toString() ?? 'Client engine failed';
+        final failure = StateError('$code: $message');
+        _failPending(failure);
+        _events.add(RuntimeErrorEvent(failure.toString()));
+      case EngineParseErrorLine(:final error):
+        _events.add(RuntimeErrorEvent(error.toString()));
     }
   }
 
-  void _failAll(Object error) {
+  void _failPending(Object error) {
     for (final completer in _pending.values) {
       completer.completeError(error);
     }
     _pending.clear();
+  }
+
+  void _failAll(Object error) {
+    _failPending(error);
     _process = null;
     _log('FAIL $error');
     _events.add(RuntimeErrorEvent(error.toString()));
+  }
+
+  Map<String, Object?> _engineCommand(
+    String method,
+    RuntimeArguments arguments,
+  ) {
+    final params = arguments.toMap();
+    String text(String key) => params[key]?.toString() ?? '';
+    return switch (method) {
+      EngineContract.bootstrap => {
+        EngineContract.type: EngineContract.commandBootstrap,
+      },
+      EngineContract.connect => {
+        EngineContract.type: EngineContract.commandConnect,
+      },
+      EngineContract.getIdentity => {
+        EngineContract.type: EngineContract.commandGetIdentity,
+      },
+      EngineContract.getProfile => {
+        EngineContract.type: EngineContract.commandGetProfile,
+      },
+      EngineContract.pairingInbox => {
+        EngineContract.type: EngineContract.commandPairingInbox,
+      },
+      EngineContract.pairingOutbox => {
+        EngineContract.type: EngineContract.commandPairingOutbox,
+      },
+      EngineContract.listContacts => {
+        EngineContract.type: EngineContract.commandListContacts,
+      },
+      EngineContract.listConversations => {
+        EngineContract.type: EngineContract.commandListConversations,
+      },
+      EngineContract.listMessages => {
+        EngineContract.type: EngineContract.commandListMessages,
+        EngineContract.commandConversationId: text(EngineContract.argId),
+      },
+      EngineContract.setNickname => {
+        EngineContract.type: EngineContract.commandSetNickname,
+        EngineContract.nickname: text(EngineContract.nickname),
+      },
+      EngineContract.refreshPairingCode => {
+        EngineContract.type: EngineContract.commandRefreshPairingCode,
+      },
+      EngineContract.submitPairingCode => {
+        EngineContract.type: EngineContract.commandSubmitPairingCode,
+        EngineContract.code: text(EngineContract.code),
+      },
+      EngineContract.acceptPairing => {
+        EngineContract.type: EngineContract.commandAcceptPairing,
+        EngineContract.commandPairingId: text(EngineContract.argPairingId),
+      },
+      EngineContract.rejectPairing => {
+        EngineContract.type: EngineContract.commandRejectPairing,
+        EngineContract.commandPairingId: text(EngineContract.argPairingId),
+      },
+      EngineContract.archivePairing => {
+        EngineContract.type: EngineContract.commandArchivePairing,
+        EngineContract.commandPairingId: text(EngineContract.argPairingId),
+      },
+      EngineContract.cancelPairing => {
+        EngineContract.type: EngineContract.commandCancelPairing,
+        EngineContract.commandPairingId: text(EngineContract.argPairingId),
+      },
+      EngineContract.verifyContact => {
+        EngineContract.type: EngineContract.commandVerifyContact,
+        EngineContract.commandInstallationId: text(EngineContract.argInstallationId),
+      },
+      EngineContract.startConversation => {
+        EngineContract.type: EngineContract.commandStartConversation,
+        EngineContract.commandContactId: text(EngineContract.argContactId),
+      },
+      EngineContract.openConversation => {
+        EngineContract.type: EngineContract.commandOpenConversation,
+        EngineContract.commandConversationId: text(EngineContract.argId),
+      },
+      EngineContract.closeConversation => {
+        EngineContract.type: EngineContract.commandCloseConversation,
+      },
+      EngineContract.sendMessage => {
+        EngineContract.type: EngineContract.commandSendMessage,
+        EngineContract.commandConversationId: text(EngineContract.argId),
+        EngineContract.body: text(EngineContract.argText),
+      },
+      EngineContract.platformFact => {
+        EngineContract.type: EngineContract.commandPlatformFact,
+        EngineContract.fact: params[EngineContract.fact],
+      },
+      EngineContract.shutdown => {
+        EngineContract.type: EngineContract.commandShutdown,
+      },
+      _ => throw UnsupportedError('Unsupported client engine method: $method'),
+    };
   }
 
   Future<Object?> _call(
@@ -195,14 +313,17 @@ class WindowsRuntime extends Object
     final id = (++_nextId).toString();
     final completer = Completer<Object?>();
     _pending[id] = completer;
-    final request = {'id': id, 'method': method, 'params': params.toMap()};
+    final request = {
+      EngineContract.requestId: id,
+      EngineContract.command: _engineCommand(method, params),
+    };
     _log('STDIN ${jsonEncode(request)}');
     _process!.stdin.writeln(jsonEncode(request));
     return completer.future.timeout(
       const Duration(seconds: 45),
       onTimeout: () {
         _pending.remove(id);
-        throw TimeoutException('Runtime command timed out: $method');
+        throw TimeoutException('Client engine command timed out: $method');
       },
     );
   }

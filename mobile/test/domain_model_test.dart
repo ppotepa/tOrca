@@ -92,7 +92,7 @@ void main() {
   });
 
   test('runtime response preserves raw payload for event decoding', () {
-    final response = RuntimeResponse.fromDynamic({
+    final response = EngineResponse.fromDynamic({
       'type': 'runtime_error',
       'message': 'relay stopped',
     });
@@ -103,16 +103,18 @@ void main() {
   });
 
   test('runtime line parser distinguishes responses, events and bad json', () {
-    final response = RuntimeLine.parse(
-      '{"id":"1","ok":true,"result":{"hello":"world"}}',
+    final response = EngineLine.parse(
+      '{"type":"response","requestId":"1","result":{"status":"ok","payload":{"type":"json","value":{"hello":"world"}}}}',
     );
-    expect(response, isA<RuntimeResponseLine>());
+    expect(response, isA<EngineResponseLine>());
 
-    final event = RuntimeLine.parse('{"type":"runtime_log","message":"hello"}');
-    expect(event, isA<RuntimeEventLine>());
+    final event = EngineLine.parse(
+      '{"type":"runtime","event":{"type":"runtime_log","message":"hello"}}',
+    );
+    expect(event, isA<EngineRuntimeEventLine>());
 
-    final bad = RuntimeLine.parse('not-json');
-    expect(bad, isA<RuntimeParseErrorLine>());
+    final bad = EngineLine.parse('not-json');
+    expect(bad, isA<EngineParseErrorLine>());
   });
 
   test('runtime arguments preserve canonical bridge keys', () {

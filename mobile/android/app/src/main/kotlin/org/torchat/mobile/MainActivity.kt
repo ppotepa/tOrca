@@ -19,11 +19,9 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import org.torchat.core.NativeIdentity
 import org.torchat.generated.EngineContract
 import org.torchat.security.LocalSecretStore
 
-private const val NOTIFY_INCOMING = "notifyIncoming"
 
 class MainActivity : FlutterActivity() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -45,6 +43,7 @@ class MainActivity : FlutterActivity() {
         val resetDev = BuildConfig.DEBUG && intent.getBooleanExtra("reset_dev_state", false)
         val clean = intent.getBooleanExtra("clean_state", false)
         if (!resetDev && !clean) return
+
         // Deployment reset flags are one-shot. Activity recreation must never
         // delete a database already owned by the foreground service.
         intent.removeExtra("reset_dev_state")
@@ -58,13 +57,15 @@ class MainActivity : FlutterActivity() {
             runCatching {
                 val target = noBackupFilesDir.resolve(name).canonicalFile
                 val root = noBackupFilesDir.canonicalFile
-                require(target.parentFile == root) { "Reset path escaped TorChat data directory: ${target.absolutePath}" }
+                require(target.parentFile == root) {
+                    "Reset path escaped TorChat data directory: ${target.absolutePath}"
+                }
                 target.delete()
             }
         }
         if (clean) LocalSecretStore(this).clearLocalSecrets()
         android.util.Log.i(
-            "TorChat-Runtime",
+            "TorChat-Engine",
             "Developer local client state reset completed resetDev=$resetDev clean=$clean",
         )
     }
@@ -76,9 +77,8 @@ class MainActivity : FlutterActivity() {
             .setStreamHandler(object : EventChannel.StreamHandler {
                 override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
                     eventSink = events
-                    TorChatForegroundService.lastTorStatus?.let { status ->
-                        events?.success(status)
-                    }
+                    val sink = events ?: return
+                    TorChatForegroundService.lastTorStatus?.let(sink::success)
                 }
 
                 override fun onCancel(arguments: Any?) {
@@ -98,146 +98,152 @@ class MainActivity : FlutterActivity() {
     private fun handle(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             EngineContract.CONNECT -> connect(result)
-            EngineContract.GET_IDENTITY -> submitQueryResult(result, "get_identity")
-            EngineContract.GET_PROFILE -> submitQueryResult(result, "get_profile")
-            EngineContract.REFRESH_PAIRING_CODE -> runAsync(result) {
-                readyEngineHost().submitCommandAndAwait(
-                    JSONObject().put("type", "refresh_pairing_code"),
-                )
-            }
+            EngineContract.GET_IDENTITY -> submitQueryResult(result, EngineContract.COMMAND_GET_IDENTITY)
+            EngineContract.GET_PROFILE -> submitQueryResult(result, EngineContract.COMMAND_GET_PROFILE)
+            EngineContract.REFRESH_PAIRING_CODE -> submitCommandResult(
+                result,
+                engineCommand(EngineContract.COMMAND_REFRESH_PAIRING_CODE),
+            )
             EngineContract.SET_NICKNAME -> runAsync(result) {
-                val nickname = call.argument<String>("nickname")?.trim().orEmpty()
+                val nickname = call.argument<String>(EngineContract.NICKNAME)?.trim().orEmpty()
                 require(nickname.length in 2..32) { "Nick musi miec od 2 do 32 znakow" }
-                android.util.Log.i("TorChat-Runtime", "setNickname requested length=${nickname.length}")
-                val activeEngineHost = readyEngineHost()
-                val localStore = LocalSecretStore(applicationContext)
-                localStore.saveNickname(nickname)
-                val activeIdentity = TorChatForegroundService.activeIdentity
-                val localProfile = activeIdentity?.let {
-                    runtimeProfileResponse(it, nickname)
-                } ?: runCatching {
-                    NativeIdentity.fromPrivateKey(localStore.identityPrivateKey()).use {
-                        runtimeProfileResponse(it, nickname)
-                    }
-                }.getOrNull() ?: TorChatForegroundService.activeProfile?.withNickname(nickname)
-                requireNotNull(localProfile) { "Lokalna tozsamosc nie jest jeszcze gotowa" }
-                TorChatForegroundService.activeProfile = localProfile
-                runCatching {
-                    activeEngineHost.submitCommandAndAwait(
-                        JSONObject()
-                            .put("type", "set_nickname")
-                            .put("nickname", nickname),
+                val profile = readyEngineHost().submitCommandAndAwait(
+                    engineCommand(EngineContract.COMMAND_SET_NICKNAME)
+                        .put(EngineContract.NICKNAME, nickname),
+                )
+                profile
+            }
+            EngineContract.SUBMIT_PAIRING_CODE -> submitCommandResult(
+                result,
+                engineCommand(EngineContract.COMMAND_SUBMIT_PAIRING_CODE)
+                    .put(EngineContract.CODE, call.argument<String>(EngineContract.CODE).orEmpty()),
+            )
+            EngineContract.PAIRING_INBOX -> submitQueryResult(
+                result,
+                EngineContract.COMMAND_PAIRING_INBOX,
+            )
+            EngineContract.PAIRING_OUTBOX -> submitQueryResult(
+                result,
+                EngineContract.COMMAND_PAIRING_OUTBOX,
+            )
+            EngineContract.ACCEPT_PAIRING -> submitPairingCommand(
+                result,
+                EngineContract.COMMAND_ACCEPT_PAIRING,
+                call.argument<String>(EngineContract.ARG_PAIRING_ID).orEmpty(),
+            )
+            EngineContract.REJECT_PAIRING -> submitPairingCommand(
+                result,
+                EngineContract.COMMAND_REJECT_PAIRING,
+                call.argument<String>(EngineContract.ARG_PAIRING_ID).orEmpty(),
+            )
+            EngineContract.CANCEL_PAIRING -> submitPairingCommand(
+                result,
+                EngineContract.COMMAND_CANCEL_PAIRING,
+                call.argument<String>(EngineContract.ARG_PAIRING_ID).orEmpty(),
+            )
+            EngineContract.ARCHIVE_PAIRING -> submitPairingCommand(
+                result,
+                EngineContract.COMMAND_ARCHIVE_PAIRING,
+                call.argument<String>(EngineContract.ARG_PAIRING_ID).orEmpty(),
+            )
+            EngineContract.VERIFY_CONTACT -> submitCommandResult(
+                result,
+                engineCommand(EngineContract.COMMAND_VERIFY_CONTACT)
+                    .put(
+                        EngineContract.COMMAND_INSTALLATION_ID,
+                        call.argument<String>(EngineContract.ARG_INSTALLATION_ID).orEmpty(),
+                    ),
+                discardPayload = true,
+            )
+            EngineContract.LIST_CONTACTS -> submitQueryResult(
+                result,
+                EngineContract.COMMAND_LIST_CONTACTS,
+            )
+            EngineContract.LIST_CONVERSATIONS -> submitQueryResult(
+                result,
+                EngineContract.COMMAND_LIST_CONVERSATIONS,
+            )
+            EngineContract.LIST_MESSAGES -> submitCommandResult(
+                result,
+                engineCommand(EngineContract.COMMAND_LIST_MESSAGES)
+                    .put(
+                        EngineContract.COMMAND_CONVERSATION_ID,
+                        call.argument<String>(EngineContract.ARG_ID).orEmpty(),
+                    ),
+            )
+            EngineContract.OPEN_CONVERSATION -> submitCommandResult(
+                result,
+                engineCommand(EngineContract.COMMAND_OPEN_CONVERSATION)
+                    .put(
+                        EngineContract.COMMAND_CONVERSATION_ID,
+                        call.argument<String>(EngineContract.ARG_ID).orEmpty(),
+                    ),
+                discardPayload = true,
+            )
+            EngineContract.CLOSE_CONVERSATION -> submitCommandResult(
+                result,
+                engineCommand(EngineContract.COMMAND_CLOSE_CONVERSATION),
+                discardPayload = true,
+            )
+            EngineContract.START_CONVERSATION -> submitCommandResult(
+                result,
+                engineCommand(EngineContract.COMMAND_START_CONVERSATION)
+                    .put(
+                        EngineContract.COMMAND_CONTACT_ID,
+                        call.argument<String>(EngineContract.ARG_CONTACT_ID).orEmpty(),
+                    ),
+                discardPayload = true,
+            )
+            EngineContract.SEND_MESSAGE -> submitCommandResult(
+                result,
+                engineCommand(EngineContract.COMMAND_SEND_MESSAGE)
+                    .put(
+                        EngineContract.COMMAND_CONVERSATION_ID,
+                        call.argument<String>(EngineContract.ARG_ID).orEmpty(),
                     )
-                }.onFailure { error ->
-                    android.util.Log.w("TorChat-Engine", "Nickname engine sync pending", error)
+                    .put(
+                        EngineContract.BODY,
+                        call.argument<String>(EngineContract.ARG_TEXT).orEmpty(),
+                    ),
+                discardPayload = true,
+            )
+            EngineContract.PLATFORM_FACT -> runAsync(result) {
+                val rawFact = call.argument<Map<*, *>>(EngineContract.FACT)
+                    ?: error("Platform fact is missing")
+                val fact = JSONObject().apply {
+                    rawFact.forEach { (key, value) -> put(key.toString(), value) }
                 }
-                localProfile.toRuntimeMap()
-            }
-            EngineContract.SUBMIT_PAIRING_CODE -> runAsync(result) {
-                android.util.Log.i("TorChat-Pairing", "submitPairingCode requested")
-                readyEngineHost().submitCommandAndAwait(
-                    JSONObject()
-                        .put("type", "submit_pairing_code")
-                        .put("code", call.argument<String>("code").orEmpty()),
-                )
-            }
-            EngineContract.PAIRING_INBOX -> runAsync(result) {
-                readyEngineHost().submitQueryAndAwait("pairing_inbox")
-            }
-            EngineContract.PAIRING_OUTBOX -> submitQueryResult(result, "pairing_outbox")
-            EngineContract.ACCEPT_PAIRING -> runAsync(result) {
-                readyEngineHost().submitCommandAndAwait(
-                    JSONObject()
-                        .put("type", "accept_pairing")
-                        .put("pairing_id", call.argument<String>("pairingId").orEmpty()),
-                )
-                null
-            }
-            EngineContract.REJECT_PAIRING -> runAsync(result) {
-                readyEngineHost().submitCommandAndAwait(
-                    JSONObject()
-                        .put("type", "reject_pairing")
-                        .put("pairing_id", call.argument<String>("pairingId").orEmpty()),
-                )
-                null
-            }
-            EngineContract.CANCEL_PAIRING -> runAsync(result) {
-                readyEngineHost().submitCommandAndAwait(
-                    JSONObject()
-                        .put("type", "cancel_pairing")
-                        .put("pairing_id", call.argument<String>("pairingId").orEmpty()),
-                )
-                null
-            }
-            EngineContract.ARCHIVE_PAIRING -> runAsync(result) {
-                readyEngineHost().submitCommandAndAwait(
-                    JSONObject()
-                        .put("type", "archive_pairing")
-                        .put("pairing_id", call.argument<String>("pairingId").orEmpty()),
-                )
-                null
-            }
-            NOTIFY_INCOMING -> {
-                val kind = call.argument<String>("kind")
-                val payload = call.argument<String>("payload")
-                TorChatForegroundService.notifyIncoming(this, kind, payload)
-                result.success(null)
-            }
-            EngineContract.VERIFY_CONTACT -> runAsync(result) {
-                readyEngineHost().submitCommandAndAwait(
-                    JSONObject()
-                        .put("type", "verify_contact")
-                        .put("installation_id", call.argument<String>("installationId").orEmpty()),
-                )
-                null
-            }
-            EngineContract.LIST_CONTACTS -> submitQueryResult(result, "list_contacts")
-            EngineContract.LIST_CONVERSATIONS -> submitQueryResult(result, "list_conversations")
-            EngineContract.LIST_MESSAGES -> runAsync(result) {
-                readyEngineHost().submitCommandAndAwait(
-                    JSONObject()
-                        .put("type", "list_messages")
-                        .put("conversation_id", call.argument<String>("id").orEmpty()),
-                )
-            }
-            EngineContract.OPEN_CONVERSATION -> runAsync(result) {
-                readyEngineHost().submitCommandAndAwait(
-                    JSONObject()
-                        .put("type", "open_conversation")
-                        .put("conversation_id", call.argument<String>("id").orEmpty()),
-                )
-                null
-            }
-            EngineContract.CLOSE_CONVERSATION -> runAsync(result) {
-                readyEngineHost().submitCommandAndAwait(
-                    JSONObject().put("type", "close_conversation"),
-                )
-                null
-            }
-            EngineContract.START_CONVERSATION -> runAsync(result) {
-                readyEngineHost().submitCommandAndAwait(
-                    JSONObject()
-                        .put("type", "start_conversation")
-                        .put("contact_id", call.argument<String>("contactId").orEmpty()),
-                )
-                null
-            }
-            EngineContract.SEND_MESSAGE -> runAsync(result) {
-                readyEngineHost().submitCommandAndAwait(
-                    JSONObject()
-                        .put("type", "send_message")
-                        .put("conversation_id", call.argument<String>("id").orEmpty())
-                        .put("body", call.argument<String>("text").orEmpty()),
-                )
+                readyEngineHost().publishPlatformFact(fact)
                 null
             }
             else -> result.notImplemented()
         }
     }
 
-    private fun submitQueryResult(result: MethodChannel.Result, type: String) {
+    private fun submitPairingCommand(
+        result: MethodChannel.Result,
+        commandType: String,
+        pairingId: String,
+    ) {
+        submitCommandResult(
+            result,
+            engineCommand(commandType).put(EngineContract.COMMAND_PAIRING_ID, pairingId),
+            discardPayload = true,
+        )
+    }
+
+    private fun submitQueryResult(result: MethodChannel.Result, commandType: String) {
+        runAsync(result) { readyEngineHost().submitQueryAndAwait(commandType) }
+    }
+
+    private fun submitCommandResult(
+        result: MethodChannel.Result,
+        command: JSONObject,
+        discardPayload: Boolean = false,
+    ) {
         runAsync(result) {
-            readyEngineHost().submitQueryAndAwait(type)
+            val payload = readyEngineHost().submitCommandAndAwait(command)
+            if (discardPayload) null else payload
         }
     }
 
@@ -252,15 +258,10 @@ class MainActivity : FlutterActivity() {
             }
             return
         }
+
         ContextCompat.startForegroundService(this, Intent(this, TorChatForegroundService::class.java))
         scope.launch {
             runCatching {
-                // `connect()` is the readiness barrier for the Flutter layer.
-                // localReady only means that the embedded Tor process and the
-                // local identity exist; relay operations would still fail at
-                // that point with "relay is not ready". Wait until the
-                // service has completed onion HTTP bootstrap and the engine
-                // reports a connected state.
                 withContext(Dispatchers.IO) { TorChatForegroundService.awaitReady() }
             }
                 .onSuccess { result.success(true) }

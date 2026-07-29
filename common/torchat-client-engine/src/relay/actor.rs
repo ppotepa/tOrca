@@ -64,10 +64,7 @@ impl AsyncWrite for RelaySocket {
         }
     }
 
-    fn poll_flush(
-        mut self: Pin<&mut Self>,
-        cx: &mut TaskContext<'_>,
-    ) -> Poll<std::io::Result<()>> {
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<std::io::Result<()>> {
         match &mut *self {
             Self::Direct(stream) => Pin::new(stream).poll_flush(cx),
             Self::Socks(stream) => Pin::new(stream).poll_flush(cx),
@@ -106,11 +103,7 @@ pub struct SharedRelayActor {
 }
 
 impl SharedRelayActor {
-    pub fn new(
-        relay_onion_url: Url,
-        socks5_url: Option<String>,
-        identity: Identity,
-    ) -> Self {
+    pub fn new(relay_onion_url: Url, socks5_url: Option<String>, identity: Identity) -> Self {
         Self {
             connection: super::RelayConnectionConfig {
                 connect_timeout: Duration::from_secs(60),
@@ -162,7 +155,11 @@ impl SharedRelayActor {
         let client = self.build_client()?;
         let base_url = self.base_url()?;
         let challenge: ChallengeResponse = client
-            .post(base_url.join("/v1/bootstrap/challenge").map_err(http_error)?)
+            .post(
+                base_url
+                    .join("/v1/bootstrap/challenge")
+                    .map_err(http_error)?,
+            )
             .json(&serde_json::json!({}))
             .send()
             .map_err(http_error)?
@@ -254,14 +251,24 @@ impl EngineRelay for SharedRelayActor {
         self.session_token = None;
     }
 
+    fn shutdown(&mut self) {
+        self.shutdown_writer();
+        self.session_token = None;
+    }
+
     fn ensure_session(&mut self) -> RuntimeResult<()> {
         let token = self.ensure_session_token()?;
         self.ensure_writer(&token)
     }
 
-    fn send_envelope(&mut self, recipient: &str, ciphertext: &str) -> RuntimeResult<()> {
+    fn send_envelope(
+        &mut self,
+        message_id: Uuid,
+        recipient: &str,
+        ciphertext: &str,
+    ) -> RuntimeResult<()> {
         self.enqueue_writer_command(WriterCommand::Envelope {
-            message_id: Uuid::new_v4(),
+            message_id,
             recipient: recipient.to_owned(),
             ciphertext: ciphertext.to_owned(),
         })
@@ -335,7 +342,11 @@ impl EngineRelay for SharedRelayActor {
         let client = self.build_client()?;
         let base_url = self.base_url()?;
         let response: Vec<PairingInboxItemResponse> = client
-            .get(base_url.join("/v1/pairing-requests/inbox").map_err(http_error)?)
+            .get(
+                base_url
+                    .join("/v1/pairing-requests/inbox")
+                    .map_err(http_error)?,
+            )
             .bearer_auth(token)
             .send()
             .map_err(http_error)?
@@ -360,8 +371,7 @@ impl EngineRelay for SharedRelayActor {
                 state: item.state,
                 received: true,
                 available_actions: torchat_client_runtime::pairing_available_actions(
-                    item.state,
-                    true,
+                    item.state, true,
                 ),
                 offer_invite_id: item.offer_invite_id,
                 offer_payload: item.offer_payload,
@@ -475,12 +485,8 @@ async fn run_writer_loop(
                 break "relay pong timeout".to_owned();
             }
             if let Some(command) = pending.take()
-                && let Err(command) = send_writer_command(
-                    &mut writer,
-                    &installation_id,
-                    command,
-                )
-                .await
+                && let Err(command) =
+                    send_writer_command(&mut writer, &installation_id, command).await
             {
                 pending = Some(command);
                 break "relay send failed".to_owned();
@@ -606,8 +612,8 @@ async fn connect_relay(
     connection: &super::RelayConnectionConfig,
     token: &str,
 ) -> RuntimeResult<RelayStream> {
-    let base_url =
-        Url::parse(&connection.relay_onion_url).map_err(|error| RuntimeError::Unavailable(error.to_string()))?;
+    let base_url = Url::parse(&connection.relay_onion_url)
+        .map_err(|error| RuntimeError::Unavailable(error.to_string()))?;
     validate_relay_url(&base_url)?;
     let host = base_url
         .host_str()
@@ -649,7 +655,11 @@ async fn connect_relay(
 
     let mut ws_url = base_url.clone();
     ws_url
-        .set_scheme(if ws_url.scheme() == "https" { "wss" } else { "ws" })
+        .set_scheme(if ws_url.scheme() == "https" {
+            "wss"
+        } else {
+            "ws"
+        })
         .map_err(|_| RuntimeError::Unavailable("invalid websocket scheme".to_owned()))?;
     ws_url.set_path("/v1/events");
     let request = Request::builder()

@@ -16,12 +16,18 @@ pub struct EngineConfig {
     pub platform: PlatformKind,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct SecretBytes(#[serde(with = "serde_bytes")] pub Vec<u8>);
 
 impl SecretBytes {
     pub fn expose(&self) -> &[u8] {
         &self.0
+    }
+}
+
+impl std::fmt::Debug for SecretBytes {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("SecretBytes([redacted])")
     }
 }

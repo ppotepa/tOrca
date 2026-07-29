@@ -2,10 +2,8 @@ use crate::{MessageState, MessageTransportOutcome};
 
 pub fn message_state_on_send_prepare(current: &MessageState) -> Option<MessageState> {
     match current {
-        MessageState::Queued | MessageState::Sending | MessageState::Sent => {
-            Some(MessageState::Sending)
-        }
-        MessageState::Delivered | MessageState::Failed => None,
+        MessageState::Queued | MessageState::Sending => Some(MessageState::Sending),
+        MessageState::Sent | MessageState::Delivered | MessageState::Failed => None,
     }
 }
 
@@ -56,10 +54,7 @@ mod tests {
             message_state_on_send_prepare(&MessageState::Sending),
             Some(MessageState::Sending)
         );
-        assert_eq!(
-            message_state_on_send_prepare(&MessageState::Sent),
-            Some(MessageState::Sending)
-        );
+        assert_eq!(message_state_on_send_prepare(&MessageState::Sent), None);
         assert_eq!(
             message_state_on_send_prepare(&MessageState::Delivered),
             None

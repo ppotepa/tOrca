@@ -135,7 +135,6 @@ final appControllerProvider = NotifierProvider<AppController, AppState>(
 class AppController extends Notifier<AppState> {
   late final RuntimeRepository _repository;
   StreamSubscription<RuntimeEvent>? _events;
-  bool _hasInitialData = false;
 
   @override
   AppState build() {
@@ -176,10 +175,7 @@ class AppController extends Notifier<AppState> {
     }
   }
 
-  Future<void> refreshData({bool announceChanges = false}) async {
-    final previousConversations = state.conversations;
-    final previousInbox = state.inbox;
-    final previousUnread = previousConversations.totalUnread;
+  Future<void> refreshData() async {
     final contacts = await _repository.contacts();
     final conversations = await _repository.conversations();
     final inbox = await _repository.inbox();
@@ -190,27 +186,6 @@ class AppController extends Notifier<AppState> {
       inbox: inbox,
       outbox: outbox,
     );
-    if (!announceChanges || !_hasInitialData) {
-      _hasInitialData = true;
-      return;
-    }
-    final nextUnread = state.conversations.totalUnread;
-    final newIncomingKind = () {
-      if (_wasInviteAdded(previousInbox, state.inbox)) return 'invite';
-      if (nextUnread > previousUnread) return 'message';
-      return null;
-    }();
-    if (newIncomingKind == null) return;
-    final payload = _buildIncomingPayload(
-      kind: newIncomingKind,
-      previousInbox: previousInbox,
-      nextInbox: state.inbox,
-      previousConversations: previousConversations,
-      nextConversations: state.conversations,
-      contacts: state.contacts,
-    );
-    _notifyIncoming(kind: newIncomingKind, payload: payload);
-    _hasInitialData = true;
   }
 
   Future<void> retryTor() => initialize();
@@ -437,57 +412,21 @@ class AppController extends Notifier<AppState> {
           screen: _screenAfterConnect(nextProfile, state.transport),
         );
       case DataChangedEvent():
-        final incomingType = switch (event.type) {
-          RuntimeContract.inviteReceived ||
-          RuntimeContract.inviteStateChanged => 'invite',
-          RuntimeContract.messageReceived => 'message',
-          _ => null,
-        };
-        unawaited(
-          _refreshAfterEvent(
-            notifyIncoming: incomingType != null,
-            kind: incomingType,
-            payloadHint: event.payload,
-          ),
-        );
+        unawaited(_refreshAfterEvent());
       case RuntimeErrorEvent(:final message):
         state = state.copyWith(error: message);
       case RuntimeLogEvent():
-        // stderr diagnostics are not a data mutation and must not trigger
-        // network refreshes while the onion connection is warming up.
+        // Diagnostics are not a data mutation and must not trigger network
+        // refreshes while the onion connection is warming up.
         break;
+      case NotificationRequestedEvent():
+        unawaited(_pagerBeep());
     }
   }
 
-  Future<void> _refreshAfterEvent({
-    bool notifyIncoming = false,
-    String? kind,
-    Map<String, dynamic>? payloadHint,
-  }) async {
-    final previousConversations = state.conversations;
-    final previousInbox = state.inbox;
-    final previousUnread = previousConversations.totalUnread;
+  Future<void> _refreshAfterEvent() async {
     try {
-      await refreshData(announceChanges: false);
-      if (notifyIncoming) {
-        final nextUnread = state.conversations.totalUnread;
-        final nextKind =
-            kind ??
-            switch (previousUnread < nextUnread) {
-              true => 'message',
-              _ => null,
-            };
-        final payload = _buildIncomingPayload(
-          kind: nextKind,
-          previousInbox: previousInbox,
-          nextInbox: state.inbox,
-          previousConversations: previousConversations,
-          nextConversations: state.conversations,
-          contacts: state.contacts,
-          hint: payloadHint,
-        );
-        if (nextKind != null) _notifyIncoming(kind: nextKind, payload: payload);
-      }
+      await refreshData();
       final selected = state.selectedConversationId;
       if (selected != null && selected.isNotEmpty) {
         final messages = await _repository.messages(selected);
@@ -507,121 +446,7 @@ class AppController extends Notifier<AppState> {
     return ControllerScreen.nickname;
   }
 
-  void _notifyIncoming({String? kind, String? payload}) {
-    unawaited(_pagerBeep(kind: kind, payload: payload));
-  }
-
-  bool _isEmptyPayload(String? value) {
-    final text = value?.trim() ?? '';
-    return text.isEmpty;
-  }
-
-  String? _buildIncomingPayload({
-    String? kind,
-    required List<PairingItem> previousInbox,
-    required List<PairingItem> nextInbox,
-    required List<ConversationSummary> previousConversations,
-    required List<ConversationSummary> nextConversations,
-    required List<ContactRecord> contacts,
-    Map<String, dynamic>? hint,
-  }) {
-    final hintText = _stringPayload(hint, 'text');
-    if (!_isEmptyPayload(hintText)) return hintText!;
-
-    if (kind == 'invite') {
-      if (hint != null) {
-        final nickname = _stringPayload(hint, 'nickname');
-        if (!_isEmptyPayload(nickname)) return 'Nowe zaproszenie od $nickname';
-        final sender = _stringPayload(hint, 'peer');
-        if (!_isEmptyPayload(sender)) return 'Nowe zaproszenie od $sender';
-      }
-      final newInvites = nextInbox
-          .where((item) => item.can(PairingAvailableAction.accept))
-          .where(
-            (item) => !previousInbox.any(
-              (previous) =>
-                  previous.id == item.id && previous.status == item.status,
-            ),
-          )
-          .toList();
-      if (newInvites.isNotEmpty && newInvites.first.peer != null) {
-        return 'Nowe zaproszenie od @${newInvites.first.peer!.nickname}';
-      }
-      final anyInvite = nextInbox
-          .where((item) => item.can(PairingAvailableAction.accept))
-          .toList()
-          .firstOrNullWhere((_) => true);
-      if (anyInvite != null && anyInvite.peer != null) {
-        return 'Nowe zaproszenie od @${anyInvite.peer!.nickname}';
-      }
-      return 'Nowe zaproszenie';
-    }
-    if (kind == 'message') {
-      if (hint != null) {
-        final name = _stringPayload(hint, 'fromNickname');
-        final preview = _stringPayload(hint, 'preview');
-        if (!_isEmptyPayload(name) && !_isEmptyPayload(preview)) {
-          return '$name: $preview';
-        }
-        if (!_isEmptyPayload(name)) return 'Wiadomość od $name';
-        if (!_isEmptyPayload(preview)) return preview;
-      }
-      final increased = _findIncreasedUnreadConversations(
-        previousConversations,
-        nextConversations,
-      );
-      if (increased != null) {
-        final contact = contacts.firstOrNullWhere(
-          (item) => item.id == increased.contactId,
-        );
-        final title = contact != null
-            ? '@${contact.nickname}'
-            : 'Nieznany kontakt';
-        final unread = increased.unread;
-        return unread > 1
-            ? 'Nowe wiadomości od $title'
-            : 'Nowa wiadomość od $title';
-      }
-      return 'Nowa wiadomość';
-    }
-    return null;
-  }
-
-  bool _wasInviteAdded(
-    List<PairingItem> previousInbox,
-    List<PairingItem> nextInbox,
-  ) {
-    if (previousInbox.isEmpty) return false;
-    final previousIds = previousInbox.map((item) => item.id).toSet();
-    return nextInbox
-        .where((item) => item.can(PairingAvailableAction.accept))
-        .any((item) => !previousIds.contains(item.id));
-  }
-
-  ConversationSummary? _findIncreasedUnreadConversations(
-    List<ConversationSummary> previousConversations,
-    List<ConversationSummary> nextConversations,
-  ) {
-    for (final conversation in nextConversations) {
-      final previous = previousConversations.firstOrNullWhere(
-        (item) => item.id == conversation.id,
-      );
-      if ((previous?.unread ?? 0) < conversation.unread) {
-        return conversation;
-      }
-    }
-    return null;
-  }
-
-  String? _stringPayload(Map<String, dynamic>? map, String key) {
-    if (map == null) return null;
-    final value = map[key];
-    if (value == null) return null;
-    final text = value.toString().trim();
-    return text.isEmpty ? null : text;
-  }
-
-  Future<void> _pagerBeep({String? kind, String? payload}) async {
+  Future<void> _pagerBeep() async {
     if (Platform.isAndroid) {
       return;
     }

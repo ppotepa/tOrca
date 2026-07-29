@@ -1,6 +1,5 @@
-//! Shared client runtime contract for TorChat desktop and mobile adapters.
+//! Internal shared client domain runtime used exclusively by `torchat-client-engine`.
 
-pub mod c_api;
 pub mod clock;
 pub mod collections;
 pub mod contract;
@@ -20,7 +19,7 @@ pub use collections::{
     RuntimeMessageLike, RuntimePairingItemLike, runtime_contacts_from_iter,
     runtime_messages_from_iter, runtime_pairing_items_from_iter,
 };
-pub use contract::{RuntimeCommand, RuntimeEvent, RuntimeMethod, RuntimeStatusPhase, RuntimeType};
+pub use contract::{RuntimeEvent, RuntimeStatusPhase, RuntimeType};
 pub use error::{RuntimeError, RuntimeResult};
 pub use logic::RuntimeConversationUpdate;
 pub use logic::{
@@ -51,7 +50,7 @@ pub use pairing_rules::{
     transition_pairing_record,
 };
 pub use pairing_rules::{expire_pairing_state, pairing_can_archive, pairing_is_active};
-pub use runtime::{ClientRuntime, RuntimeRequest, RuntimeResponse};
+pub use runtime::ClientRuntime;
 pub use session::RuntimeSession;
 pub use storage::RuntimeStorage;
 pub use transport::RuntimeTransport;
@@ -64,7 +63,7 @@ mod tests {
     #[test]
     fn fixture_models_match_contract() {
         let fixture = crate::models::RuntimeFixture::from_json(include_str!(
-            "../../client-runtime-fixtures.json"
+            "../../internal-runtime-fixtures.json"
         ))
         .expect("fixture should parse");
 
@@ -113,7 +112,7 @@ mod tests {
     #[test]
     fn fixture_canonical_tor_status_includes_retry_attempt() {
         let fixture: serde_json::Value =
-            serde_json::from_str(include_str!("../../client-runtime-fixtures.json"))
+            serde_json::from_str(include_str!("../../internal-runtime-fixtures.json"))
                 .expect("fixture should parse");
 
         let retry_attempt = fixture["events"][1]["retryAttempt"]

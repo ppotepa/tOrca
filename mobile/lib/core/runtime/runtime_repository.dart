@@ -23,17 +23,7 @@ class RuntimeRepository {
 
   Future<void> rejectPairing(String id) => _runtime.rejectPairing(id);
 
-  Future<void> archiveInvite(String id) {
-    final runtime = _runtime;
-    if (runtime is! PairingArchiveRuntime) {
-      return Future<void>.error(
-        UnsupportedError(
-          'Archiwizacja zaproszeń nie jest dostępna w tym runtime.',
-        ),
-      );
-    }
-    return (runtime as PairingArchiveRuntime).archivePairing(id);
-  }
+  Future<void> archiveInvite(String id) => _runtime.archivePairing(id);
 
   Future<void> cancelPairing(String id) => _runtime.cancelPairing(id);
 

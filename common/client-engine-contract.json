@@ -27,6 +27,60 @@
       "shutdown"
     ]
   },
+  "commandTypes": [
+    "bootstrap",
+    "connect",
+    "get_identity",
+    "get_profile",
+    "pairing_inbox",
+    "pairing_outbox",
+    "list_contacts",
+    "list_conversations",
+    "list_messages",
+    "set_nickname",
+    "refresh_pairing_code",
+    "submit_pairing_code",
+    "accept_pairing",
+    "reject_pairing",
+    "archive_pairing",
+    "cancel_pairing",
+    "verify_contact",
+    "start_conversation",
+    "open_conversation",
+    "close_conversation",
+    "send_message",
+    "platform_fact",
+    "shutdown"
+  ],
+  "engineEventTypes": [
+    "response",
+    "runtime",
+    "connection",
+    "notification_requested",
+    "log",
+    "fatal"
+  ],
+  "responseStatuses": [
+    "ok",
+    "error"
+  ],
+  "responsePayloadTypes": [
+    "empty",
+    "json"
+  ],
+  "platformFactTypes": [
+    "tor_status",
+    "tor_endpoint_available",
+    "tor_endpoint_lost",
+    "app_visibility_changed",
+    "network_changed"
+  ],
+  "torPhases": [
+    "starting",
+    "bootstrapping",
+    "ready",
+    "failed"
+  ],
   "events": [
     "runtime_ready",
     "tor_status",
@@ -80,5 +134,25 @@
     "REJECT",
     "ARCHIVE",
     "CANCEL"
+  ],
+  "connectionStates": [
+    "waiting_for_tor",
+    "disconnected",
+    "connecting",
+    "authenticating",
+    "waiting_for_ready",
+    "connected",
+    "backoff",
+    "stopped"
+  ],
+  "transportPhases": [
+    "starting",
+    "bootstrapping",
+    "connecting",
+    "degraded",
+    "connected",
+    "reconnecting",
+    "offline",
+    "error"
   ]
 }
