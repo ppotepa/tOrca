@@ -47,20 +47,6 @@ pub fn load_or_create(path: Option<&Path>) -> Result<Identity> {
     Ok(identity)
 }
 
-pub fn load_existing(path: &Path) -> Result<Identity> {
-    if !path.is_file() {
-        bail!("identity file does not exist: {}", path.display())
-    }
-    let encoded = fs::read_to_string(path).context("read identity file")?;
-    let bytes = URL_SAFE_NO_PAD
-        .decode(encoded.trim())
-        .context("decode identity file")?;
-    let bytes: [u8; 32] = bytes
-        .try_into()
-        .map_err(|_| anyhow::anyhow!("identity file must contain 32 bytes"))?;
-    Ok(Identity::from_private_key_bytes(bytes))
-}
-
 pub fn state_path(path: Option<&Path>) -> Result<PathBuf> {
     let identity_path = path
         .map(Path::to_path_buf)

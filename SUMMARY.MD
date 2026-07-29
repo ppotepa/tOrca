@@ -22,6 +22,9 @@ Przechodzi lokalnie:
 - [x] `powershell -ExecutionPolicy Bypass -File scripts\internal\build-android-core.ps1`
 - [x] `flutter analyze lib/core/runtime lib/mobile_bridge.dart lib/windows_runtime.dart lib/client_runtime.dart`
 - [x] `.\gradlew.bat :app:compileDebugKotlin` z katalogu `mobile\android`
+- [x] Build warning cleanup:
+  - `cargo check -p torchat-client-engine -p torchat-desktop` bez warningow
+  - `cargo test -p torchat-client-runtime` bez warningow
 - [x] `rg -n "RuntimeRequest|RuntimeResponse|dispatch_runtime|map_runtime_request|response_to_runtime_response" desktop mobile common`
 - [x] `rg -n '"type", "[a-z_]+"|put\("type", "[a-z_]+"|''method'': method|''params'': params' mobile desktop common`
 
@@ -58,6 +61,9 @@ Uwaga srodowiskowa:
 - [x] Dodana brakujaca zaleznosc `base64` w `desktop/Cargo.toml`.
 - [x] Udostepnione transakcyjne API `RuntimeSession` dla wspolpracy runtime/engine.
 - [x] Naprawiony `scripts/internal/build-android-core.ps1`, zeby Android Rust build uzywal MSYS2 Perl/make oraz recznie ustawionego NDK toolchain z forward-slash sciezkami.
+- [x] Usuniety warning `dead_code` z desktop przez skasowanie nieuzywanego `identity_store::load_existing`.
+- [x] Usuniete warningi Cargo o hardlinkach incremental przez repo-local `.cargo/config.toml` z `incremental = false`.
+- [x] Dodane ignorowanie Gradle/Kotlin cache `.kotlin/`.
 - [x] CodeGraph zsynchronizowany po zmianach.
 
 ## Verification Notes
@@ -87,6 +93,8 @@ $env:PATH='C:\Strawberry\perl\bin;'+$env:PATH; cargo check -p torchat-client-eng
 powershell -ExecutionPolicy Bypass -File scripts\internal\build-android-core.ps1
 flutter analyze lib/core/runtime lib/mobile_bridge.dart lib/windows_runtime.dart lib/client_runtime.dart
 .\gradlew.bat :app:compileDebugKotlin
+$env:PATH='C:\Strawberry\perl\bin;'+$env:PATH; cargo check -p torchat-client-engine -p torchat-desktop
+$env:PATH='C:\Strawberry\perl\bin;'+$env:PATH; cargo test -p torchat-client-runtime
 rg -n "RuntimeRequest|RuntimeResponse|dispatch_runtime|map_runtime_request|response_to_runtime_response" desktop mobile common
 rg -n '"type", "[a-z_]+"|put\("type", "[a-z_]+"|''method'': method|''params'': params' mobile desktop common
 codegraph sync
