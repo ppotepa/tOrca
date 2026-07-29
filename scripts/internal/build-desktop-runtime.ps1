@@ -25,6 +25,20 @@ try {
         }
         if ($running.Count -gt 0) { Start-Sleep -Milliseconds 1000 }
     }
+    if ($env:OS -eq 'Windows_NT') {
+        $nativePerlRoots = @(
+            'C:\Strawberry\perl\bin',
+            'C:\Perl64\bin',
+            'C:\Perl\bin'
+        )
+        $nativePerlRoot = $nativePerlRoots |
+            Where-Object { Test-Path -LiteralPath (Join-Path $_ 'perl.exe') } |
+            Select-Object -First 1
+        if ([string]::IsNullOrWhiteSpace($nativePerlRoot)) {
+            throw 'Native Windows Perl is required for openssl-sys desktop/MSVC builds. Install Strawberry Perl or add a MSWin32 perl.exe to PATH.'
+        }
+        $env:PATH = "$nativePerlRoot;$env:PATH"
+    }
     $cargoArgs = @('build', '-p', 'torchat-desktop')
     if ($Release) { $cargoArgs += '--release' }
     $previousCompiledOnion = $env:TORCHAT_COMPILED_ONION_URL

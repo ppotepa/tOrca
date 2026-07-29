@@ -20,6 +20,7 @@ Przechodzi lokalnie:
 - [x] `cargo test -p torchat-client-engine-ffi c_api::tests`
 - [x] `cargo check -p torchat-client-engine -p torchat-desktop`
 - [x] `powershell -ExecutionPolicy Bypass -File scripts\internal\build-android-core.ps1`
+- [x] `powershell -ExecutionPolicy Bypass -File scripts\internal\build-desktop-runtime.ps1 -Release`
 - [x] `flutter analyze lib/core/runtime lib/mobile_bridge.dart lib/windows_runtime.dart lib/client_runtime.dart`
 - [x] `.\gradlew.bat :app:compileDebugKotlin` z katalogu `mobile\android`
 - [x] Build warning cleanup:
@@ -61,6 +62,7 @@ Uwaga srodowiskowa:
 - [x] Dodana brakujaca zaleznosc `base64` w `desktop/Cargo.toml`.
 - [x] Udostepnione transakcyjne API `RuntimeSession` dla wspolpracy runtime/engine.
 - [x] Naprawiony `scripts/internal/build-android-core.ps1`, zeby Android Rust build uzywal MSYS2 Perl/make oraz recznie ustawionego NDK toolchain z forward-slash sciezkami.
+- [x] Naprawiony `scripts/internal/build-desktop-runtime.ps1`, zeby desktop/MSVC wymuszal natywnego Windows Perla i nie lapal MSYS2/Cygwin Perla z aktualnego `PATH`.
 - [x] Usuniety warning `dead_code` z desktop przez skasowanie nieuzywanego `identity_store::load_existing`.
 - [x] Usuniete warningi Cargo o hardlinkach incremental przez repo-local `.cargo/config.toml` z `incremental = false`.
 - [x] Dodane ignorowanie Gradle/Kotlin cache `.kotlin/`.
@@ -91,6 +93,7 @@ $env:PATH='C:\Strawberry\perl\bin;'+$env:PATH; cargo test -p torchat-client-engi
 $env:PATH='C:\Strawberry\perl\bin;'+$env:PATH; cargo test -p torchat-client-engine-ffi c_api::tests
 $env:PATH='C:\Strawberry\perl\bin;'+$env:PATH; cargo check -p torchat-client-engine -p torchat-desktop
 powershell -ExecutionPolicy Bypass -File scripts\internal\build-android-core.ps1
+powershell -ExecutionPolicy Bypass -File scripts\internal\build-desktop-runtime.ps1 -Release
 flutter analyze lib/core/runtime lib/mobile_bridge.dart lib/windows_runtime.dart lib/client_runtime.dart
 .\gradlew.bat :app:compileDebugKotlin
 $env:PATH='C:\Strawberry\perl\bin;'+$env:PATH; cargo check -p torchat-client-engine -p torchat-desktop
