@@ -19,6 +19,7 @@ Przechodzi lokalnie:
 - [x] `cargo test -p torchat-client-engine storage::sqlite::tests`
 - [x] `cargo test -p torchat-client-engine-ffi c_api::tests`
 - [x] `cargo check -p torchat-client-engine -p torchat-desktop`
+- [x] `powershell -ExecutionPolicy Bypass -File scripts\internal\build-android-core.ps1`
 - [x] `flutter analyze lib/core/runtime lib/mobile_bridge.dart lib/windows_runtime.dart lib/client_runtime.dart`
 - [x] `.\gradlew.bat :app:compileDebugKotlin` z katalogu `mobile\android`
 - [x] `rg -n "RuntimeRequest|RuntimeResponse|dispatch_runtime|map_runtime_request|response_to_runtime_response" desktop mobile common`
@@ -26,7 +27,8 @@ Przechodzi lokalnie:
 
 Uwaga srodowiskowa:
 
-- [x] Zainstalowany `Strawberry Perl`, wymagany przez `openssl-sys` dla vendored OpenSSL/SQLCipher na Windows.
+- [x] Zainstalowany `Strawberry Perl`, wymagany przez lokalny Windows build `openssl-sys`.
+- [x] Zainstalowany `MSYS2` + `make`, wymagany przez Android cross-build vendored OpenSSL/SQLCipher.
 
 ## Closed Items
 
@@ -55,6 +57,7 @@ Uwaga srodowiskowa:
 - [x] Naprawiony testowy config FFI pod walidacje exact onion URL bez portu.
 - [x] Dodana brakujaca zaleznosc `base64` w `desktop/Cargo.toml`.
 - [x] Udostepnione transakcyjne API `RuntimeSession` dla wspolpracy runtime/engine.
+- [x] Naprawiony `scripts/internal/build-android-core.ps1`, zeby Android Rust build uzywal MSYS2 Perl/make oraz recznie ustawionego NDK toolchain z forward-slash sciezkami.
 - [x] CodeGraph zsynchronizowany po zmianach.
 
 ## Verification Notes
@@ -81,6 +84,7 @@ cargo test -p torchat-client-runtime
 $env:PATH='C:\Strawberry\perl\bin;'+$env:PATH; cargo test -p torchat-client-engine storage::sqlite::tests
 $env:PATH='C:\Strawberry\perl\bin;'+$env:PATH; cargo test -p torchat-client-engine-ffi c_api::tests
 $env:PATH='C:\Strawberry\perl\bin;'+$env:PATH; cargo check -p torchat-client-engine -p torchat-desktop
+powershell -ExecutionPolicy Bypass -File scripts\internal\build-android-core.ps1
 flutter analyze lib/core/runtime lib/mobile_bridge.dart lib/windows_runtime.dart lib/client_runtime.dart
 .\gradlew.bat :app:compileDebugKotlin
 rg -n "RuntimeRequest|RuntimeResponse|dispatch_runtime|map_runtime_request|response_to_runtime_response" desktop mobile common
