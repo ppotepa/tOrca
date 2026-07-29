@@ -172,6 +172,7 @@ switch ($operation) {
         if ($Environment -eq 'local') { Invoke-TorChat 'start-dev.ps1' @{ Rebuild = $true; ForceRecreate = $true; NoCache = $NoCache; Environment = 'local' } }
         $arguments = @{ Environment = $Environment; Target = $operationTarget }
         if ($Release -or $Environment -ne 'local') { $arguments.Release = $true }
+        if ($Incremental) { $arguments.Smart = $true }
         Invoke-TorChat 'internal\build-clients.ps1' $arguments
     }
     'deploy' {
@@ -234,6 +235,7 @@ switch ($operation) {
             Environment = $Environment
             ClientState = $redeployClientState
             Release = $Release
+            Incremental = $Incremental
             NoCache = $NoCache
         }
         if ($DeviceAddress) { $arguments.DeviceAddress = $DeviceAddress }

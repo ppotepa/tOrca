@@ -66,6 +66,12 @@ Uwaga srodowiskowa:
 - [x] Usuniety warning `dead_code` z desktop przez skasowanie nieuzywanego `identity_store::load_existing`.
 - [x] Usuniete warningi Cargo o hardlinkach incremental przez repo-local `.cargo/config.toml` z `incremental = false`.
 - [x] Dodane ignorowanie Gradle/Kotlin cache `.kotlin/`.
+- [x] Dodany smart incremental build cache:
+  - `scripts/torchat.ps1 build-clients -Incremental`
+  - `scripts/torchat.ps1 full-deploy -Incremental`
+  - `scripts/torchat.ps1 redeploy -Incremental`
+- [x] `redeploy -Incremental` zachowuje obecny onion i lokalne wolumeny, dzieki czemu bez zmian robi szybka podgrywke i start zamiast destrukcyjnego rebuilda.
+- [x] Flutter status polaczenia nie pokazuje juz technicznych snapshotow typu `platform fact applied`; surowy `relay transport error` jest mapowany na czytelny komunikat o niedostepnym albo nieaktualnym onion.
 - [x] CodeGraph zsynchronizowany po zmianach.
 
 ## Verification Notes
@@ -80,6 +86,12 @@ sqlite3Codec: error decrypting page 1 data: 1
 To jest oczekiwane i odpowiada testowi `reopen_with_wrong_sqlcipher_key_fails_integrity_check`.
 
 Oba wyszukania `rg` dla legacy request/response i hardcoded command type zakonczyly sie bez trafien produkcyjnych.
+
+Android core smart-cache note: jezeli
+`mobile/android/app/src/main/jniLibs/arm64-v8a/libtorchat_client_engine.so`
+jest zablokowany przez Android Studio/Gradle/ADB, skrypt przerywa z jasnym
+komunikatem zamiast nadpisywac niesprawdzony artefakt. Po zwolnieniu locka
+pierwszy run zapisuje cache, drugi run powinien pominac build.
 
 ## Commands Log
 
@@ -98,6 +110,8 @@ flutter analyze lib/core/runtime lib/mobile_bridge.dart lib/windows_runtime.dart
 .\gradlew.bat :app:compileDebugKotlin
 $env:PATH='C:\Strawberry\perl\bin;'+$env:PATH; cargo check -p torchat-client-engine -p torchat-desktop
 $env:PATH='C:\Strawberry\perl\bin;'+$env:PATH; cargo test -p torchat-client-runtime
+powershell -ExecutionPolicy Bypass -File scripts\internal\build-desktop-runtime.ps1 -Release -SkipIfFresh
+flutter analyze lib/core/runtime lib/mobile_bridge.dart lib/windows_runtime.dart lib/client_runtime.dart
 rg -n "RuntimeRequest|RuntimeResponse|dispatch_runtime|map_runtime_request|response_to_runtime_response" desktop mobile common
 rg -n '"type", "[a-z_]+"|put\("type", "[a-z_]+"|''method'': method|''params'': params' mobile desktop common
 codegraph sync

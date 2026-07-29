@@ -1,11 +1,21 @@
 param(
     [string]$AndroidNdk = $env:ANDROID_NDK_HOME,
-    [string]$RustTarget = "aarch64-linux-android"
+    [string]$RustTarget = "aarch64-linux-android",
+    [switch]$SkipIfFresh
 )
 
 $ErrorActionPreference = "Stop"
 $repo = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $jni = Join-Path $repo "mobile\android\app\src\main\jniLibs"
+. (Join-Path $PSScriptRoot "build-cache.ps1")
+
+function Test-TorChatFileExists([string]$Path) {
+    try {
+        Test-Path -LiteralPath $Path
+    } catch [System.UnauthorizedAccessException] {
+        [IO.File]::Exists($Path)
+    }
+}
 
 $msysPerl = "C:\msys64\usr\bin"
 $gitPerl = "C:\Program Files\Git\usr\bin"
@@ -68,12 +78,52 @@ if (-not (Test-Path -LiteralPath $clang) -or -not (Test-Path -LiteralPath $clang
 [Environment]::SetEnvironmentVariable("CFLAGS_$($RustTarget.Replace('-', '_'))", "--target=$RustTarget" + "21", "Process")
 
 $out = Join-Path $jni $abi
-if (Test-Path -LiteralPath $out) {
-    Remove-Item -LiteralPath $out -Recurse -Force
+$libraryPath = Join-Path $out "libtorchat_client_engine.so"
+if ($SkipIfFresh) {
+    $inputHash = Get-TorChatInputHash -RepoRoot $repo -Roots @(
+        'Cargo.toml',
+        'Cargo.lock',
+        'common\client-engine-contract.json',
+        'common\torchat-core',
+        'common\torchat-client-runtime',
+        'common\torchat-client-engine',
+        'common\torchat-client-engine-ffi'
+    ) -ExtraValues @(
+        "rust_target=$RustTarget",
+        "android_ndk=$env:ANDROID_NDK_HOME"
+    )
+    if (Test-TorChatBuildFresh -RepoRoot $repo -Key "android-core-$RustTarget" -Hash $inputHash -Artifacts @($libraryPath)) {
+        Write-Host "[torchat] Android Rust engine unchanged; using $libraryPath"
+        return
+    }
 }
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 cargo build --target $RustTarget -p torchat-client-engine-ffi --release
-Copy-Item (Join-Path $repo "target\$RustTarget\release\libtorchat_client_engine_ffi.so") (Join-Path $out "libtorchat_client_engine.so") -Force -ErrorAction SilentlyContinue
-if (-not (Test-Path (Join-Path $out "libtorchat_client_engine.so"))) {
-    throw "Rust Android engine library was not produced for $abi."
+$sourceLibraryPath = Join-Path $repo "target\$RustTarget\release\libtorchat_client_engine_ffi.so"
+if (-not (Test-Path -LiteralPath $sourceLibraryPath)) {
+    throw "Rust Android engine build did not produce source library: $sourceLibraryPath"
+}
+$copyRequired = $true
+if (Test-TorChatFileExists $libraryPath) {
+    try {
+        $copyRequired = (Get-FileHash -LiteralPath $sourceLibraryPath -Algorithm SHA256).Hash -ne
+            (Get-FileHash -LiteralPath $libraryPath -Algorithm SHA256).Hash
+    } catch {
+        throw "Android engine library exists but cannot be read: $libraryPath. Stop Android Studio/Gradle/ADB users of the project or remove the locked file, then rerun."
+    }
+}
+if ($copyRequired) {
+    try {
+        Copy-Item $sourceLibraryPath $libraryPath -Force -ErrorAction Stop
+    } catch [System.UnauthorizedAccessException] {
+        if (-not (Test-TorChatFileExists $libraryPath)) { throw }
+        $sourceHash = (Get-FileHash -LiteralPath $sourceLibraryPath -Algorithm SHA256).Hash
+        $targetHash = (Get-FileHash -LiteralPath $libraryPath -Algorithm SHA256).Hash
+        if ($sourceHash -ne $targetHash) { throw }
+        Write-Host "[torchat] Android engine library is already current but locked: $libraryPath"
+    }
+}
+if (-not (Test-TorChatFileExists $libraryPath)) { throw "Rust Android engine library was not produced for $abi." }
+if ($SkipIfFresh) {
+    Set-TorChatBuildFresh -RepoRoot $repo -Key "android-core-$RustTarget" -Hash $inputHash -Artifacts @($libraryPath)
 }

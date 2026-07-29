@@ -2,13 +2,15 @@
 param(
     [Parameter(Mandatory = $true)][ValidateSet('local','staging','production')][string]$Environment,
     [ValidateSet('android','windows','all')][string]$Target = 'all',
-    [switch]$Release
+    [switch]$Release,
+    [switch]$Smart
 )
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $mobileRoot = Join-Path $repoRoot 'mobile'
 . (Join-Path $PSScriptRoot 'environment.ps1')
+. (Join-Path $PSScriptRoot 'build-cache.ps1')
 $environmentState = Ensure-TorChatEnvironment $repoRoot $Environment
 Import-TorChatEnvironment $environmentState -RequireOnion
 
@@ -70,12 +72,57 @@ function Build-WindowsFlutterOnNtfs([string]$Variant) {
 Push-Location $repoRoot
 try {
     if ($Target -in @('windows','all')) {
-        & (Join-Path $PSScriptRoot 'build-desktop-runtime.ps1') -Release:$Release
+        & (Join-Path $PSScriptRoot 'build-desktop-runtime.ps1') -Release:$Release -SkipIfFresh:$Smart
         if (-not $?) { throw 'Desktop Rust engine client build failed.' }
     }
     if ($Target -in @('android','all')) {
-        & (Join-Path $PSScriptRoot 'build-android-core.ps1')
+        & (Join-Path $PSScriptRoot 'build-android-core.ps1') -SkipIfFresh:$Smart
         if (-not $?) { throw 'Android Rust engine build failed.' }
+    }
+    $variant = if ($Release) { 'release' } else { 'debug' }
+    $windowsVariant = if ($Release) { '--release' } else { '--debug' }
+    $windowsBuildVariant = if ($Release) { 'Release' } else { 'Debug' }
+    $androidApk = Join-Path $mobileRoot "build\app\outputs\flutter-apk\app-$variant.apk"
+    $windowsExe = Join-Path $mobileRoot "build\windows\x64\runner\$windowsBuildVariant\torchat_mobile.exe"
+    $androidFlutterHash = $null
+    $windowsFlutterHash = $null
+    $androidFlutterFresh = $false
+    $windowsFlutterFresh = $false
+    if ($Smart -and $Target -in @('android','all')) {
+        $androidFlutterHash = Get-TorChatInputHash -RepoRoot $repoRoot -Roots @(
+            'common\client-engine-contract.json',
+            'mobile\pubspec.yaml',
+            'mobile\pubspec.lock',
+            'mobile\lib',
+            'mobile\assets',
+            'mobile\android\app\build.gradle.kts',
+            'mobile\android\app\src\main',
+            'mobile\android\gradle',
+            'mobile\android\build.gradle.kts',
+            'mobile\android\settings.gradle.kts'
+        ) -ExtraValues @(
+            "environment=$Environment",
+            "config=$($environmentState.Paths.RuntimeEnvironment)",
+            "onion=$($env:TORCHAT_ONION_URL)",
+            "variant=$variant"
+        )
+        $androidFlutterFresh = Test-TorChatBuildFresh -RepoRoot $repoRoot -Key "flutter-android-$variant" -Hash $androidFlutterHash -Artifacts @($androidApk)
+    }
+    if ($Smart -and $Target -in @('windows','all')) {
+        $windowsFlutterHash = Get-TorChatInputHash -RepoRoot $repoRoot -Roots @(
+            'common\client-engine-contract.json',
+            'mobile\pubspec.yaml',
+            'mobile\pubspec.lock',
+            'mobile\lib',
+            'mobile\assets',
+            'mobile\windows'
+        ) -ExtraValues @(
+            "environment=$Environment",
+            "config=$($environmentState.Paths.RuntimeEnvironment)",
+            "onion=$($env:TORCHAT_ONION_URL)",
+            "variant=$windowsBuildVariant"
+        )
+        $windowsFlutterFresh = Test-TorChatBuildFresh -RepoRoot $repoRoot -Key "flutter-windows-$windowsBuildVariant" -Hash $windowsFlutterHash -Artifacts @($windowsExe)
     }
     Push-Location $mobileRoot
     try {
@@ -86,17 +133,31 @@ try {
         # Fixtures are opt-in; normal developer builds exercise real onboarding.
         $env:TORCHAT_DEV_PROFILE = ''
         $env:TORCHAT_DEV_PAIR = 'false'
-        flutter pub get
-        if ($LASTEXITCODE -ne 0) { throw 'flutter pub get failed.' }
+        if (-not ($Smart -and (($Target -eq 'android' -and $androidFlutterFresh) -or ($Target -eq 'windows' -and $windowsFlutterFresh) -or ($Target -eq 'all' -and $androidFlutterFresh -and $windowsFlutterFresh)))) {
+            flutter pub get
+            if ($LASTEXITCODE -ne 0) { throw 'flutter pub get failed.' }
+        }
         if ($Target -in @('android','all')) {
-            $variant = if ($Release) { 'release' } else { 'debug' }
-            flutter build apk "--$variant"
-            if ($LASTEXITCODE -ne 0) { throw "Flutter Android $variant build failed." }
+            if ($androidFlutterFresh) {
+                Write-Host "[torchat] Flutter Android APK unchanged; using $androidApk"
+            } else {
+                flutter build apk "--$variant"
+                if ($LASTEXITCODE -ne 0) { throw "Flutter Android $variant build failed." }
+                if ($Smart) {
+                    Set-TorChatBuildFresh -RepoRoot $repoRoot -Key "flutter-android-$variant" -Hash $androidFlutterHash -Artifacts @($androidApk)
+                }
+            }
         }
         if ($Target -in @('windows','all')) {
             Stop-TorChatFlutterWindows
-            $windowsVariant = if ($Release) { '--release' } else { '--debug' }
-            Build-WindowsFlutterOnNtfs $windowsVariant
+            if ($windowsFlutterFresh) {
+                Write-Host "[torchat] Flutter Windows client unchanged; using $windowsExe"
+            } else {
+                Build-WindowsFlutterOnNtfs $windowsVariant
+                if ($Smart) {
+                    Set-TorChatBuildFresh -RepoRoot $repoRoot -Key "flutter-windows-$windowsBuildVariant" -Hash $windowsFlutterHash -Artifacts @($windowsExe)
+                }
+            }
         }
     } finally {
         $env:TORCHAT_CONFIG_FILE = $previousConfigFile

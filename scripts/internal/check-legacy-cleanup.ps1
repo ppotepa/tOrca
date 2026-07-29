@@ -57,7 +57,7 @@ foreach ($check in $checks) {
     if ($paths.Count -eq 0) {
         continue
     }
-    $hits = @(rg -n -F --glob '!concat.txt' $check.Needle $paths 2>$null |
+    $hits = @(rg -n -F --glob '!concat.txt' --glob '!**/jniLibs/**' $check.Needle $paths 2>$null |
         Where-Object { -not $_.StartsWith($PSCommandPath) })
     if ($hits) {
         throw "Legacy production path still present: $($check.Needle)`n$hits"

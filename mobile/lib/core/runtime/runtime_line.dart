@@ -67,7 +67,8 @@ final class EngineConnectionLine extends EngineLine {
 
   RuntimeEvent runtimeEvent() {
     final stateValue = snapshot[EngineContract.state];
-    var state = stateValue?.toString() ?? EngineContract.connectionStateDisconnected;
+    var state =
+        stateValue?.toString() ?? EngineContract.connectionStateDisconnected;
     var retryAttempt = 0;
     int? retryInMs;
     if (stateValue is Map) {
@@ -76,12 +77,12 @@ final class EngineConnectionLine extends EngineLine {
       if (backoff is Map) {
         final backoffMap = Map<String, dynamic>.from(backoff);
         state = EngineContract.connectionStateBackoff;
-        retryAttempt = (backoffMap[EngineContract.attempt] as num?)?.toInt() ?? 0;
-        retryInMs =
-            (backoffMap[EngineContract.retryInMs] as num?)?.toInt();
+        retryAttempt =
+            (backoffMap[EngineContract.attempt] as num?)?.toInt() ?? 0;
+        retryInMs = (backoffMap[EngineContract.retryInMs] as num?)?.toInt();
       }
     }
-    final detail = snapshot[EngineContract.detail]?.toString() ?? '';
+    final rawDetail = snapshot[EngineContract.detail]?.toString() ?? '';
     final phase = switch (state) {
       EngineContract.connectionStateWaitingForTor => TransportPhase.starting,
       EngineContract.connectionStateConnecting ||
@@ -94,15 +95,32 @@ final class EngineConnectionLine extends EngineLine {
       EngineContract.connectionStateDisconnected => TransportPhase.offline,
       _ => TransportPhase.error,
     };
+    final detail = _connectionDetail(rawDetail, retryInMs);
     return TorStatusEvent(
       RuntimeTorStatus(
         phase: phase,
-        label: detail.isEmpty ? phase.label : detail,
-        detail: retryInMs == null ? detail : '$detail; retry in ${retryInMs}ms',
+        label: phase.label,
+        detail: detail,
         retryAttempt: retryAttempt,
       ),
     );
   }
+}
+
+String _connectionDetail(String detail, int? retryInMs) {
+  final trimmed = detail.trim();
+  final technical =
+      trimmed.isEmpty ||
+      trimmed == 'engine actor initialized' ||
+      trimmed == 'connect requested' ||
+      trimmed == 'platform fact applied' ||
+      trimmed == 'relay connected';
+  if (technical) return '';
+  if (trimmed.startsWith('relay transport error:')) {
+    final retry = retryInMs == null ? '' : ' Próba ponownie za ${retryInMs}ms.';
+    return 'Relay onion jest chwilowo niedostępny albo aplikacja ma nieaktualny adres.$retry';
+  }
+  return retryInMs == null ? trimmed : '$trimmed; retry in ${retryInMs}ms';
 }
 
 final class EngineNotificationLine extends EngineLine {

@@ -1,8 +1,12 @@
 [CmdletBinding()]
-param([switch]$Release)
+param(
+    [switch]$Release,
+    [switch]$SkipIfFresh
+)
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+. (Join-Path $PSScriptRoot 'build-cache.ps1')
 Push-Location $repoRoot
 try {
     $profile = if ($Release) { 'release' } else { 'debug' }
@@ -12,6 +16,25 @@ try {
     }
     $binaryName = if ($env:OS -eq 'Windows_NT') { 'torchat-desktop.exe' } else { 'torchat-desktop' }
     $binaryPath = Join-Path $repoRoot "target\$profile\$binaryName"
+    if ($SkipIfFresh) {
+        $inputHash = Get-TorChatInputHash -RepoRoot $repoRoot -Roots @(
+            'Cargo.toml',
+            'Cargo.lock',
+            'common\client-engine-contract.json',
+            'common\torchat-core',
+            'common\torchat-client-runtime',
+            'common\torchat-client-engine',
+            'desktop'
+        ) -ExtraValues @(
+            "profile=$profile",
+            "onion=$onion",
+            "os=$env:OS"
+        )
+        if (Test-TorChatBuildFresh -RepoRoot $repoRoot -Key "desktop-runtime-$profile" -Hash $inputHash -Artifacts @($binaryPath)) {
+            Write-Host "[torchat] Desktop engine client unchanged; using $binaryPath"
+            return (Resolve-Path -LiteralPath $binaryPath).Path
+        }
+    }
     if ($env:OS -eq 'Windows_NT' -and (Test-Path -LiteralPath $binaryPath)) {
         $resolvedBinaryPath = [IO.Path]::GetFullPath((Resolve-Path -LiteralPath $binaryPath).Path)
         $running = @(Get-CimInstance Win32_Process -Filter "Name='torchat-desktop.exe'" |
@@ -49,6 +72,9 @@ try {
     $name = if ($isWindowsHost) { 'torchat-desktop.exe' } else { 'torchat-desktop' }
     $source = Join-Path $repoRoot "target\$profile\$name"
     if (-not (Test-Path -LiteralPath $source)) { throw "Desktop engine client binary missing: $source" }
+    if ($SkipIfFresh) {
+        Set-TorChatBuildFresh -RepoRoot $repoRoot -Key "desktop-runtime-$profile" -Hash $inputHash -Artifacts @($source)
+    }
     Write-Host "[torchat] Desktop engine client ready: $source"
     return (Resolve-Path -LiteralPath $source).Path
 } finally { Pop-Location }

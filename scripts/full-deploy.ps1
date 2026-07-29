@@ -45,6 +45,7 @@ $buildArgs = @{
     Target = 'all'
 }
 if ($Release -or $Environment -ne 'local') { $buildArgs.Release = $true }
+if ($Incremental) { $buildArgs.Smart = $true }
 if (-not $SkipMobileBuild) {
     Invoke-Step 'Build clients' {
         & (Join-Path $PSScriptRoot 'internal\build-clients.ps1') @buildArgs
