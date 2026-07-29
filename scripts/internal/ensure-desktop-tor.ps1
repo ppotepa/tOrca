@@ -4,10 +4,13 @@ $ErrorActionPreference = "Stop"
 $manifestPath = Join-Path $RepoRoot "infra\config\desktop-tor-packages.json"
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 $architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+$isLinuxPlatform = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+    [System.Runtime.InteropServices.OSPlatform]::Linux
+)
 if ($architecture -ne [System.Runtime.InteropServices.Architecture]::X64) {
     throw "Embedded Tor currently supports x86_64 desktop only (detected: $architecture)."
 }
-$platform = if ($IsLinux) { "linux-x86_64" } else { "windows-x86_64" }
+$platform = if ($isLinuxPlatform) { "linux-x86_64" } else { "windows-x86_64" }
 $package = $manifest.packages.$platform
 if (-not $package) { throw "No embedded Tor package for $platform." }
 
@@ -45,7 +48,7 @@ if (-not (Test-Path -LiteralPath $binary)) {
 if (-not (Test-Path -LiteralPath $binary)) {
     throw "Tor executable is missing after extraction: $binary"
 }
-if ($IsLinux) { chmod +x $binary }
+if ($isLinuxPlatform) { chmod +x $binary }
 
 [pscustomobject]@{
     Binary = (Resolve-Path -LiteralPath $binary).Path

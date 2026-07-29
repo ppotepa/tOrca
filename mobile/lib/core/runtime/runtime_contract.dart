@@ -1,0 +1,57 @@
+abstract final class RuntimeContract {
+  static const type = 'type';
+
+  static const bootstrapRuntime = 'bootstrapRuntime';
+  static const reportTorStatus = 'reportTorStatus';
+  static const applyRemoteProfile = 'applyRemoteProfile';
+  static const reportRuntimeError = 'reportRuntimeError';
+  static const reportRuntimeLog = 'reportRuntimeLog';
+  static const connect = 'connect';
+  static const identity = 'identity';
+  static const profile = 'profile';
+  static const setNickname = 'setNickname';
+  static const refreshPairingCode = 'refreshPairingCode';
+  static const prepareSubmitPairingCode = 'prepareSubmitPairingCode';
+  static const submitPairingCode = 'submitPairingCode';
+  static const pairingInbox = 'pairingInbox';
+  static const mergePairingInbox = 'mergePairingInbox';
+  static const pairingOutbox = 'pairingOutbox';
+  static const mergePairingOutbox = 'mergePairingOutbox';
+  static const acceptPairing = 'acceptPairing';
+  static const rejectPairing = 'rejectPairing';
+  static const cancelPairing = 'cancelPairing';
+  static const prepareAcceptPairing = 'prepareAcceptPairing';
+  static const commitAcceptPairing = 'commitAcceptPairing';
+  static const bootstrapContact = 'bootstrapContact';
+  static const prepareRejectPairing = 'prepareRejectPairing';
+  static const commitRejectPairing = 'commitRejectPairing';
+  static const archivePairing = 'archivePairing';
+  static const prepareCancelPairing = 'prepareCancelPairing';
+  static const confirmPairingCancelled = 'confirmPairingCancelled';
+  static const applyPairingPeerOutcome = 'applyPairingPeerOutcome';
+  static const welcomeAccepted = 'welcomeAccepted';
+  static const verifyContact = 'verifyContact';
+  static const contacts = 'contacts';
+  static const conversations = 'conversations';
+  static const messages = 'messages';
+  static const openConversation = 'openConversation';
+  static const closeConversation = 'closeConversation';
+  static const startConversation = 'startConversation';
+  static const sendMessage = 'sendMessage';
+  static const receiveMessage = 'receiveMessage';
+  static const preparePendingSendEffects = 'preparePendingSendEffects';
+  static const applyMessageTransportOutcome = 'applyMessageTransportOutcome';
+
+  static const runtimeReady = 'runtime_ready';
+  static const torStatus = 'tor_status';
+  static const profileReady = 'profile_ready';
+  static const inviteReceived = 'invite_received';
+  static const inviteStateChanged = 'invite_state_changed';
+  static const messageReceived = 'message_received';
+  static const messageStateChanged = 'message_state_changed';
+  static const conversationReadChanged = 'conversation_read_changed';
+  static const changed = 'changed';
+  static const runtimeError = 'runtime_error';
+  static const runtimeLog = 'runtime_log';
+  static const notifyIncoming = 'notifyIncoming';
+}

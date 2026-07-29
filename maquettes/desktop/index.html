@@ -1,0 +1,3080 @@
+<!-- GENERATED FILE. Edit maquettes/desktop/src and shared sources. -->
+<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TorChat desktop maquette</title><style>:root {
+  color-scheme: dark;
+  --bg: #0c111a;
+  --bg-elevated: #111827;
+  --surface: #141b2a;
+  --surface-2: #182133;
+  --surface-3: #1e2a42;
+  --line: #26344d;
+  --line-strong: #364861;
+  --text: #edf3ff;
+  --muted: #8d9bb4;
+  --accent: #77a0ff;
+  --accent-strong: #4e7cf1;
+  --ok: #4ad7a2;
+  --warn: #f2bc5f;
+  --danger: #f07a8c;
+  --shadow: 0 16px 50px rgba(0, 0, 0, 0.3);
+  --radius: 2px;
+  --radius-sm: 2px;
+  --control: 38px;
+  --control-lg: 44px;
+  --space: 8px;
+  --font: "Inter", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+}
+
+body[data-theme="light"] {
+  color-scheme: light;
+  --bg: #eef2f8;
+  --bg-elevated: #f7f9fd;
+  --surface: #ffffff;
+  --surface-2: #f0f4fa;
+  --surface-3: #e5ebf4;
+  --line: #d3dce8;
+  --line-strong: #bcc8d8;
+  --text: #122033;
+  --muted: #60708a;
+  --accent: #406fe2;
+  --accent-strong: #335ec8;
+  --ok: #1f9d75;
+  --warn: #b37b18;
+  --danger: #c7586b;
+  --shadow: 0 16px 50px rgba(31, 43, 61, 0.12);
+}
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.45 var(--font);
+  min-height: 100vh;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  background: transparent;
+}
+
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.shell {
+  min-height: 100vh;
+}
+
+.mobile-shell {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+}
+
+.desktop-shell {
+  display: grid;
+  grid-template-rows: 30px minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.desktop-workspace {
+  display: grid;
+  grid-template-columns: 176px 304px minmax(420px, 1fr) 280px;
+  min-height: 0;
+}
+
+.desktop-shell.no-inspector .desktop-workspace {
+  grid-template-columns: 180px 320px minmax(420px, 1fr);
+}
+
+.desktop-status {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-elevated);
+  color: var(--muted);
+  cursor: pointer;
+  transition: background-color 420ms ease, color 420ms ease, border-color 420ms ease;
+}
+
+.desktop-status::after {
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 3px;
+  content: "";
+  background: var(--line-strong);
+  transition: background 420ms ease, opacity 420ms ease;
+}
+
+.desktop-status-line {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: 50%;
+  background: var(--warn);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--warn) 58%, transparent);
+}
+
+.desktop-status-copy {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.desktop-status-copy strong {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.desktop-status-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.desktop-status-badge {
+  margin-left: auto;
+  padding: 1px 7px;
+  border-left: 1px solid var(--line-strong);
+  color: var(--muted);
+  font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.desktop-status.ok .desktop-status-line {
+  background: var(--ok);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--ok) 58%, transparent);
+}
+
+.desktop-status.ok {
+  background: color-mix(in srgb, var(--ok) 9%, var(--bg-elevated));
+  border-bottom-color: color-mix(in srgb, var(--ok) 35%, var(--line));
+}
+
+.desktop-status.ok::after {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--ok) 65%, var(--bg-elevated)), var(--ok), color-mix(in srgb, var(--ok) 65%, var(--bg-elevated)));
+  box-shadow: 0 0 12px color-mix(in srgb, var(--ok) 48%, transparent);
+}
+
+.desktop-status.bad .desktop-status-line {
+  background: var(--danger);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--danger) 58%, transparent);
+}
+
+.desktop-status.bad {
+  background: color-mix(in srgb, var(--danger) 9%, var(--bg-elevated));
+  border-bottom-color: color-mix(in srgb, var(--danger) 35%, var(--line));
+}
+
+.desktop-status.bad::after {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--danger) 58%, var(--bg-elevated)), var(--danger), color-mix(in srgb, var(--danger) 58%, var(--bg-elevated)));
+  box-shadow: 0 0 12px color-mix(in srgb, var(--danger) 42%, transparent);
+}
+
+.desktop-status.warn .desktop-status-line {
+  animation: tor-status-pulse 1.1s ease-in-out infinite;
+}
+
+.desktop-status.warn {
+  background: color-mix(in srgb, var(--warn) 7%, var(--bg-elevated));
+  border-bottom-color: color-mix(in srgb, var(--warn) 32%, var(--line));
+}
+
+.desktop-status.warn::after {
+  background: repeating-linear-gradient(90deg, var(--warn) 0 18px, transparent 18px 30px);
+  background-size: 180px 100%;
+  box-shadow: 0 0 10px color-mix(in srgb, var(--warn) 38%, transparent);
+  animation: tor-status-dash 1.2s linear infinite;
+}
+
+@keyframes tor-status-pulse {
+  0%, 100% { opacity: 0.45; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.15); }
+}
+
+@keyframes tor-status-dash {
+  from { background-position: 0 0; }
+  to { background-position: 180px 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .desktop-status.warn .desktop-status-line,
+  .desktop-status.warn::after {
+    animation: none;
+  }
+}
+
+.viewport {
+  min-width: 0;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.eyebrow {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.icon,
+.ghost,
+.primary,
+.status-chip,
+.rail button,
+.dock button {
+  min-height: var(--control);
+}
+
+.icon,
+.ghost,
+.primary {
+  border-radius: var(--radius-sm);
+}
+
+.icon,
+.ghost,
+.status-chip,
+.rail button,
+.dock button,
+.rail-meta {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+
+.icon,
+.ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 12px;
+}
+
+.icon {
+  width: var(--control);
+  padding: 0;
+}
+
+.icon svg,
+.ghost svg,
+.primary svg,
+.status-chip svg,
+.rail button svg,
+.dock button svg,
+.rail-meta svg,
+.brand-mark svg,
+.avatar svg,
+.hero-mark svg,
+.empty-mark svg,
+.search-wrap svg,
+.queue-note svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+  flex: 0 0 auto;
+}
+
+.hero-mark svg {
+  width: 34px;
+  height: 34px;
+}
+
+.empty-mark svg {
+  width: 24px;
+  height: 24px;
+}
+
+.primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: var(--control);
+  padding: 0 14px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.primary:hover {
+  background: var(--accent-strong);
+}
+
+.ghost:hover,
+.icon:hover,
+.rail button:hover,
+.dock button:hover,
+.rail-meta:hover {
+  background: var(--surface-3);
+}
+
+.danger {
+  color: #fff;
+  background: var(--danger);
+  border-color: transparent;
+}
+
+.danger:hover {
+  background: color-mix(in srgb, var(--danger) 85%, black);
+}
+
+.wide {
+  width: 100%;
+}
+
+.center {
+  text-align: center;
+}
+
+.field,
+.search {
+  width: 100%;
+  min-height: var(--control-lg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  padding: 0 12px;
+}
+
+.field::placeholder,
+.search::placeholder {
+  color: color-mix(in srgb, var(--muted) 85%, transparent);
+}
+
+.field-label {
+  display: block;
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.04em;
+  word-break: break-word;
+}
+
+.avatar,
+.hero-mark,
+.brand-mark {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  color: #fff;
+  background: var(--accent);
+}
+
+.avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  font-weight: 700;
+}
+
+.avatar-lg {
+  width: 52px;
+  height: 52px;
+  border-radius: 12px;
+}
+
+.brand-mark {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+}
+
+.hero-mark {
+  width: 72px;
+  height: 72px;
+  border-radius: 16px;
+  margin: 0 auto 20px;
+}
+
+.status-pill,
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.status-pill {
+  border: 1px solid var(--line);
+  color: var(--muted);
+  background: var(--surface-2);
+}
+
+.status-pill.ok {
+  color: var(--ok);
+}
+
+.status-pill.warn {
+  color: var(--warn);
+}
+
+.status-pill.bad {
+  color: var(--danger);
+}
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+}
+
+.tor-strip {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 10px;
+  min-height: 10px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  overflow: hidden;
+  background: var(--warn);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--warn) 34%, transparent);
+}
+
+.tor-strip span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.tor-strip::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.65), transparent);
+}
+
+.tor-strip.ok {
+  background: var(--ok);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--ok) 34%, transparent);
+}
+
+.tor-strip.warn {
+  background: var(--warn);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--warn) 34%, transparent);
+}
+
+.tor-strip.warn::after {
+  animation: tor-strip-scan 1200ms linear infinite;
+}
+
+.tor-strip.bad {
+  background: var(--danger);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--danger) 36%, transparent);
+}
+
+.badge {
+  color: #fff;
+  background: var(--accent);
+}
+
+.topbar {
+  min-height: 60px;
+  padding: 12px 14px;
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 10px;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
+}
+
+.detail-topbar {
+  grid-template-columns: auto 1fr auto;
+}
+
+.topbar-title h1,
+.list-copy h1,
+.detail-copy h1,
+.inspector-header h2 {
+  margin: 2px 0 0;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.topbar-title {
+  min-width: 0;
+}
+
+.topbar-title h1 {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.list-column {
+  min-width: 0;
+  border-right: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
+}
+
+.list-shell,
+.detail-shell,
+.inspector {
+  min-width: 0;
+  min-height: 0;
+}
+
+.list-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.list-header,
+.detail-header,
+.inspector-header {
+  padding: 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.list-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.list-copy,
+.detail-copy {
+  min-width: 0;
+}
+
+.list-copy p,
+.detail-copy p,
+.inspector-header p {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+
+.search-wrap {
+  position: relative;
+  padding: 12px 16px 0;
+}
+
+.search-wrap svg {
+  position: absolute;
+  left: 28px;
+  top: 24px;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.search-wrap .search {
+  padding-left: 40px;
+}
+
+.list-body {
+  display: grid;
+  gap: 6px;
+  padding: 12px 10px 16px;
+  overflow: auto;
+}
+
+.list-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 72px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+}
+
+.list-row:hover,
+.list-row.active {
+  background: var(--surface-2);
+  border-color: var(--line);
+}
+
+.list-row strong,
+.profile-line strong {
+  display: block;
+  font-size: 15px;
+}
+
+.list-row p,
+.profile-line p {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+
+.list-row small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.fingerprint {
+  display: block;
+  margin-top: 4px;
+  color: color-mix(in srgb, var(--muted) 86%, white);
+  font-size: 12px;
+}
+
+.detail-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
+}
+
+.detail-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.detail-body {
+  min-height: 0;
+  padding: 16px;
+  overflow: auto;
+}
+
+.detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stack {
+  display: grid;
+  gap: 10px;
+}
+
+.panel,
+.empty-card,
+.modal-card {
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.panel {
+  border-radius: var(--radius);
+  padding: 14px;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.profile-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.context-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 34px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 65%, transparent);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.context-row:last-child {
+  border-bottom: 0;
+}
+
+.context-row strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.actions-column {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.chat-flow {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 12px;
+}
+
+.messages {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 320px;
+  overflow: auto;
+  padding: 4px 0;
+}
+
+.bubble {
+  max-width: min(74%, 520px);
+  align-self: flex-start;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+
+.bubble.mine {
+  align-self: flex-end;
+  background: color-mix(in srgb, var(--accent) 28%, var(--surface-2));
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--line));
+}
+
+.bubble small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: right;
+}
+
+.composer {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+
+.queue-note {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: center;
+  padding: 12px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+
+.queue-note svg {
+  color: var(--warn);
+}
+
+.queue-note p {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+
+.inspector {
+  border-left: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg-elevated) 90%, transparent);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.inspector-body {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  overflow: auto;
+}
+
+.inspector-title {
+  min-width: 0;
+}
+
+.inspector-section {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 10px;
+}
+
+.inspector-section:last-child {
+  border-bottom: 0;
+}
+
+.inspector-label,
+.settings-label {
+  padding: 4px 0 8px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.inspector-row,
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 4px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 65%, transparent);
+  text-align: left;
+}
+
+.inspector-row:last-child,
+.settings-row:last-child {
+  border-bottom: 0;
+}
+
+.inspector-row:hover,
+.settings-row:hover {
+  background: var(--surface-2);
+}
+
+.inspector-row strong,
+.inspector-row span,
+.settings-row strong,
+.settings-row small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inspector-row strong,
+.settings-row small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.inspector-row svg,
+.settings-row svg {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+}
+
+.muted-row {
+  color: var(--muted);
+}
+
+.settings-list {
+  display: grid;
+  gap: 24px;
+  max-width: 680px;
+}
+
+.settings-section {
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+
+.danger-row,
+.danger-row small {
+  color: var(--danger);
+}
+
+.empty-state {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 32px 16px;
+}
+
+.empty-card {
+  max-width: 360px;
+  width: 100%;
+  border-radius: var(--radius);
+  padding: 24px;
+  text-align: center;
+}
+
+.empty-mark {
+  width: 52px;
+  height: 52px;
+  margin: 0 auto 14px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  background: var(--surface-2);
+  color: var(--accent);
+}
+
+.empty-card h2,
+.modal-card h2,
+.onboarding-card h1,
+.onboarding-screen h1 {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.1;
+}
+
+.empty-card p,
+.modal-card p,
+.onboarding-card p,
+.onboarding-screen p {
+  margin: 10px 0 0;
+  color: var(--muted);
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.onboarding-card .field,
+.onboarding-card .primary {
+  max-width: 100%;
+}
+
+.onboarding-screen {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  place-items: center;
+  justify-items: center;
+  gap: 18px;
+  text-align: center;
+  padding: 24px;
+  overflow-x: hidden;
+}
+
+.onboarding-card {
+  width: 100%;
+  max-width: 420px;
+  min-width: 0;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  box-shadow: var(--shadow);
+}
+
+.onboarding-card,
+.empty-card,
+.modal-card {
+  overflow-wrap: anywhere;
+}
+
+.progress-bar {
+  height: 8px;
+  margin: 18px 0 12px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.progress-bar span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.status-line {
+  margin-top: 8px;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(2, 6, 16, 0.68);
+  z-index: 20;
+}
+
+.modal-card {
+  position: relative;
+  width: min(480px, 100%);
+  border-radius: var(--radius);
+  padding: 20px;
+  box-shadow: var(--shadow);
+}
+
+.qr-modal {
+  background: #fff;
+  color: #101419;
+}
+
+.qr-modal p {
+  color: #4c5566;
+}
+
+.close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.qr-frame {
+  margin: 18px auto 0;
+  width: min(100%, 260px);
+  background: #fff;
+  border: 1px solid #d7dbe2;
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.qr-grid {
+  display: grid;
+  grid-template-columns: repeat(11, 1fr);
+  gap: 2px;
+  aspect-ratio: 1;
+  background: #fff;
+}
+
+.qr-grid i {
+  display: block;
+  background: #111;
+  border-radius: 1px;
+}
+
+.qr-grid i.off {
+  background: #fff;
+}
+
+.qr-code {
+  text-align: center;
+  font-size: 22px;
+  letter-spacing: 0.22em;
+  margin-top: 16px;
+}
+
+.code-modal {
+  display: grid;
+  gap: 12px;
+}
+
+.code-entry {
+  height: 58px;
+  text-align: center;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 28px;
+  letter-spacing: 0.18em;
+}
+
+.rail {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 10px;
+  padding: 12px 8px 10px;
+  border-right: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
+}
+
+.rail-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 6px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.brand-copy {
+  min-width: 0;
+}
+
+.brand-copy strong,
+.rail-meta span {
+  display: block;
+}
+
+.brand-copy span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.rail-avatar {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+}
+
+.rail-nav {
+  display: grid;
+  grid-template-rows: repeat(3, 46px);
+  align-content: start;
+  gap: 2px;
+  min-height: 0;
+}
+
+.rail button,
+.dock button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+  color: var(--muted);
+  border-radius: 2px;
+  padding: 0 12px;
+  font-weight: 500;
+}
+
+.rail-nav button {
+  min-height: 0;
+  align-items: center;
+}
+
+.rail button.active,
+.dock button.active {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-3));
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--line));
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.rail button span {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dock button {
+  justify-content: center;
+}
+
+.rail-footer {
+  display: grid;
+  gap: 2px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.rail-identity,
+.rail-settings {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 48px;
+  padding: 0 8px;
+  text-align: left;
+}
+
+.rail-identity-copy {
+  min-width: 0;
+}
+
+.rail-identity-copy strong,
+.rail-identity-copy small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail-identity-copy small,
+.rail-settings {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.rail-settings {
+  justify-content: flex-start;
+}
+
+.rail-settings svg {
+  width: 18px;
+  height: 18px;
+}
+
+.rail-meta {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  border-radius: 2px;
+  padding: 8px 10px;
+  min-height: 54px;
+  text-align: left;
+  transition: border-color 140ms ease, box-shadow 140ms ease, background-color 140ms ease;
+}
+
+.rail-meta span {
+  min-width: 0;
+}
+
+.rail-meta strong,
+.rail-meta small {
+  display: block;
+}
+
+.rail-meta small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.rail-meta.ok {
+  border-color: color-mix(in srgb, var(--ok) 42%, var(--line));
+  box-shadow: 0 0 16px color-mix(in srgb, var(--ok) 22%, transparent);
+}
+
+.rail-meta.warn {
+  border-color: color-mix(in srgb, var(--warn) 46%, var(--line));
+  box-shadow: 0 0 16px color-mix(in srgb, var(--warn) 20%, transparent);
+}
+
+.rail-meta.bad {
+  border-color: color-mix(in srgb, var(--danger) 48%, var(--line));
+  box-shadow: 0 0 16px color-mix(in srgb, var(--danger) 22%, transparent);
+}
+
+.dock {
+  position: sticky;
+  bottom: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  padding: 10px;
+  border-top: 1px solid var(--line);
+  background: var(--bg-elevated);
+}
+
+.dock button {
+  flex-direction: column;
+  min-height: 56px;
+  padding: 8px 6px;
+  font-size: 12px;
+}
+
+.dock button span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dock button .badge {
+  margin-left: 4px;
+}
+
+.icon-button {
+  width: 36px;
+  min-width: 36px;
+  padding: 0;
+}
+
+@media (max-width: 1199px) {
+  .desktop-workspace {
+    grid-template-columns: 84px 292px minmax(360px, 1fr);
+  }
+
+  .desktop-shell.no-inspector .desktop-workspace {
+    grid-template-columns: 84px 292px minmax(360px, 1fr);
+  }
+
+  .inspector {
+    display: none;
+  }
+
+  .rail-brand .brand-copy,
+  .rail-nav button span,
+  .rail-identity-copy,
+  .rail-meta span,
+  .rail-settings span {
+    display: none;
+  }
+
+  .rail-brand,
+  .rail-nav button,
+  .rail-identity,
+  .rail-meta,
+  .rail-settings {
+    justify-content: center;
+    padding-inline: 0;
+  }
+}
+
+@media (max-width: 899px) {
+  .desktop-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .inspector {
+    display: none;
+  }
+
+  .topbar {
+    padding-inline: 12px;
+  }
+
+  .list-shell,
+  .detail-shell {
+    height: calc(100vh - 10px);
+  }
+
+  .list-body {
+    padding-inline: 8px;
+  }
+
+  .list-row {
+    min-height: 68px;
+  }
+
+  .bubble {
+    max-width: 84%;
+  }
+
+  .modal-card {
+    width: 100%;
+    border-radius: var(--radius);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .modal-card,
+  .onboarding-card,
+  .panel,
+  .list-row,
+  .rail button,
+  .dock button {
+    transition: background-color 140ms ease, border-color 140ms ease, transform 140ms ease;
+  }
+
+  @keyframes tor-strip-scan {
+    to {
+      transform: translateX(100%);
+    }
+  }
+}
+body[data-platform="desktop"] {
+  overflow: hidden;
+}
+
+body[data-platform="desktop"] .desktop-shell {
+  height: 100vh;
+}
+
+body[data-platform="desktop"] .desktop-workspace {
+  height: 100%;
+}
+
+body[data-platform="desktop"] .list-column,
+body[data-platform="desktop"] .viewport,
+body[data-platform="desktop"] .inspector {
+  min-height: 0;
+  overflow: hidden;
+}
+
+body[data-platform="desktop"] .list-column {
+  display: flex;
+  flex-direction: column;
+}
+
+body[data-platform="desktop"] .viewport {
+  background: color-mix(in srgb, var(--bg-elevated) 90%, transparent);
+}
+
+body[data-platform="desktop"] .detail-shell {
+  height: 100vh;
+}
+
+body[data-platform="desktop"] .list-body,
+body[data-platform="desktop"] .detail-body,
+body[data-platform="desktop"] .inspector-body {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+
+body[data-platform="desktop"] .list-body::-webkit-scrollbar,
+body[data-platform="desktop"] .detail-body::-webkit-scrollbar,
+body[data-platform="desktop"] .inspector-body::-webkit-scrollbar {
+  width: 10px;
+}
+
+body[data-platform="desktop"] .list-body::-webkit-scrollbar-thumb,
+body[data-platform="desktop"] .detail-body::-webkit-scrollbar-thumb,
+body[data-platform="desktop"] .inspector-body::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 0;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+
+@media (max-width: 1199px) {
+  body[data-platform="desktop"] .desktop-workspace {
+    grid-template-columns: 84px 292px minmax(360px, 1fr);
+  }
+}
+</style></head><body data-platform="desktop"><div id="app"></div><div id="overlay-root"></div><template id="tpl-splash">
+  <section class="onboarding-screen">
+    <div class="hero-mark">{{brand}}</div>
+    <h1>TorChat</h1>
+    <p>Prywatne wiadomości przez onion i lokalny model kolejki.</p>
+  </section>
+</template>
+<template id="tpl-tor-onboarding">
+  <section class="onboarding-screen">
+    <div class="hero-mark">{{brand}}</div>
+    <div class="onboarding-card">
+      <div class="eyebrow">Status Tor</div>
+      <h1>{{title}}</h1>
+      <p>{{subtitle}}</p>
+      <div class="progress-bar"><span style="width:{{progress}}%"></span></div>
+      <p class="status-line">{{label}}</p>
+      {{retry}}
+    </div>
+  </section>
+</template>
+<template id="tpl-nickname">
+  <section class="onboarding-screen">
+    <div class="hero-mark">{{brand}}</div>
+    <div class="onboarding-card">
+      <div class="eyebrow">Profil</div>
+      <h1>Wybierz nick</h1>
+      <p>Będzie widoczny dla kontaktów i w rozmowach testowych.</p>
+      <label class="field-label">Nick</label>
+      <input data-field="nickname" class="field" value="{{nickname}}" maxlength="32" placeholder="np. Maja">
+      <button class="primary wide" data-action="save-nickname">Kontynuuj</button>
+    </div>
+  </section>
+</template>
+<template id="tpl-mobile-shell">
+  <div class="shell mobile-shell">
+    {{topbar}}
+    <main class="viewport">{{body}}</main>
+    {{dock}}
+  </div>
+</template>
+<template id="tpl-desktop-shell">
+  <div class="shell desktop-shell {{desktopMode}}">
+    {{desktopStatus}}
+    <div class="desktop-workspace">
+    {{rail}}
+    <section class="list-column">{{list}}</section>
+    <main class="viewport">{{body}}</main>
+    {{inspector}}
+    </div>
+  </div>
+</template>
+<template id="tpl-empty">
+  <section class="empty-state">
+    <div class="empty-card">
+      <div class="empty-mark">{{iconEmpty}}</div>
+      <h2>{{title}}</h2>
+      <p>{{body}}</p>
+    </div>
+  </section>
+</template>
+<template id="tpl-chat-row">
+  <button class="list-row chat-row {{active}}" data-action="open-chat" data-id="{{id}}">
+    <div class="avatar">{{initial}}</div>
+    <div class="list-copy">
+      <strong>{{name}}</strong>
+      <p>{{preview}}</p>
+    </div>
+    <small>{{time}}</small>
+    {{unread}}
+  </button>
+</template>
+<template id="tpl-contact-row">
+  <button class="list-row contact-row" data-action="open-contact" data-id="{{id}}">
+    <div class="avatar">{{initial}}</div>
+    <div class="list-copy">
+      <strong>{{name}}</strong>
+      <p>{{note}}</p>
+      <span class="fingerprint">{{fingerprint}}</span>
+    </div>
+    <div class="status-pill {{verifiedClass}}">{{verifiedLabel}}</div>
+  </button>
+</template>
+<template id="tpl-inbox-row">
+  <button class="list-row inbox-row" data-action="open-invite" data-id="{{id}}">
+    <div class="avatar">{{initial}}</div>
+    <div class="list-copy">
+      <strong>{{name}}</strong>
+      <p>{{note}}</p>
+      <span class="fingerprint">{{code}}</span>
+    </div>
+    <div class="status-pill {{statusClass}}">{{statusLabel}}</div>
+  </button>
+</template>
+<template id="tpl-message-row">
+  <div class="bubble {{mine}}">
+    <span>{{body}}</span>
+    <small>{{time}}</small>
+  </div>
+</template>
+<template id="tpl-detail-shell">
+  <section class="detail-shell">
+    <header class="detail-header">
+      <button class="icon back" data-action="back">{{back}}</button>
+      <div class="detail-copy">
+        <div class="eyebrow">{{eyebrow}}</div>
+        <h1>{{title}}</h1>
+        <p>{{subtitle}}</p>
+      </div>
+      <div class="detail-actions">{{actions}}</div>
+    </header>
+    <div class="detail-body">
+      {{body}}
+    </div>
+  </section>
+</template>
+<template id="tpl-contact-detail">
+  <div class="stack">
+    <article class="panel">
+      <div class="profile-line">
+        <div class="avatar avatar-lg">{{initial}}</div>
+        <div>
+          <strong>{{name}}</strong>
+          <p>{{note}}</p>
+        </div>
+      </div>
+      <div class="status-pill {{statusClass}}">{{statusLabel}}</div>
+    </article>
+    <article class="panel">
+      <div class="section-head">
+        <span>Fingerprint</span>
+        <button class="ghost icon-button" data-action="copy-fingerprint">{{iconCopy}}</button>
+      </div>
+      <p class="mono">{{fingerprint}}</p>
+    </article>
+    <article class="panel">
+      <button class="primary wide" data-action="open-chat" data-id="{{contactId}}">{{iconMessage}} Otwórz rozmowę</button>
+      <button class="ghost wide" data-action="open-qr">{{iconQr}} Pokaż mój kod</button>
+    </article>
+    <article class="panel compact-context">
+      <div class="section-head"><span>Współdzielone</span></div>
+      <div class="context-row"><span>Media</span><strong>0</strong></div>
+      <div class="context-row"><span>Pliki</span><strong>0</strong></div>
+      <div class="context-row"><span>Linki</span><strong>0</strong></div>
+    </article>
+  </div>
+</template>
+<template id="tpl-invite-detail">
+  <div class="stack">
+    <article class="panel">
+      <div class="profile-line">
+        <div class="avatar avatar-lg">{{initial}}</div>
+        <div>
+          <strong>{{name}}</strong>
+          <p>{{note}}</p>
+        </div>
+      </div>
+      <div class="status-pill {{statusClass}}">{{kindLabel}}</div>
+    </article>
+    <article class="panel">
+      <div class="section-head"><span>Kod</span><button class="ghost icon-button" data-action="copy-code">{{iconCopy}}</button></div>
+      <p class="mono">{{code}}</p>
+    </article>
+    <article class="panel action-stack">
+      {{actions}}
+    </article>
+  </div>
+</template>
+<template id="tpl-new-contact">
+  <div class="stack">
+    <article class="panel">
+      <div class="section-head">
+        <span>Zaproszenie</span>
+        <button class="ghost icon-button" data-action="open-qr">{{iconQr}}</button>
+      </div>
+      <p>{{helper}}</p>
+      <label class="field-label">Kod 8 cyfr</label>
+      <input data-field="invite-code" class="field code-field" inputmode="numeric" maxlength="8" placeholder="00000000">
+      <div class="actions-row">
+        <button class="primary" data-action="send-invite">{{iconSend}} Wyślij zaproszenie</button>
+        <button class="ghost" data-action="open-qr">{{iconQr}} Mój QR</button>
+      </div>
+    </article>
+  </div>
+</template>
+<template id="tpl-account-detail">
+  <div class="stack">
+    <article class="panel">
+      <div class="profile-line">
+        <div class="avatar avatar-lg">{{nickname}}</div>
+        <div>
+          <strong>{{nickname}}</strong>
+          <p>Lokalny profil urządzenia</p>
+        </div>
+      </div>
+      <div class="status-pill ok">Aktywny profil</div>
+    </article>
+    <article class="panel">
+      <label class="field-label">Nick</label>
+      <input data-field="settings-nickname" class="field" value="{{nickname}}" maxlength="32" placeholder="np. Maja">
+      <div class="actions-row" style="margin-top: 10px;">
+        <button class="primary" data-action="save-settings">{{iconMessage}} Zapisz nick</button>
+      </div>
+    </article>
+    <article class="panel">
+      <div class="section-head"><span>Fingerprint</span><button class="ghost icon-button" data-action="copy-fingerprint">{{iconCopy}}</button></div>
+      <p class="mono">{{fingerprint}}</p>
+    </article>
+    <article class="panel action-stack">
+      <button class="ghost wide" data-action="toggle-theme">{{iconTheme}} Motyw: {{themeLabel}}</button>
+      <button class="ghost wide" data-action="open-tor">{{iconOnion}} {{torLabel}}</button>
+      <button class="ghost danger wide" data-action="open-confirm" data-confirm="reset">{{iconDelete}} Reset danych</button>
+    </article>
+  </div>
+</template>
+<template id="tpl-settings-detail">
+  <div class="settings-list">
+    <div class="settings-section">
+      <div class="settings-label">Aplikacja</div>
+      <button class="settings-row" data-action="toggle-theme"><span>{{iconTheme}}<strong>Motyw</strong></span><small>{{themeLabel}}</small></button>
+      <button class="settings-row" data-action="open-tor"><span>{{iconOnion}}<strong>Połączenie Tor</strong></span><small>{{torLabel}}</small></button>
+    </div>
+    <div class="settings-section">
+      <div class="settings-label">Tożsamość</div>
+      <button class="settings-row" data-action="open-account"><span>{{iconUser}}<strong>Profil użytkownika</strong></span><small>{{nickname}}</small></button>
+      <button class="settings-row" data-action="open-qr"><span>{{iconQr}}<strong>Kod zaproszenia</strong></span><small>Otwórz modal</small></button>
+    </div>
+    <div class="settings-section">
+      <div class="settings-label">Dane lokalne</div>
+      <button class="settings-row danger-row" data-action="open-confirm" data-confirm="reset"><span>{{iconDelete}}<strong>Reset danych demo</strong></span><small>Nieodwracalne</small></button>
+    </div>
+  </div>
+</template>
+<template id="tpl-tor-detail">
+  <div class="stack">
+    <article class="panel">
+      <div class="section-head"><span>Status</span><div class="status-pill {{torClass}}">{{torLabel}}</div></div>
+      <p>Komunikacja idzie wyłącznie przez onion.</p>
+    </article>
+    <article class="panel">
+      <div class="section-head"><span>Adres onion</span><button class="ghost icon-button" data-action="copy-onion">{{iconCopy}}</button></div>
+      <p class="mono">{{onion}}</p>
+      <p class="muted">SOCKS: {{socks}} · latency {{latency}}</p>
+    </article>
+    <article class="panel">
+      <div class="section-head"><span>Kolejka</span><button class="ghost icon-button" data-action="toggle-tor">{{iconRefresh}}</button></div>
+      <p>{{queueCount}} wiadomości oczekuje na wysyłkę.</p>
+    </article>
+    <article class="panel action-stack">
+      <button class="primary wide" data-action="toggle-tor">{{iconRefresh}} {{actionLabel}}</button>
+    </article>
+  </div>
+</template>
+<template id="tpl-inspector">
+  <aside class="inspector">
+    <header class="inspector-header">
+      <div class="profile-line">
+        <div class="avatar avatar-lg">{{initial}}</div>
+        <div class="inspector-title"><h2>{{title}}</h2><p>{{subtitle}}</p></div>
+      </div>
+    </header>
+    <div class="inspector-body">
+      <div class="inspector-section">
+        <div class="inspector-label">Tożsamość</div>
+        <button class="inspector-row" data-action="copy-fingerprint"><span>Fingerprint</span><strong class="mono">{{fingerprint}}</strong>{{iconCopy}}</button>
+      </div>
+      <div class="inspector-section">
+        <div class="inspector-label">Połączenie</div>
+        <div class="inspector-row"><span>Status</span><strong>{{note}}</strong></div>
+        <div class="inspector-row"><span>Transport</span><strong>Przez onion</strong></div>
+      </div>
+      <div class="inspector-section">
+        <div class="inspector-label">Współdzielone</div>
+        <div class="inspector-row muted-row"><span>Media</span><strong>0</strong></div>
+        <div class="inspector-row muted-row"><span>Pliki</span><strong>0</strong></div>
+        <div class="inspector-row muted-row"><span>Linki</span><strong>0</strong></div>
+      </div>
+      <div class="inspector-section">
+        <div class="inspector-label">Działania</div>
+        <button class="inspector-row" data-action="open-contact-from-route"><span>Otwórz profil kontaktu</span>{{iconUser}}</button>
+        <button class="inspector-row" data-action="open-actions"><span>Więcej działań</span>{{iconDots}}</button>
+      </div>
+    </div>
+  </aside>
+</template>
+<template id="tpl-modal-qr">
+  <div class="modal-overlay" data-action="close-modal">
+    <section class="modal-card qr-modal" onclick="event.stopPropagation()">
+      <button class="close" data-action="close-modal">{{iconClose}}</button>
+      <div class="eyebrow">{{title}}</div>
+      <h2>{{subtitle}}</h2>
+      <div class="qr-frame">
+        <div class="qr-grid">{{qr}}</div>
+      </div>
+      <p class="mono qr-code">{{code}}</p>
+      <p class="muted center">Nowy kod za {{expires}} s</p>
+      <div class="actions-row center">
+        <button class="primary" data-action="copy-code">{{iconCopy}} Kopiuj kod</button>
+      </div>
+    </section>
+  </div>
+</template>
+<template id="tpl-modal-new-contact">
+  <div class="modal-overlay" data-action="close-modal">
+    <section class="modal-card code-modal" onclick="event.stopPropagation()">
+      <button class="close" data-action="close-modal">{{iconClose}}</button>
+      <div class="eyebrow">{{title}}</div>
+      <h2>{{subtitle}}</h2>
+      <p>{{helper}}</p>
+      <label class="field-label">Kod 8 cyfr</label>
+      <input data-field="invite-code" class="field code-entry" inputmode="numeric" maxlength="8" placeholder="00000000" autocomplete="one-time-code">
+      <div class="actions-row">
+        <button class="primary wide" data-action="send-invite">{{iconSend}} Dodaj</button>
+      </div>
+    </section>
+  </div>
+</template>
+<template id="tpl-modal-confirm">
+  <div class="modal-overlay" data-action="close-modal">
+    <section class="modal-card" onclick="event.stopPropagation()">
+      <button class="close" data-action="close-modal">{{iconClose}}</button>
+      <div class="eyebrow">Potwierdzenie</div>
+      <h2>{{title}}</h2>
+      <p>{{body}}</p>
+      <div class="actions-row">
+        <button class="primary {{dangerClass}}" data-action="confirm-modal" data-confirm="{{confirmAction}}">{{confirmLabel}}</button>
+        <button class="ghost" data-action="close-modal">Anuluj</button>
+      </div>
+    </section>
+  </div>
+</template>
+<template id="tpl-modal-error">
+  <div class="modal-overlay" data-action="close-modal">
+    <section class="modal-card" onclick="event.stopPropagation()">
+      <button class="close" data-action="close-modal">{{iconClose}}</button>
+      <div class="eyebrow">Komunikat</div>
+      <h2>{{title}}</h2>
+      <p>{{body}}</p>
+      <div class="actions-row">
+        <button class="primary" data-action="close-modal">OK</button>
+      </div>
+    </section>
+  </div>
+</template>
+<template id="tpl-modal-actions">
+  <div class="modal-overlay" data-action="close-modal">
+    <section class="modal-card" onclick="event.stopPropagation()">
+      <button class="close" data-action="close-modal">{{iconClose}}</button>
+      <div class="eyebrow">{{title}}</div>
+      <h2>{{body}}</h2>
+      <div class="actions-row actions-column">{{actions}}</div>
+    </section>
+  </div>
+</template>
+<template id="tpl-dock">
+  <nav class="dock">
+    <button class="{{chatsClass}}" data-action="tab" data-tab="chats">{{chatsIcon}}<span>{{chatsLabel}}</span></button>
+    <button class="{{contactsClass}}" data-action="tab" data-tab="contacts">{{contactsIcon}}<span>{{contactsLabel}}</span></button>
+    <button class="{{inboxClass}}" data-action="tab" data-tab="inbox">{{inboxIcon}}<span>{{inboxLabel}}</span>{{inboxBadge}}</button>
+  </nav>
+</template>
+<template id="tpl-rail">
+  <aside class="rail">
+    <div class="rail-brand">
+      <div class="brand-mark">{{torIcon}}</div>
+      <div class="brand-copy">
+        <strong>TorChat</strong>
+        <span>desktop client</span>
+      </div>
+    </div>
+    <nav class="rail-nav">
+      <button class="{{chatsClass}}" data-action="tab" data-tab="chats">{{chatsIcon}}<span>Czaty</span></button>
+      <button class="{{contactsClass}}" data-action="tab" data-tab="contacts">{{contactsIcon}}<span>Kontakty</span></button>
+      <button class="{{inboxClass}}" data-action="tab" data-tab="inbox">{{inboxIcon}}<span>Inbox</span>{{inboxBadge}}</button>
+    </nav>
+    <div class="rail-footer">
+      <button class="rail-identity" data-action="open-account">
+        <span class="rail-avatar">{{initial}}</span>
+        <span class="rail-identity-copy"><strong>{{nickname}}</strong><small>Lokalny profil</small></span>
+      </button>
+      <button class="rail-settings" data-action="open-settings" title="Ustawienia" aria-label="Ustawienia">{{settingsIcon}}<span>Ustawienia</span></button>
+    </div>
+  </aside>
+</template>
+<template id="tpl-desktop-status">
+  <div class="desktop-status {{torClass}}" data-action="open-tor" title="{{torLabel}}">
+    <span class="desktop-status-line"></span>
+    <span class="desktop-status-copy"><strong>{{torLabel}}</strong><small>Komunikacja przez onion</small></span>
+    <span class="desktop-status-badge">{{latency}}</span>
+  </div>
+</template>
+<template id="tpl-list-shell">
+  <div class="list-shell">
+    <header class="list-header">
+      <div class="list-copy">
+        <div class="eyebrow">{{eyebrow}}</div>
+        <h1>{{title}}</h1>
+        <p>{{subtitle}}</p>
+      </div>
+      <div class="header-actions">{{actions}}</div>
+    </header>
+    {{search}}
+    <div class="list-body">{{items}}</div>
+  </div>
+</template>
+<script>(() => {
+  const platform = document.body.dataset.platform;
+  const storageKey = `torchat.maquette.${platform}.v3`;
+  const app = document.getElementById('app');
+  const overlay = document.getElementById('overlay-root');
+
+  const seed = {
+    screen: 'splash',
+    destination: 'chats',
+    routeStack: [{ kind: 'list' }],
+    modal: null,
+    theme: 'dark',
+    profile: {
+      nickname: 'Maja',
+      fingerprint: 'A1C3-9F20-72D4',
+      inviteCode: '48273190',
+      inviteExpires: 60,
+    },
+    transport: {
+      status: 'connecting',
+      onion: 'http://gd6xcrek7ncoujoz72g4icexj45b4atzbk5gjhqm06thngmgcbci4cqd.onion',
+      socks: '127.0.0.1:19050',
+      latency: '28 ms',
+      queue: [],
+    },
+    search: {
+      chats: '',
+      contacts: '',
+      inbox: '',
+    },
+    contacts: [
+      {
+        id: 'alice',
+        name: 'Alice',
+        initial: 'A',
+        fingerprint: 'A1C3-9F20',
+        verified: true,
+        status: 'online',
+        note: 'Kontakt testowy',
+      },
+      {
+        id: 'bob',
+        name: 'Bob',
+        initial: 'B',
+        fingerprint: 'B7D2-44A1',
+        verified: false,
+        status: 'offline',
+        note: 'Kontakt testowy',
+      },
+    ],
+    conversations: [
+      {
+        id: 'alice',
+        name: 'Alice',
+        initial: 'A',
+        unread: 2,
+        preview: 'Możemy przetestować połączenie?',
+        time: '10:42',
+        fingerprint: 'A1C3-9F20',
+        verified: true,
+        messages: [
+          { from: 'Alice', body: 'Hej! Działa już Tor?', time: '10:40' },
+          { from: 'Maja', body: 'Tak, jestem online.', time: '10:41' },
+          { from: 'Alice', body: 'Możemy przetestować połączenie?', time: '10:42' },
+        ],
+      },
+      {
+        id: 'bob',
+        name: 'Bob',
+        initial: 'B',
+        unread: 0,
+        preview: 'Zaproszenie zaakceptowane',
+        time: '09:18',
+        fingerprint: 'B7D2-44A1',
+        verified: false,
+        messages: [
+          { from: 'Bob', body: 'Zaproszenie zaakceptowane', time: '09:18' },
+        ],
+      },
+    ],
+    inbox: [
+      {
+        id: 'req1',
+        name: 'Charlie',
+        initial: 'C',
+        code: '71904258',
+        kind: 'received',
+        status: 'pending',
+        note: 'Nowe zaproszenie',
+      },
+      {
+        id: 'req2',
+        name: 'Delta',
+        initial: 'D',
+        code: '99550011',
+        kind: 'sent',
+        status: 'pending',
+        note: 'Oczekuje na akceptację',
+      },
+    ],
+  };
+
+  const icons = {
+    message: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/></svg>',
+    users: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/><circle cx="9" cy="7" r="3" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M20 21v-2a3.5 3.5 0 0 0-2.5-3.36" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/><path d="M16 4.1a3 3 0 0 1 0 5.8" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>',
+    inbox: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h18v10h-5l-2 3H10l-2-3H3z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/><path d="M3 14l3 6h12l3-6" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/></svg>',
+    user: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M4 21v-1.5A5.5 5.5 0 0 1 9.5 14h5A5.5 5.5 0 0 1 20 19.5V21" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>',
+    search: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M16 16l4 4" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>',
+    plus: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>',
+    send: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22 3L11 14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/><path d="M22 3l-7 18-4-8-8-4z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/></svg>',
+    info: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M12 10.2v6M12 7h.01" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>',
+    back: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    qr: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/><path d="M15 14h1v1h-1zM18 14h2v2h-2zM15 17h2v2h-2zM18 18h2v2h-2z" fill="currentColor"/><path d="M12 12h2v2h-2zM14 16h2v2h-2zM16 12h2v2h-2zM19 12h1v1h-1z" fill="currentColor"/></svg>',
+    copy: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="10" height="10" rx="1" fill="none" stroke="currentColor" stroke-width="1.75"/><rect x="5" y="5" width="10" height="10" rx="1" fill="none" stroke="currentColor" stroke-width="1.75"/></svg>',
+    check: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6l-11 11-5-5" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    x: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>',
+    shield: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 5-3.5 8.5-7 10-3.5-1.5-7-5-7-10V6z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/><path d="M9.5 12l1.8 1.8L15 10" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    refresh: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0 1 4" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/><path d="M20 4v7h-7" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    moon: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 3a8.5 8.5 0 1 0 6.5 13.8A9.5 9.5 0 0 1 14.5 3z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/></svg>',
+    sun: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1l2.1-2.1M17 7l2.1-2.1" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>',
+    onion: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4c4.2 0 7.5 3.3 7.5 7.5S16.2 19 12 19s-7.5-3.3-7.5-7.5S7.8 4 12 4z" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M12 7v10M8.5 9.5l7 5M15.5 9.5l-7 5" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>',
+    dots: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="19" r="1.5" fill="currentColor"/></svg>',
+    settings: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M19.4 13.5l1.2.9-1.8 3.1-1.4-.6a7.3 7.3 0 0 1-2.2 1.3l-.2 1.5h-3.6l-.2-1.5a7.3 7.3 0 0 1-2.2-1.3l-1.4.6-1.8-3.1 1.2-.9a7 7 0 0 1 0-2.6l-1.2-.9 1.8-3.1 1.4.6a7.3 7.3 0 0 1 2.2-1.3l.2-1.5h3.6l.2 1.5a7.3 7.3 0 0 1 2.2 1.3l1.4-.6 1.8 3.1-1.2.9a7 7 0 0 1 0 2.6z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>',
+  };
+
+  const clone = (value) => JSON.parse(JSON.stringify(value));
+  const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+
+  function iconPack() {
+    return {
+      iconClose: icons.x,
+      iconCopy: icons.copy,
+      iconSend: icons.send,
+      iconQr: icons.qr,
+      iconTheme: state.theme === 'dark' ? icons.sun : icons.moon,
+      iconOnion: icons.onion,
+      iconDelete: icons.x,
+      iconDots: icons.dots,
+      iconMessage: icons.message,
+      iconRefresh: icons.refresh,
+      iconEmpty: icons.onion,
+      iconUser: icons.user,
+      settingsIcon: icons.settings,
+    };
+  }
+
+  function normalizeState(raw) {
+    if (!raw || typeof raw !== 'object') return clone(seed);
+    const next = clone(seed);
+    Object.assign(next, raw);
+    next.profile = { ...clone(seed.profile), ...(raw.profile || {}) };
+    next.transport = { ...clone(seed.transport), ...(raw.transport || {}) };
+    next.search = { ...clone(seed.search), ...(raw.search || {}) };
+    next.contacts = Array.isArray(raw.contacts) ? raw.contacts : clone(seed.contacts);
+    next.conversations = Array.isArray(raw.conversations) ? raw.conversations : clone(seed.conversations);
+    next.inbox = Array.isArray(raw.inbox) ? raw.inbox : clone(seed.inbox);
+    next.routeStack = Array.isArray(raw.routeStack) && raw.routeStack.length ? raw.routeStack : [{ kind: 'list' }];
+    next.modal = raw.modal ?? null;
+    next.destination = raw.destination || 'chats';
+    next.screen = raw.screen || 'splash';
+    next.theme = raw.theme === 'light' ? 'light' : 'dark';
+    return next;
+  }
+
+  let state = normalizeState(JSON.parse(localStorage.getItem(storageKey) || 'null'));
+  let pendingFocus = null;
+
+  function isCompactLayout() {
+    return platform === 'mobile' || window.matchMedia('(max-width: 899px)').matches;
+  }
+
+  function save() {
+    const persisted = {
+      ...state,
+      modal: null,
+      screen: state.screen === 'main' ? 'main' : 'splash',
+    };
+    localStorage.setItem(storageKey, JSON.stringify(persisted));
+  }
+
+  function route() {
+    return state.routeStack[state.routeStack.length - 1] || { kind: 'list' };
+  }
+
+  function isRoot() {
+    return route().kind === 'list';
+  }
+
+  function markFocus(field) {
+    pendingFocus = field;
+  }
+
+  function renderTemplate(id, values = {}) {
+    const raw = document.getElementById(`tpl-${id}`).innerHTML;
+    const merged = { ...iconPack(), ...values };
+    return raw.replace(/\{\{([\w-]+)\}\}/g, (_, key) => merged[key] ?? '');
+  }
+
+  function copyText(text) {
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text);
+    }
+  }
+
+  function routeTitle(kind) {
+    if (kind === 'conversation') return 'Rozmowa';
+    if (kind === 'contact') return 'Kontakt';
+    if (kind === 'invite') return 'Zaproszenie';
+    if (kind === 'new-contact') return 'Dodaj kontakt';
+    if (kind === 'account') return 'Konto';
+    if (kind === 'settings') return 'Ustawienia';
+    if (kind === 'tor') return 'Tor';
+    return state.destination === 'contacts' ? 'Kontakty' : state.destination === 'inbox' ? 'Inbox' : 'Czaty';
+  }
+
+  function routeSubtitle(current) {
+    if (current.kind === 'conversation') {
+      const item = state.conversations.find((entry) => entry.id === current.id);
+      return item?.verified ? 'Zweryfikowany kontakt' : 'Fingerprint oczekuje';
+    }
+    if (current.kind === 'contact') {
+      const item = state.contacts.find((entry) => entry.id === current.id);
+      return item?.verified ? 'Kontakt zweryfikowany' : 'Kontakt niezweryfikowany';
+    }
+    if (current.kind === 'invite') return 'Akceptacja lub odrzucenie zaproszenia';
+    if (current.kind === 'new-contact') return 'Dodaj kontakt przez 8-cyfrowy kod';
+    if (current.kind === 'account') return 'Lokalny profil i ustawienia';
+    if (current.kind === 'settings') return 'Preferencje aplikacji i dane lokalne';
+    if (current.kind === 'tor') return 'Stan połączenia onion i kolejka wysyłki';
+    return state.destination === 'contacts' ? 'Kontakty zapisane lokalnie' : state.destination === 'inbox' ? 'Zaproszenia i odpowiedzi' : 'Rozmowy dostępne po połączeniu';
+  }
+
+  function currentConnectionLabel() {
+    if (state.transport.status === 'connected') return 'Tor połączony';
+    if (state.transport.status === 'error') return 'Tor offline';
+    return 'Łączenie Tor';
+  }
+
+  function currentConnectionClass() {
+    if (state.transport.status === 'connected') return 'ok';
+    if (state.transport.status === 'error') return 'bad';
+    return 'warn';
+  }
+
+  function currentConnectionIcon() {
+    if (state.transport.status === 'connected') return icons.shield;
+    if (state.transport.status === 'error') return icons.x;
+    return icons.onion;
+  }
+
+  function initials() {
+    return esc((state.profile.nickname || 'M')[0].toUpperCase());
+  }
+
+  function now() {
+    return new Date().toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' });
+  }
+
+  function filteredChats() {
+    const query = state.search.chats.trim().toLowerCase();
+    return state.conversations.filter((item) => !query || [item.name, item.preview, item.fingerprint].some((value) => String(value).toLowerCase().includes(query)));
+  }
+
+  function filteredContacts() {
+    const query = state.search.contacts.trim().toLowerCase();
+    return state.contacts.filter((item) => !query || [item.name, item.note, item.fingerprint].some((value) => String(value).toLowerCase().includes(query)));
+  }
+
+  function filteredInbox() {
+    const query = state.search.inbox.trim().toLowerCase();
+    return state.inbox.filter((item) => !query || [item.name, item.code, item.note].some((value) => String(value).toLowerCase().includes(query)));
+  }
+
+  function listMeta() {
+    const profileAction = isCompactLayout()
+      ? [{ action: 'open-account', icon: icons.user, label: 'Konto' }]
+      : [];
+    if (state.destination === 'contacts') {
+      return {
+        eyebrow: 'Baza kontaktów',
+        title: 'Kontakty',
+        subtitle: 'Wyszukuj po nicku lub fingerprintcie',
+        actions: [
+          { action: 'open-new-contact', icon: icons.plus, label: 'Dodaj kontakt' },
+          { action: 'open-qr', icon: icons.qr, label: 'Mój kod' },
+          ...profileAction,
+        ],
+        placeholder: 'Szukaj kontaktów…',
+      };
+    }
+    if (state.destination === 'inbox') {
+      return {
+        eyebrow: 'Obsługa zaproszeń',
+        title: 'Inbox',
+        subtitle: 'Zaproszenia przychodzące i wysłane',
+        actions: [
+          { action: 'open-qr', icon: icons.qr, label: 'Mój kod' },
+          ...profileAction,
+        ],
+        placeholder: 'Szukaj zaproszeń…',
+      };
+    }
+    return {
+      eyebrow: 'Rozmowy bieżące',
+      title: 'Czaty',
+      subtitle: 'Rozmowy i stan dostarczenia',
+      actions: [
+        { action: 'open-new-contact', icon: icons.plus, label: 'Dodaj kontakt' },
+        { action: 'open-qr', icon: icons.qr, label: 'Mój kod' },
+        ...profileAction,
+      ],
+      placeholder: 'Szukaj rozmów…',
+    };
+  }
+
+  function listItems() {
+    if (state.destination === 'contacts') {
+      const items = filteredContacts().map((item) => renderTemplate('contact-row', {
+        id: item.id,
+        initial: esc(item.initial),
+        name: esc(item.name),
+        note: esc(item.note || 'Kontakt lokalny'),
+        fingerprint: esc(item.fingerprint),
+        verifiedClass: item.verified ? 'ok' : 'warn',
+        verifiedLabel: item.verified ? 'Zweryfikowany' : 'Wymaga weryfikacji',
+      })).join('');
+      return items || renderTemplate('empty', {
+        title: 'Brak kontaktów',
+        body: 'Użyj 8-cyfrowego kodu, aby dodać osobę.',
+      });
+    }
+    if (state.destination === 'inbox') {
+      const items = filteredInbox().map((item) => renderTemplate('inbox-row', {
+        id: item.id,
+        initial: esc(item.initial),
+        name: esc(item.name),
+        code: esc(item.code),
+        note: esc(item.note),
+        kind: item.kind,
+        statusLabel: item.kind === 'received' ? 'Otrzymane' : 'Wysłane',
+        statusClass: item.kind === 'received' ? 'ok' : 'warn',
+      })).join('');
+      return items || renderTemplate('empty', {
+        title: 'Inbox pusty',
+        body: 'Nowe zaproszenia pojawią się tutaj.',
+      });
+    }
+    const selected = route().kind === 'conversation' ? route().id : null;
+    const items = filteredChats().map((item) => renderTemplate('chat-row', {
+      id: item.id,
+      initial: esc(item.initial),
+      name: esc(item.name),
+      preview: esc(item.preview),
+      time: esc(item.time),
+      unread: item.unread ? `<span class="badge">${item.unread}</span>` : '',
+      active: item.id === selected ? 'active' : '',
+    })).join('');
+    return items || renderTemplate('empty', {
+      title: 'Brak rozmów',
+      body: 'Po dodaniu kontaktu zobaczysz tutaj czat.',
+    });
+  }
+
+  function messageRows(messages) {
+    return messages.map((message) => renderTemplate('message-row', {
+      body: esc(message.body),
+      time: esc(message.time),
+      mine: message.from === state.profile.nickname ? 'mine' : '',
+    })).join('');
+  }
+
+  function conversationBody(current) {
+    const conversation = state.conversations.find((item) => item.id === current.id);
+    if (!conversation) return renderTemplate('empty', { title: 'Brak rozmowy', body: 'Ta rozmowa nie istnieje.' });
+    const queue = state.transport.queue.includes(conversation.id)
+      ? `<div class="queue-note">${icons.refresh}<div><b>Wiadomość w kolejce</b><p>Oczekuje na połączenie Tor.</p></div></div>`
+      : '';
+    return `
+      <div class="chat-flow">
+        <div class="messages">
+          ${messageRows(conversation.messages)}
+          ${queue}
+        </div>
+        <form class="composer" data-action="send-message">
+          <input data-field="message" class="field" placeholder="Napisz wiadomość..." autocomplete="off">
+          <button class="primary icon-button" type="submit">${icons.send}</button>
+        </form>
+      </div>
+    `;
+  }
+
+  function contactBody(current) {
+    const contact = state.contacts.find((item) => item.id === current.id);
+    if (!contact) return renderTemplate('empty', { title: 'Brak kontaktu', body: 'Nie znaleziono tego kontaktu.' });
+    return renderTemplate('contact-detail', {
+      initial: esc(contact.initial),
+      name: esc(contact.name),
+      note: esc(contact.note || 'Kontakt lokalny'),
+      fingerprint: esc(contact.fingerprint),
+      statusLabel: contact.verified ? 'Fingerprint zweryfikowany' : 'Fingerprint niezweryfikowany',
+      statusClass: contact.verified ? 'ok' : 'warn',
+      contactId: esc(contact.id),
+    });
+  }
+
+  function inviteBody(current) {
+    const invite = state.inbox.find((item) => item.id === current.id);
+    if (!invite) return renderTemplate('empty', { title: 'Brak zaproszenia', body: 'To zaproszenie nie jest już dostępne.' });
+    return renderTemplate('invite-detail', {
+      initial: esc(invite.initial),
+      name: esc(invite.name),
+      code: esc(invite.code),
+      note: esc(invite.note),
+      kindLabel: invite.kind === 'received' ? 'Zaproszenie otrzymane' : 'Zaproszenie wysłane',
+      statusClass: invite.kind === 'received' ? 'ok' : 'muted',
+      actions: invite.kind === 'received'
+        ? `<button class="primary" data-action="accept-invite" data-id="${esc(invite.id)}">${icons.check} Akceptuj</button><button class="ghost danger" data-action="reject-invite" data-id="${esc(invite.id)}">${icons.x} Odrzuć</button>`
+        : `<button class="ghost danger" data-action="cancel-invite" data-id="${esc(invite.id)}">${icons.x} Anuluj wysyłkę</button>`,
+    });
+  }
+
+  function newContactBody() {
+    return renderTemplate('new-contact', {
+      inviteCode: '',
+      helper: 'Wpisz 8 cyfr. Kod jest jednorazowy.',
+    });
+  }
+
+  function accountBody() {
+    return renderTemplate('account-detail', {
+      nickname: esc(state.profile.nickname),
+      fingerprint: esc(state.profile.fingerprint),
+      themeLabel: state.theme === 'dark' ? 'Ciemny' : 'Jasny',
+      torLabel: currentConnectionLabel(),
+      torClass: currentConnectionClass(),
+    });
+  }
+
+  function settingsBody() {
+    return renderTemplate('settings-detail', {
+      nickname: esc(state.profile.nickname),
+      themeLabel: state.theme === 'dark' ? 'Ciemny' : 'Jasny',
+      torLabel: currentConnectionLabel(),
+    });
+  }
+
+  function torBody() {
+    return renderTemplate('tor-detail', {
+      onion: esc(state.transport.onion),
+      socks: esc(state.transport.socks),
+      latency: esc(state.transport.latency),
+      queueCount: state.transport.queue.length,
+      torLabel: currentConnectionLabel(),
+      torClass: currentConnectionClass(),
+      actionLabel: state.transport.status === 'connected' ? 'Symuluj rozłączenie' : 'Ponów połączenie',
+    });
+  }
+
+  function inspectorBody() {
+    const current = route();
+    if (current.kind === 'conversation') {
+      const conversation = state.conversations.find((item) => item.id === current.id);
+      if (!conversation) return '';
+      return renderTemplate('inspector', {
+        initial: esc(conversation.initial),
+        title: esc(conversation.name),
+        subtitle: conversation.verified ? 'Zweryfikowany kontakt' : 'Fingerprint oczekuje',
+        fingerprint: esc(conversation.fingerprint),
+        note: conversation.unread ? esc(`${conversation.unread} nieprzeczytane`) : 'Brak nieprzeczytanych',
+      });
+    }
+    return '';
+  }
+
+  function detailView() {
+    const current = route();
+    if (current.kind === 'conversation') {
+      const conversation = state.conversations.find((item) => item.id === current.id);
+    return renderTemplate('detail-shell', {
+      back: icons.back,
+      eyebrow: 'Rozmowa',
+      title: esc(conversation?.name || 'Rozmowa'),
+      subtitle: conversation?.verified ? 'Zweryfikowany kontakt' : 'Fingerprint oczekuje',
+      actions: `<button class="ghost" data-action="open-actions">${icons.dots}</button><button class="ghost" data-action="open-contact" data-id="${esc(current.id)}">${icons.user}</button>`,
+        body: conversationBody(current),
+      });
+    }
+    if (current.kind === 'contact') {
+      const contact = state.contacts.find((item) => item.id === current.id);
+    return renderTemplate('detail-shell', {
+      back: icons.back,
+      eyebrow: 'Kontakt',
+      title: esc(contact?.name || 'Kontakt'),
+      subtitle: contact?.verified ? 'Zweryfikowany kontakt' : 'Kontakt niezweryfikowany',
+      actions: `<button class="ghost" data-action="open-actions">${icons.dots}</button><button class="ghost" data-action="open-chat" data-id="${esc(current.id)}">${icons.message}</button>`,
+        body: contactBody(current),
+      });
+    }
+    if (current.kind === 'invite') {
+    return renderTemplate('detail-shell', {
+      back: icons.back,
+      eyebrow: 'Zaproszenie',
+      title: 'Zaproszenie',
+      subtitle: routeSubtitle(current),
+      actions: `<button class="ghost" data-action="open-actions">${icons.dots}</button>`,
+        body: inviteBody(current),
+      });
+    }
+    if (current.kind === 'new-contact') {
+    return renderTemplate('detail-shell', {
+      back: icons.back,
+      eyebrow: 'Nowy kontakt',
+      title: 'Dodaj kontakt',
+      subtitle: '8-cyfrowy kod zaproszenia',
+      actions: `<button class="ghost" data-action="open-qr">${icons.qr}</button>`,
+        body: newContactBody(),
+      });
+    }
+    if (current.kind === 'account') {
+    return renderTemplate('detail-shell', {
+      back: icons.back,
+      eyebrow: 'Profil',
+      title: 'Konto',
+      subtitle: 'Nickname, kod i ustawienia lokalne',
+      actions: `<button class="ghost" data-action="open-qr">${icons.qr}</button><button class="ghost" data-action="open-settings">${icons.settings}</button><button class="ghost" data-action="toggle-theme">${state.theme === 'dark' ? icons.sun : icons.moon}</button>`,
+        body: accountBody(),
+      });
+    }
+    if (current.kind === 'settings') {
+      return renderTemplate('detail-shell', {
+        back: icons.back,
+        eyebrow: 'Konfiguracja',
+        title: 'Ustawienia',
+        subtitle: 'Preferencje aplikacji i dane lokalne',
+        actions: `<button class="ghost" data-action="toggle-theme">${state.theme === 'dark' ? icons.sun : icons.moon}</button>`,
+        body: settingsBody(),
+      });
+    }
+    if (current.kind === 'tor') {
+    return renderTemplate('detail-shell', {
+      back: icons.back,
+      eyebrow: 'Tor',
+      title: 'Tor',
+      subtitle: 'Status połączenia onion',
+      actions: `<button class="ghost" data-action="toggle-tor">${icons.refresh}</button>`,
+        body: torBody(),
+      });
+    }
+    return renderTemplate('empty', { title: 'Wybierz widok', body: 'Kliknij rozmowę, kontakt lub zaproszenie.' });
+  }
+
+  function mobileHeader() {
+    return `
+      <button class="tor-strip ${currentConnectionClass()}" data-action="open-tor" title="${esc(currentConnectionLabel())}" aria-label="${esc(currentConnectionLabel())}">
+        <span>${esc(currentConnectionLabel())}</span>
+      </button>
+    `;
+  }
+
+  function mobileDock() {
+    if (!isRoot()) return '';
+    return renderTemplate('dock', {
+      chatsClass: state.destination === 'chats' ? 'active' : '',
+      contactsClass: state.destination === 'contacts' ? 'active' : '',
+      inboxClass: state.destination === 'inbox' ? 'active' : '',
+      chatsIcon: icons.message,
+      contactsIcon: icons.users,
+      inboxIcon: icons.inbox,
+      chatsLabel: 'Czaty',
+      contactsLabel: 'Kontakty',
+      inboxLabel: 'Inbox',
+      inboxBadge: state.inbox.length ? `<span class="badge">${state.inbox.length}</span>` : '',
+    });
+  }
+
+  function desktopRail() {
+    return renderTemplate('rail', {
+      initial: initials(),
+      nickname: esc(state.profile.nickname),
+      chatsClass: state.destination === 'chats' ? 'active' : '',
+      contactsClass: state.destination === 'contacts' ? 'active' : '',
+      inboxClass: state.destination === 'inbox' ? 'active' : '',
+      chatsIcon: icons.message,
+      contactsIcon: icons.users,
+      inboxIcon: icons.inbox,
+      inboxBadge: state.inbox.length ? `<span class="badge">${state.inbox.length}</span>` : '',
+      settingsIcon: icons.settings,
+    });
+  }
+
+  function desktopStatus() {
+    return renderTemplate('desktop-status', {
+      torClass: currentConnectionClass(),
+      torLabel: currentConnectionLabel(),
+      latency: state.transport.status === 'connected' ? esc(state.transport.latency) : '— ms',
+    });
+  }
+
+  function listView() {
+    const meta = listMeta();
+    const searchValue = state.search[state.destination] || '';
+    return renderTemplate('list-shell', {
+      title: meta.title,
+      eyebrow: meta.eyebrow,
+      subtitle: meta.subtitle,
+      actions: meta.actions.map((item) => `<button class="icon" data-action="${esc(item.action)}" title="${esc(item.label)}" aria-label="${esc(item.label)}">${item.icon}</button>`).join(''),
+      search: `<div class="search-wrap">${icons.search}<input data-field="search" class="field search" value="${esc(searchValue)}" placeholder="${esc(meta.placeholder)}" autocomplete="off"></div>`,
+      items: listItems(),
+    });
+  }
+
+  function desktopMain() {
+    const current = route();
+    if (current.kind === 'list') {
+      return renderTemplate('empty', {
+        title: state.destination === 'chats' ? 'Wybierz rozmowę' : state.destination === 'contacts' ? 'Wybierz kontakt' : 'Wybierz zaproszenie',
+        body: 'Widok szczegółowy pojawi się tutaj.',
+      });
+    }
+    return detailView();
+  }
+
+  function renderModal() {
+    if (!state.modal) {
+      overlay.innerHTML = '';
+      return;
+    }
+    if (state.modal.kind === 'qr') {
+      const cells = Array.from({ length: 121 }, (_, index) => `<i class="${(index * 5 + Number(state.profile.inviteCode.slice(-2))) % 7 === 0 ? 'off' : ''}"></i>`).join('');
+      overlay.innerHTML = renderTemplate('modal-qr', {
+        code: esc(state.profile.inviteCode),
+        expires: state.profile.inviteExpires,
+        qr: cells,
+        title: 'Twój kod zaproszenia',
+        subtitle: 'QR zawsze ma białe tło',
+      });
+      return;
+    }
+    if (state.modal.kind === 'new-contact') {
+      overlay.innerHTML = renderTemplate('modal-new-contact', {
+        title: 'Dodaj kontakt',
+        subtitle: 'Wpisz 8-cyfrowy kod',
+        helper: 'Kod działa jednorazowo i nie jest zapisywany w widoku.',
+      });
+      pendingFocus = 'invite-code';
+      return;
+    }
+    if (state.modal.kind === 'confirm') {
+      overlay.innerHTML = renderTemplate('modal-confirm', {
+        title: esc(state.modal.title),
+        body: esc(state.modal.body),
+        confirmAction: esc(state.modal.confirmAction),
+        confirmLabel: esc(state.modal.confirmLabel || 'Potwierdź'),
+        dangerClass: state.modal.danger ? 'danger' : '',
+      });
+      return;
+    }
+    if (state.modal.kind === 'error') {
+      overlay.innerHTML = renderTemplate('modal-error', {
+        title: esc(state.modal.title || 'Błąd'),
+        body: esc(state.modal.body || 'Nieoczekiwany problem.'),
+      });
+      return;
+    }
+    overlay.innerHTML = renderTemplate('modal-actions', {
+      title: esc(state.modal.title || 'Akcje'),
+      body: esc(state.modal.body || 'Wybierz akcję.'),
+      actions: state.modal.actions || '',
+    });
+  }
+
+  function render() {
+    document.body.dataset.theme = state.theme;
+    if (state.screen !== 'main') {
+      if (state.screen === 'splash') {
+        app.innerHTML = renderTemplate('splash', {
+          brand: icons.onion,
+        });
+      } else if (state.screen === 'tor') {
+        app.innerHTML = renderTemplate('tor-onboarding', {
+          brand: icons.onion,
+          title: 'Bezpieczne połączenie Tor',
+          subtitle: 'Uwierzytelnianie przez onion',
+          progress: state.transport.status === 'connected' ? 100 : 58,
+          label: currentConnectionLabel(),
+          retry: state.transport.status === 'error' ? '<button class="primary" data-action="retry-tor">Spróbuj ponownie</button>' : '',
+        });
+      } else {
+        app.innerHTML = renderTemplate('nickname', {
+          brand: icons.user,
+          nickname: esc(state.profile.nickname),
+        });
+      }
+      renderModal();
+      return;
+    }
+
+    if (isCompactLayout()) {
+      app.innerHTML = renderTemplate('mobile-shell', {
+        topbar: mobileHeader(),
+        body: isRoot() ? listView() : detailView(),
+        dock: mobileDock(),
+      });
+    } else {
+      const inspector = inspectorBody();
+      app.innerHTML = renderTemplate('desktop-shell', {
+        desktopStatus: desktopStatus(),
+        rail: desktopRail(),
+        list: listView(),
+        body: desktopMain(),
+        inspector,
+        desktopMode: inspector ? 'with-inspector' : 'no-inspector',
+      });
+    }
+
+    renderModal();
+
+    if (pendingFocus) {
+      const target = document.querySelector(`[data-field="${pendingFocus}"]`);
+      if (target) {
+        target.focus();
+        if ('selectionStart' in target && typeof target.value === 'string') {
+          const length = target.value.length;
+          try {
+            target.setSelectionRange(length, length);
+          } catch {
+            // No-op.
+          }
+        }
+      }
+      pendingFocus = null;
+    }
+  }
+
+  function openDestination(destination, routeItem = null) {
+    state.destination = destination;
+    state.routeStack = [{ kind: 'list' }];
+    if (routeItem) state.routeStack.push(routeItem);
+    state.modal = null;
+    save();
+    render();
+  }
+
+  function openConversation(id) {
+    const conversation = state.conversations.find((item) => item.id === id);
+    if (!conversation) return;
+    conversation.unread = 0;
+    openDestination('chats', { kind: 'conversation', id });
+  }
+
+  function openContact(id) {
+    openDestination('contacts', { kind: 'contact', id });
+  }
+
+  function openInvite(id) {
+    openDestination('inbox', { kind: 'invite', id });
+  }
+
+  function openAccount() {
+    state.routeStack = [{ kind: 'list' }, { kind: 'account' }];
+    state.modal = null;
+    save();
+    render();
+  }
+
+  function openSettings() {
+    state.routeStack = [{ kind: 'list' }, { kind: 'settings' }];
+    state.modal = null;
+    save();
+    render();
+  }
+
+  function openTor() {
+    state.routeStack = [{ kind: 'list' }, { kind: 'tor' }];
+    state.modal = null;
+    save();
+    render();
+  }
+
+  function openNewContact() {
+    openModal({
+      kind: 'new-contact',
+    });
+  }
+
+  function goBack() {
+    if (state.modal) {
+      state.modal = null;
+      save();
+      render();
+      return;
+    }
+    if (state.routeStack.length > 1) {
+      state.routeStack.pop();
+      save();
+      render();
+      return;
+    }
+  }
+
+  function openQr() {
+    openModal({
+      kind: 'qr',
+    });
+  }
+
+  function openActions(kind) {
+    if (kind === 'conversation') {
+      state.modal = {
+        kind: 'actions',
+        title: 'Akcje rozmowy',
+        body: 'Drobne akcje można wykonać w modalu.',
+        actions: `
+          <button class="ghost" data-action="open-contact-from-route">${icons.user} Kontakt</button>
+          <button class="ghost" data-action="open-qr">${icons.qr} QR</button>
+          <button class="ghost danger" data-action="open-confirm" data-confirm="disconnect">${icons.refresh} Symuluj offline</button>
+        `,
+      };
+      save();
+      render();
+      return;
+    }
+    state.modal = {
+      kind: 'actions',
+      title: 'Akcje',
+      body: 'Szybkie akcje dla bieżącego widoku.',
+      actions: `
+        <button class="ghost" data-action="open-qr">${icons.qr} QR</button>
+        <button class="ghost danger" data-action="open-confirm" data-confirm="reset">${icons.x} Reset demo</button>
+      `,
+    };
+    save();
+    render();
+  }
+
+  function openModal(modal) {
+    state.modal = modal;
+    save();
+    render();
+  }
+
+  function resolveConfirm(kind) {
+    if (kind === 'disconnect') {
+      state.transport.status = state.transport.status === 'connected' ? 'error' : 'connected';
+      if (state.transport.status === 'connected') state.transport.queue = [];
+      state.modal = null;
+      save();
+      render();
+      return;
+    }
+    if (kind === 'reset') {
+      localStorage.removeItem(storageKey);
+      state = normalizeState(null);
+      save();
+      render();
+      return;
+    }
+    if (kind === 'reject-invite' || kind === 'cancel-invite') {
+      const current = route();
+      const id = current.kind === 'invite' ? current.id : null;
+      if (id) state.inbox = state.inbox.filter((item) => item.id !== id);
+      state.modal = null;
+      save();
+      render();
+      return;
+    }
+    state.modal = null;
+    save();
+    render();
+  }
+
+  function acceptInvite(id) {
+    const invite = state.inbox.find((item) => item.id === id);
+    if (!invite) return;
+    const contactId = `contact-${invite.id}`;
+    state.contacts.push({
+      id: contactId,
+      name: invite.name,
+      initial: invite.initial,
+      fingerprint: `${invite.code.slice(0, 4)}-${invite.code.slice(4)}`,
+      verified: false,
+      status: 'online',
+      note: 'Dodany przez zaproszenie',
+    });
+    state.conversations.push({
+      id: contactId,
+      name: invite.name,
+      initial: invite.initial,
+      unread: 0,
+      preview: 'Nowy kontakt',
+      time: 'teraz',
+      fingerprint: `${invite.code.slice(0, 4)}-${invite.code.slice(4)}`,
+      verified: false,
+      messages: [],
+    });
+    state.inbox = state.inbox.filter((item) => item.id !== id);
+    state.modal = null;
+    save();
+    openDestination('chats', { kind: 'conversation', id: contactId });
+  }
+
+  function rejectInvite(id) {
+    openModal({
+      kind: 'confirm',
+      title: 'Odrzucić zaproszenie?',
+      body: 'Ta operacja usunie zaproszenie z inboxa.',
+      confirmAction: 'reject-invite',
+      confirmLabel: 'Odrzuć',
+      danger: true,
+      id,
+    });
+  }
+
+  function cancelInvite(id) {
+    openModal({
+      kind: 'confirm',
+      title: 'Anulować wysyłkę?',
+      body: 'Zaproszenie zostanie usunięte z inboxa.',
+      confirmAction: 'cancel-invite',
+      confirmLabel: 'Anuluj wysyłkę',
+      danger: true,
+      id,
+    });
+  }
+
+  function handleAction(action, element) {
+    const id = element?.dataset?.id;
+    if (action === 'tab') {
+      const destination = element.dataset.tab;
+      if (destination !== state.destination) {
+        state.destination = destination;
+      }
+      state.routeStack = [{ kind: 'list' }];
+      state.modal = null;
+      save();
+      render();
+      return;
+    }
+    if (action === 'back') return goBack();
+    if (action === 'open-account') return openAccount();
+    if (action === 'open-settings') return openSettings();
+    if (action === 'open-tor') return openTor();
+    if (action === 'open-new-contact') return openNewContact();
+    if (action === 'open-qr') return openQr();
+    if (action === 'open-actions') return openActions(route().kind);
+    if (action === 'open-contact') return openContact(id);
+    if (action === 'open-contact-from-route') {
+      const current = route();
+      if (current.kind === 'conversation') return openContact(current.id);
+      return;
+    }
+    if (action === 'open-chat') return openConversation(id);
+    if (action === 'open-invite') return openInvite(id);
+    if (action === 'accept-invite') return acceptInvite(id);
+    if (action === 'reject-invite') return rejectInvite(id);
+    if (action === 'cancel-invite') return cancelInvite(id);
+    if (action === 'copy-code') {
+      const current = route();
+      const code = current.kind === 'invite'
+        ? (state.inbox.find((item) => item.id === current.id)?.code || state.profile.inviteCode)
+        : state.profile.inviteCode;
+      copyText(code);
+      return openModal({
+        kind: 'error',
+        title: 'Skopiowano',
+        body: 'Kod został skopiowany do schowka.',
+      });
+    }
+    if (action === 'copy-fingerprint') {
+      const current = route();
+      const fingerprint = current.kind === 'contact'
+        ? (state.contacts.find((item) => item.id === current.id)?.fingerprint || state.profile.fingerprint)
+        : current.kind === 'conversation'
+          ? (state.conversations.find((item) => item.id === current.id)?.fingerprint || state.profile.fingerprint)
+          : state.profile.fingerprint;
+      copyText(fingerprint);
+      return openModal({
+        kind: 'error',
+        title: 'Skopiowano',
+        body: 'Fingerprint został skopiowany do schowka.',
+      });
+    }
+    if (action === 'copy-onion') {
+      copyText(state.transport.onion);
+      return openModal({
+        kind: 'error',
+        title: 'Skopiowano',
+        body: 'Adres onion został skopiowany do schowka.',
+      });
+    }
+    if (action === 'toggle-theme') {
+      state.theme = state.theme === 'dark' ? 'light' : 'dark';
+      save();
+      render();
+      return;
+    }
+    if (action === 'toggle-tor') {
+      state.transport.status = state.transport.status === 'connected' ? 'error' : 'connected';
+      if (state.transport.status === 'connected') state.transport.queue = [];
+      save();
+      render();
+      return;
+    }
+    if (action === 'retry-tor') {
+      state.transport.status = 'connected';
+      save();
+      render();
+      return;
+    }
+    if (action === 'confirm-modal') {
+      return resolveConfirm(element.dataset.confirm);
+    }
+    if (action === 'close-modal') {
+      state.modal = null;
+      save();
+      render();
+      return;
+    }
+    if (action === 'send-invite') return sendInvite();
+    if (action === 'save-nickname') return saveNickname();
+    if (action === 'save-settings') return saveNickname('settings-nickname');
+    if (action === 'open-confirm') {
+      const confirm = element.dataset.confirm;
+      if (confirm === 'reset') {
+        return openModal({
+          kind: 'confirm',
+          title: 'Zresetować dane demo?',
+          body: 'Usunie lokalny stan maquette i przywróci start.',
+          confirmAction: 'reset',
+          confirmLabel: 'Resetuj',
+          danger: true,
+        });
+      }
+      if (confirm === 'disconnect') {
+        return openModal({
+          kind: 'confirm',
+          title: 'Symulować rozłączenie?',
+          body: 'Tor przejdzie w tryb offline do czasu ponownego połączenia.',
+          confirmAction: 'disconnect',
+          confirmLabel: 'Przełącz',
+          danger: true,
+        });
+      }
+    }
+  }
+
+  function saveNickname(fieldName = 'nickname') {
+    const input = document.querySelector(`[data-field="${fieldName}"]`);
+    const value = input?.value.trim();
+    if (!value || value.length < 2 || value.length > 32) {
+      return openModal({
+        kind: 'error',
+        title: 'Nieprawidłowy nick',
+        body: 'Nick musi mieć 2-32 znaki.',
+      });
+    }
+    state.profile.nickname = value;
+    state.screen = 'main';
+    save();
+    render();
+  }
+
+  function sendInvite() {
+    const input = document.querySelector('[data-field="invite-code"]');
+    const value = input?.value.trim() || '';
+    if (!/^\d{8}$/.test(value)) {
+      return openModal({
+        kind: 'error',
+        title: 'Nieprawidłowy kod',
+        body: 'Kod musi zawierać dokładnie 8 cyfr.',
+      });
+    }
+    state.inbox.unshift({
+      id: `out-${Date.now()}`,
+      name: 'Nowy kontakt',
+      initial: '?',
+      code: value,
+      kind: 'sent',
+      status: 'pending',
+      note: 'Wysłane z tej instancji',
+    });
+    state.modal = null;
+    save();
+    render();
+  }
+
+  function sendMessage(event) {
+    event.preventDefault();
+    const current = route();
+    if (current.kind !== 'conversation') return;
+    const conversation = state.conversations.find((item) => item.id === current.id);
+    const input = event.currentTarget.querySelector('[data-field="message"]');
+    const value = input.value.trim();
+    if (!value || !conversation) return;
+    conversation.messages.push({ from: state.profile.nickname, body: value, time: now() });
+    conversation.preview = value;
+    conversation.time = now();
+    if (state.transport.status !== 'connected') {
+      if (!state.transport.queue.includes(conversation.id)) state.transport.queue.push(conversation.id);
+    } else {
+      setTimeout(() => {
+        conversation.messages.push({ from: conversation.name, body: 'Odebrano. To jest odpowiedź demonstracyjna.', time: now() });
+        conversation.preview = 'Odebrano. To jest odpowiedź demonstracyjna.';
+        conversation.time = now();
+        save();
+        render();
+      }, 700);
+    }
+    input.value = '';
+    save();
+    render();
+  }
+
+  function updateSearch(value) {
+    state.search[state.destination] = value;
+    save();
+    markFocus('search');
+    render();
+  }
+
+  function handleInput(event) {
+    const input = event.target.closest('[data-field]');
+    if (!input) return;
+    if (input.dataset.field === 'search') return updateSearch(input.value);
+  }
+
+  function handleSubmit(event) {
+    const form = event.target.closest('form');
+    if (!form) return;
+    if (form.dataset.action === 'send-message') return sendMessage(event);
+  }
+
+  function handleClick(event) {
+    const action = event.target.closest('[data-action]');
+    if (!action) return;
+    event.preventDefault();
+    handleAction(action.dataset.action, action);
+  }
+
+  function tickInviteCode() {
+    if (state.profile.inviteExpires > 0) {
+      state.profile.inviteExpires -= 1;
+    } else {
+      state.profile.inviteExpires = 60;
+      state.profile.inviteCode = String(Math.floor(10000000 + Math.random() * 90000000));
+    }
+    save();
+    if (state.screen === 'main' && (route().kind === 'account' || state.modal?.kind === 'qr')) render();
+  }
+
+  document.addEventListener('click', handleClick);
+  document.addEventListener('submit', handleSubmit);
+  document.addEventListener('input', handleInput);
+  window.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      if (state.modal) {
+        state.modal = null;
+        save();
+        render();
+        return;
+      }
+      if (!isRoot()) {
+        goBack();
+      }
+      return;
+    }
+    if (event.ctrlKey && event.key.toLowerCase() === 'k') {
+      const field = document.querySelector('[data-field="search"]');
+      if (field) {
+        event.preventDefault();
+        field.focus();
+      }
+    }
+  });
+
+  const compactQuery = window.matchMedia('(max-width: 899px)');
+  if (compactQuery.addEventListener) {
+    compactQuery.addEventListener('change', render);
+  } else {
+    compactQuery.addListener(render);
+  }
+
+  // Developer-only console API. It resets only this platform's local maquette state.
+  window.app = {
+    reset() {
+      localStorage.removeItem(storageKey);
+      state = normalizeState(null);
+      render();
+      return 'TorChat maquette reset.';
+    },
+  };
+
+  window.startTorChat = () => {
+    if (state.screen === 'splash') {
+      render();
+      setTimeout(() => {
+        state.screen = 'tor';
+        state.transport.status = 'connecting';
+        render();
+        setTimeout(() => {
+          state.screen = 'nickname';
+          state.transport.status = 'connected';
+          save();
+          render();
+        }, 900);
+      }, 800);
+    } else {
+      render();
+    }
+    setInterval(tickInviteCode, 1000);
+  };
+})();
+window.startTorChat();
+</script></body></html>

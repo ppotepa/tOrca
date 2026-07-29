@@ -7,11 +7,11 @@ param(
     [string]$DeviceAddress,
     [string]$PairingAddress,
     [string]$PairingCode,
-    [ValidateSet("Alice", "Bob")][string]$DevProfile = "Alice",
+    [ValidateSet("", "Alice", "Bob")][string]$DevProfile = "",
     [switch]$NoDevPair,
     [switch]$ResetDevState,
     [switch]$Release,
-    [switch]$Keep,
+    [switch]$Clean,
     [ValidateSet('local','staging','production')][string]$Environment = 'local'
 )
 
@@ -94,6 +94,12 @@ if (-not ((Get-ConnectedDevices) -contains $DeviceAddress)) {
     if ($LASTEXITCODE -ne 0) { throw "Could not connect to $DeviceAddress." }
 }
 
+if ($Clean) {
+    Write-Host "[torchat] Scheduling Android client state reset on $DeviceAddress"
+    & adb -s $DeviceAddress shell am force-stop org.torchat.mobile
+    if ($LASTEXITCODE -ne 0) { throw "Could not stop TorChat before cleaning Android state." }
+}
+
 if (-not $SkipServer) {
     if ($Environment -ne 'local') { throw "Android deployment for '$Environment' uses its remote host; use -SkipServer." }
     & (Join-Path $PSScriptRoot 'start-dev.ps1') -Rebuild:$Rebuild -Environment local
@@ -116,7 +122,12 @@ if (-not $SkipApkBuild) {
         $previousPair = $env:TORCHAT_DEV_PAIR
         if (-not $Release) {
             $fixturesEnabled = $environmentState.Values['TORCHAT_FIXTURES'] -eq 'true' -and -not $NoDevPair
-            $env:TORCHAT_DEV_PROFILE = if ($fixturesEnabled) { $DevProfile } else { "" }
+            $selectedDevProfile = if ($fixturesEnabled) {
+                if ($DevProfile) { $DevProfile } else { "Alice" }
+            } else {
+                ""
+            }
+            $env:TORCHAT_DEV_PROFILE = $selectedDevProfile
             $env:TORCHAT_DEV_PAIR = if ($fixturesEnabled) { "true" } else { "false" }
         } else {
             Remove-Item Env:TORCHAT_DEV_PROFILE -ErrorAction SilentlyContinue
@@ -148,15 +159,42 @@ $ErrorActionPreference = $savedErrorActionPreference
 if ($installExitCode -ne 0) {
     $details = ($installOutput -join " ").Trim()
     if ($details -match "INSTALL_FAILED_USER_RESTRICTED") {
+        # Some Xiaomi/HyperOS builds block the high-level `adb install`
+        # command but still allow an explicit package-manager install after
+        # the APK has been copied over Wireless Debugging. Try that route
+        # before reporting the device policy as fatal.
+        Write-Warning "ADB install was restricted; trying adb push + pm install on $DeviceAddress."
+        $remoteApk = "/data/local/tmp/torchat-mobile-$variant.apk"
+        $savedFallbackErrorActionPreference = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        $pushOutput = @(& adb -s $DeviceAddress push $apk $remoteApk 2>&1)
+        if ($LASTEXITCODE -eq 0) {
+            $pmOutput = @(& adb -s $DeviceAddress shell pm install -r $remoteApk 2>&1)
+            $pmExitCode = $LASTEXITCODE
+            & adb -s $DeviceAddress shell rm -f $remoteApk *> $null
+            if ($pmExitCode -eq 0) {
+                Write-Host "TorChat APK installed through package manager on $DeviceAddress"
+                $installExitCode = 0
+            } else {
+                $fallbackDetails = (($pushOutput + $pmOutput) -join " ").Trim()
+                $details = (($installOutput + $fallbackDetails) -join " ").Trim()
+            }
+        } else {
+            $pushDetails = ($pushOutput -join " ").Trim()
+            $details = (($installOutput + $pushDetails) -join " ").Trim()
+        }
+        $ErrorActionPreference = $savedFallbackErrorActionPreference
+    }
+    if ($installExitCode -ne 0 -and $details -match "INSTALL_FAILED_USER_RESTRICTED") {
         $manufacturer = (& adb -s $DeviceAddress shell getprop ro.product.manufacturer 2>$null | Out-String).Trim()
         $deviceHint = if ($manufacturer -match "Xiaomi|Redmi|POCO") {
             "On Xiaomi/HyperOS enable Developer options > USB debugging (Security settings) and Install via USB; accept any Xiaomi-account/security confirmation and keep the phone unlocked."
         } else {
             "On the phone enable Developer options > Install via USB (and USB debugging security settings, if present), unlock the phone and accept the installation prompt."
         }
-        throw "Android blocked APK installation from ADB (INSTALL_FAILED_USER_RESTRICTED). $deviceHint`nThen run the script again."
+        throw "Android blocked APK installation from ADB (INSTALL_FAILED_USER_RESTRICTED). $deviceHint`nInstall diagnostics: $details`nThen run the script again."
     }
-    throw "Flutter APK installation failed: $details"
+    if ($installExitCode -ne 0) { throw "Flutter APK installation failed: $details" }
 }
 adb -s $DeviceAddress shell am force-stop org.torchat.mobile
 if ($LASTEXITCODE -ne 0) { throw "Could not stop the previous Flutter mobile process." }
@@ -166,6 +204,7 @@ if ($ResetDevState) {
     # the old working APK intact when Android rejects an installation.
     $launchArgs += @("--ez", "reset_dev_state", "true")
 }
+if ($Clean) { $launchArgs += @("--ez", "clean_state", "true") }
 & adb @launchArgs
 if ($LASTEXITCODE -ne 0) { throw "Could not launch Flutter mobile app." }
 Write-Host "TorChat Flutter mobile deployed to $DeviceAddress"

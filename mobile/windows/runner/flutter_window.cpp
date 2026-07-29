@@ -1,8 +1,10 @@
 #include "flutter_window.h"
 
 #include <optional>
+#include <thread>
 
 #include "flutter/generated_plugin_registrant.h"
+#include <flutter/standard_method_codec.h>
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -25,6 +27,34 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
+  notification_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(),
+          "org.torchat/desktop-notifications",
+          &flutter::StandardMethodCodec::GetInstance());
+  const HWND notification_window = GetHandle();
+  notification_channel_->SetMethodCallHandler(
+      [notification_window](const auto& call, auto result) {
+        if (call.method_name() != "pagerBeep") {
+          result->NotImplemented();
+          return;
+        }
+        std::thread([notification_window] {
+          if (IsWindow(notification_window)) {
+            FLASHWINFO flash = {};
+            flash.cbSize = sizeof(FLASHWINFO);
+            flash.hwnd = notification_window;
+            flash.dwFlags = FLASHW_TRAY | FLASHW_TIMERNOFG;
+            flash.uCount = 5;
+            flash.dwTimeout = 0;
+            FlashWindowEx(&flash);
+          }
+          MessageBeep(MB_ICONASTERISK);
+          Sleep(130);
+          MessageBeep(MB_ICONASTERISK);
+        }).detach();
+        result->Success();
+      });
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {

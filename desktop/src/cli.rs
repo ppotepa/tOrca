@@ -5,8 +5,10 @@ use std::path::PathBuf;
 #[command(name = "torchat-desktop", version, about = "TorChat desktop client")]
 pub struct Cli {
     /// Exact v3 onion server URL. TorChat has no direct/LAN fallback.
+    /// Runtime override. If omitted, the onion captured by the client build
+    /// is used; production clients therefore never depend on a LAN address.
     #[arg(long, env = "TORCHAT_SERVER_URL")]
-    pub server_url: String,
+    pub server_url: Option<String>,
 
     /// SOCKS5 proxy, normally a local Tor daemon, e.g. socks5h://127.0.0.1:9050.
     #[arg(long, env = "TORCHAT_SOCKS5_PROXY")]
@@ -50,6 +52,16 @@ pub struct Cli {
     /// connected. Used by deployment smoke tests.
     #[arg(long, default_value_t = false)]
     pub headless_smoke: bool,
+
+    /// Connect without a window, request one real relay pairing code and
+    /// print it. Used by deployment smoke tests.
+    #[arg(long, default_value_t = false)]
+    pub headless_pairing_code: bool,
+
+    /// Connect without a window, submit one 8-digit pairing code and print
+    /// the created request id. Used by relay pairing smoke tests.
+    #[arg(long)]
+    pub headless_submit_pairing_code: Option<String>,
 
     /// Connect without a window, send one encrypted development message and
     /// exit after the Android peer confirms delivery.

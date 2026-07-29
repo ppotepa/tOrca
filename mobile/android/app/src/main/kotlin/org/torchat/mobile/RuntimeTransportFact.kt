@@ -1,0 +1,10 @@
+package org.torchat.mobile
+
+enum class RuntimeTransportFact(val wireValue: String) {
+    ACCEPTED_LOCALLY("ACCEPTED_LOCALLY"),
+    FORWARDED("FORWARDED"),
+    DELIVERED("DELIVERED"),
+    RECIPIENT_OFFLINE("RECIPIENT_OFFLINE"),
+    RETRYABLE_FAILURE("RETRYABLE_FAILURE"),
+    PERMANENT_FAILURE("PERMANENT_FAILURE"),
+}

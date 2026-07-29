@@ -1,6 +1,6 @@
 use crate::model::{
-    ChallengeResponse, ClientFrame, PairingCodeResponse, PairingInboxItem, ProfileResponse,
-    RegisterRequest, ServerFrame, SessionResponse,
+    ChallengeResponse, ClientFrame, PairingCodeResponse, PairingInboxItem, RegisterRequest,
+    ServerFrame, SessionResponse,
 };
 use anyhow::{Context, Result, bail};
 use futures_util::{SinkExt, StreamExt};
@@ -12,18 +12,20 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
     task::{Context as TaskContext, Poll},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::{
     io::{AsyncRead, AsyncWrite, ReadBuf},
     net::TcpStream,
     sync::mpsc,
+    time::timeout,
 };
 use tokio_socks::tcp::Socks5Stream;
 use tokio_tungstenite::{
     WebSocketStream, client_async,
     tungstenite::{Message, handshake::client::generate_key, http::Request},
 };
+use torchat_client_runtime::{InviteState, MessageTransportOutcome};
 use torchat_core::{Identity, is_valid_onion_address, relay::RelayEnvelope};
 use uuid::Uuid;
 
@@ -77,6 +79,48 @@ impl AsyncWrite for RelaySocket {
 
 type Relay = WebSocketStream<RelaySocket>;
 
+#[derive(Clone, Copy, Debug)]
+enum RelayFailureCode {
+    SocksTimeout,
+    WsHandshakeTimeout,
+    ReadyTimeout,
+    PongTimeout,
+    RemoteClose,
+    ReadError,
+    WriteError,
+    AuthExpired,
+    HttpRetryable,
+    HttpPermanent,
+    Unknown,
+}
+
+fn classify_relay_error(message: &str) -> RelayFailureCode {
+    let lowered = message.to_ascii_lowercase();
+    if lowered.contains("401") || lowered.contains("403") || lowered.contains("expired") {
+        RelayFailureCode::AuthExpired
+    } else if lowered.contains("websocket handshake timeout") {
+        RelayFailureCode::WsHandshakeTimeout
+    } else if lowered.contains("ready timeout") || lowered.contains("did not return ready") {
+        RelayFailureCode::ReadyTimeout
+    } else if lowered.contains("pong timeout") {
+        RelayFailureCode::PongTimeout
+    } else if lowered.contains("relay connect timeout") || lowered.contains("timed out") {
+        RelayFailureCode::SocksTimeout
+    } else if lowered.contains("closed") {
+        RelayFailureCode::RemoteClose
+    } else if lowered.contains("send failed") || lowered.contains("heartbeat failed") || lowered.contains("pong failed") {
+        RelayFailureCode::WriteError
+    } else if lowered.contains("receive failed") {
+        RelayFailureCode::ReadError
+    } else if lowered.contains("429") || lowered.contains("5") && lowered.contains("relay:") {
+        RelayFailureCode::HttpRetryable
+    } else if lowered.contains("relay:") {
+        RelayFailureCode::HttpPermanent
+    } else {
+        RelayFailureCode::Unknown
+    }
+}
+
 #[derive(Debug)]
 pub enum RelayCommand {
     Send {
@@ -87,15 +131,12 @@ pub enum RelayCommand {
     UpdateNickname(String),
     RefreshPairingCode,
     SubmitPairingCode(String),
+    CancelPairing(Uuid),
     PairingInbox,
     AcknowledgePairing(Uuid),
     ConfirmContact {
         capability: String,
         peer: String,
-    },
-    Receipt {
-        message_id: Uuid,
-        sender: String,
     },
     Shutdown,
 }
@@ -106,17 +147,23 @@ pub enum RelayEvent {
         phase: String,
         label: String,
         progress: i32,
+        latency_ms: Option<u64>,
     },
     Connected,
     PairingCode(PairingCodeResponse),
-    PairingRequestCreated,
+    PairingRequestCreated {
+        pairing_id: Uuid,
+        expires_at: i64,
+        state: InviteState,
+    },
+    PairingCancelled(Uuid),
     PairingInbox(Vec<PairingInboxItem>),
     PairingAcknowledged,
     ContactConfirmed,
     Envelope(RelayEnvelope),
-    MessageState {
+    MessageTransportOutcome {
         message_id: Uuid,
-        state: String,
+        outcome: MessageTransportOutcome,
     },
     Error(String),
 }
@@ -146,7 +193,11 @@ impl ApiTransport {
         if socks5_proxy.is_none() {
             bail!("TorChat requires a Tor SOCKS proxy")
         }
-        let mut builder = Client::builder();
+        let mut builder = Client::builder()
+            // Bound one failed onion circuit. The actor retries with backoff
+            // instead of leaving a desktop splash stuck on a dead route.
+            .connect_timeout(Duration::from_secs(60))
+            .timeout(Duration::from_secs(75));
         if let Some(proxy) = socks5_proxy {
             builder = builder.proxy(reqwest::Proxy::all(proxy).context("invalid SOCKS5 proxy")?);
         }
@@ -161,9 +212,22 @@ impl ApiTransport {
         Ok(self
             .client
             .post(self.base_url.join(path)?)
+            // Axum's JSON extractor rejects a missing body.  These bootstrap
+            // commands have no fields, but they still use JSON semantics.
+            .json(&serde_json::json!({}))
             .send()
             .await?
             .error_for_status()?)
+    }
+
+    async fn warmup_onion(&self) -> Result<u64> {
+        let started = Instant::now();
+        self.client
+            .get(self.base_url.join("/health")?)
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(started.elapsed().as_millis() as u64)
     }
 
     async fn bootstrap(&self, identity: &Identity) -> Result<SessionResponse> {
@@ -205,10 +269,22 @@ impl ApiTransport {
                 .port_or_known_default()
                 .context("SOCKS5 proxy has no port")?;
             RelaySocket::Socks(
-                Socks5Stream::connect((proxy_host, proxy_port), (host.as_str(), port)).await?,
+                timeout(
+                    Duration::from_secs(180),
+                    Socks5Stream::connect((proxy_host, proxy_port), (host.as_str(), port)),
+                )
+                .await
+                .context("relay connect timeout")??,
             )
         } else {
-            RelaySocket::Direct(TcpStream::connect((host.as_str(), port)).await?)
+            RelaySocket::Direct(
+                timeout(
+                    Duration::from_secs(180),
+                    TcpStream::connect((host.as_str(), port)),
+                )
+                .await
+                .context("relay connect timeout")??,
+            )
         };
         let mut ws_url = self.base_url.clone();
         ws_url
@@ -228,8 +304,13 @@ impl ApiTransport {
             .header("Sec-WebSocket-Key", generate_key())
             .header("Sec-WebSocket-Version", "13")
             .body(())?;
-        let (mut stream, _) = client_async(request, socket).await?;
-        let ready = stream.next().await.context("relay closed before ready")??;
+        let (mut stream, _) = timeout(Duration::from_secs(180), client_async(request, socket))
+            .await
+            .context("relay websocket handshake timeout")??;
+        let ready = timeout(Duration::from_secs(60), stream.next())
+            .await
+            .context("relay ready timeout")?
+            .context("relay closed before ready")??;
         let Message::Text(ready) = ready else {
             bail!("relay returned non-text ready frame")
         };
@@ -242,17 +323,15 @@ impl ApiTransport {
         Ok(stream)
     }
 
-    async fn update_nickname(&self, token: &str, nickname: &str) -> Result<ProfileResponse> {
-        Ok(self
-            .client
+    async fn update_nickname(&self, token: &str, nickname: &str) -> Result<()> {
+        self.client
             .put(self.base_url.join("/v1/profile")?)
             .bearer_auth(token)
             .json(&serde_json::json!({ "nickname": nickname }))
             .send()
             .await?
-            .error_for_status()?
-            .json()
-            .await?)
+            .error_for_status()?;
+        Ok(())
     }
 
     async fn refresh_pairing_code(&self, token: &str) -> Result<PairingCodeResponse> {
@@ -267,11 +346,11 @@ impl ApiTransport {
             .await?)
     }
 
-    async fn create_pairing_request(&self, token: &str, code: &str) -> Result<Uuid> {
-        #[derive(serde::Deserialize)]
-        struct Response {
-            pairing_id: Uuid,
-        }
+    async fn create_pairing_request(
+        &self,
+        token: &str,
+        code: &str,
+    ) -> Result<crate::model::PairingRequestResponse> {
         Ok(self
             .client
             .post(self.base_url.join("/v1/pairing-requests")?)
@@ -280,9 +359,8 @@ impl ApiTransport {
             .send()
             .await?
             .error_for_status()?
-            .json::<Response>()
-            .await?
-            .pairing_id)
+            .json::<crate::model::PairingRequestResponse>()
+            .await?)
     }
 
     async fn pairing_inbox(&self, token: &str) -> Result<Vec<PairingInboxItem>> {
@@ -304,6 +382,20 @@ impl ApiTransport {
                     .join(&format!("/v1/pairing-requests/{pairing_id}/ack"))?,
             )
             .bearer_auth(token)
+            .json(&serde_json::json!({}))
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(())
+    }
+
+    async fn cancel_pairing(&self, token: &str, pairing_id: Uuid) -> Result<()> {
+        self.client
+            .delete(
+                self.base_url
+                    .join(&format!("/v1/pairing-requests/{pairing_id}"))?,
+            )
+            .bearer_auth(token)
             .send()
             .await?
             .error_for_status()?;
@@ -322,31 +414,6 @@ impl ApiTransport {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const ONION: &str = "36xcrek7ncoujoz72g4icexl45b4atzbk5gjhqrnb6thngmgcbci4cqd.onion";
-
-    #[test]
-    fn transport_requires_exact_onion_and_tor_proxy() {
-        assert!(
-            ApiTransport::new(&format!("http://{ONION}"), Some("socks5h://127.0.0.1:9050")).is_ok()
-        );
-        assert!(
-            ApiTransport::new("http://127.0.0.1:8080", Some("socks5h://127.0.0.1:9050")).is_err()
-        );
-        assert!(
-            ApiTransport::new(
-                &format!("http://{ONION}/other"),
-                Some("socks5h://127.0.0.1:9050")
-            )
-            .is_err()
-        );
-        assert!(ApiTransport::new(&format!("http://{ONION}"), None).is_err());
-    }
-}
-
 pub fn spawn_relay_actor(
     runtime: &tokio::runtime::Runtime,
     transport: ApiTransport,
@@ -354,10 +421,10 @@ pub fn spawn_relay_actor(
     nickname: String,
     tor_ready: Arc<AtomicBool>,
 ) -> (
-    mpsc::UnboundedSender<RelayCommand>,
+    mpsc::Sender<RelayCommand>,
     std::sync::mpsc::Receiver<RelayEvent>,
 ) {
-    let (command_tx, mut command_rx) = mpsc::unbounded_channel();
+    let (command_tx, mut command_rx) = mpsc::channel(256);
     let (event_tx, event_rx) = std::sync::mpsc::channel();
     runtime.spawn(async move {
         while !tor_ready.load(Ordering::Acquire) {
@@ -365,13 +432,37 @@ pub fn spawn_relay_actor(
         }
         let retry_delays = [1_u64, 2, 5, 10, 30];
         let mut retry_index = 0_usize;
+        let mut cached_token: Option<String> = None;
         loop {
+            eprintln!(
+                "[TorChat-Relay] phase=connecting retryAttempt={retry_index} step=warmup_start"
+            );
             let _ = event_tx.send(RelayEvent::Status {
-                phase: "api".into(),
-                label: "Uwierzytelnianie przez onion…".into(),
-                progress: 80,
+                phase: "connecting".into(),
+                label: "Rozgrzewanie circuitu onion…".into(),
+                progress: 76,
+                latency_ms: None,
             });
             let connected = async {
+                let latency_ms = transport.warmup_onion().await?;
+                eprintln!(
+                    "[TorChat-Relay] phase=authenticating retryAttempt={retry_index} step=bootstrap_start latencyMs={latency_ms}"
+                );
+                let _ = event_tx.send(RelayEvent::Status {
+                    phase: "api".into(),
+                    label: "Circuit onion gotowy · uwierzytelnianie relaya".into(),
+                    progress: 86,
+                    latency_ms: Some(latency_ms),
+                });
+                if let Some(token) = cached_token.as_deref() {
+                    if let Ok(relay) = transport.connect_relay(token).await {
+                        eprintln!(
+                            "[TorChat-Relay] phase=connected retryAttempt={retry_index} step=session_resume latencyMs={latency_ms}"
+                        );
+                        return Ok::<_, anyhow::Error>((token.to_owned(), relay, latency_ms));
+                    }
+                    cached_token = None;
+                }
                 let session = transport.bootstrap(&identity).await?;
                 if !nickname.trim().is_empty() {
                     transport
@@ -379,12 +470,21 @@ pub fn spawn_relay_actor(
                         .await?;
                 }
                 let relay = transport.connect_relay(&session.session_token).await?;
-                Ok::<_, anyhow::Error>((session.session_token, relay))
+                cached_token = Some(session.session_token.clone());
+                eprintln!(
+                    "[TorChat-Relay] phase=connected retryAttempt={retry_index} step=fresh_session latencyMs={latency_ms}"
+                );
+                Ok::<_, anyhow::Error>((session.session_token, relay, latency_ms))
             }
             .await;
-            let (token, relay) = match connected {
+            let (token, relay, _latency_ms) = match connected {
                 Ok(value) => value,
                 Err(error) => {
+                    let detail = format!("{error:#}");
+                    let code = classify_relay_error(&detail);
+                    eprintln!(
+                        "[TorChat-Relay] phase=backoff retryAttempt={retry_index} code={code:?} detail={detail}"
+                    );
                     let _ = event_tx.send(RelayEvent::Error(format!("{error:#}")));
                     let delay = retry_delays[retry_index.min(retry_delays.len() - 1)];
                     retry_index = (retry_index + 1).min(retry_delays.len() - 1);
@@ -394,9 +494,21 @@ pub fn spawn_relay_actor(
             };
             retry_index = 0;
             let _ = event_tx.send(RelayEvent::Connected);
+            eprintln!("[TorChat-Relay] phase=connected retryAttempt=0 step=websocket_ready");
             let (mut writer, mut reader) = relay.split();
+            let mut last_pong_at = Instant::now();
+            let mut heartbeat = tokio::time::interval(Duration::from_secs(25));
+            heartbeat.tick().await;
             let disconnected = loop {
                 tokio::select! {
+                    _ = heartbeat.tick() => {
+                        if last_pong_at.elapsed() > Duration::from_secs(75) {
+                            break "relay websocket pong timeout".into();
+                        }
+                        if let Err(error) = writer.send(Message::Ping(Vec::new().into())).await {
+                            break format!("relay heartbeat failed: {error}");
+                        }
+                    }
                     command = command_rx.recv() => {
                         match command {
                             Some(RelayCommand::UpdateNickname(nickname)) => {
@@ -432,8 +544,14 @@ pub fn spawn_relay_actor(
                             }
                             Some(RelayCommand::SubmitPairingCode(code)) => {
                                 match transport.create_pairing_request(&token, &code).await {
-                                    Ok(_) => { let _ = event_tx.send(RelayEvent::PairingRequestCreated); }
+                                    Ok(value) => { let _ = event_tx.send(RelayEvent::PairingRequestCreated { pairing_id: value.pairing_id, expires_at: value.expires_at, state: value.state }); }
                                     Err(error) => { let _ = event_tx.send(RelayEvent::Error(format!("pairing request failed: {error:#}"))); }
+                                }
+                            }
+                            Some(RelayCommand::CancelPairing(pairing_id)) => {
+                                match transport.cancel_pairing(&token, pairing_id).await {
+                                    Ok(()) => { let _ = event_tx.send(RelayEvent::PairingCancelled(pairing_id)); }
+                                    Err(error) => { let _ = event_tx.send(RelayEvent::Error(format!("pairing cancellation failed: {error:#}"))); }
                                 }
                             }
                             Some(RelayCommand::PairingInbox) => {
@@ -454,20 +572,6 @@ pub fn spawn_relay_actor(
                                     Err(error) => { let _ = event_tx.send(RelayEvent::Error(format!("contact confirmation failed: {error:#}"))); }
                                 }
                             }
-                            Some(RelayCommand::Receipt { message_id, sender }) => {
-                                let frame = ClientFrame::DeliveryReceipt { message_id, sender };
-                                if let Err(error) = writer.send(Message::Text(
-                                    match serde_json::to_string(&frame) {
-                                        Ok(value) => value.into(),
-                                        Err(error) => {
-                                            let _ = event_tx.send(RelayEvent::Error(error.to_string()));
-                                            continue;
-                                        }
-                                    }
-                                )).await {
-                                    break format!("receipt send failed: {error}");
-                                }
-                            }
                             Some(RelayCommand::Shutdown) | None => return,
                         }
                     }
@@ -483,13 +587,22 @@ pub fn spawn_relay_actor(
                                     let _ = event_tx.send(RelayEvent::Envelope(envelope));
                                 }
                                 Ok(ServerFrame::Forwarded { message_id }) => {
-                                    let _ = event_tx.send(RelayEvent::MessageState { message_id, state: "sent".into() });
+                                    let _ = event_tx.send(RelayEvent::MessageTransportOutcome {
+                                        message_id,
+                                        outcome: MessageTransportOutcome::Forwarded,
+                                    });
                                 }
                                 Ok(ServerFrame::DeliveryReceipt { message_id }) => {
-                                    let _ = event_tx.send(RelayEvent::MessageState { message_id, state: "delivered".into() });
+                                    let _ = event_tx.send(RelayEvent::MessageTransportOutcome {
+                                        message_id,
+                                        outcome: MessageTransportOutcome::Delivered,
+                                    });
                                 }
                                 Ok(ServerFrame::RecipientOffline { message_id }) => {
-                                    let _ = event_tx.send(RelayEvent::MessageState { message_id, state: "failed".into() });
+                                    let _ = event_tx.send(RelayEvent::MessageTransportOutcome {
+                                        message_id,
+                                        outcome: MessageTransportOutcome::RecipientOffline,
+                                    });
                                 }
                                 Ok(ServerFrame::Error { code }) => {
                                     let _ = event_tx.send(RelayEvent::Error(format!("relay: {code}")));
@@ -504,18 +617,52 @@ pub fn spawn_relay_actor(
                                     break format!("relay pong failed: {error}");
                                 }
                             }
+                            Message::Pong(_) => {
+                                last_pong_at = Instant::now();
+                            }
                             Message::Close(_) => break "relay closed".into(),
                             _ => {}
                         }
                     }
                 }
             };
+            let reconnect_label = disconnected.clone();
             let _ = event_tx.send(RelayEvent::Status {
                 phase: "reconnecting".into(),
-                label: disconnected,
+                label: reconnect_label,
                 progress: 70,
+                latency_ms: None,
             });
+            let code = classify_relay_error(&disconnected);
+            eprintln!(
+                "[TorChat-Relay] phase=reconnecting retryAttempt=0 code={code:?} detail={disconnected}"
+            );
         }
     });
     (command_tx, event_rx)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ONION: &str = "36xcrek7ncoujoz72g4icexl45b4atzbk5gjhqrnb6thngmgcbci4cqd.onion";
+
+    #[test]
+    fn transport_requires_exact_onion_and_tor_proxy() {
+        assert!(
+            ApiTransport::new(&format!("http://{ONION}"), Some("socks5h://127.0.0.1:9050")).is_ok()
+        );
+        assert!(
+            ApiTransport::new("http://127.0.0.1:8080", Some("socks5h://127.0.0.1:9050")).is_err()
+        );
+        assert!(
+            ApiTransport::new(
+                &format!("http://{ONION}/other"),
+                Some("socks5h://127.0.0.1:9050")
+            )
+            .is_err()
+        );
+        assert!(ApiTransport::new(&format!("http://{ONION}"), None).is_err());
+    }
 }

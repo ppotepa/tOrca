@@ -80,7 +80,9 @@ private class TorSocksSocket(private val socksPort: Int) : Socket() {
         Log.i(LOG_TAG, "Opening SOCKS5 connection to ${hostname.take(12)}…:${destination.port} via 127.0.0.1:$socksPort")
         try {
             delegate.connect(InetSocketAddress("127.0.0.1", socksPort), timeout)
-            delegate.soTimeout = timeout.coerceAtLeast(1)
+            // The connection to Tor is local, but the SOCKS CONNECT reply
+            // waits for a fresh onion circuit and can take well over 20s.
+            delegate.soTimeout = SOCKS_HANDSHAKE_TIMEOUT_MS
             Log.i(LOG_TAG, "Local Tor SOCKS listener accepted the socket")
             performSocks5Handshake(delegate, hostname, destination.port)
             logicalRemote = destination
@@ -186,3 +188,6 @@ private fun InputStream.readExactly(length: Int): ByteArray {
 }
 
 private const val LOG_TAG = "TorChat-SOCKS"
+// Cold v3 onion circuits on Android can exceed a minute. Match the service
+// readiness budget so Tor can finish one circuit before the app rotates it.
+private const val SOCKS_HANDSHAKE_TIMEOUT_MS = 180_000

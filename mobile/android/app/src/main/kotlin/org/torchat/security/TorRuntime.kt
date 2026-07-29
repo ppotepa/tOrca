@@ -33,10 +33,10 @@ class TorRuntime(private val context: Context) {
     fun prepare(): TorRuntimeConfig {
         val torrc = TorService.getTorrc(context)
         torrc.parentFile?.mkdirs()
-        // TorService supplies the private DataDirectory and defaults torrc.
-        // Keep this file deliberately small: relay traffic must go through the
-        // SOCKS listener selected by the native service.
-        torrc.writeText("ClientOnly 1\n")
+        // TorService owns the generated torrc, SOCKS port and private data
+        // directory. Do not overwrite it here: replacing its template with a
+        // one-line file discarded cache/persistence settings and turned many
+        // application restarts into cold Tor starts.
         val prepared = TorRuntimeConfig(
             dataDirectory = torrc.parentFile ?: context.filesDir,
             torrc = torrc,
@@ -92,35 +92,35 @@ class TorRuntime(private val context: Context) {
             Log.i("TorChat-Tor", "Native Tor SOCKS port detected: $socksPort")
             check(socksPort > 0) { "Native Tor did not publish a SOCKS port" }
 
-            var bootstrapProgress = 0
-            var bootstrapSummary = "Uruchamianie sieci Tor"
-            for (attempt in 0 until 360) {
-                val phase = runCatching {
-                    service?.getInfo("status/bootstrap-phase").orEmpty()
-                }.getOrDefault("")
-                val progress = Regex("""PROGRESS=(\d+)""")
-                    .find(phase)?.groupValues?.getOrNull(1)?.toIntOrNull()
-                val summary = Regex("""SUMMARY="([^"]+)"""")
-                    .find(phase)?.groupValues?.getOrNull(1)
-                if (progress != null && (progress != bootstrapProgress || attempt == 0)) {
-                    bootstrapProgress = progress
-                    bootstrapSummary = summary ?: bootstrapSummary
-                    Log.i("TorChat-Tor", "Bootstrap $bootstrapProgress%: $bootstrapSummary")
-                    onBootstrapProgress(bootstrapProgress, bootstrapSummary)
-                }
-                if (bootstrapProgress >= 100) break
-                Thread.sleep(500)
+            check(probeSocks(socksPort)) {
+                "Tor SOCKS listener nie odpowiada na handshake"
             }
-            check(bootstrapProgress >= 100) {
-                "Tor bootstrap zatrzymał się na $bootstrapProgress%: $bootstrapSummary"
-            }
+            // SOCKS readiness is the local-runtime boundary. Onion circuits
+            // may still be warming up; the relay actor owns retry/backoff and
+            // the UI must be able to open encrypted local state immediately.
+            Log.i("TorChat-Tor", "SOCKS5 readiness probe succeeded on port $socksPort; bootstrap continues in background")
+            onBootstrapProgress(1, "Tor SOCKS gotowy · rozgrzewanie obwodu onion")
             return prepared.copy(socksPort = socksPort)
         } catch (error: Throwable) {
             failure = error
-            release()
+            stop()
             throw failure
         }
     }
+
+    private fun probeSocks(port: Int): Boolean = runCatching {
+        Socket().use { socket ->
+            socket.connect(InetSocketAddress("127.0.0.1", port), 5_000)
+            socket.soTimeout = 5_000
+            socket.getOutputStream().use { output ->
+                output.write(byteArrayOf(0x05, 0x01, 0x00))
+                output.flush()
+                val version = socket.getInputStream().read()
+                val method = socket.getInputStream().read()
+                version == 0x05 && method == 0x00
+            }
+        }
+    }.getOrDefault(false)
 
     private fun isListening(port: Int): Boolean = runCatching {
         Socket().use { it.connect(InetSocketAddress("127.0.0.1", port), 500) }

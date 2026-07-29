@@ -1,0 +1,103 @@
+{
+  "protocol": 1,
+  "methods": {
+    "public": [
+      "connect",
+      "identity",
+      "profile",
+      "setNickname",
+      "refreshPairingCode",
+      "submitPairingCode",
+      "pairingInbox",
+      "pairingOutbox",
+      "acceptPairing",
+      "rejectPairing",
+      "archivePairing",
+      "cancelPairing",
+      "verifyContact",
+      "contacts",
+      "conversations",
+      "messages",
+      "openConversation",
+      "closeConversation",
+      "startConversation",
+      "sendMessage"
+    ],
+    "internal": [
+      "bootstrapRuntime",
+      "reportTorStatus",
+      "applyRemoteProfile",
+      "reportRuntimeError",
+      "reportRuntimeLog",
+      "prepareSubmitPairingCode",
+      "mergePairingInbox",
+      "mergePairingOutbox",
+      "prepareAcceptPairing",
+      "commitAcceptPairing",
+      "welcomeAccepted",
+      "bootstrapContact",
+      "prepareRejectPairing",
+      "commitRejectPairing",
+      "prepareCancelPairing",
+      "confirmPairingCancelled",
+      "applyPairingPeerOutcome",
+      "preparePendingSendEffects",
+      "receiveMessage",
+      "applyMessageTransportOutcome"
+    ]
+  },
+  "events": [
+    "runtime_ready",
+    "tor_status",
+    "profile_ready",
+    "invite_received",
+    "invite_state_changed",
+    "message_received",
+    "message_state_changed",
+    "conversation_read_changed",
+    "changed",
+    "runtime_error",
+    "runtime_log"
+  ],
+  "messageStates": [
+    "QUEUED",
+    "SENDING",
+    "SENT",
+    "DELIVERED",
+    "FAILED"
+  ],
+  "conversationStates": [
+    "PENDING",
+    "VERIFYING",
+    "ACTIVE",
+    "OFFLINE",
+    "FAILED"
+  ],
+  "inviteStates": [
+    "PENDING",
+    "ACCEPTED",
+    "REJECTED",
+    "COMPLETED",
+    "EXPIRED",
+    "ARCHIVED",
+    "CANCELLED"
+  ],
+  "messageTransportOutcomes": [
+    "FORWARDED",
+    "DELIVERED",
+    "RECIPIENT_OFFLINE",
+    "RETRYABLE_FAILURE",
+    "PERMANENT_FAILURE"
+  ],
+  "pairingPeerOutcomes": [
+    "OFFER_RECEIVED",
+    "REJECTION_RECEIVED",
+    "WELCOME_PREPARED"
+  ],
+  "pairingAvailableActions": [
+    "ACCEPT",
+    "REJECT",
+    "ARCHIVE",
+    "CANCEL"
+  ]
+}

@@ -1,0 +1,302 @@
+<template id="tpl-empty">
+  <section class="empty-state">
+    <div class="empty-card">
+      <div class="empty-mark">{{iconEmpty}}</div>
+      <h2>{{title}}</h2>
+      <p>{{body}}</p>
+    </div>
+  </section>
+</template>
+<template id="tpl-chat-row">
+  <button class="list-row chat-row {{active}}" data-action="open-chat" data-id="{{id}}">
+    <div class="avatar">{{initial}}</div>
+    <div class="list-copy">
+      <strong>{{name}}</strong>
+      <p>{{preview}}</p>
+    </div>
+    <small>{{time}}</small>
+    {{unread}}
+  </button>
+</template>
+<template id="tpl-contact-row">
+  <button class="list-row contact-row" data-action="open-contact" data-id="{{id}}">
+    <div class="avatar">{{initial}}</div>
+    <div class="list-copy">
+      <strong>{{name}}</strong>
+      <p>{{note}}</p>
+      <span class="fingerprint">{{fingerprint}}</span>
+    </div>
+    <div class="status-pill {{verifiedClass}}">{{verifiedLabel}}</div>
+  </button>
+</template>
+<template id="tpl-inbox-row">
+  <button class="list-row inbox-row" data-action="open-invite" data-id="{{id}}">
+    <div class="avatar">{{initial}}</div>
+    <div class="list-copy">
+      <strong>{{name}}</strong>
+      <p>{{note}}</p>
+      <span class="fingerprint">{{code}}</span>
+    </div>
+    <div class="status-pill {{statusClass}}">{{statusLabel}}</div>
+  </button>
+</template>
+<template id="tpl-message-row">
+  <div class="bubble {{mine}}">
+    <span>{{body}}</span>
+    <small>{{time}}</small>
+  </div>
+</template>
+<template id="tpl-detail-shell">
+  <section class="detail-shell">
+    <header class="detail-header">
+      <button class="icon back" data-action="back">{{back}}</button>
+      <div class="detail-copy">
+        <div class="eyebrow">{{eyebrow}}</div>
+        <h1>{{title}}</h1>
+        <p>{{subtitle}}</p>
+      </div>
+      <div class="detail-actions">{{actions}}</div>
+    </header>
+    <div class="detail-body">
+      {{body}}
+    </div>
+  </section>
+</template>
+<template id="tpl-contact-detail">
+  <div class="stack">
+    <article class="panel">
+      <div class="profile-line">
+        <div class="avatar avatar-lg">{{initial}}</div>
+        <div>
+          <strong>{{name}}</strong>
+          <p>{{note}}</p>
+        </div>
+      </div>
+      <div class="status-pill {{statusClass}}">{{statusLabel}}</div>
+    </article>
+    <article class="panel">
+      <div class="section-head">
+        <span>Fingerprint</span>
+        <button class="ghost icon-button" data-action="copy-fingerprint">{{iconCopy}}</button>
+      </div>
+      <p class="mono">{{fingerprint}}</p>
+    </article>
+    <article class="panel">
+      <button class="primary wide" data-action="open-chat" data-id="{{contactId}}">{{iconMessage}} Otwórz rozmowę</button>
+      <button class="ghost wide" data-action="open-qr">{{iconQr}} Pokaż mój kod</button>
+    </article>
+    <article class="panel compact-context">
+      <div class="section-head"><span>Współdzielone</span></div>
+      <div class="context-row"><span>Media</span><strong>0</strong></div>
+      <div class="context-row"><span>Pliki</span><strong>0</strong></div>
+      <div class="context-row"><span>Linki</span><strong>0</strong></div>
+    </article>
+  </div>
+</template>
+<template id="tpl-invite-detail">
+  <div class="stack">
+    <article class="panel">
+      <div class="profile-line">
+        <div class="avatar avatar-lg">{{initial}}</div>
+        <div>
+          <strong>{{name}}</strong>
+          <p>{{note}}</p>
+        </div>
+      </div>
+      <div class="status-pill {{statusClass}}">{{kindLabel}}</div>
+    </article>
+    <article class="panel">
+      <div class="section-head"><span>Kod</span><button class="ghost icon-button" data-action="copy-code">{{iconCopy}}</button></div>
+      <p class="mono">{{code}}</p>
+    </article>
+    <article class="panel action-stack">
+      {{actions}}
+    </article>
+  </div>
+</template>
+<template id="tpl-new-contact">
+  <div class="stack">
+    <article class="panel">
+      <div class="section-head">
+        <span>Zaproszenie</span>
+        <button class="ghost icon-button" data-action="open-qr">{{iconQr}}</button>
+      </div>
+      <p>{{helper}}</p>
+      <label class="field-label">Kod 8 cyfr</label>
+      <input data-field="invite-code" class="field code-field" inputmode="numeric" maxlength="8" placeholder="00000000">
+      <div class="actions-row">
+        <button class="primary" data-action="send-invite">{{iconSend}} Wyślij zaproszenie</button>
+        <button class="ghost" data-action="open-qr">{{iconQr}} Mój QR</button>
+      </div>
+    </article>
+  </div>
+</template>
+<template id="tpl-account-detail">
+  <div class="stack">
+    <article class="panel">
+      <div class="profile-line">
+        <div class="avatar avatar-lg">{{nickname}}</div>
+        <div>
+          <strong>{{nickname}}</strong>
+          <p>Lokalny profil urządzenia</p>
+        </div>
+      </div>
+      <div class="status-pill ok">Aktywny profil</div>
+    </article>
+    <article class="panel">
+      <label class="field-label">Nick</label>
+      <input data-field="settings-nickname" class="field" value="{{nickname}}" maxlength="32" placeholder="np. Maja">
+      <div class="actions-row" style="margin-top: 10px;">
+        <button class="primary" data-action="save-settings">{{iconMessage}} Zapisz nick</button>
+      </div>
+    </article>
+    <article class="panel">
+      <div class="section-head"><span>Fingerprint</span><button class="ghost icon-button" data-action="copy-fingerprint">{{iconCopy}}</button></div>
+      <p class="mono">{{fingerprint}}</p>
+    </article>
+    <article class="panel action-stack">
+      <button class="ghost wide" data-action="toggle-theme">{{iconTheme}} Motyw: {{themeLabel}}</button>
+      <button class="ghost wide" data-action="open-tor">{{iconOnion}} {{torLabel}}</button>
+      <button class="ghost danger wide" data-action="open-confirm" data-confirm="reset">{{iconDelete}} Reset danych</button>
+    </article>
+  </div>
+</template>
+<template id="tpl-settings-detail">
+  <div class="settings-list">
+    <div class="settings-section">
+      <div class="settings-label">Aplikacja</div>
+      <button class="settings-row" data-action="toggle-theme"><span>{{iconTheme}}<strong>Motyw</strong></span><small>{{themeLabel}}</small></button>
+      <button class="settings-row" data-action="open-tor"><span>{{iconOnion}}<strong>Połączenie Tor</strong></span><small>{{torLabel}}</small></button>
+    </div>
+    <div class="settings-section">
+      <div class="settings-label">Tożsamość</div>
+      <button class="settings-row" data-action="open-account"><span>{{iconUser}}<strong>Profil użytkownika</strong></span><small>{{nickname}}</small></button>
+      <button class="settings-row" data-action="open-qr"><span>{{iconQr}}<strong>Kod zaproszenia</strong></span><small>Otwórz modal</small></button>
+    </div>
+    <div class="settings-section">
+      <div class="settings-label">Dane lokalne</div>
+      <button class="settings-row danger-row" data-action="open-confirm" data-confirm="reset"><span>{{iconDelete}}<strong>Reset danych demo</strong></span><small>Nieodwracalne</small></button>
+    </div>
+  </div>
+</template>
+<template id="tpl-tor-detail">
+  <div class="stack">
+    <article class="panel">
+      <div class="section-head"><span>Status</span><div class="status-pill {{torClass}}">{{torLabel}}</div></div>
+      <p>Komunikacja idzie wyłącznie przez onion.</p>
+    </article>
+    <article class="panel">
+      <div class="section-head"><span>Adres onion</span><button class="ghost icon-button" data-action="copy-onion">{{iconCopy}}</button></div>
+      <p class="mono">{{onion}}</p>
+      <p class="muted">SOCKS: {{socks}} · latency {{latency}}</p>
+    </article>
+    <article class="panel">
+      <div class="section-head"><span>Kolejka</span><button class="ghost icon-button" data-action="toggle-tor">{{iconRefresh}}</button></div>
+      <p>{{queueCount}} wiadomości oczekuje na wysyłkę.</p>
+    </article>
+    <article class="panel action-stack">
+      <button class="primary wide" data-action="toggle-tor">{{iconRefresh}} {{actionLabel}}</button>
+    </article>
+  </div>
+</template>
+<template id="tpl-inspector">
+  <aside class="inspector">
+    <header class="inspector-header">
+      <div class="profile-line">
+        <div class="avatar avatar-lg">{{initial}}</div>
+        <div class="inspector-title"><h2>{{title}}</h2><p>{{subtitle}}</p></div>
+      </div>
+    </header>
+    <div class="inspector-body">
+      <div class="inspector-section">
+        <div class="inspector-label">Tożsamość</div>
+        <button class="inspector-row" data-action="copy-fingerprint"><span>Fingerprint</span><strong class="mono">{{fingerprint}}</strong>{{iconCopy}}</button>
+      </div>
+      <div class="inspector-section">
+        <div class="inspector-label">Połączenie</div>
+        <div class="inspector-row"><span>Status</span><strong>{{note}}</strong></div>
+        <div class="inspector-row"><span>Transport</span><strong>Przez onion</strong></div>
+      </div>
+      <div class="inspector-section">
+        <div class="inspector-label">Współdzielone</div>
+        <div class="inspector-row muted-row"><span>Media</span><strong>0</strong></div>
+        <div class="inspector-row muted-row"><span>Pliki</span><strong>0</strong></div>
+        <div class="inspector-row muted-row"><span>Linki</span><strong>0</strong></div>
+      </div>
+      <div class="inspector-section">
+        <div class="inspector-label">Działania</div>
+        <button class="inspector-row" data-action="open-contact-from-route"><span>Otwórz profil kontaktu</span>{{iconUser}}</button>
+        <button class="inspector-row" data-action="open-actions"><span>Więcej działań</span>{{iconDots}}</button>
+      </div>
+    </div>
+  </aside>
+</template>
+<template id="tpl-modal-qr">
+  <div class="modal-overlay" data-action="close-modal">
+    <section class="modal-card qr-modal" onclick="event.stopPropagation()">
+      <button class="close" data-action="close-modal">{{iconClose}}</button>
+      <div class="eyebrow">{{title}}</div>
+      <h2>{{subtitle}}</h2>
+      <div class="qr-frame">
+        <div class="qr-grid">{{qr}}</div>
+      </div>
+      <p class="mono qr-code">{{code}}</p>
+      <p class="muted center">Nowy kod za {{expires}} s</p>
+      <div class="actions-row center">
+        <button class="primary" data-action="copy-code">{{iconCopy}} Kopiuj kod</button>
+      </div>
+    </section>
+  </div>
+</template>
+<template id="tpl-modal-new-contact">
+  <div class="modal-overlay" data-action="close-modal">
+    <section class="modal-card code-modal" onclick="event.stopPropagation()">
+      <button class="close" data-action="close-modal">{{iconClose}}</button>
+      <div class="eyebrow">{{title}}</div>
+      <h2>{{subtitle}}</h2>
+      <p>{{helper}}</p>
+      <label class="field-label">Kod 8 cyfr</label>
+      <input data-field="invite-code" class="field code-entry" inputmode="numeric" maxlength="8" placeholder="00000000" autocomplete="one-time-code">
+      <div class="actions-row">
+        <button class="primary wide" data-action="send-invite">{{iconSend}} Dodaj</button>
+      </div>
+    </section>
+  </div>
+</template>
+<template id="tpl-modal-confirm">
+  <div class="modal-overlay" data-action="close-modal">
+    <section class="modal-card" onclick="event.stopPropagation()">
+      <button class="close" data-action="close-modal">{{iconClose}}</button>
+      <div class="eyebrow">Potwierdzenie</div>
+      <h2>{{title}}</h2>
+      <p>{{body}}</p>
+      <div class="actions-row">
+        <button class="primary {{dangerClass}}" data-action="confirm-modal" data-confirm="{{confirmAction}}">{{confirmLabel}}</button>
+        <button class="ghost" data-action="close-modal">Anuluj</button>
+      </div>
+    </section>
+  </div>
+</template>
+<template id="tpl-modal-error">
+  <div class="modal-overlay" data-action="close-modal">
+    <section class="modal-card" onclick="event.stopPropagation()">
+      <button class="close" data-action="close-modal">{{iconClose}}</button>
+      <div class="eyebrow">Komunikat</div>
+      <h2>{{title}}</h2>
+      <p>{{body}}</p>
+      <div class="actions-row">
+        <button class="primary" data-action="close-modal">OK</button>
+      </div>
+    </section>
+  </div>
+</template>
+<template id="tpl-modal-actions">
+  <div class="modal-overlay" data-action="close-modal">
+    <section class="modal-card" onclick="event.stopPropagation()">
+      <button class="close" data-action="close-modal">{{iconClose}}</button>
+      <div class="eyebrow">{{title}}</div>
+      <h2>{{body}}</h2>
+      <div class="actions-row actions-column">{{actions}}</div>
+    </section>
+  </div>
+</template>

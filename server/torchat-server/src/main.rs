@@ -5,16 +5,17 @@
 
 use axum::{
     Json, Router,
+    body::Bytes,
     extract::{
         State, WebSocketUpgrade,
         ws::{Message, WebSocket},
     },
     http::{HeaderMap, StatusCode},
-    response::Response,
+    response::{Html, Redirect, Response},
     routing::{get, post},
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use futures_util::StreamExt;
+use futures_util::{SinkExt, StreamExt};
 use hmac::{Hmac, Mac};
 use rand::{Rng, random, rng};
 use serde::{Deserialize, Serialize};
@@ -26,7 +27,7 @@ use std::{
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::{RwLock, mpsc, oneshot};
 use tracing::info;
 use uuid::Uuid;
 
@@ -44,6 +45,10 @@ const DATABASE_MIGRATIONS: &[(&str, &str)] = &[
         "005_pairing_sql_file.sql",
         include_str!("../../../infra/db/migrations/005_pairing_sql_file.sql"),
     ),
+    (
+        "006_pairing_request_deduplication.sql",
+        include_str!("../../../infra/db/migrations/006_pairing_request_deduplication.sql"),
+    ),
 ];
 
 const SQL_SCHEMA_MIGRATIONS: &str = include_str!("../sql/schema_migrations.sql");
@@ -53,10 +58,8 @@ const SQL_SCHEMA_MIGRATION_INSERT: &str =
     include_str!("../sql/queries/schema_migration_insert.sql");
 const SQL_PRUNE_SESSIONS: &str = include_str!("../sql/queries/prune_sessions.sql");
 const SQL_PRUNE_PAIRING_CODES: &str = include_str!("../sql/queries/prune_pairing_codes.sql");
-const SQL_PRUNE_PENDING_PAIRINGS: &str =
-    include_str!("../sql/queries/prune_pending_pairings.sql");
-const SQL_INSTALLATION_NICKNAME: &str =
-    include_str!("../sql/queries/installation_nickname.sql");
+const SQL_PRUNE_PENDING_PAIRINGS: &str = include_str!("../sql/queries/prune_pending_pairings.sql");
+const SQL_INSTALLATION_NICKNAME: &str = include_str!("../sql/queries/installation_nickname.sql");
 const SQL_INSTALLATION_UPSERT: &str = include_str!("../sql/queries/installation_upsert.sql");
 const SQL_INSTALLATION_PROFILE: &str = include_str!("../sql/queries/installation_profile.sql");
 const SQL_PROFILE_UPDATE_NICKNAME: &str =
@@ -64,11 +67,13 @@ const SQL_PROFILE_UPDATE_NICKNAME: &str =
 const SQL_PAIRING_CODE_DELETE_FOR_INSTALLATION: &str =
     include_str!("../sql/queries/pairing_code_delete_for_installation.sql");
 const SQL_PAIRING_CODE_INSERT: &str = include_str!("../sql/queries/pairing_code_insert.sql");
+const SQL_PAIRING_CODE_LOOKUP: &str = include_str!("../sql/queries/pairing_code_lookup.sql");
 const SQL_PAIRING_CODE_CONSUME: &str = include_str!("../sql/queries/pairing_code_consume.sql");
-const SQL_PAIRING_REQUEST_INSERT: &str =
-    include_str!("../sql/queries/pairing_request_insert.sql");
+const SQL_PAIRING_REQUEST_LOOKUP: &str = include_str!("../sql/queries/pairing_request_lookup.sql");
+const SQL_PAIRING_REQUEST_INSERT: &str = include_str!("../sql/queries/pairing_request_insert.sql");
 const SQL_PAIRING_INBOX_LIST: &str = include_str!("../sql/queries/pairing_inbox_list.sql");
 const SQL_PAIRING_REQUEST_ACK: &str = include_str!("../sql/queries/pairing_request_ack.sql");
+const SQL_PAIRING_REQUEST_CANCEL: &str = include_str!("../sql/queries/pairing_request_cancel.sql");
 const SQL_CONTACTS_CONFIRM: &str = include_str!("../sql/queries/contacts_confirm.sql");
 const SQL_CONTACTS_LIST: &str = include_str!("../sql/queries/contacts_list.sql");
 const SQL_CONTACT_DELETE: &str = include_str!("../sql/queries/contact_delete.sql");
@@ -80,7 +85,7 @@ struct AppState {
     db: Arc<tokio_postgres::Client>,
     challenges: Arc<RwLock<HashMap<Uuid, Challenge>>>,
     installations: Arc<RwLock<HashMap<String, Installation>>>,
-    connections: Arc<RwLock<HashMap<String, mpsc::UnboundedSender<Message>>>>,
+    connections: Arc<RwLock<HashMap<String, Connection>>>,
     pairing_secret: Arc<String>,
     pairing_attempts: Arc<RwLock<HashMap<String, PairingAttemptWindow>>>,
 }
@@ -101,6 +106,21 @@ struct Challenge {
 struct Installation {
     public_key: String,
     nickname: Option<String>,
+}
+
+#[derive(Clone)]
+struct Connection {
+    id: Uuid,
+    sender: mpsc::Sender<OutboundCommand>,
+}
+
+enum OutboundCommand {
+    Frame {
+        frame: torchat_core::relay::RelayServerFrame,
+        completion: Option<oneshot::Sender<Result<(), String>>>,
+    },
+    WebSocketPong(Bytes),
+    Close,
 }
 
 #[derive(Serialize)]
@@ -125,9 +145,7 @@ struct InstallationRequest {
 
 #[derive(Serialize)]
 struct InstallationResponse {
-    installation_id: String,
     session_token: String,
-    security_status: &'static str,
 }
 
 #[derive(Deserialize)]
@@ -164,7 +182,7 @@ struct PairingCodeResponse {
     expires_at: u64,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct CreatePairingRequest {
     code: String,
 }
@@ -173,6 +191,7 @@ struct CreatePairingRequest {
 struct PairingRequestCreated {
     pairing_id: Uuid,
     expires_at: i64,
+    state: &'static str,
 }
 
 #[derive(Serialize)]
@@ -181,14 +200,14 @@ struct PairingInboxItem {
     sender: ContactCardView,
     capability: String,
     expires_at: i64,
+    state: &'static str,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct ConfirmContactRequest {
     capability: String,
     peer_installation_id: String,
 }
-
 
 async fn apply_database_migrations(
     db: &mut tokio_postgres::Client,
@@ -197,9 +216,7 @@ async fn apply_database_migrations(
 
     for (name, sql) in DATABASE_MIGRATIONS {
         let checksum = format!("{:x}", Sha256::digest(sql.as_bytes()));
-        let existing = db
-            .query_opt(SQL_SCHEMA_MIGRATION_LOOKUP, &[name])
-            .await?;
+        let existing = db.query_opt(SQL_SCHEMA_MIGRATION_LOOKUP, &[name]).await?;
         if let Some(row) = existing {
             let applied: String = row.get(0);
             if applied != checksum {
@@ -263,7 +280,32 @@ async fn main() {
         ),
         pairing_attempts: Arc::new(RwLock::new(HashMap::new())),
     };
+    let cleanup_state = state.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(60));
+        loop {
+            interval.tick().await;
+            if let Err(error) = prune_server_metadata(&cleanup_state.db).await {
+                tracing::error!(%error, "periodic server metadata cleanup failed");
+            }
+            let current = now();
+            cleanup_state
+                .challenges
+                .write()
+                .await
+                .retain(|_, challenge| challenge.expires_at >= current);
+            cleanup_state
+                .pairing_attempts
+                .write()
+                .await
+                .retain(|_, attempt| {
+                    current.saturating_sub(attempt.started_at) < PAIRING_ATTEMPT_WINDOW_SECONDS
+                });
+        }
+    });
     let app = Router::new()
+        .route("/", get(status_redirect))
+        .route("/status", get(status_page))
         .route("/health", get(health))
         .route("/v1/bootstrap/challenge", post(create_challenge))
         .route("/v1/installations", post(register_installation))
@@ -276,9 +318,16 @@ async fn main() {
             "/v1/pairing-requests/{pairing_id}/ack",
             post(ack_pairing_request),
         )
+        .route(
+            "/v1/pairing-requests/{pairing_id}",
+            axum::routing::delete(cancel_pairing_request),
+        )
         .route("/v1/contacts", get(list_contacts))
         .route("/v1/contacts/confirm", post(confirm_contact))
-        .route("/v1/contacts/{installation_id}", axum::routing::delete(remove_contact))
+        .route(
+            "/v1/contacts/{installation_id}",
+            axum::routing::delete(remove_contact),
+        )
         .route("/v1/events", get(events))
         .with_state(state);
     let bind = env::var("TORCHAT_BIND").unwrap_or_else(|_| "127.0.0.1:8080".into());
@@ -293,10 +342,54 @@ async fn main() {
 }
 
 async fn health() -> Json<Health> {
+    info!("health probe ok");
     Json(Health {
         status: "ok",
         protocol_version: torchat_core::protocol_version(),
     })
+}
+
+async fn status_redirect() -> Redirect {
+    Redirect::temporary("/status")
+}
+
+async fn status_page() -> Html<String> {
+    let protocol_version = torchat_core::protocol_version();
+    let checked_at = now();
+    info!(protocol_version, "status page served");
+    Html(format!(
+        r#"<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="refresh" content="10">
+  <title>TorChat onion status</title>
+  <style>
+    :root {{ color-scheme: dark; font-family: system-ui, sans-serif; }}
+    body {{ margin: 0; min-height: 100vh; display: grid; place-items: center; background: #111; color: #eee; }}
+    main {{ width: min(32rem, calc(100% - 2rem)); border: 1px solid #3a3a3a; padding: 1.5rem; }}
+    h1 {{ margin: 0 0 1rem; font-size: 1.35rem; }}
+    .ok {{ color: #63d68b; font-size: 1.1rem; font-weight: 700; }}
+    dl {{ display: grid; grid-template-columns: auto 1fr; gap: .65rem 1rem; margin: 1.5rem 0 0; }}
+    dt {{ color: #aaa; }} dd {{ margin: 0; overflow-wrap: anywhere; }}
+    small {{ display: block; margin-top: 1.5rem; color: #888; }}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>TorChat onion service</h1>
+    <div class="ok">Online</div>
+    <dl>
+      <dt>Protocol</dt><dd>{protocol_version}</dd>
+      <dt>Server time</dt><dd>{checked_at} (Unix)</dd>
+      <dt>Path</dt><dd>/status via Tor v3 onion</dd>
+    </dl>
+    <small>Refreshes every 10 seconds. JSON probe: /health</small>
+  </main>
+</body>
+</html>"#
+    ))
 }
 
 async fn create_challenge(State(state): State<AppState>) -> Json<ChallengeResponse> {
@@ -359,17 +452,18 @@ async fn register_installation(
     );
     state
         .db
-        .execute(SQL_INSTALLATION_UPSERT, &[&installation_id, &request.public_key])
+        .execute(
+            SQL_INSTALLATION_UPSERT,
+            &[&installation_id, &request.public_key],
+        )
         .await
         .map_err(|_| error(StatusCode::INTERNAL_SERVER_ERROR, "database error"))?;
-    let session_token = issue_session(&state, &installation_id).await;
+    let session_token = issue_session(&state, &installation_id)
+        .await
+        .map_err(|_| error(StatusCode::INTERNAL_SERVER_ERROR, "database error"))?;
     Ok((
         StatusCode::CREATED,
-        Json(InstallationResponse {
-            installation_id,
-            session_token,
-            security_status: "verified",
-        }),
+        Json(InstallationResponse { session_token }),
     ))
 }
 
@@ -405,12 +499,10 @@ async fn create_session(
     {
         return Err(error(StatusCode::BAD_REQUEST, "invalid session proof"));
     }
-    let session_token = issue_session(&state, &request.installation_id).await;
-    Ok(Json(InstallationResponse {
-        installation_id: request.installation_id,
-        session_token,
-        security_status: "verified",
-    }))
+    let session_token = issue_session(&state, &request.installation_id)
+        .await
+        .map_err(|_| error(StatusCode::INTERNAL_SERVER_ERROR, "database error"))?;
+    Ok(Json(InstallationResponse { session_token }))
 }
 
 async fn get_profile(
@@ -456,9 +548,13 @@ async fn refresh_pairing_code(
     headers: HeaderMap,
 ) -> Result<Json<PairingCodeResponse>, (StatusCode, Json<serde_json::Value>)> {
     let installation_id = authorize(&state, &headers).await?;
+    tracing::info!(installation_id = %installation_id, "refresh_pairing_code");
     state
         .db
-        .execute(SQL_PAIRING_CODE_DELETE_FOR_INSTALLATION, &[&installation_id])
+        .execute(
+            SQL_PAIRING_CODE_DELETE_FOR_INSTALLATION,
+            &[&installation_id],
+        )
         .await
         .map_err(|_| error(StatusCode::INTERNAL_SERVER_ERROR, "database error"))?;
     let expires_at = now() + PAIRING_CODE_TTL_SECONDS;
@@ -469,13 +565,16 @@ async fn refresh_pairing_code(
             .db
             .execute(
                 SQL_PAIRING_CODE_INSERT,
-                &[&hash, &installation_id, &(expires_at as i64)],
+                &[&hash, &installation_id, &(expires_at as f64)],
             )
             .await;
         match result {
             Ok(_) => return Ok(Json(PairingCodeResponse { code, expires_at })),
             Err(db_error) if db_error.code().is_some_and(|code| code.code() == "23505") => continue,
-            Err(_) => return Err(error(StatusCode::INTERNAL_SERVER_ERROR, "database error")),
+            Err(db_error) => {
+                tracing::error!(installation_id = %installation_id, error = %db_error, "pairing code insert failed");
+                return Err(error(StatusCode::INTERNAL_SERVER_ERROR, "database error"));
+            }
         }
     }
     Err(error(
@@ -490,18 +589,14 @@ async fn create_pairing_request(
     Json(request): Json<CreatePairingRequest>,
 ) -> Result<(StatusCode, Json<PairingRequestCreated>), (StatusCode, Json<serde_json::Value>)> {
     let sender = authorize(&state, &headers).await?;
-    let code = request.code.trim();
-    if code.len() != 8 || !code.bytes().all(|value| value.is_ascii_digit()) {
-        return Err(error(
-            StatusCode::BAD_REQUEST,
-            "pairing code must have exactly 8 digits",
-        ));
-    }
+    tracing::info!(sender = %sender, "create_pairing_request start");
+    let code = torchat_core::Identity::pairing_code_digits(&request.code)
+        .map_err(|message| error(StatusCode::BAD_REQUEST, &message))?;
     take_pairing_attempt(&state, &sender).await?;
-    let hash = pairing_code_hash(&state, code);
+    let hash = pairing_code_hash(&state, &code);
     let row = state
         .db
-        .query_opt(SQL_PAIRING_CODE_CONSUME, &[&hash])
+        .query_opt(SQL_PAIRING_CODE_LOOKUP, &[&hash])
         .await
         .map_err(|_| error(StatusCode::INTERNAL_SERVER_ERROR, "database error"))?;
     let Some(row) = row else {
@@ -514,22 +609,66 @@ async fn create_pairing_request(
     if recipient == sender {
         return Err(error(StatusCode::BAD_REQUEST, "cannot pair with yourself"));
     }
+    let existing = state
+        .db
+        .query_opt(SQL_PAIRING_REQUEST_LOOKUP, &[&sender, &recipient])
+        .await
+        .map_err(|_| error(StatusCode::INTERNAL_SERVER_ERROR, "database error"))?;
+    if existing.is_some() {
+        return Err(error(
+            StatusCode::CONFLICT,
+            "a pending invitation to this user already exists",
+        ));
+    }
+    let consumed = state
+        .db
+        .execute(SQL_PAIRING_CODE_CONSUME, &[&hash])
+        .await
+        .map_err(|_| error(StatusCode::INTERNAL_SERVER_ERROR, "database error"))?;
+    if consumed != 1 {
+        return Err(error(
+            StatusCode::NOT_FOUND,
+            "pairing code expired or invalid",
+        ));
+    }
     let pairing_id = Uuid::new_v4();
     let expires_at = now() + PAIRING_REQUEST_TTL_SECONDS;
     let capability = pairing_capability(&state, pairing_id, &sender, &recipient, expires_at);
-    state
+    let inserted = state
         .db
         .execute(
             SQL_PAIRING_REQUEST_INSERT,
-            &[&pairing_id, &sender, &recipient, &capability, &(expires_at as i64)],
+            &[
+                &pairing_id,
+                &sender,
+                &recipient,
+                &capability,
+                &(expires_at as f64),
+            ],
         )
         .await
-        .map_err(|_| error(StatusCode::INTERNAL_SERVER_ERROR, "database error"))?;
+        .map_err(|db_error| {
+            tracing::error!(sender = %sender, error = %db_error, "pairing request insert failed");
+            error(StatusCode::INTERNAL_SERVER_ERROR, "database error")
+        })?;
+    if inserted == 0 {
+        return Err(error(
+            StatusCode::CONFLICT,
+            "a pending invitation to this user already exists",
+        ));
+    }
+    tracing::info!(
+        sender = %sender,
+        recipient = %recipient,
+        pairing_id = %pairing_id,
+        "create_pairing_request ok"
+    );
     Ok((
         StatusCode::CREATED,
         Json(PairingRequestCreated {
             pairing_id,
             expires_at: expires_at as i64,
+            state: "PENDING",
         }),
     ))
 }
@@ -539,6 +678,7 @@ async fn list_pairing_inbox(
     headers: HeaderMap,
 ) -> Result<Json<Vec<PairingInboxItem>>, (StatusCode, Json<serde_json::Value>)> {
     let recipient = authorize(&state, &headers).await?;
+    tracing::info!(recipient = %recipient, "list_pairing_inbox");
     let rows = state
         .db
         .query(SQL_PAIRING_INBOX_LIST, &[&recipient])
@@ -552,8 +692,10 @@ async fn list_pairing_inbox(
             sender: contact_card(&state, &sender).await?,
             capability: row.get(2),
             expires_at: row.get(3),
+            state: "PENDING",
         });
     }
+    tracing::info!(recipient = %recipient, count = result.len(), "list_pairing_inbox ok");
     Ok(Json(result))
 }
 
@@ -563,9 +705,28 @@ async fn ack_pairing_request(
     axum::extract::Path(pairing_id): axum::extract::Path<Uuid>,
 ) -> Result<StatusCode, (StatusCode, Json<serde_json::Value>)> {
     let recipient = authorize(&state, &headers).await?;
+    tracing::info!(recipient = %recipient, pairing_id = %pairing_id, "ack_pairing_request");
     let changed = state
         .db
         .execute(SQL_PAIRING_REQUEST_ACK, &[&pairing_id, &recipient])
+        .await
+        .map_err(|_| error(StatusCode::INTERNAL_SERVER_ERROR, "database error"))?;
+    if changed != 1 {
+        return Err(error(StatusCode::NOT_FOUND, "pairing request not found"));
+    }
+    tracing::info!(recipient = %recipient, pairing_id = %pairing_id, "ack_pairing_request ok");
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn cancel_pairing_request(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Path(pairing_id): axum::extract::Path<Uuid>,
+) -> Result<StatusCode, (StatusCode, Json<serde_json::Value>)> {
+    let sender = authorize(&state, &headers).await?;
+    let changed = state
+        .db
+        .execute(SQL_PAIRING_REQUEST_CANCEL, &[&pairing_id, &sender])
         .await
         .map_err(|_| error(StatusCode::INTERNAL_SERVER_ERROR, "database error"))?;
     if changed != 1 {
@@ -653,10 +814,11 @@ fn pairing_capability(
 
 fn parse_pairing_capability(state: &AppState, value: &str) -> Option<(Uuid, String, String, u64)> {
     let decoded = String::from_utf8(URL_SAFE_NO_PAD.decode(value).ok()?).ok()?;
-    let mut parts = decoded.rsplitn(2, ':');
-    let signature = parts.next()?;
-    let body = parts.next()?;
-    if !constant_time_equal(signature.as_bytes(), pairing_mac(&state.pairing_secret, body).as_bytes()) {
+    let (body, signature) = decoded.rsplit_once(':')?;
+    if !constant_time_equal(
+        signature.as_bytes(),
+        pairing_mac(&state.pairing_secret, body).as_bytes(),
+    ) {
         return None;
     }
     let mut fields = body.splitn(4, ':');
@@ -677,7 +839,11 @@ fn pairing_mac(secret: &str, body: &str) -> String {
 
 fn constant_time_equal(left: &[u8], right: &[u8]) -> bool {
     left.len() == right.len()
-        && left.iter().zip(right).fold(0_u8, |value, (a, b)| value | (a ^ b)) == 0
+        && left
+            .iter()
+            .zip(right)
+            .fold(0_u8, |value, (a, b)| value | (a ^ b))
+            == 0
 }
 
 async fn contact_card(
@@ -791,104 +957,316 @@ async fn events(
     Ok(upgrade.on_upgrade(move |socket| websocket_session(state, installation_id, socket)))
 }
 
-async fn websocket_session(state: AppState, installation_id: String, mut socket: WebSocket) {
-    let (outgoing_tx, mut outgoing_rx) = mpsc::unbounded_channel();
-    state
-        .connections
-        .write()
-        .await
-        .insert(installation_id.clone(), outgoing_tx);
-    let _ = socket
-        .send(frame(torchat_core::relay::RelayServerFrame::Ready {
-            installation_id: installation_id.clone(),
-        }))
+async fn websocket_session(state: AppState, installation_id: String, socket: WebSocket) {
+    const OUTBOUND_CAPACITY: usize = 256;
+    let (outgoing_tx, mut outgoing_rx) = mpsc::channel(OUTBOUND_CAPACITY);
+    let connection_id = Uuid::new_v4();
+    let previous = state.connections.write().await.insert(
+        installation_id.clone(),
+        Connection {
+            id: connection_id,
+            sender: outgoing_tx.clone(),
+        },
+    );
+    if let Some(previous) = previous {
+        tracing::info!(
+            installation_id = %installation_id,
+            connection_id = %connection_id,
+            previous_connection_id = %previous.id,
+            "websocket replacing previous connection"
+        );
+        let _ = previous.sender.try_send(OutboundCommand::Close);
+    }
+    tracing::info!(
+        installation_id = %installation_id,
+        connection_id = %connection_id,
+        "websocket session registered"
+    );
+
+    let (mut socket_writer, mut socket_reader) = socket.split();
+    let writer_task = tokio::spawn(async move {
+        while let Some(command) = outgoing_rx.recv().await {
+            match command {
+                OutboundCommand::Frame { frame, completion } => {
+                    let result = socket_writer
+                        .send(frame_message(frame))
+                        .await
+                        .map_err(|error| error.to_string());
+
+                    if let Some(completion) = completion {
+                        let _ = completion.send(result.as_ref().map(|_| ()).map_err(Clone::clone));
+                    }
+
+                    if result.is_err() {
+                        break;
+                    }
+                }
+                OutboundCommand::WebSocketPong(payload) => {
+                    if socket_writer.send(Message::Pong(payload)).await.is_err() {
+                        break;
+                    }
+                }
+                OutboundCommand::Close => break,
+            }
+        }
+    });
+
+    let _ = outgoing_tx
+        .send(OutboundCommand::Frame {
+            frame: torchat_core::relay::RelayServerFrame::Ready {
+                installation_id: installation_id.clone(),
+            },
+            completion: None,
+        })
         .await;
+    tracing::info!(
+        installation_id = %installation_id,
+        connection_id = %connection_id,
+        "websocket ready queued"
+    );
 
     loop {
-        tokio::select! {
-            outgoing = outgoing_rx.recv() => {
-                let Some(outgoing) = outgoing else { break };
-                if socket.send(outgoing).await.is_err() { break; }
-            }
-            incoming = socket.next() => {
-                let Some(Ok(Message::Text(text))) = incoming else { break };
-                let result = serde_json::from_str::<torchat_core::relay::RelayClientFrame>(&text)
-                    .map_err(|_| "invalid_request".to_string())
-                    .and_then(|frame| process_frame(&state, &installation_id, frame));
+        match socket_reader.next().await {
+            Some(Ok(Message::Text(text))) => {
+                let still_active = state
+                    .connections
+                    .read()
+                    .await
+                    .get(&installation_id)
+                    .is_some_and(|connection| connection.id == connection_id);
+                if !still_active {
+                    break;
+                }
+                let result =
+                    match serde_json::from_str::<torchat_core::relay::RelayClientFrame>(&text) {
+                        Ok(frame) => process_frame(&state, &installation_id, frame).await,
+                        Err(_) => Err("invalid_request".to_string()),
+                    };
                 if let Err(code) = result {
-                    let _ = socket.send(frame(torchat_core::relay::RelayServerFrame::Error { code })).await;
+                    let _ = outgoing_tx
+                        .send(OutboundCommand::Frame {
+                            frame: torchat_core::relay::RelayServerFrame::Error { code },
+                            completion: None,
+                        })
+                        .await;
                 }
             }
+            Some(Ok(Message::Ping(payload))) => {
+                tracing::debug!(
+                    installation_id = %installation_id,
+                    connection_id = %connection_id,
+                    bytes = payload.len(),
+                    "websocket ping received"
+                );
+                if outgoing_tx
+                    .send(OutboundCommand::WebSocketPong(payload))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
+            Some(Ok(Message::Pong(payload))) => {
+                tracing::debug!(
+                    installation_id = %installation_id,
+                    connection_id = %connection_id,
+                    bytes = payload.len(),
+                    "websocket pong received"
+                );
+            }
+            Some(Ok(Message::Close(frame))) => {
+                tracing::info!(
+                    installation_id = %installation_id,
+                    ?frame,
+                    "websocket closed by peer"
+                );
+                break;
+            }
+            Some(Ok(Message::Binary(_))) => {
+                tracing::warn!(
+                    installation_id = %installation_id,
+                    "unsupported binary websocket frame"
+                );
+                let _ = outgoing_tx
+                    .send(OutboundCommand::Frame {
+                        frame: torchat_core::relay::RelayServerFrame::Error {
+                            code: "invalid_request".to_string(),
+                        },
+                        completion: None,
+                    })
+                    .await;
+                break;
+            }
+            Some(Err(error)) => {
+                tracing::warn!(
+                    installation_id = %installation_id,
+                    %error,
+                    "websocket read failed"
+                );
+                break;
+            }
+            None => break,
         }
     }
     let mut connections = state.connections.write().await;
     if connections
         .get(&installation_id)
-        .is_some_and(|sender| sender.is_closed())
+        .is_some_and(|connection| connection.id == connection_id)
     {
         connections.remove(&installation_id);
     }
+    let _ = outgoing_tx.send(OutboundCommand::Close).await;
+    let _ = writer_task.await;
+    tracing::info!(
+        installation_id = %installation_id,
+        connection_id = %connection_id,
+        "websocket session ended"
+    );
 }
 
-fn process_frame(
+async fn process_frame(
     state: &AppState,
     sender_id: &str,
     incoming_frame: torchat_core::relay::RelayClientFrame,
 ) -> Result<(), String> {
-    let state = state.clone();
-    let sender_id = sender_id.to_owned();
-    tokio::spawn(async move {
-        match incoming_frame {
-            torchat_core::relay::RelayClientFrame::Envelope(mut envelope) => {
-                if envelope.version != torchat_core::PROTOCOL_VERSION
-                    || envelope.sender != sender_id
-                    || envelope.recipient.is_empty()
-                    || envelope.ciphertext.len() > 128 * 1024
-                    || URL_SAFE_NO_PAD.decode(&envelope.ciphertext).is_err()
-                {
-                    return;
-                }
-                let recipient = state
-                    .connections
-                    .read()
-                    .await
-                    .get(&envelope.recipient)
-                    .cloned();
-                if let Some(recipient) = recipient {
-                    envelope.sender = sender_id.clone();
-                    let message_id = envelope.message_id;
-                    let _ = recipient.send(frame(torchat_core::relay::RelayServerFrame::Envelope(
-                        envelope,
-                    )));
-                    if let Some(sender) = state.connections.read().await.get(&sender_id).cloned() {
-                        let _ =
-                            sender.send(frame(torchat_core::relay::RelayServerFrame::Forwarded {
-                                message_id,
-                            }));
-                    }
-                } else if let Some(sender) = state.connections.read().await.get(&sender_id).cloned()
-                {
-                    let _ = sender.send(frame(
-                        torchat_core::relay::RelayServerFrame::RecipientOffline {
-                            message_id: envelope.message_id,
-                        },
-                    ));
-                }
-            }
-            torchat_core::relay::RelayClientFrame::DeliveryReceipt { message_id, sender } => {
-                if let Some(target) = state.connections.read().await.get(&sender).cloned() {
-                    let _ = target.send(frame(
-                        torchat_core::relay::RelayServerFrame::DeliveryReceipt { message_id },
-                    ));
-                }
-            }
-            torchat_core::relay::RelayClientFrame::Ping => {}
+    match incoming_frame {
+        torchat_core::relay::RelayClientFrame::Envelope(envelope) => {
+            tracing::info!(
+                sender = %sender_id,
+                recipient = %envelope.recipient,
+                message_id = %envelope.message_id,
+                "relay envelope received"
+            );
+            route_envelope(&state.connections, sender_id, envelope).await?;
         }
-    });
+        torchat_core::relay::RelayClientFrame::DeliveryReceipt { message_id, sender } => {
+            if let Some(target) = state.connections.read().await.get(&sender).cloned() {
+                let _ = target.sender.try_send(OutboundCommand::Frame {
+                    frame: torchat_core::relay::RelayServerFrame::DeliveryReceipt { message_id },
+                    completion: None,
+                });
+            }
+        }
+        torchat_core::relay::RelayClientFrame::Ping => {
+            tracing::debug!(sender = %sender_id, "relay application ping received");
+            send_server_frame(
+                state,
+                sender_id,
+                torchat_core::relay::RelayServerFrame::Pong,
+            )
+            .await?;
+        }
+    }
     Ok(())
 }
 
-fn frame<T: Serialize>(value: T) -> Message {
+async fn route_envelope(
+    connections: &Arc<RwLock<HashMap<String, Connection>>>,
+    sender_id: &str,
+    mut envelope: torchat_core::relay::RelayEnvelope,
+) -> Result<(), String> {
+    if envelope.version != torchat_core::PROTOCOL_VERSION
+        || envelope.sender != sender_id
+        || envelope.recipient.is_empty()
+        || envelope.ciphertext.len() > 128 * 1024
+        || URL_SAFE_NO_PAD.decode(&envelope.ciphertext).is_err()
+    {
+        tracing::warn!(
+            sender = %sender_id,
+            message_id = %envelope.message_id,
+            "relay envelope rejected by validation"
+        );
+        return Ok(());
+    }
+    let recipient = connections.read().await.get(&envelope.recipient).cloned();
+    let message_id = envelope.message_id;
+    if let Some(recipient) = recipient {
+        envelope.sender = sender_id.to_owned();
+        let recipient_id = envelope.recipient.clone();
+        let (completion_tx, completion_rx) = oneshot::channel();
+        let queued = recipient.sender.try_send(OutboundCommand::Frame {
+            frame: torchat_core::relay::RelayServerFrame::Envelope(envelope),
+            completion: Some(completion_tx),
+        });
+        if queued.is_err() {
+            tracing::warn!(
+                sender = %sender_id,
+                recipient = %recipient_id,
+                message_id = %message_id,
+                "relay recipient queue full"
+            );
+            let _ = recipient.sender.try_send(OutboundCommand::Close);
+            send_server_frame_to_connections(
+                connections,
+                sender_id,
+                torchat_core::relay::RelayServerFrame::RecipientOffline { message_id },
+            )
+            .await?;
+            return Ok(());
+        }
+
+        let written = matches!(
+            tokio::time::timeout(Duration::from_secs(30), completion_rx).await,
+            Ok(Ok(Ok(())))
+        );
+        let outcome = if written {
+            tracing::info!(
+                sender = %sender_id,
+                recipient = %recipient_id,
+                message_id = %message_id,
+                "relay envelope forwarded"
+            );
+            torchat_core::relay::RelayServerFrame::Forwarded { message_id }
+        } else {
+            tracing::warn!(
+                sender = %sender_id,
+                recipient = %recipient_id,
+                message_id = %message_id,
+                "relay envelope write failed"
+            );
+            torchat_core::relay::RelayServerFrame::RecipientOffline { message_id }
+        };
+        send_server_frame_to_connections(connections, sender_id, outcome).await?;
+    } else {
+        tracing::info!(
+            sender = %sender_id,
+            recipient = %envelope.recipient,
+            message_id = %message_id,
+            "relay recipient offline"
+        );
+        send_server_frame_to_connections(
+            connections,
+            sender_id,
+            torchat_core::relay::RelayServerFrame::RecipientOffline { message_id },
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+async fn send_server_frame(
+    state: &AppState,
+    target_id: &str,
+    frame_value: torchat_core::relay::RelayServerFrame,
+) -> Result<(), String> {
+    send_server_frame_to_connections(&state.connections, target_id, frame_value).await
+}
+
+async fn send_server_frame_to_connections(
+    connections: &Arc<RwLock<HashMap<String, Connection>>>,
+    target_id: &str,
+    frame_value: torchat_core::relay::RelayServerFrame,
+) -> Result<(), String> {
+    if let Some(target) = connections.read().await.get(target_id).cloned() {
+        let _ = target.sender.try_send(OutboundCommand::Frame {
+            frame: frame_value,
+            completion: None,
+        });
+    }
+    Ok(())
+}
+
+fn frame_message<T: Serialize>(value: T) -> Message {
     Message::Text(
         serde_json::to_string(&value)
             .expect("server frame must serialize")
@@ -932,18 +1310,21 @@ async fn take_valid_challenge(
     Ok(challenge)
 }
 
-async fn issue_session(state: &AppState, installation_id: &str) -> String {
+async fn issue_session(
+    state: &AppState,
+    installation_id: &str,
+) -> Result<String, tokio_postgres::Error> {
     let mut bytes = [0u8; 32];
     rng().fill(&mut bytes);
     let token = URL_SAFE_NO_PAD.encode(bytes);
     let mut hash = sha2::Sha256::new();
     hash.update(token.as_bytes());
     let token_hash = URL_SAFE_NO_PAD.encode(hash.finalize());
-    let _ = state
+    state
         .db
         .execute(SQL_SESSION_INSERT, &[&token_hash, &installation_id])
-        .await;
-    token
+        .await
+        .map(|_| token)
 }
 
 fn now() -> u64 {
@@ -952,6 +1333,221 @@ fn now() -> u64 {
         .unwrap_or(Duration::ZERO)
         .as_secs()
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg(test)]
+enum WebSocketFrameAction {
+    Continue,
+    Close,
+}
+
+#[cfg(test)]
+fn websocket_frame_action(message: &Message) -> WebSocketFrameAction {
+    match message {
+        Message::Text(_) | Message::Ping(_) | Message::Pong(_) => WebSocketFrameAction::Continue,
+        Message::Close(_) | Message::Binary(_) => WebSocketFrameAction::Close,
+    }
+}
+
 fn error(status: StatusCode, message: &str) -> (StatusCode, Json<serde_json::Value>) {
     (status, Json(serde_json::json!({ "error": message })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        ConfirmContactRequest, ContactCardView, CreatePairingRequest, PairingInboxItem,
+        PairingRequestCreated, SQL_PAIRING_CODE_INSERT, SQL_PAIRING_REQUEST_INSERT,
+    };
+    use super::{
+        Connection, OutboundCommand, WebSocketFrameAction, route_envelope, websocket_frame_action,
+    };
+    use axum::extract::ws::Message;
+    use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+    use std::{collections::HashMap, sync::Arc};
+    use tokio::sync::{RwLock, mpsc};
+    use uuid::Uuid;
+
+    #[test]
+    fn pairing_expiry_queries_declare_the_postgres_timestamp_input_type() {
+        assert!(SQL_PAIRING_CODE_INSERT.contains("$3::double precision"));
+        assert!(SQL_PAIRING_REQUEST_INSERT.contains("$5::double precision"));
+    }
+
+    #[test]
+    fn pairing_created_response_exposes_canonical_state() {
+        let value = serde_json::to_value(PairingRequestCreated {
+            pairing_id: Uuid::nil(),
+            expires_at: 1,
+            state: "PENDING",
+        })
+        .unwrap();
+
+        assert_eq!(value["state"], "PENDING");
+    }
+
+    #[test]
+    fn pairing_inbox_response_exposes_canonical_state() {
+        let value = serde_json::to_value(PairingInboxItem {
+            pairing_id: Uuid::nil(),
+            sender: ContactCardView {
+                installation_id: "installation-bob".into(),
+                nickname: "Bob".into(),
+                public_key: "public-key".into(),
+                fingerprint: "fingerprint".into(),
+            },
+            capability: "capability".into(),
+            expires_at: 1,
+            state: "PENDING",
+        })
+        .unwrap();
+
+        assert_eq!(value["state"], "PENDING");
+    }
+
+    #[test]
+    fn pairing_request_insert_is_conflict_safe_for_duplicate_sender_recipient_pairs() {
+        assert!(SQL_PAIRING_REQUEST_INSERT.contains(
+            "ON CONFLICT (sender_installation_id, recipient_installation_id) DO NOTHING"
+        ));
+    }
+
+    #[test]
+    fn pairing_code_validation_trims_and_rejects_invalid_values() {
+        assert_eq!(
+            torchat_core::Identity::pairing_code_digits(" 12345678 ").unwrap(),
+            "12345678"
+        );
+        assert!(torchat_core::Identity::pairing_code_digits("1234").is_err());
+    }
+
+    #[test]
+    fn pairing_request_body_uses_canonical_code_field() {
+        let value = serde_json::to_value(CreatePairingRequest {
+            code: "12345678".into(),
+        })
+        .unwrap();
+        assert_eq!(value["code"], "12345678");
+        assert!(value.get("pairingCode").is_none());
+    }
+
+    #[test]
+    fn confirm_contact_request_uses_canonical_body_fields() {
+        let value = serde_json::to_value(ConfirmContactRequest {
+            capability: "capability".into(),
+            peer_installation_id: "installation-bob".into(),
+        })
+        .unwrap();
+        assert_eq!(value["capability"], "capability");
+        assert_eq!(value["peer_installation_id"], "installation-bob");
+    }
+
+    #[test]
+    fn websocket_ping_and_pong_do_not_close_session() {
+        assert_eq!(
+            websocket_frame_action(&Message::Ping(vec![1, 2, 3].into())),
+            WebSocketFrameAction::Continue
+        );
+        assert_eq!(
+            websocket_frame_action(&Message::Pong(vec![4, 5, 6].into())),
+            WebSocketFrameAction::Continue
+        );
+    }
+
+    fn envelope(message_id: Uuid) -> torchat_core::relay::RelayEnvelope {
+        torchat_core::relay::RelayEnvelope {
+            version: torchat_core::PROTOCOL_VERSION,
+            message_id,
+            sender: "sender".to_owned(),
+            recipient: "recipient".to_owned(),
+            ciphertext: URL_SAFE_NO_PAD.encode(b"ciphertext"),
+        }
+    }
+
+    fn connection(sender: mpsc::Sender<OutboundCommand>) -> Connection {
+        Connection {
+            id: Uuid::new_v4(),
+            sender,
+        }
+    }
+
+    #[tokio::test]
+    async fn forwarded_is_sent_only_after_writer_completion() {
+        let (sender_tx, mut sender_rx) = mpsc::channel(4);
+        let (recipient_tx, mut recipient_rx) = mpsc::channel(4);
+        let connections = Arc::new(RwLock::new(HashMap::from([
+            ("sender".to_owned(), connection(sender_tx)),
+            ("recipient".to_owned(), connection(recipient_tx)),
+        ])));
+        let message_id = Uuid::new_v4();
+        let route_task = tokio::spawn({
+            let connections = connections.clone();
+            async move { route_envelope(&connections, "sender", envelope(message_id)).await }
+        });
+
+        let command = recipient_rx
+            .recv()
+            .await
+            .expect("recipient receives envelope");
+        let completion = match command {
+            OutboundCommand::Frame {
+                frame: torchat_core::relay::RelayServerFrame::Envelope(envelope),
+                completion: Some(completion),
+            } => {
+                assert_eq!(envelope.message_id, message_id);
+                completion
+            }
+            _ => panic!("expected recipient envelope with completion"),
+        };
+
+        assert!(sender_rx.try_recv().is_err());
+        completion.send(Ok(())).unwrap();
+        route_task.await.unwrap().unwrap();
+
+        let command = sender_rx.recv().await.expect("sender receives forwarded");
+        match command {
+            OutboundCommand::Frame {
+                frame:
+                    torchat_core::relay::RelayServerFrame::Forwarded {
+                        message_id: forwarded,
+                    },
+                completion: None,
+            } => assert_eq!(forwarded, message_id),
+            _ => panic!("expected forwarded after writer completion"),
+        }
+    }
+
+    #[tokio::test]
+    async fn full_recipient_queue_reports_offline_to_sender() {
+        let (sender_tx, mut sender_rx) = mpsc::channel(4);
+        let (recipient_tx, mut recipient_rx) = mpsc::channel(1);
+        recipient_tx
+            .try_send(OutboundCommand::Close)
+            .expect("fill recipient queue");
+        let connections = Arc::new(RwLock::new(HashMap::from([
+            ("sender".to_owned(), connection(sender_tx)),
+            ("recipient".to_owned(), connection(recipient_tx)),
+        ])));
+        let message_id = Uuid::new_v4();
+
+        route_envelope(&connections, "sender", envelope(message_id))
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            recipient_rx.try_recv(),
+            Ok(OutboundCommand::Close)
+        ));
+        let command = sender_rx.recv().await.expect("sender receives offline");
+        match command {
+            OutboundCommand::Frame {
+                frame:
+                    torchat_core::relay::RelayServerFrame::RecipientOffline {
+                        message_id: offline,
+                    },
+                completion: None,
+            } => assert_eq!(offline, message_id),
+            _ => panic!("expected recipient offline for full queue"),
+        }
+    }
 }

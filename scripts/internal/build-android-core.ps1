@@ -24,7 +24,7 @@ if ([string]::IsNullOrWhiteSpace($AndroidNdk) -or -not (Test-Path -LiteralPath $
 rustup target add $RustTarget
 
 # The Flutter UI and Android background service both use the checked-in C ABI
-# header and the same native Rust library.
+# header and the native Rust libraries.
 
 $abi = switch ($RustTarget) {
     "aarch64-linux-android" { "arm64-v8a" }
@@ -37,8 +37,14 @@ $abi = switch ($RustTarget) {
 $out = Join-Path $jni $abi
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 cargo ndk -t $RustTarget -o $jni build -p torchat-core --release
+cargo ndk -t $RustTarget -o $jni build -p torchat-client-runtime --release
 Copy-Item (Join-Path $repo "target\$RustTarget\release\torchat_core.dll") (Join-Path $out "libtorchat_core.so") -Force -ErrorAction SilentlyContinue
 Copy-Item (Join-Path $repo "target\$RustTarget\release\libtorchat_core.so") (Join-Path $out "libtorchat_core.so") -Force -ErrorAction SilentlyContinue
+Copy-Item (Join-Path $repo "target\$RustTarget\release\torchat_client_runtime.dll") (Join-Path $out "libtorchat_client_runtime.so") -Force -ErrorAction SilentlyContinue
+Copy-Item (Join-Path $repo "target\$RustTarget\release\libtorchat_client_runtime.so") (Join-Path $out "libtorchat_client_runtime.so") -Force -ErrorAction SilentlyContinue
 if (-not (Test-Path (Join-Path $out "libtorchat_core.so"))) {
     throw "Rust Android library was not produced for $abi."
+}
+if (-not (Test-Path (Join-Path $out "libtorchat_client_runtime.so"))) {
+    throw "Rust Android client runtime library was not produced for $abi."
 }

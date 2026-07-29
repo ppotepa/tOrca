@@ -1,0 +1,1503 @@
+CODECAT_VERSION: 1
+ROOT: D:\Git\torchat\scripts
+TOTAL_FILES: 16
+TOTAL_LINES: 1432
+TOTAL_BYTES: 60792
+PLUGIN_COUNTS: powershell=16
+DIRECTORIES_VISITED: 2
+FILES_SEEN: 17
+ITEMS_SKIPPED: 1
+WARNINGS: 0
+SKIPPED_BY_REASON: output_file=1
+
+<<<FILE path="collect-logs.ps1" plugin="powershell" lang="powershell" reason="extension:.ps1" lines="119" bytes="4696" original_lines="119" original_bytes="4696" minified="false" sha256="7d947e03a393a37eedc38b0420868ffee67026dba9d8acaca157b4ec60f762ef">>>
+[CmdletBinding()]
+param(
+    [ValidateSet('local')]
+    [string]$Environment = 'local',
+    [string]$DeviceAddress,
+    [int]$Tail = 5000,
+    [string]$OutputDirectory
+)
+
+$ErrorActionPreference = 'Stop'
+$repoRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'internal\environment.ps1')
+
+function Write-TextFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [AllowEmptyString()][string]$Text = ''
+    )
+    $parent = Split-Path -Parent $Path
+    New-Item -ItemType Directory -Force -Path $parent | Out-Null
+    Set-Content -LiteralPath $Path -Value $Text -Encoding UTF8
+}
+
+function Invoke-Capture {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][scriptblock]$Command
+    )
+    try {
+        $output = & $Command 2>&1 | Out-String
+        Write-TextFile -Path $Path -Text $output.TrimEnd()
+    } catch {
+        Write-TextFile -Path $Path -Text $_.Exception.ToString()
+    }
+}
+
+function Get-ConnectedDevices {
+    if (-not (Get-Command adb -ErrorAction SilentlyContinue)) { return @() }
+    @(adb devices 2>$null | Where-Object { $_ -match '^\S+\s+device$' } | ForEach-Object { ($_ -split '\s+')[0] })
+}
+
+$date = Get-Date -Format 'yyyyMMdd'
+$timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+if (-not $OutputDirectory) {
+    $dateDirectory = Join-Path $repoRoot ".torchat\logs\$date"
+    New-Item -ItemType Directory -Force -Path $dateDirectory | Out-Null
+    $existingRuns = @(Get-ChildItem -LiteralPath $dateDirectory -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match '^run-\d{4}$' } |
+        ForEach-Object { [int]$_.Name.Substring(4) })
+    [int]$nextRun = if ($existingRuns.Count -gt 0) {
+        [int](($existingRuns | Measure-Object -Maximum).Maximum) + 1
+    } else {
+        1
+    }
+    $OutputDirectory = Join-Path $dateDirectory ("run-{0:D4}" -f $nextRun)
+}
+New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
+
+$environmentState = Ensure-TorChatEnvironment $repoRoot $Environment
+$compose = Join-Path $repoRoot 'infra\docker\compose.dev.yml'
+$composeArgs = @(
+    'compose',
+    '--project-name', $environmentState.Values['TORCHAT_COMPOSE_PROJECT'],
+    '--env-file', $environmentState.Paths.RuntimeEnvironment,
+    '-f', $compose
+)
+
+Invoke-Capture (Join-Path $OutputDirectory 'environment.txt') {
+    $safe = $environmentState.Values.Clone()
+    foreach ($key in @('TORCHAT_DATABASE_PASSWORD', 'TORCHAT_PAIRING_SECRET')) {
+        if ($safe.ContainsKey($key)) { $safe[$key] = '<redacted>' }
+    }
+    $safe.GetEnumerator() | Sort-Object Name | ForEach-Object { "$($_.Key)=$($_.Value)" }
+}
+
+Invoke-Capture (Join-Path $OutputDirectory 'docker-ps.txt') {
+    docker @($composeArgs + @('ps'))
+}
+foreach ($service in @('tor', 'server', 'postgres')) {
+    $domainLog = if ($service -eq 'server') { 'server.log' } else { "docker-$service.log" }
+    Invoke-Capture (Join-Path $OutputDirectory $domainLog) {
+        docker @($composeArgs + @('logs', '--tail', "$Tail", $service))
+    }
+}
+
+$devices = @(if ($DeviceAddress) { $DeviceAddress } else { Get-ConnectedDevices })
+if ($devices.Count -gt 0) {
+    $device = $devices[0]
+    Invoke-Capture (Join-Path $OutputDirectory 'adb-device.txt') {
+        adb -s $device shell getprop ro.product.manufacturer
+        adb -s $device shell getprop ro.product.model
+        adb -s $device shell getprop ro.build.version.release
+        adb -s $device shell pidof org.torchat.mobile
+    }
+    Invoke-Capture (Join-Path $OutputDirectory 'android.log') {
+        adb -s $device logcat -d -v time -t $Tail `
+            'TorChat-Runtime:V' 'TorChat-Tor:V' 'TorChat-SOCKS:V' 'TorChat-Pairing:V' 'TorChat-Onion:V' `
+            'TorChat-Relay:V' 'AndroidRuntime:E' 'Flutter:V' 'ActivityTaskManager:I' '*:S'
+    }
+} else {
+    Write-TextFile -Path (Join-Path $OutputDirectory 'android.log') -Text 'No connected ADB device found.'
+}
+
+$desktopLogRoot = Join-Path $repoRoot '.torchat\logs'
+if (Test-Path -LiteralPath $desktopLogRoot) {
+    Get-ChildItem -LiteralPath $desktopLogRoot -Recurse -Filter 'desktop*.log' -File -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1 |
+        ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $OutputDirectory 'desktop.log') -Force }
+}
+
+Invoke-Capture (Join-Path $OutputDirectory 'desktop-processes.txt') {
+    Get-CimInstance Win32_Process |
+        Where-Object { $_.Name -in @('torchat_mobile.exe', 'torchat-desktop.exe', 'tor.exe') } |
+        Select-Object ProcessId, Name, ExecutablePath, CommandLine |
+        Format-List
+}
+
+Write-Host "[torchat] Logs collected in $OutputDirectory"
+<<<END_FILE>>>
+
+<<<FILE path="deploy-android.ps1" plugin="powershell" lang="powershell" reason="extension:.ps1" lines="207" bytes="9498" original_lines="207" original_bytes="9498" minified="false" sha256="a490682438c1794e461b1218cf6afe3d3d420fef0764ce22bc4e89b3adae220f">>>
+[CmdletBinding()]
+param(
+    [switch]$Rebuild,
+    [switch]$SkipServer,
+    [switch]$SkipCoreBuild,
+    [switch]$SkipApkBuild,
+    [string]$DeviceAddress,
+    [string]$PairingAddress,
+    [string]$PairingCode,
+    [ValidateSet("", "Alice", "Bob")][string]$DevProfile = "",
+    [switch]$NoDevPair,
+    [switch]$ResetDevState,
+    [switch]$Release,
+    [switch]$Clean,
+    [ValidateSet('local','staging','production')][string]$Environment = 'local'
+)
+
+$ErrorActionPreference = "Stop"
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$mobileRoot = Join-Path $repoRoot "mobile"
+$variant = if ($Release) { "release" } else { "debug" }
+$apk = Join-Path $mobileRoot "build\app\outputs\flutter-apk\app-$variant.apk"
+. (Join-Path $PSScriptRoot "internal\environment.ps1")
+$environmentState = Ensure-TorChatEnvironment $repoRoot $Environment
+
+function Get-ConnectedDevices {
+    @(adb devices 2>$null | Where-Object { $_ -match '^\S+\s+device$' } | ForEach-Object { ($_ -split '\s+')[0] })
+}
+
+function Find-MdnsConnectAddresses {
+    $text = adb mdns services 2>&1 | Out-String
+    @($text -split "`r?`n" | Where-Object {
+        $_ -match '_adb-tls-connect' -and $_ -match '\d{1,3}(?:\.\d{1,3}){3}:\d+'
+    } | ForEach-Object {
+        if ($_ -match '(\d{1,3}(?:\.\d{1,3}){3}:\d+)') { $Matches[1] }
+    } | Select-Object -Unique)
+}
+
+function Wait-ConnectedMdnsDevice {
+    for ($attempt = 1; $attempt -le 10; $attempt++) {
+        foreach ($address in @(Find-MdnsConnectAddresses)) {
+            if ((Get-ConnectedDevices) -contains $address) { return $address }
+            $connectOutput = adb connect $address 2>&1 | Out-String
+            Write-Host $connectOutput.Trim()
+            if ($LASTEXITCODE -eq 0 -and (Get-ConnectedDevices) -contains $address) {
+                return $address
+            }
+        }
+        if ($attempt -lt 10) { Start-Sleep -Seconds 2 }
+    }
+    return $null
+}
+
+if ($PairingAddress) {
+    if (-not $PairingCode) { throw "PairingCode is required with PairingAddress." }
+    adb pair $PairingAddress $PairingCode
+    if ($LASTEXITCODE -ne 0) { throw "ADB pairing failed." }
+}
+
+if (-not $DeviceAddress) {
+    $devices = @(Get-ConnectedDevices)
+    $wifiDevices = @($devices | Where-Object {
+        $_ -match '^\d{1,3}(?:\.\d{1,3}){3}:\d+$'
+    })
+    if ($wifiDevices.Count -eq 1) {
+        # ADB can expose the same phone twice: once as an mDNS service name
+        # and once as its concrete Wi-Fi endpoint. Prefer the routable address.
+        $DeviceAddress = $wifiDevices[0]
+    } elseif ($wifiDevices.Count -gt 1) {
+        $discovered = @(Find-MdnsConnectAddresses)
+        $connectedDiscovery = @($wifiDevices | Where-Object { $discovered -contains $_ })
+        if ($connectedDiscovery.Count -gt 0) {
+            $DeviceAddress = $connectedDiscovery[0]
+        } else {
+            throw "Multiple Wi-Fi devices detected. Use -DeviceAddress to select one."
+        }
+    } elseif ($devices.Count -eq 1) {
+        $DeviceAddress = $devices[0]
+    } elseif ($devices.Count -gt 1) {
+        $DeviceAddress = Wait-ConnectedMdnsDevice
+        if (-not $DeviceAddress) {
+            throw "Multiple devices detected and no Wi-Fi endpoint could be resolved. Use -DeviceAddress."
+        }
+    } else {
+        $DeviceAddress = Wait-ConnectedMdnsDevice
+        if (-not $DeviceAddress) {
+            throw "No paired Wireless Debugging device found after 20 seconds. Enable Wireless debugging on the unlocked phone."
+        }
+    }
+}
+
+if (-not ((Get-ConnectedDevices) -contains $DeviceAddress)) {
+    adb connect $DeviceAddress
+    if ($LASTEXITCODE -ne 0) { throw "Could not connect to $DeviceAddress." }
+}
+
+if ($Clean) {
+    Write-Host "[torchat] Scheduling Android client state reset on $DeviceAddress"
+    & adb -s $DeviceAddress shell am force-stop org.torchat.mobile
+    if ($LASTEXITCODE -ne 0) { throw "Could not stop TorChat before cleaning Android state." }
+}
+
+if (-not $SkipServer) {
+    if ($Environment -ne 'local') { throw "Android deployment for '$Environment' uses its remote host; use -SkipServer." }
+    & (Join-Path $PSScriptRoot 'start-dev.ps1') -Rebuild:$Rebuild -Environment local
+    if ($LASTEXITCODE -ne 0) { throw "Development stack failed to start." }
+}
+
+if (-not $SkipCoreBuild) {
+    Write-Host "Building Rust identity/MLS core for Flutter Android..."
+    & (Join-Path $PSScriptRoot "internal\build-android-core.ps1")
+    if ($LASTEXITCODE -ne 0) { throw "Rust Android core build failed." }
+}
+
+if (-not $SkipApkBuild) {
+    Push-Location $mobileRoot
+    try {
+        Import-TorChatEnvironment $environmentState -RequireOnion
+        $previousConfigFile = $env:TORCHAT_CONFIG_FILE
+        $env:TORCHAT_CONFIG_FILE = $environmentState.Paths.RuntimeEnvironment
+        $previousProfile = $env:TORCHAT_DEV_PROFILE
+        $previousPair = $env:TORCHAT_DEV_PAIR
+        if (-not $Release) {
+            $fixturesEnabled = $environmentState.Values['TORCHAT_FIXTURES'] -eq 'true' -and -not $NoDevPair
+            $selectedDevProfile = if ($fixturesEnabled) {
+                if ($DevProfile) { $DevProfile } else { "Alice" }
+            } else {
+                ""
+            }
+            $env:TORCHAT_DEV_PROFILE = $selectedDevProfile
+            $env:TORCHAT_DEV_PAIR = if ($fixturesEnabled) { "true" } else { "false" }
+        } else {
+            Remove-Item Env:TORCHAT_DEV_PROFILE -ErrorAction SilentlyContinue
+            $env:TORCHAT_DEV_PAIR = "false"
+        }
+        flutter build apk --$variant
+        if ($LASTEXITCODE -ne 0) { throw "Flutter APK build failed." }
+    } finally {
+        $env:TORCHAT_DEV_PROFILE = $previousProfile
+        $env:TORCHAT_DEV_PAIR = $previousPair
+        $env:TORCHAT_CONFIG_FILE = $previousConfigFile
+        Pop-Location
+    }
+} elseif (-not (Test-Path -LiteralPath $apk)) {
+    throw "APK not found at $apk. Run rebuild first or omit -SkipApkBuild."
+}
+
+$savedErrorActionPreference = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+$installArgs = @("-s", $DeviceAddress, "install", "-r")
+$installArgs += @("--no-streaming", $apk)
+# Reinstall in place for every variant. Android preserves Keystore-backed
+# identity and SQLCipher state across a signed update. A destructive reset is
+# deliberately available only through `torchat reset -Confirm -Scope client`
+# (or the explicit debug-only -ResetDevState switch below).
+$installOutput = @(& adb @installArgs 2>&1)
+$installExitCode = $LASTEXITCODE
+$ErrorActionPreference = $savedErrorActionPreference
+if ($installExitCode -ne 0) {
+    $details = ($installOutput -join " ").Trim()
+    if ($details -match "INSTALL_FAILED_USER_RESTRICTED") {
+        # Some Xiaomi/HyperOS builds block the high-level `adb install`
+        # command but still allow an explicit package-manager install after
+        # the APK has been copied over Wireless Debugging. Try that route
+        # before reporting the device policy as fatal.
+        Write-Warning "ADB install was restricted; trying adb push + pm install on $DeviceAddress."
+        $remoteApk = "/data/local/tmp/torchat-mobile-$variant.apk"
+        $pushOutput = @(& adb -s $DeviceAddress push $apk $remoteApk 2>&1)
+        if ($LASTEXITCODE -eq 0) {
+            $pmOutput = @(& adb -s $DeviceAddress shell pm install -r $remoteApk 2>&1)
+            $pmExitCode = $LASTEXITCODE
+            & adb -s $DeviceAddress shell rm -f $remoteApk *> $null
+            if ($pmExitCode -eq 0) {
+                Write-Host "TorChat APK installed through package manager on $DeviceAddress"
+                $installExitCode = 0
+            } else {
+                $fallbackDetails = (($pushOutput + $pmOutput) -join " ").Trim()
+                $details = (($installOutput + $fallbackDetails) -join " ").Trim()
+            }
+        } else {
+            $pushDetails = ($pushOutput -join " ").Trim()
+            $details = (($installOutput + $pushDetails) -join " ").Trim()
+        }
+    }
+    if ($installExitCode -ne 0 -and $details -match "INSTALL_FAILED_USER_RESTRICTED") {
+        $manufacturer = (& adb -s $DeviceAddress shell getprop ro.product.manufacturer 2>$null | Out-String).Trim()
+        $deviceHint = if ($manufacturer -match "Xiaomi|Redmi|POCO") {
+            "On Xiaomi/HyperOS enable Developer options > USB debugging (Security settings) and Install via USB; accept any Xiaomi-account/security confirmation and keep the phone unlocked."
+        } else {
+            "On the phone enable Developer options > Install via USB (and USB debugging security settings, if present), unlock the phone and accept the installation prompt."
+        }
+        throw "Android blocked APK installation from ADB (INSTALL_FAILED_USER_RESTRICTED). $deviceHint`nInstall diagnostics: $details`nThen run the script again."
+    }
+    if ($installExitCode -ne 0) { throw "Flutter APK installation failed: $details" }
+}
+adb -s $DeviceAddress shell am force-stop org.torchat.mobile
+if ($LASTEXITCODE -ne 0) { throw "Could not stop the previous Flutter mobile process." }
+$launchArgs = @("-s", $DeviceAddress, "shell", "am", "start", "-n", "org.torchat.mobile/.MainActivity")
+if ($ResetDevState) {
+    # Reset from inside the debug app after a successful install. This keeps
+    # the old working APK intact when Android rejects an installation.
+    $launchArgs += @("--ez", "reset_dev_state", "true")
+}
+if ($Clean) { $launchArgs += @("--ez", "clean_state", "true") }
+& adb @launchArgs
+if ($LASTEXITCODE -ne 0) { throw "Could not launch Flutter mobile app." }
+Write-Host "TorChat Flutter mobile deployed to $DeviceAddress"
+<<<END_FILE>>>
+
+<<<FILE path="full-deploy.ps1" plugin="powershell" lang="powershell" reason="extension:.ps1" lines="95" bytes="2817" original_lines="95" original_bytes="2817" minified="false" sha256="01e75b71c40a4f17c845bdc00c9277da1daaa2667e30e7659975594e37782ce3">>>
+[CmdletBinding()]
+param(
+    [ValidateSet('local','staging','production')]
+    [string]$Environment = 'local',
+    [switch]$Release,
+    [switch]$Incremental,
+    [switch]$Clean,
+    [ValidateSet('preserve','clean')]
+    [string]$ClientState = 'preserve',
+    [switch]$NoCache,
+    [switch]$SkipMobileBuild,
+    [string]$DeviceAddress
+)
+
+$ErrorActionPreference = 'Stop'
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$cleanClientState = $Clean -or $ClientState -eq 'clean'
+
+function Invoke-Step {
+    param(
+        [string]$Name,
+        [scriptblock]$Command
+    )
+    Write-Host "[torchat] $Name"
+    & $Command
+    if (-not $?) { throw "$Name failed." }
+}
+
+if ($Environment -eq 'local') {
+    $serverArgs = @{ Environment = 'local'; SkipOnionHealth = $true }
+    if (-not $Incremental) {
+        $serverArgs.Rebuild = $true
+        $serverArgs.ForceRecreate = $true
+        if ($NoCache) { $serverArgs.NoCache = $true }
+    } else {
+        Write-Host '[torchat] Reusing the running local Docker/Tor stack.'
+    }
+    Invoke-Step 'Start local environment' {
+        & (Join-Path $PSScriptRoot 'start-dev.ps1') @serverArgs
+    }
+}
+
+$buildArgs = @{
+    Environment = $Environment
+    Target = 'all'
+}
+if ($Release -or $Environment -ne 'local') { $buildArgs.Release = $true }
+if (-not $SkipMobileBuild) {
+    Invoke-Step 'Build clients' {
+        & (Join-Path $PSScriptRoot 'internal\build-clients.ps1') @buildArgs
+    }
+} else {
+    Invoke-Step 'Build desktop runtime' {
+        & (Join-Path $PSScriptRoot 'internal\build-desktop-runtime.ps1') -Release:($Release -or $Environment -ne 'local')
+    }
+}
+
+if ($cleanClientState) {
+    $desktopStateRoot = Join-Path $repoRoot '.torchat\clients\desktop'
+    foreach ($path in @(
+        (Join-Path $desktopStateRoot 'identity.key'),
+        (Join-Path $desktopStateRoot 'identity.state.db'),
+        (Join-Path $desktopStateRoot 'identity.state.db-wal'),
+        (Join-Path $desktopStateRoot 'identity.state.db-shm')
+    )) {
+        if (Test-Path -LiteralPath $path) {
+            Remove-Item -LiteralPath $path -Force
+        }
+    }
+    Write-Host '[torchat] Cleared desktop client local state.'
+}
+
+$deployArgs = @{
+    Environment = $Environment
+    SkipServer = $true
+    SkipCoreBuild = $true
+    SkipApkBuild = $true
+    Clean = $cleanClientState
+}
+if ($Release -or $Environment -ne 'local') { $deployArgs.Release = $true }
+if ($DeviceAddress) { $deployArgs.DeviceAddress = $DeviceAddress }
+Invoke-Step 'Deploy Android' {
+    & (Join-Path $PSScriptRoot 'deploy-android.ps1') @deployArgs
+}
+
+$runArgs = @{
+    Command = 'run-desktop'
+    Environment = $Environment
+    Target = 'windows'
+}
+if ($Release) { $runArgs.Release = $true }
+if ($cleanClientState) { $runArgs.Clean = $true }
+Invoke-Step 'Run desktop' {
+    & (Join-Path $PSScriptRoot 'torchat.ps1') @runArgs
+}
+<<<END_FILE>>>
+
+<<<FILE path="internal/build-android-core.ps1" plugin="powershell" lang="powershell" reason="extension:.ps1" lines="50" bytes="2551" original_lines="50" original_bytes="2551" minified="false" sha256="6ee7a7ae5c554eb94d2f71f9b03fddfe8535734f2f4315930032cd0e77d1974f">>>
+param(
+    [string]$AndroidNdk = $env:ANDROID_NDK_HOME,
+    [string]$RustTarget = "aarch64-linux-android"
+)
+
+$ErrorActionPreference = "Stop"
+$repo = Resolve-Path (Join-Path $PSScriptRoot "..\..")
+$jni = Join-Path $repo "mobile\android\app\src\main\jniLibs"
+
+if (-not (Get-Command cargo-ndk -ErrorAction SilentlyContinue)) {
+    cargo install cargo-ndk --locked
+}
+if ([string]::IsNullOrWhiteSpace($AndroidNdk)) {
+    $sdk = $env:ANDROID_SDK_ROOT
+    if ([string]::IsNullOrWhiteSpace($sdk)) { $sdk = $env:ANDROID_HOME }
+    if ([string]::IsNullOrWhiteSpace($sdk)) { $sdk = Join-Path $env:LOCALAPPDATA "Android\Sdk" }
+    $AndroidNdk = Get-ChildItem (Join-Path $sdk "ndk") -Directory -ErrorAction SilentlyContinue |
+        Sort-Object Name -Descending | Select-Object -First 1 -ExpandProperty FullName
+}
+if ([string]::IsNullOrWhiteSpace($AndroidNdk) -or -not (Test-Path -LiteralPath $AndroidNdk)) {
+    throw "Android NDK not found. Install it through Android Studio or set ANDROID_NDK_HOME."
+}
+
+rustup target add $RustTarget
+
+# The Flutter UI and Android background service both use the checked-in C ABI
+# header and the native Rust libraries.
+
+$abi = switch ($RustTarget) {
+    "aarch64-linux-android" { "arm64-v8a" }
+    "armv7-linux-androideabi" { "armeabi-v7a" }
+    "x86_64-linux-android" { "x86_64" }
+    "i686-linux-android" { "x86" }
+    default { throw "Unsupported Android Rust target: $RustTarget" }
+}
+
+$out = Join-Path $jni $abi
+New-Item -ItemType Directory -Force -Path $out | Out-Null
+cargo ndk -t $RustTarget -o $jni build -p torchat-core --release
+cargo ndk -t $RustTarget -o $jni build -p torchat-client-runtime --release
+Copy-Item (Join-Path $repo "target\$RustTarget\release\torchat_core.dll") (Join-Path $out "libtorchat_core.so") -Force -ErrorAction SilentlyContinue
+Copy-Item (Join-Path $repo "target\$RustTarget\release\libtorchat_core.so") (Join-Path $out "libtorchat_core.so") -Force -ErrorAction SilentlyContinue
+Copy-Item (Join-Path $repo "target\$RustTarget\release\torchat_client_runtime.dll") (Join-Path $out "libtorchat_client_runtime.so") -Force -ErrorAction SilentlyContinue
+Copy-Item (Join-Path $repo "target\$RustTarget\release\libtorchat_client_runtime.so") (Join-Path $out "libtorchat_client_runtime.so") -Force -ErrorAction SilentlyContinue
+if (-not (Test-Path (Join-Path $out "libtorchat_core.so"))) {
+    throw "Rust Android library was not produced for $abi."
+}
+if (-not (Test-Path (Join-Path $out "libtorchat_client_runtime.so"))) {
+    throw "Rust Android client runtime library was not produced for $abi."
+}
+<<<END_FILE>>>
+
+<<<FILE path="internal/build-clients.ps1" plugin="powershell" lang="powershell" reason="extension:.ps1" lines="70" bytes="2991" original_lines="70" original_bytes="2991" minified="false" sha256="ff3d32f0868bd520d11afe8e31ac1b934396b711a4c7b77e0c73977bf3744924">>>
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = $true)][ValidateSet('local','staging','production')][string]$Environment,
+    [ValidateSet('android','windows','all')][string]$Target = 'all',
+    [switch]$Release
+)
+
+$ErrorActionPreference = 'Stop'
+$repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$mobileRoot = Join-Path $repoRoot 'mobile'
+. (Join-Path $PSScriptRoot 'environment.ps1')
+$environmentState = Ensure-TorChatEnvironment $repoRoot $Environment
+Import-TorChatEnvironment $environmentState -RequireOnion
+
+function Stop-TorChatFlutterWindows {
+    if ($env:OS -ne 'Windows_NT') { return }
+    $windowsRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot 'mobile\build\windows'))
+    $running = @(Get-CimInstance Win32_Process -Filter "Name='torchat_mobile.exe'" |
+        Where-Object {
+            $_.ExecutablePath -and
+            [IO.Path]::GetFullPath($_.ExecutablePath).StartsWith($windowsRoot, [StringComparison]::OrdinalIgnoreCase)
+        })
+    foreach ($process in $running) {
+        Write-Host "[torchat] Stopping Flutter Windows client PID $($process.ProcessId) before rebuild."
+        Stop-Process -Id ([int]$process.ProcessId) -Force -ErrorAction SilentlyContinue
+    }
+    if ($running.Count -gt 0) { Start-Sleep -Milliseconds 1000 }
+}
+
+Push-Location $repoRoot
+try {
+    if ($Target -in @('windows','all')) {
+        & (Join-Path $PSScriptRoot 'build-desktop-runtime.ps1') -Release:$Release
+        if (-not $?) { throw 'Desktop Rust runtime build failed.' }
+    }
+    if ($Target -in @('android','all')) {
+        & (Join-Path $PSScriptRoot 'build-android-core.ps1')
+        if (-not $?) { throw 'Android Rust core build failed.' }
+    }
+    Push-Location $mobileRoot
+    try {
+        $previousConfigFile = $env:TORCHAT_CONFIG_FILE
+        $previousProfile = $env:TORCHAT_DEV_PROFILE
+        $previousPair = $env:TORCHAT_DEV_PAIR
+        $env:TORCHAT_CONFIG_FILE = $environmentState.Paths.RuntimeEnvironment
+        # Fixtures are opt-in; normal developer builds exercise real onboarding.
+        $env:TORCHAT_DEV_PROFILE = ''
+        $env:TORCHAT_DEV_PAIR = 'false'
+        flutter pub get
+        if ($LASTEXITCODE -ne 0) { throw 'flutter pub get failed.' }
+        if ($Target -in @('android','all')) {
+            $variant = if ($Release) { 'release' } else { 'debug' }
+            flutter build apk "--$variant"
+            if ($LASTEXITCODE -ne 0) { throw "Flutter Android $variant build failed." }
+        }
+        if ($Target -in @('windows','all')) {
+            Stop-TorChatFlutterWindows
+            $windowsVariant = if ($Release) { '--release' } else { '--debug' }
+            flutter build windows $windowsVariant
+            if ($LASTEXITCODE -ne 0) { throw 'Flutter Windows build failed.' }
+        }
+    } finally {
+        $env:TORCHAT_CONFIG_FILE = $previousConfigFile
+        $env:TORCHAT_DEV_PROFILE = $previousProfile
+        $env:TORCHAT_DEV_PAIR = $previousPair
+        Pop-Location
+    }
+} finally {
+    Pop-Location
+}
+<<<END_FILE>>>
+
+<<<FILE path="internal/build-desktop-runtime.ps1" plugin="powershell" lang="powershell" reason="extension:.ps1" lines="40" bytes="2205" original_lines="40" original_bytes="2205" minified="false" sha256="612f3a0aa837c6f84f803d94fe4e5eab488e5080fd92db1a2690eff18726e889">>>
+[CmdletBinding()]
+param([switch]$Release)
+
+$ErrorActionPreference = 'Stop'
+$repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+Push-Location $repoRoot
+try {
+    $profile = if ($Release) { 'release' } else { 'debug' }
+    $onion = $env:TORCHAT_ONION_URL
+    if ($onion -notmatch '^https?://[a-z2-7]{56}\.onion$') {
+        throw 'TORCHAT_ONION_URL must be a real v3 onion URL before building the desktop client.'
+    }
+    $binaryName = if ($env:OS -eq 'Windows_NT') { 'torchat-desktop.exe' } else { 'torchat-desktop' }
+    $binaryPath = Join-Path $repoRoot "target\$profile\$binaryName"
+    if ($env:OS -eq 'Windows_NT' -and (Test-Path -LiteralPath $binaryPath)) {
+        $resolvedBinaryPath = [IO.Path]::GetFullPath((Resolve-Path -LiteralPath $binaryPath).Path)
+        $running = @(Get-CimInstance Win32_Process -Filter "Name='torchat-desktop.exe'" |
+            Where-Object {
+                $_.ExecutablePath -and
+                [IO.Path]::GetFullPath($_.ExecutablePath).Equals($resolvedBinaryPath, [StringComparison]::OrdinalIgnoreCase)
+            })
+        foreach ($process in $running) {
+            Write-Host "[torchat] Stopping previous desktop runtime (PID $($process.ProcessId)) before rebuild."
+            Stop-Process -Id ([int]$process.ProcessId) -Force -ErrorAction SilentlyContinue
+        }
+        if ($running.Count -gt 0) { Start-Sleep -Milliseconds 1000 }
+    }
+    $cargoArgs = @('build', '-p', 'torchat-desktop')
+    if ($Release) { $cargoArgs += '--release' }
+    $previousCompiledOnion = $env:TORCHAT_COMPILED_ONION_URL
+    $env:TORCHAT_COMPILED_ONION_URL = $onion
+    try { & cargo @cargoArgs } finally { $env:TORCHAT_COMPILED_ONION_URL = $previousCompiledOnion }
+    if ($LASTEXITCODE -ne 0) { throw 'Rust desktop runtime build failed.' }
+    $isWindowsHost = $env:OS -eq 'Windows_NT'
+    $name = if ($isWindowsHost) { 'torchat-desktop.exe' } else { 'torchat-desktop' }
+    $source = Join-Path $repoRoot "target\$profile\$name"
+    if (-not (Test-Path -LiteralPath $source)) { throw "Runtime binary missing: $source" }
+    Write-Host "[torchat] Desktop runtime ready: $source"
+    return (Resolve-Path -LiteralPath $source).Path
+} finally { Pop-Location }
+<<<END_FILE>>>
+
+<<<FILE path="internal/check-legacy-cleanup.ps1" plugin="powershell" lang="powershell" reason="extension:.ps1" lines="32" bytes="890" original_lines="32" original_bytes="890" minified="false" sha256="97efa9baaf6db694b7bbc643afa7461312e3c475e43f545b090ae79449f5962d">>>
+[CmdletBinding()]
+param()
+
+$ErrorActionPreference = 'Stop'
+$repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$roots = @(
+    (Join-Path $repoRoot 'common\torchat-client-runtime\src'),
+    (Join-Path $repoRoot 'desktop\src'),
+    (Join-Path $repoRoot 'mobile\android\app\src\main\kotlin'),
+    (Join-Path $repoRoot 'mobile\lib'),
+    (Join-Path $repoRoot 'server\torchat-server\src')
+)
+
+$legacy = @(
+    'queueMessage',
+    'updateMessageState',
+    'markState(',
+    'set_message_state(',
+    'RuntimeCommand::QueueMessage',
+    'RuntimeCommand::UpdateMessageState',
+    'RuntimeContract.QUEUE_MESSAGE',
+    'RuntimeContract.UPDATE_MESSAGE_STATE'
+)
+
+foreach ($needle in $legacy) {
+    $hits = rg -n -F --glob '!concat.txt' $needle $roots 2>$null
+    if ($hits) {
+        throw "Legacy path still present: $needle"
+    }
+}
+
+Write-Host '[torchat] legacy cleanup check passed'
+<<<END_FILE>>>
+
+<<<FILE path="internal/check-runtime-contract.ps1" plugin="powershell" lang="powershell" reason="extension:.ps1" lines="47" bytes="1428" original_lines="47" original_bytes="1428" minified="false" sha256="c52e9824cffa6cd6c11310455f10944e6b0c543f88a4811735d6516021bdd8f5">>>
+[CmdletBinding()]
+param(
+    [switch]$FailOnLegacy
+)
+
+$ErrorActionPreference = 'Stop'
+$repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+
+$required = @(
+    'preparePendingSendEffects',
+    'applyMessageTransportOutcome',
+    'MessageSendEffect',
+    'MessageTransportOutcome'
+)
+
+$requiredMissing = @()
+foreach ($needle in $required) {
+    $hits = rg -n --glob '!concat.txt' --glob '!scripts/internal/check-runtime-contract.ps1' --glob '!scripts/internal/check-legacy-cleanup.ps1' --glob '!scripts/internal/check-server-relay-ephemeral.ps1' --glob '!scripts/internal/check-sql-isolation.ps1' $needle $repoRoot 2>$null
+    if (-not $hits) {
+        $requiredMissing += $needle
+    }
+}
+
+if ($requiredMissing.Count -gt 0) {
+    throw "Missing required runtime contract markers: $($requiredMissing -join ', ')"
+}
+
+if ($FailOnLegacy) {
+    $legacy = @(
+        'RuntimeCommand::QueueMessage',
+        '"queueMessage" =>',
+        'RuntimeCommand::UpdateMessageState',
+        '"updateMessageState" =>',
+        'RuntimeContract.QUEUE_MESSAGE',
+        'RuntimeContract.UPDATE_MESSAGE_STATE',
+        'markState(',
+        'set_message_state('
+    )
+    foreach ($needle in $legacy) {
+        $hits = rg -n --glob '!concat.txt' $needle $repoRoot 2>$null
+        if ($hits) {
+            throw "Legacy runtime contract path still present: $needle"
+        }
+    }
+}
+
+Write-Host '[torchat] runtime contract check passed'
+<<<END_FILE>>>
+
+<<<FILE path="internal/check-server-relay-ephemeral.ps1" plugin="powershell" lang="powershell" reason="extension:.ps1" lines="27" bytes="621" original_lines="27" original_bytes="621" minified="false" sha256="2e7a32992575f4845a8145d7e730ff4810560c32ca9585c57e0d9f33032752f6">>>
+[CmdletBinding()]
+param()
+
+$ErrorActionPreference = 'Stop'
+$repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+
+$forbidden = @(
+    'messages',
+    'message_body',
+    'ciphertext',
+    'mls',
+    'welcome',
+    'application'
+)
+
+$serverRoots = @(
+    (Join-Path $repoRoot 'server\torchat-server\sql'),
+    (Join-Path $repoRoot 'infra\db\migrations')
+)
+foreach ($needle in $forbidden) {
+    $hits = rg -n -F --glob '!**/target/**' $needle $serverRoots 2>$null
+    if ($hits) {
+        throw "Server relay persistence marker found: $needle"
+    }
+}
+
+Write-Host '[torchat] server relay ephemeral check passed'
+<<<END_FILE>>>
+
+<<<FILE path="internal/check-sql-isolation.ps1" plugin="powershell" lang="powershell" reason="extension:.ps1" lines="25" bytes="642" original_lines="25" original_bytes="642" minified="false" sha256="633d9a4d204c7028c353dc09f93eb662a696be1bc106a5743686a8b700a11183">>>
+[CmdletBinding()]
+param()
+
+$ErrorActionPreference = 'Stop'
+$repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$sqlRoots = @(
+    (Join-Path $repoRoot 'desktop\sql'),
+    (Join-Path $repoRoot 'mobile\android\app\src\main\assets\sql'),
+    (Join-Path $repoRoot 'infra\db\migrations')
+)
+
+$forbidden = @(
+    'message_state_update.sql',
+    'set_message_state',
+    'markState('
+)
+
+foreach ($needle in $forbidden) {
+    $hits = rg -n -F --glob '!concat.txt' --glob '!**/build/**' $needle $sqlRoots 2>$null
+    if ($hits) {
+        throw "SQL isolation violation: $needle"
+    }
+}
+
+Write-Host '[torchat] SQL isolation check passed'
+<<<END_FILE>>>
+
+<<<FILE path="internal/ensure-desktop-tor.ps1" plugin="powershell" lang="powershell" reason="extension:.ps1" lines="57" bytes="2663" original_lines="57" original_bytes="2663" minified="false" sha256="c9b0d18f3356ce4b1562eea22bd38851dcd6ebe8f523468bcb7c0cbd7f103f42">>>
+param([Parameter(Mandatory = $true)][string]$RepoRoot)
+
+$ErrorActionPreference = "Stop"
+$manifestPath = Join-Path $RepoRoot "infra\config\desktop-tor-packages.json"
+$manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+$architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+$isLinuxPlatform = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+    [System.Runtime.InteropServices.OSPlatform]::Linux
+)
+if ($architecture -ne [System.Runtime.InteropServices.Architecture]::X64) {
+    throw "Embedded Tor currently supports x86_64 desktop only (detected: $architecture)."
+}
+$platform = if ($isLinuxPlatform) { "linux-x86_64" } else { "windows-x86_64" }
+$package = $manifest.packages.$platform
+if (-not $package) { throw "No embedded Tor package for $platform." }
+
+$cacheRoot = Join-Path $RepoRoot "tmp\tools\tor\$($manifest.version)\$platform"
+$archive = Join-Path $cacheRoot "tor-expert-bundle.tar.gz"
+$extractRoot = Join-Path $cacheRoot "bundle"
+$binary = Join-Path $extractRoot ($package.binary -replace '/', [IO.Path]::DirectorySeparatorChar)
+New-Item -ItemType Directory -Force -Path $cacheRoot | Out-Null
+
+if (-not (Test-Path -LiteralPath $archive)) {
+    Write-Host "[torchat] Downloading Tor Expert Bundle $($manifest.version) for $platform..."
+    Invoke-WebRequest -Uri $package.url -OutFile $archive
+}
+if (Get-Command Get-FileHash -ErrorAction SilentlyContinue) {
+    $actualHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash
+} else {
+    # Windows PowerShell installations can run with the Utility module
+    # unavailable. Keep checksum verification working without weakening it.
+    $stream = [System.IO.File]::OpenRead($archive)
+    try {
+        $digest = [System.Security.Cryptography.SHA256]::Create().ComputeHash($stream)
+        $actualHash = ([System.BitConverter]::ToString($digest) -replace '-', '').ToUpperInvariant()
+    } finally {
+        $stream.Dispose()
+    }
+}
+if ($actualHash -ne $package.sha256) {
+    throw "Tor package checksum mismatch. Expected $($package.sha256), got $actualHash."
+}
+if (-not (Test-Path -LiteralPath $binary)) {
+    New-Item -ItemType Directory -Force -Path $extractRoot | Out-Null
+    tar -xf $archive -C $extractRoot
+    if ($LASTEXITCODE -ne 0) { throw "Could not extract Tor Expert Bundle." }
+}
+if (-not (Test-Path -LiteralPath $binary)) {
+    throw "Tor executable is missing after extraction: $binary"
+}
+if ($isLinuxPlatform) { chmod +x $binary }
+
+[pscustomobject]@{
+    Binary = (Resolve-Path -LiteralPath $binary).Path
+    DataDirectory = (Join-Path $RepoRoot "tmp\desktop-tor-data")
+    Version = $manifest.tor_version
+}
+<<<END_FILE>>>
+
+<<<FILE path="internal/environment.ps1" plugin="powershell" lang="powershell" reason="extension:.ps1" lines="87" bytes="4815" original_lines="87" original_bytes="4815" minified="false" sha256="a514e1c1bf100506727bd764e42c037fa3ec41ba882be8451588326a111e8c7a">>>
+Set-StrictMode -Version Latest
+
+function Get-TorChatRepositoryRoot {
+    param([Parameter(Mandatory = $true)][string]$ScriptRoot)
+    return (Split-Path -Parent $ScriptRoot)
+}
+
+function Read-TorChatEnvironmentFile {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { throw "Environment manifest is missing: $Path" }
+    $values = @{}
+    foreach ($line in Get-Content -LiteralPath $Path) {
+        if ($line -match '^\s*#' -or $line -notmatch '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$') { continue }
+        $values[$Matches[1]] = $Matches[2].Trim().Trim('"').Trim("'")
+    }
+    return $values
+}
+
+function Get-TorChatEnvironmentPaths {
+    param([Parameter(Mandatory = $true)][string]$RepoRoot, [Parameter(Mandatory = $true)][ValidateSet('local','staging','production')][string]$Environment)
+    $manifest = Join-Path $RepoRoot "infra\environments\$Environment.env"
+    $runtime = Join-Path $RepoRoot ".torchat\runtime\$Environment"
+    [pscustomobject]@{
+        Manifest = $manifest
+        RuntimeDirectory = $runtime
+        RuntimeEnvironment = Join-Path $runtime "environment.env"
+    }
+}
+
+function Ensure-TorChatEnvironment {
+    param([Parameter(Mandatory = $true)][string]$RepoRoot, [Parameter(Mandatory = $true)][ValidateSet('local','staging','production')][string]$Environment)
+    $paths = Get-TorChatEnvironmentPaths $RepoRoot $Environment
+    if (-not (Test-Path -LiteralPath $paths.Manifest)) {
+        $example = "$($paths.Manifest).example"
+        throw "Environment '$Environment' is not configured. Create $($paths.Manifest) from $example."
+    }
+    $values = Read-TorChatEnvironmentFile $paths.Manifest
+    New-Item -ItemType Directory -Force -Path $paths.RuntimeDirectory | Out-Null
+    if ($Environment -eq 'local') {
+        if (-not $values['TORCHAT_COMPOSE_PROJECT']) { $values['TORCHAT_COMPOSE_PROJECT'] = 'torchat-local' }
+        if (-not $values['TORCHAT_HTTP_PORT']) { $values['TORCHAT_HTTP_PORT'] = '8080' }
+        if (-not $values['TORCHAT_SOCKS_PORT']) { $values['TORCHAT_SOCKS_PORT'] = '9050' }
+        if (-not $values['TORCHAT_DATABASE_PASSWORD']) {
+            $bytes = New-Object byte[] 24
+            $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+            try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
+            $values['TORCHAT_DATABASE_PASSWORD'] = [Convert]::ToBase64String($bytes).Replace('+','A').Replace('/','B').Replace('=','')
+        }
+    }
+    if (Test-Path -LiteralPath $paths.RuntimeEnvironment) {
+        # The manifest owns stable behaviour (ports, profile and project
+        # name). Runtime state owns only generated or secret values.
+        foreach ($pair in (Read-TorChatEnvironmentFile $paths.RuntimeEnvironment).GetEnumerator()) {
+            if ($pair.Key -in @('TORCHAT_ONION_URL', 'TORCHAT_DATABASE_PASSWORD', 'TORCHAT_PAIRING_SECRET')) {
+                $values[$pair.Key] = $pair.Value
+            }
+        }
+    }
+    if (-not $values['TORCHAT_PAIRING_SECRET']) {
+        $bytes = New-Object byte[] 32
+        $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+        try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
+        $values['TORCHAT_PAIRING_SECRET'] = [Convert]::ToBase64String($bytes).Replace('+','A').Replace('/','B').Replace('=','')
+    }
+    $values['TORCHAT_ENVIRONMENT'] = $Environment
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    $lines = @($values.Keys | Sort-Object | ForEach-Object { "$_=$($values[$_])" })
+    [System.IO.File]::WriteAllLines($paths.RuntimeEnvironment, [string[]]$lines, $utf8NoBom)
+    return [pscustomobject]@{ Paths = $paths; Values = $values }
+}
+
+function Set-TorChatEnvironmentOnion {
+    param([Parameter(Mandatory = $true)]$EnvironmentState, [Parameter(Mandatory = $true)][string]$OnionUrl)
+    if ($OnionUrl -notmatch '^https?://[a-z2-7]{56}\.onion$') { throw "Invalid v3 onion URL: $OnionUrl" }
+    $EnvironmentState.Values['TORCHAT_ONION_URL'] = $OnionUrl
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    $lines = @($EnvironmentState.Values.Keys | Sort-Object | ForEach-Object { "$_=$($EnvironmentState.Values[$_])" })
+    [System.IO.File]::WriteAllLines($EnvironmentState.Paths.RuntimeEnvironment, [string[]]$lines, $utf8NoBom)
+}
+
+function Import-TorChatEnvironment {
+    param([Parameter(Mandatory = $true)]$EnvironmentState, [switch]$RequireOnion)
+    foreach ($pair in $EnvironmentState.Values.GetEnumerator()) { Set-Item -Path "Env:$($pair.Key)" -Value $pair.Value }
+    if ($RequireOnion -and $env:TORCHAT_ONION_URL -notmatch '^https?://[a-z2-7]{56}\.onion$') {
+        throw "Environment '$($env:TORCHAT_ENVIRONMENT)' has no valid TORCHAT_ONION_URL yet. Run 'torchat env up --environment local' or configure its manifest."
+    }
+}
+<<<END_FILE>>>
+
+<<<FILE path="redeploy.ps1" plugin="powershell" lang="powershell" reason="extension:.ps1" lines="95" bytes="3076" original_lines="95" original_bytes="3076" minified="false" sha256="ff3a45c57045b08dc85be42381b97b2a74d1fecf5de6b567250bdbff68ae3a1c">>>
+[CmdletBinding()]
+param(
+    [ValidateSet('local')]
+    [string]$Environment = 'local',
+    [ValidateSet('clean','preserve')]
+    [string]$ClientState = 'clean',
+    [switch]$Release,
+    [switch]$NoCache,
+    [string]$DeviceAddress
+)
+
+$ErrorActionPreference = 'Stop'
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$compose = Join-Path $repoRoot 'infra\docker\compose.dev.yml'
+. (Join-Path $PSScriptRoot 'internal\environment.ps1')
+
+function Invoke-Step {
+    param(
+        [string]$Name,
+        [scriptblock]$Command
+    )
+    Write-Host "[torchat] $Name"
+    & $Command
+    if (-not $?) { throw "$Name failed." }
+}
+
+$environmentState = Ensure-TorChatEnvironment $repoRoot $Environment
+$composeArgs = @(
+    'compose',
+    '--project-name', $environmentState.Values['TORCHAT_COMPOSE_PROJECT'],
+    '--env-file', $environmentState.Paths.RuntimeEnvironment,
+    '-f', $compose
+)
+
+Push-Location $repoRoot
+try {
+    Invoke-Step 'Destroy local Docker stack, database volume and Tor volume' {
+        & docker @($composeArgs + @('down', '--volumes', '--remove-orphans'))
+    }
+
+    if (Test-Path -LiteralPath $environmentState.Paths.RuntimeEnvironment) {
+        Remove-Item -LiteralPath $environmentState.Paths.RuntimeEnvironment -Force
+    }
+    Write-Host '[torchat] Removed local runtime environment so a fresh onion and secrets are generated.'
+
+    Invoke-Step 'Start fresh local Docker/Tor stack' {
+        $startArgs = @{
+            Environment = 'local'
+            Rebuild = $true
+            ForceRecreate = $true
+            SkipOnionHealth = $true
+        }
+        if ($NoCache) { $startArgs.NoCache = $true }
+        & (Join-Path $PSScriptRoot 'start-dev.ps1') @startArgs
+    }
+
+    $environmentState = Ensure-TorChatEnvironment $repoRoot $Environment
+    Import-TorChatEnvironment $environmentState -RequireOnion
+    Write-Host "[torchat] Fresh onion selected for this build: $($env:TORCHAT_ONION_URL)"
+
+    Invoke-Step 'Build Android APK and Windows desktop with the fresh onion' {
+        $buildArgs = @{
+            Environment = 'local'
+            Target = 'all'
+        }
+        if ($Release) { $buildArgs.Release = $true }
+        & (Join-Path $PSScriptRoot 'internal\build-clients.ps1') @buildArgs
+    }
+
+    Invoke-Step 'Install and launch Android app' {
+        $deployArgs = @{
+            Environment = 'local'
+            SkipServer = $true
+            SkipCoreBuild = $true
+            SkipApkBuild = $true
+            Clean = ($ClientState -eq 'clean')
+        }
+        if ($Release) { $deployArgs.Release = $true }
+        if ($DeviceAddress) { $deployArgs.DeviceAddress = $DeviceAddress }
+        & (Join-Path $PSScriptRoot 'deploy-android.ps1') @deployArgs
+    }
+
+    Invoke-Step 'Start Windows desktop app' {
+        $runArgs = @{
+            Command = 'run-desktop'
+            Environment = 'local'
+            ClientState = $ClientState
+            Clean = ($ClientState -eq 'clean')
+        }
+        if ($Release) { $runArgs.Release = $true }
+        & (Join-Path $PSScriptRoot 'torchat.ps1') @runArgs
+    }
+} finally {
+    Pop-Location
+}
+<<<END_FILE>>>
+
+<<<FILE path="start-dev.ps1" plugin="powershell" lang="powershell" reason="extension:.ps1" lines="223" bytes="9979" original_lines="223" original_bytes="9979" minified="false" sha256="cd0316017c288a3cc7fbaccdd79b634ec6bb59973d382c82dcc1904dba8477ea">>>
+[CmdletBinding()]
+param(
+    [switch]$Rebuild,
+    [switch]$ForceRecreate,
+    [switch]$NoCache,
+    [switch]$KeepOtherStacks,
+    [switch]$SkipOnionHealth,
+    [ValidateSet('local')][string]$Environment = 'local'
+)
+
+$ErrorActionPreference = "Stop"
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$compose = Join-Path $repoRoot "infra\docker\compose.dev.yml"
+. (Join-Path $PSScriptRoot "internal\environment.ps1")
+
+$environmentState = Ensure-TorChatEnvironment $repoRoot $Environment
+Import-TorChatEnvironment $environmentState
+
+function Invoke-DockerComposeWithRetry {
+    param([Parameter(Mandatory = $true)][string[]]$Arguments, [Parameter(Mandatory = $true)][string]$FailureMessage)
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        & docker @Arguments
+        if ($LASTEXITCODE -eq 0) { return }
+        if ($attempt -lt 3) {
+            $delay = 5 * $attempt
+            Write-Warning "Docker command failed (attempt $attempt/3). Retrying in $delay seconds. Inspect the Docker output above: this may be a registry timeout or an image build error."
+            Start-Sleep -Seconds $delay
+        }
+    }
+    throw $FailureMessage
+}
+
+function Stop-ConflictingTorChatStacks {
+    if ($KeepOtherStacks) { return }
+    $currentProject = $environmentState.Values['TORCHAT_COMPOSE_PROJECT']
+    $knownProjects = @('torchat-release', 'docker') |
+        Where-Object { $_ -ne $currentProject }
+    foreach ($project in $knownProjects) {
+        $containers = @(docker ps -q --filter "label=com.docker.compose.project=$project" 2>$null)
+        if ($containers.Count -eq 0) { continue }
+        Write-Warning "Stopping stale TorChat stack '$project' to keep one canonical local environment. Use -KeepOtherStacks to preserve it."
+        & docker rm --force @containers | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Could not stop conflicting TorChat stack '$project'." }
+    }
+}
+
+function Read-DockerServiceLogs {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$ComposeArgs,
+        [Parameter(Mandatory = $true)][string]$Service,
+        [int]$Tail = 60
+    )
+    return (& docker @($ComposeArgs + @('logs', '--tail', "$Tail", $Service)) 2>&1 | Out-String).Trim()
+}
+
+function Assert-JsonHealthOk {
+    param([object]$Value, [Parameter(Mandatory = $true)][string]$Name)
+    if ($null -eq $Value) { throw "$Name healthcheck returned no response." }
+    if ($null -eq $Value.PSObject.Properties['status']) {
+        throw "$Name healthcheck response has no status field: $($Value | ConvertTo-Json -Compress)"
+    }
+    if ($Value.status -ne 'ok') {
+        throw "$Name healthcheck status is '$($Value.status)', expected 'ok'."
+    }
+}
+
+function Invoke-OnionHealthProbe {
+    param(
+        [Parameter(Mandatory = $true)][string]$Url,
+        [Parameter(Mandatory = $true)][string]$SocksPort,
+        [int]$MaxTimeSeconds = 75
+    )
+    if (-not (Get-Command curl.exe -ErrorAction SilentlyContinue)) {
+        throw 'curl.exe is required for the Tor SOCKS onion healthcheck.'
+    }
+    $output = & curl.exe --silent --show-error --max-time $MaxTimeSeconds `
+        --socks5-hostname "127.0.0.1:$SocksPort" `
+        "$Url/health" 2>&1
+    $exitCode = $LASTEXITCODE
+    [pscustomobject]@{
+        ExitCode = $exitCode
+        Output = ($output | Out-String).Trim()
+    }
+}
+
+function Wait-TorChatLocalServerHealth {
+    param(
+        [Parameter(Mandatory = $true)][string]$HealthUrl,
+        [Parameter(Mandatory = $true)][string[]]$ComposeArgs
+    )
+
+    $health = $null
+    $lastLocalHealthError = ''
+    for ($attempt = 1; $attempt -le 30; $attempt++) {
+        try {
+            $health = Invoke-RestMethod -Uri $HealthUrl -TimeoutSec 2
+            Assert-JsonHealthOk -Value $health -Name 'Local server'
+            return
+        } catch {
+            $lastLocalHealthError = $_.Exception.Message
+            Start-Sleep -Seconds 2
+        }
+    }
+
+    $serverLogs = Read-DockerServiceLogs -ComposeArgs $ComposeArgs -Service 'server'
+    throw "Server local healthcheck failed. Last probe: $lastLocalHealthError`n$serverLogs"
+}
+
+function Wait-TorChatOnionHostname {
+    param([Parameter(Mandatory = $true)][string[]]$ComposeArgs)
+
+    for ($attempt = 1; $attempt -le 120; $attempt++) {
+        $hostnameOutput = & docker @($ComposeArgs + @('exec', '-T', 'tor', 'cat', '/var/lib/tor/hidden_service/hostname')) 2>$null
+        $onion = ($hostnameOutput | Select-Object -First 1 | Out-String).Trim()
+        if ($onion -match '^[a-z2-7]{56}\.onion$') {
+            return $onion
+        }
+        Start-Sleep -Seconds 2
+    }
+
+    throw 'Tor onion hostname was not generated.'
+}
+
+function Assert-TorChatOnionHealth {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$ComposeArgs,
+        [Parameter(Mandatory = $true)][string]$OnionUrl,
+        [Parameter(Mandatory = $true)][string]$SocksPort
+    )
+
+    $onionAttempts = 5
+    $lastOnionProbeError = ''
+
+    for ($attempt = 1; $attempt -le $onionAttempts; $attempt++) {
+        $percent = [math]::Floor((($attempt - 1) / $onionAttempts) * 100)
+        $progressStatus = "Tor SOCKS buduje circuit - proba $attempt/$onionAttempts (do 75 s)"
+        Write-Progress -Id 1 -Activity 'TorChat: przygotowanie połączenia onion' -Status $progressStatus -PercentComplete $percent
+
+        try {
+            $probe = Invoke-OnionHealthProbe -Url $OnionUrl -SocksPort $SocksPort -MaxTimeSeconds 75
+            if ($probe.ExitCode -ne 0) {
+                $lastOnionProbeError = $probe.Output
+            } else {
+                $payloadText = $probe.Output
+                $onionHealth = $payloadText | ConvertFrom-Json
+                if (($null -ne $onionHealth) -and ($null -ne $onionHealth.PSObject.Properties['status'])) {
+                    if ($onionHealth.status -eq 'ok') {
+                        Write-Progress -Id 1 -Activity 'TorChat: przygotowanie połączenia onion' -Completed
+                        return
+                    }
+                }
+                $lastOnionProbeError = "Unexpected onion health payload: $payloadText"
+            }
+        } catch {
+            $lastOnionProbeError = $_.Exception.Message
+        }
+
+        Write-Host "[torchat] Onion circuit is still warming up (attempt $attempt/$onionAttempts; each probe allows 75 s)."
+        Start-Sleep -Seconds 2
+    }
+
+    Write-Progress -Id 1 -Activity 'TorChat: przygotowanie połączenia onion' -Completed
+    $torLogs = Read-DockerServiceLogs -ComposeArgs $ComposeArgs -Service 'tor'
+    $serverLogs = Read-DockerServiceLogs -ComposeArgs $ComposeArgs -Service 'server' -Tail 40
+    throw "Tor onion healthcheck failed through SOCKS at $OnionUrl. Last probe: $lastOnionProbeError`n--- tor logs ---`n$torLogs`n--- server logs ---`n$serverLogs"
+}
+
+Stop-ConflictingTorChatStacks
+docker info *> $null
+if ($LASTEXITCODE -ne 0) { throw "Docker Desktop is not running." }
+if ($NoCache -and -not $Rebuild) {
+    throw "-NoCache requires -Rebuild."
+}
+
+Push-Location $repoRoot
+try {
+    $composeArgs = @('compose', '--project-name', $environmentState.Values['TORCHAT_COMPOSE_PROJECT'], '--env-file', $environmentState.Paths.RuntimeEnvironment, '-f', $compose)
+    & docker @($composeArgs + @('config')) | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Docker Compose configuration is invalid." }
+    if ($Rebuild) {
+        $buildArgs = $composeArgs + @('build')
+        if ($NoCache) { $buildArgs += "--no-cache" }
+        Invoke-DockerComposeWithRetry $buildArgs 'Docker image rebuild failed after three attempts. The relevant compiler or Docker error is printed above; do not assume this is a network problem.'
+    }
+    # A normal start asks Compose for an incremental build. An explicit
+    # rebuild already produced the images above, so do not invoke BuildKit
+    # twice before recreating the containers.
+    $upArgs = $composeArgs + @('up', '-d', '--remove-orphans')
+    if (-not $Rebuild) { $upArgs += "--build" }
+    if ($ForceRecreate) { $upArgs += "--force-recreate" }
+    Invoke-DockerComposeWithRetry $upArgs 'Local stack failed to start after three attempts.'
+
+    # A cold v3 onion circuit can exceed Tor's own initial 60-second timeout.
+    # Keep deploy deterministic, but give guard replacement enough time.
+    $onion = Wait-TorChatOnionHostname -ComposeArgs $composeArgs
+    Set-TorChatEnvironmentOnion $environmentState "http://$onion"
+    Import-TorChatEnvironment $environmentState -RequireOnion
+    # The server receives the canonical public endpoint only after Tor has
+    # generated it. Recreate just this service with the refreshed env file.
+    # The server embeds the public endpoint in its runtime configuration.
+    # Force recreation so a changed generated onion cannot leave an old
+    # container running with stale configuration.
+    & docker @($composeArgs + @('up', '-d', '--force-recreate', 'server'))
+    if ($LASTEXITCODE -ne 0) { throw 'Development server restart failed.' }
+    $httpPort = $environmentState.Values['TORCHAT_HTTP_PORT']
+    $healthUrl = 'http://127.0.0.1:{0}/health' -f $httpPort
+    Wait-TorChatLocalServerHealth -HealthUrl $healthUrl -ComposeArgs $composeArgs
+    # A local HTTP healthcheck proves only that the Rust process is alive. The
+    # clients use the onion exclusively, so verify the complete path through
+    # the Docker Tor SOCKS listener before publishing the environment to them.
+    if ($SkipOnionHealth) {
+        Write-Host '[torchat] Skipping Tor SOCKS onion healthcheck; clients will retry while circuits warm up.'
+    } else {
+        $socksPort = $environmentState.Values['TORCHAT_SOCKS_PORT']
+        Write-Host "[torchat] Verifying onion health through Tor SOCKS ($($env:TORCHAT_ONION_URL))..."
+        Assert-TorChatOnionHealth -ComposeArgs $composeArgs -OnionUrl $env:TORCHAT_ONION_URL -SocksPort $socksPort
+        Write-Host '[torchat] Onion healthcheck passed through Tor SOCKS.'
+    }
+    & docker @($composeArgs + @('ps'))
+    Write-Host "[torchat] local onion: $($env:TORCHAT_ONION_URL)"
+} finally {
+    Pop-Location
+}
+<<<END_FILE>>>
+
+<<<FILE path="stop-dev.ps1" plugin="powershell" lang="powershell" reason="extension:.ps1" lines="13" bytes="730" original_lines="13" original_bytes="730" minified="false" sha256="836e6a456ad675327bba79b9dd55fb95b3d8c8cc9d11dee26919eb46503ceb1e">>>
+[CmdletBinding()]
+param([ValidateSet('local')][string]$Environment = 'local')
+$ErrorActionPreference = "Stop"
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$compose = Join-Path $repoRoot "infra\docker\compose.dev.yml"
+. (Join-Path $PSScriptRoot "internal\environment.ps1")
+$environmentState = Ensure-TorChatEnvironment $repoRoot $Environment
+Push-Location $repoRoot
+try {
+    & docker @('compose', '--project-name', $environmentState.Values['TORCHAT_COMPOSE_PROJECT'], '--env-file', $environmentState.Paths.RuntimeEnvironment, '-f', $compose, 'down')
+    if ($LASTEXITCODE -ne 0) { throw "Development stack stop failed." }
+    Write-Host "Local stack stopped. PostgreSQL and Tor volumes were preserved."
+} finally { Pop-Location }
+<<<END_FILE>>>
+
+<<<FILE path="torchat.ps1" plugin="powershell" lang="powershell" reason="extension:.ps1" lines="245" bytes="11190" original_lines="245" original_bytes="11190" minified="false" sha256="171399b542b348df6ba6e4345bde2873a1935c989febd90b0712acf666dc0872">>>
+[CmdletBinding()]
+param(
+    [Parameter(Position = 0)]
+    [ValidateSet(
+        'build-clients',
+        'deploy-mobile',
+        'run-desktop',
+        'full-deploy',
+        'redeploy',
+        'logs',
+        'test',
+        'reset-client-state',
+        'status',
+        'start-dev',
+        'stop-dev'
+    )]
+    [string]$Command = 'status',
+    [Parameter(Position = 1)][ValidateSet('up','down','status')][string]$Action = 'status',
+    [ValidateSet('local','staging','production')][string]$Environment = 'local',
+    [ValidateSet('android','windows','all')][string]$Target = 'all',
+    [ValidateSet('client','server','all')][string]$Scope = 'client',
+    [switch]$Confirm,
+    [switch]$NoCache,
+    [switch]$SkipMobileBuild,
+    [switch]$Release,
+    [switch]$Incremental,
+    [switch]$Clean,
+    [ValidateSet('preserve','clean')][string]$ClientState = 'preserve',
+    [string]$DeviceAddress
+)
+
+$ErrorActionPreference = 'Stop'
+$repoRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'internal\environment.ps1')
+
+function Invoke-TorChat {
+    param([string]$Script, [hashtable]$Parameters = @{})
+    $scriptPath = Join-Path $PSScriptRoot $Script
+    $pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
+    if ($pwsh) {
+        $args = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $scriptPath)
+        foreach ($entry in $Parameters.GetEnumerator()) {
+            $args += "-$($entry.Key)"
+            if ($entry.Value -isnot [switch] -and $entry.Value -isnot [bool]) {
+                $args += [string]$entry.Value
+            } elseif ([bool]$entry.Value) {
+                # Switches are represented by presence only.
+            } else {
+                $args = $args[0..($args.Count - 2)]
+            }
+        }
+        & $pwsh.Source @args
+    } else {
+        & $scriptPath @Parameters
+    }
+    if (-not $?) { throw "$Script failed." }
+}
+
+function Assert-TorChatTool([string]$Name) {
+    if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) { throw "Missing required tool: $Name" }
+}
+
+function Show-TorChatStatus($state) {
+    Write-Host "[torchat] environment: $Environment"
+    Write-Host "[torchat] onion: $($state.Values['TORCHAT_ONION_URL'])"
+    if ($Environment -eq 'local') {
+        $compose = Join-Path $repoRoot 'infra\docker\compose.dev.yml'
+        & docker @('compose','--project-name',$state.Values['TORCHAT_COMPOSE_PROJECT'],'--env-file',$state.Paths.RuntimeEnvironment,'-f',$compose,'ps')
+    }
+    Write-Host '[torchat] ADB devices:'
+    if (Get-Command adb -ErrorAction SilentlyContinue) { adb devices }
+}
+
+function Clear-TorChatDesktopState {
+    $runtimePath = [IO.Path]::GetFullPath((Join-Path $repoRoot 'target\debug\torchat-desktop.exe'))
+    $releasePath = [IO.Path]::GetFullPath((Join-Path $repoRoot 'target\release\torchat-desktop.exe'))
+    $running = @(Get-CimInstance Win32_Process -Filter "Name='torchat-desktop.exe'" |
+        Where-Object { $_.ExecutablePath -eq $runtimePath -or $_.ExecutablePath -eq $releasePath })
+    foreach ($process in $running) {
+        Write-Host "[torchat] Stopping desktop runtime PID $($process.ProcessId) before clearing state."
+        Stop-Process -Id ([int]$process.ProcessId) -Force -ErrorAction SilentlyContinue
+    }
+    if ($running.Count -gt 0) { Start-Sleep -Milliseconds 300 }
+    $clientRoot = Join-Path $repoRoot '.torchat\clients\desktop'
+    $files = @(
+        (Join-Path $clientRoot 'identity.key'),
+        (Join-Path $clientRoot 'identity.state.db'),
+        (Join-Path $clientRoot 'identity.state.db-wal'),
+        (Join-Path $clientRoot 'identity.state.db-shm')
+    )
+    foreach ($file in $files) {
+        if (Test-Path -LiteralPath $file) {
+            for ($attempt = 1; $attempt -le 5; $attempt++) {
+                try {
+                    Remove-Item -LiteralPath $file -Force -ErrorAction Stop
+                    break
+                } catch {
+                    if ($attempt -eq 5) { throw }
+                    Start-Sleep -Milliseconds 250
+                }
+            }
+        }
+    }
+    Write-Host '[torchat] Cleared desktop client identity and encrypted local state.'
+}
+
+function Stop-TorChatFlutterWindows {
+    $windowsRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot 'mobile\build\windows'))
+    $running = @(Get-CimInstance Win32_Process -Filter "Name='torchat_mobile.exe'" |
+        Where-Object {
+            $_.ExecutablePath -and
+            ([IO.Path]::GetFullPath($_.ExecutablePath)).StartsWith($windowsRoot, [StringComparison]::OrdinalIgnoreCase)
+        })
+    foreach ($process in $running) {
+        Write-Host "[torchat] Stopping Flutter Windows client PID $($process.ProcessId) before build/run."
+        Stop-Process -Id ([int]$process.ProcessId) -Force -ErrorAction SilentlyContinue
+    }
+    if ($running.Count -gt 0) { Start-Sleep -Milliseconds 300 }
+}
+
+$operation = $Command
+$operationAction = $Action
+$operationTarget = $Target
+$operationScope = $Scope
+
+switch ($Command) {
+    'start-dev' { $operation = 'env'; $operationAction = 'up' }
+    'stop-dev' { $operation = 'env'; $operationAction = 'down' }
+    'deploy-mobile' { $operation = 'deploy'; $operationTarget = 'android' }
+    'run-desktop' { $operation = 'run'; $operationTarget = 'windows' }
+    'build-clients' { $operation = 'build' }
+    'reset-client-state' { $operation = 'reset'; $operationScope = 'client' }
+    'full-deploy' { $operation = 'full' }
+    'redeploy' { $operation = 'redeploy' }
+    'logs' { $operation = 'logs' }
+}
+
+$state = Ensure-TorChatEnvironment $repoRoot $Environment
+
+switch ($operation) {
+    'status' { Show-TorChatStatus $state }
+    'env' {
+        if ($Environment -ne 'local') {
+            if ($operationAction -ne 'status') { throw "Only local Docker is controlled from this workstation. '$Environment' is managed on its Linux host." }
+            Import-TorChatEnvironment $state -RequireOnion
+            Show-TorChatStatus $state
+            break
+        }
+        if ($operationAction -eq 'up') { Invoke-TorChat 'start-dev.ps1' @{ Rebuild = $false; Environment = 'local' } }
+        elseif ($operationAction -eq 'down') { Invoke-TorChat 'stop-dev.ps1' @{ Environment = 'local' } }
+        else { Show-TorChatStatus $state }
+    }
+    'build' {
+        if ($Environment -eq 'local') { Invoke-TorChat 'start-dev.ps1' @{ Rebuild = $true; ForceRecreate = $true; NoCache = $NoCache; Environment = 'local' } }
+        $arguments = @{ Environment = $Environment; Target = $operationTarget }
+        if ($Release -or $Environment -ne 'local') { $arguments.Release = $true }
+        Invoke-TorChat 'internal\build-clients.ps1' $arguments
+    }
+    'deploy' {
+        if ($operationTarget -ne 'android') { throw 'deploy currently supports only Android; use run --target windows for desktop.' }
+        if ($Environment -eq 'local') { Invoke-TorChat 'start-dev.ps1' @{ Environment = 'local'; SkipOnionHealth = $true } }
+        $arguments = @{ SkipServer = $true; Environment = $Environment; Release = ($Release -or $Environment -ne 'local'); Clean = $Clean }
+        if ($DeviceAddress) { $arguments.DeviceAddress = $DeviceAddress }
+        Invoke-TorChat 'deploy-android.ps1' $arguments
+    }
+    'run' {
+        if ($operationTarget -ne 'windows') { throw 'run currently supports the Windows Flutter target.' }
+        if ($Environment -eq 'local') { Invoke-TorChat 'start-dev.ps1' @{ Environment = 'local'; SkipOnionHealth = $true } }
+        Stop-TorChatFlutterWindows
+        if ($Clean) { Clear-TorChatDesktopState }
+        Import-TorChatEnvironment $state -RequireOnion
+        Invoke-TorChat 'internal\build-desktop-runtime.ps1' @{ Release = $true }
+        $tor = & (Join-Path $PSScriptRoot 'internal\ensure-desktop-tor.ps1') $repoRoot
+        $env:TORCHAT_TOR_BINARY = $tor.Binary
+        $env:TORCHAT_TOR_DATA_DIR = $tor.DataDirectory
+        $env:TORCHAT_RUNTIME_PATH = Join-Path $repoRoot 'target\release\torchat-desktop.exe'
+        $env:TORCHAT_IDENTITY_FILE = Join-Path $repoRoot '.torchat\clients\desktop\identity.key'
+        $env:TORCHAT_LOG_DIR = Join-Path $repoRoot '.torchat\logs'
+        Push-Location (Join-Path $repoRoot 'mobile')
+        $flutterArgs = @('run', '-d', 'windows')
+        if ($Release) { $flutterArgs += '--release' }
+        try { flutter @flutterArgs } finally { Pop-Location }
+    }
+    'full' {
+        $arguments = @{
+            Environment = $Environment
+            Release = $Release
+            Incremental = $Incremental
+            Clean = $Clean
+            ClientState = $ClientState
+            NoCache = $NoCache
+            SkipMobileBuild = $SkipMobileBuild
+        }
+        if ($DeviceAddress) { $arguments.DeviceAddress = $DeviceAddress }
+        Invoke-TorChat 'full-deploy.ps1' $arguments
+    }
+    'redeploy' {
+        $arguments = @{
+            Environment = $Environment
+            ClientState = $ClientState
+            Release = $Release
+            NoCache = $NoCache
+        }
+        if ($DeviceAddress) { $arguments.DeviceAddress = $DeviceAddress }
+        Invoke-TorChat 'redeploy.ps1' $arguments
+    }
+    'logs' {
+        $arguments = @{ Environment = $Environment }
+        if ($DeviceAddress) { $arguments.DeviceAddress = $DeviceAddress }
+        Invoke-TorChat 'collect-logs.ps1' $arguments
+    }
+    'test' {
+        Push-Location $repoRoot
+        try {
+            cargo test -p torchat-client-runtime
+            if ($LASTEXITCODE -ne 0) { throw 'torchat-client-runtime unit tests failed.' }
+            cargo test -p torchat-desktop runtime_conformance
+            if ($LASTEXITCODE -ne 0) { throw 'torchat-desktop runtime conformance tests failed.' }
+        } finally {
+            Pop-Location
+        }
+    }
+    'reset' {
+        if (-not $Confirm) { throw 'Reset is destructive. Repeat with -Confirm after choosing -Scope client, server or all.' }
+        if ($Environment -ne 'local') { throw "Reset for '$Environment' is intentionally unavailable from a workstation." }
+        if ($operationScope -in @('server','all')) {
+            $project = $state.Values['TORCHAT_COMPOSE_PROJECT']
+            $targets = @("${project}_postgres_dev", "${project}_tor_dev")
+            foreach ($volume in $targets) {
+                $exists = (& docker volume ls --format '{{.Name}}' | Where-Object { $_ -eq $volume })
+                if ($exists) { & docker volume rm $volume; if ($LASTEXITCODE -ne 0) { throw "Could not remove local volume $volume" } }
+            }
+        }
+        if ($operationScope -in @('client','all')) {
+            $devices = @(adb devices 2>$null | Where-Object { $_ -match '^\S+\s+device$' } | ForEach-Object { ($_ -split '\s+')[0] })
+            if ($devices.Count -ne 1) { throw 'Client reset requires exactly one connected ADB device.' }
+            $installed = (& adb -s $devices[0] shell pm path org.torchat.mobile 2>$null | Out-String).Trim()
+            if ($installed -match '^package:') {
+                & adb -s $devices[0] uninstall org.torchat.mobile
+                if ($LASTEXITCODE -ne 0) { throw 'Could not remove TorChat from the selected Android device.' }
+            }
+            Write-Host '[torchat] Android app identity and encrypted local state were removed.'
+        }
+    }
+}
+<<<END_FILE>>>
+
+<<<SUMMARY>>>
+included_files=16
+total_lines=1432
+total_bytes=60792
+plugin_counts=powershell=16
+directories_visited=2
+files_seen=17
+items_skipped=1
+warnings=0
+skipped_by_reason=output_file=1
+<<<END_SUMMARY>>>

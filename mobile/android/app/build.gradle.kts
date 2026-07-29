@@ -118,4 +118,7 @@ dependencies {
     implementation("info.guardianproject:jtorctl:0.4.5.7")
     implementation("net.zetetic:android-database-sqlcipher:4.5.4")
     implementation("androidx.sqlite:sqlite:2.4.0")
+
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }

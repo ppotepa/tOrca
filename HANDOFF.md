@@ -2,6 +2,13 @@
 
 Updated: 2026-07-27
 
+> **Current-state warning:** this file contains historical handoff notes as
+> well as current expectations. The authoritative implementation is the code
+> and scripts in this working tree. Use only one local Compose project
+> (`torchat-local`) at a time; stale `release`/legacy Docker stacks are stopped
+> by `scripts/start-dev.ps1` unless `-KeepOtherStacks` is explicitly supplied.
+> Pairing requires a live relay connection and all messages remain client-local.
+
 ## Project goal
 
 TorChat is a privacy-oriented Flutter mobile messenger with a Tor onion-service backend. The server is an untrusted delivery service. Message contents, attachments and conversation keys must remain on clients and be protected with end-to-end encryption.
@@ -10,7 +17,8 @@ Current first-release scope:
 
 - Flutter mobile client, Android first;
 - Rust server and PostgreSQL;
-- built-in default onion address plus optional custom `.onion` address;
+- one exact v3 `.onion` address selected by the environment and embedded into
+  both clients during their build;
 - no email, phone number or password registration;
 - anonymous installation identity;
 - direct one-to-one text chat first;
@@ -217,12 +225,13 @@ POST /v1/sessions
 42. Desktop runtime now has a Zaproszenia flow with accept/reject actions. Both
     clients can search the directory, create a request and keep local message
     queues while Tor reconnects.
-43. Added the canonical release workflow. The first `full-deploy -Release`
+43. Added the canonical release workflow. `full-deploy -Release`
     starts a separate Compose project, generates one persistent v3 onion,
     writes it to the tracked `infra/config/release.env`, builds the release APK
     with that endpoint, clears Android/desktop state by default and launches
-    both clients without Alice/Bob fixtures. `-Keep` preserves client state;
-    the release Tor/Postgres volumes are never removed by the workflow.
+    both clients without Alice/Bob fixtures. Client state is preserved by
+    default; `-Clean` explicitly resets Android and desktop client state while
+    preserving the release Tor/Postgres volumes.
 44. Desktop now follows the real first-run flow: it no longer assumes Bob,
     asks for and persists a nickname locally, publishes it after Tor connects,
     exposes a "Wyślij zaproszenie" action from directory contacts, and keeps
@@ -249,10 +258,11 @@ POST /v1/sessions
   KeyPackages. A non-development first conversation still requires QR exchange.
 - Alice/Bob fixtures and private keys remain available only for debug workflow.
   Release builds compile no development identity or fixture.
-- Wi-Fi ADB and debug APK installation currently work on the physical Xiaomi.
-  Background desktop-to-Android delivery is verified; the remaining manual
-  check is opening Bob in Flutter and confirming the stored message renders in
-  the conversation view.
+- Wi-Fi ADB detects the physical Xiaomi, but HyperOS currently blocks APK
+  installation with `INSTALL_FAILED_USER_RESTRICTED`; the phone-side
+  "Install via USB" security setting still needs to be enabled.
+  Background desktop-to-Android delivery is covered by the runtime code and
+  fixture tests, but physical two-client verification remains outstanding.
 - Android foreground receive is implemented, but production-quality battery,
   OEM process-killing and reboot behavior still needs a longer device test.
 - Client-side queue retry covers loss of the sender's Tor/relay connection.
@@ -278,10 +288,20 @@ Release-like clean deployment (generates the onion on first run):
 .\scripts\torchat.ps1 full-deploy -Release
 ```
 
-Keep the release identities and local stores across a redeploy:
+Fast release-like iteration without rebuilding/recreating Docker and Tor:
 
 ```powershell
-.\scripts\torchat.ps1 full-deploy -Release -Keep
+.\scripts\torchat.ps1 full-deploy -Release -Incremental -SkipChecks
+```
+
+Preserve release identities and local stores across a redeploy (default):
+
+```powershell
+.\scripts\torchat.ps1 full-deploy -Release
+
+Start with fresh local client identities and stores:
+
+.\scripts\torchat.ps1 full-deploy -Release -Clean
 ```
 
 Focused commands:
@@ -318,7 +338,7 @@ Do not use `down -v` unless local development data is intentionally disposable.
 
 1. Install the generated release APK on an unlocked phone and verify the
    foreground service reaches the configured release onion.
-2. Run desktop release with `-Keep`, exchange invite codes, and verify one
+2. Run desktop release, exchange invite codes, and verify one
    delivered MLS message in each direction after both clients restart.
 3. Add API integration tests for request authorization, expiry and state
    transitions, plus rate limits and replay protection.

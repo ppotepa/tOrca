@@ -1,4 +1,8 @@
 #![allow(unsafe_op_in_unsafe_fn)]
+// C ABI entry points share one pointer-safety contract: callers must pass
+// valid pointers/lengths and release returned ownership with the matching free
+// function. The ABI stays small and is exercised by FFI round-trip tests.
+#![allow(clippy::missing_safety_doc)]
 
 //! Small C ABI for clients that cannot consume UniFFI directly.
 //!
@@ -311,24 +315,20 @@ pub unsafe extern "C" fn torchat_identity_contact_invite_with_nickname_and_recip
             .as_ref()
             .ok_or_else(|| "MLS member is being rotated".to_string())?;
         let key_package = member.key_package()?;
-        let mut invite = crate::ContactInvite {
-            version: crate::PROTOCOL_VERSION,
-            installation_id: (*value).identity.installation_id(),
-            public_key: (*value).identity.public_key(),
-            fingerprint: (*value).identity.fingerprint(),
-            nickname,
-            recipient_installation_id,
-            key_package: base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(key_package),
-            invite_id: uuid::Uuid::new_v4().to_string(),
-            expires_at: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map_err(|_| "system clock is invalid")?
-                .as_secs()
-                + 15 * 60,
-            signature: None,
-        };
-        invite.sign(&(*value).identity).map_err(|e| e.to_string())?;
-        serde_json::to_string(&invite).map_err(|e| e.to_string())
+        (*value)
+            .identity
+            .contact_invite_payload(
+                nickname,
+                recipient_installation_id,
+                base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(key_package),
+                uuid::Uuid::new_v4().to_string(),
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map_err(|_| "system clock is invalid")?
+                    .as_secs()
+                    + 15 * 60,
+            )
+            .map_err(|e| e.to_string())
     })
     .map(string)
     .unwrap_or(std::ptr::null_mut())
@@ -526,10 +526,10 @@ pub unsafe extern "C" fn torchat_conversation_encrypt(
         if value.is_null() {
             return Err("conversation is null".into());
         }
-        Ok((*value)
+        (*value)
             .conversation
             .encrypt(input(data, len)?)
-            .map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string())
     })
     .map(bytes)
     .unwrap_or(TorchatBytes {
@@ -548,10 +548,10 @@ pub unsafe extern "C" fn torchat_conversation_decrypt(
         if value.is_null() {
             return Err("conversation is null".into());
         }
-        Ok((*value)
+        (*value)
             .conversation
             .decrypt(input(data, len)?)
-            .map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string())
     })
     .map(bytes)
     .unwrap_or(TorchatBytes {
@@ -568,7 +568,7 @@ pub unsafe extern "C" fn torchat_conversation_snapshot(
         if value.is_null() {
             return Err("conversation is null".into());
         }
-        Ok((*value).conversation.snapshot()?)
+        (*value).conversation.snapshot()
     })
     .map(bytes)
     .unwrap_or(TorchatBytes {

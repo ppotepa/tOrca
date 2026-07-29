@@ -35,18 +35,10 @@ pub struct DirectConversation {
     group: MlsGroup,
 }
 
+#[derive(Default)]
 struct PersistentProvider {
     crypto: RustCrypto,
     storage: MemoryStorage,
-}
-
-impl Default for PersistentProvider {
-    fn default() -> Self {
-        Self {
-            crypto: RustCrypto::default(),
-            storage: MemoryStorage::default(),
-        }
-    }
 }
 
 impl OpenMlsProvider for PersistentProvider {
@@ -186,7 +178,8 @@ impl MlsMember {
             MlsMessageBodyIn::Welcome(value) => value,
             _ => return Err("MLS message is not a Welcome".into()),
         };
-        let tree = openmls::prelude::RatchetTreeIn::tls_deserialize(&mut ratchet_tree.as_ref())
+        let mut ratchet_tree = ratchet_tree;
+        let tree = openmls::prelude::RatchetTreeIn::tls_deserialize(&mut ratchet_tree)
             .map_err(|e| format!("decode ratchet tree: {e}"))?;
         let group = StagedWelcome::new_from_welcome(
             &self.provider,

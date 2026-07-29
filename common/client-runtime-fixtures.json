@@ -1,0 +1,150 @@
+{
+  "profile": {
+    "installationId": "installation-alice",
+    "nickname": "Alice",
+    "publicKey": "alice-public-key",
+    "fingerprint": "aa11 bb22 cc33 dd44 ee55 ff66 0011 2233"
+  },
+  "identity": {
+    "installationId": "installation-alice",
+    "publicKey": "alice-public-key",
+    "fingerprint": "aa11 bb22 cc33 dd44 ee55 ff66 0011 2233"
+  },
+  "contact": {
+    "installationId": "installation-bob",
+    "nickname": "Bob",
+    "publicKey": "bob-public-key",
+    "fingerprint": "bb11 cc22 dd33 ee44 ff55 0066 1122 3344",
+    "verification": "VERIFIED"
+  },
+  "conversation": {
+    "id": "installation-bob",
+    "contactInstallationId": "installation-bob",
+    "status": "ACTIVE",
+    "lastMessagePreview": "hello",
+    "lastMessageAt": 1760000000000,
+    "unreadCount": 2
+  },
+  "message": {
+    "id": "message-1",
+    "conversationId": "installation-bob",
+    "outgoing": false,
+    "body": "hello",
+    "state": "DELIVERED",
+    "createdAt": 1760000000000
+  },
+  "pairingCode": {
+    "code": "12345678",
+    "expiresAt": 1760000060
+  },
+  "pairingInboxItem": {
+    "pairingId": "pairing-1",
+    "sender": {
+      "installationId": "installation-bob",
+      "nickname": "Bob",
+      "publicKey": "bob-public-key",
+      "fingerprint": "bb11 cc22 dd33 ee44 ff55 0066 1122 3344",
+      "verification": "UNVERIFIED"
+    },
+    "capability": "chat",
+    "expiresAt": 1760000060,
+    "state": "PENDING",
+    "availableActions": ["ACCEPT", "REJECT"],
+    "offerInviteId": "invite-1",
+    "offerPayload": "welcome-offer-payload"
+  },
+  "pairingOutboxItem": {
+    "pairingId": "pairing-2",
+    "capability": "chat",
+    "expiresAt": 1760000060,
+    "state": "PENDING",
+    "received": false,
+    "availableActions": ["CANCEL"]
+  },
+  "pairingPreparation": {
+    "pairingId": "pairing-1",
+    "recipientInstallationId": "installation-bob",
+    "capability": "chat"
+  },
+  "pairingSendEffects": [
+    {
+      "pairingId": "pairing-1",
+      "recipientInstallationId": "installation-bob",
+      "kind": "OFFER",
+      "payload": "welcome-offer-payload"
+    },
+    {
+      "pairingId": "pairing-1",
+      "recipientInstallationId": "installation-bob",
+      "kind": "REJECTION"
+    }
+  ],
+  "pairingPeerOutcomes": [
+    "OFFER_RECEIVED",
+    "REJECTION_RECEIVED",
+    "WELCOME_PREPARED"
+  ],
+  "pairingSyncResult": {
+    "items": [
+      {
+        "pairingId": "pairing-1",
+        "sender": {
+          "installationId": "installation-bob",
+          "nickname": "Bob",
+          "publicKey": "bob-public-key",
+          "fingerprint": "bb11 cc22 dd33 ee44 ff55 0066 1122 3344",
+          "verification": "UNVERIFIED"
+        },
+        "capability": "chat",
+        "expiresAt": 1760000060,
+        "state": "PENDING",
+        "received": true,
+        "availableActions": ["ACCEPT", "REJECT"]
+      }
+    ],
+    "acknowledgements": [
+      {"pairingId": "pairing-1"}
+    ]
+  },
+  "welcomeAcceptedResult": {
+    "conversation": {
+      "id": "installation-bob",
+      "contactInstallationId": "installation-bob",
+      "status": "VERIFYING",
+      "lastMessagePreview": "Nowa rozmowa",
+      "lastMessageAt": 1760000000000,
+      "unreadCount": 0
+    },
+    "confirmContact": {
+      "pairingId": "pairing-1",
+      "capability": "chat",
+      "peerInstallationId": "installation-bob"
+    }
+  },
+  "messageSendEffect": {
+    "messageId": "message-1",
+    "conversationId": "installation-bob",
+    "recipientInstallationId": "installation-bob",
+    "body": "hello"
+  },
+  "messageTransportOutcomes": [
+    "FORWARDED",
+    "DELIVERED",
+    "RECIPIENT_OFFLINE",
+    "RETRYABLE_FAILURE",
+    "PERMANENT_FAILURE"
+  ],
+  "events": [
+    {"type": "runtime_ready", "protocol": 1},
+    {"type": "tor_status", "phase": "connected", "label": "Połączono z relayem przez Tor", "progress": 100, "latencyMs": 420, "retryAttempt": 0},
+    {"type": "profile_ready", "profile": {"installationId": "installation-alice", "nickname": "Alice", "publicKey": "alice-public-key", "fingerprint": "aa11 bb22 cc33 dd44 ee55 ff66 0011 2233"}},
+    {"type": "invite_received", "pairingId": "pairing-1", "nickname": "Bob"},
+    {"type": "invite_state_changed"},
+    {"type": "message_received", "text": "hello"},
+    {"type": "message_state_changed"},
+    {"type": "conversation_read_changed"},
+    {"type": "changed"},
+    {"type": "runtime_error", "message": "runtime failed"},
+    {"type": "runtime_log", "message": "diagnostic"}
+  ]
+}

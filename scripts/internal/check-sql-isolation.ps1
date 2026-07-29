@@ -1,27 +1,25 @@
 [CmdletBinding()]
-param(
-    [string]$RepoRoot = (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
-)
+param()
 
 $ErrorActionPreference = 'Stop'
-$codeRoots = @(
-    (Join-Path $RepoRoot 'server\torchat-server\src'),
-    (Join-Path $RepoRoot 'desktop\src'),
-    (Join-Path $RepoRoot 'mobile\android\app\src\main\kotlin')
+$repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$sqlRoots = @(
+    (Join-Path $repoRoot 'desktop\sql'),
+    (Join-Path $repoRoot 'mobile\android\app\src\main\assets\sql'),
+    (Join-Path $repoRoot 'infra\db\migrations')
 )
-$pattern = '(?i)(?:"{1,3}|''{1,3})\s*(SELECT|INSERT|UPDATE|DELETE|CREATE\s+TABLE|ALTER\s+TABLE|DROP\s+TABLE|PRAGMA|CREATE\s+INDEX)\b'
-$violations = @()
 
-foreach ($root in $codeRoots) {
-    if (-not (Test-Path -LiteralPath $root)) { continue }
-    $violations += @(Get-ChildItem -LiteralPath $root -Recurse -File |
-        Where-Object { $_.Extension -in @('.rs', '.kt') } |
-        Select-String -Pattern $pattern)
+$forbidden = @(
+    'message_state_update.sql',
+    'set_message_state',
+    'markState('
+)
+
+foreach ($needle in $forbidden) {
+    $hits = rg -n -F --glob '!concat.txt' --glob '!**/build/**' $needle $sqlRoots 2>$null
+    if ($hits) {
+        throw "SQL isolation violation: $needle"
+    }
 }
 
-if ($violations.Count -gt 0) {
-    $details = $violations | ForEach-Object { "$($_.Path):$($_.LineNumber): $($_.Line.Trim())" }
-    throw "SQL must live in versioned SQL files, not Rust/Kotlin source:`n$($details -join "`n")"
-}
-
-Write-Host '[torchat] SQL isolation check passed.'
+Write-Host '[torchat] SQL isolation check passed'

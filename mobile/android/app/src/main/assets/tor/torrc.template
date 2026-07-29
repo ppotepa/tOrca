@@ -3,5 +3,6 @@
 ClientOnly 1
 SocksPort 127.0.0.1:<SOCKS_PORT>
 DataDirectory <DATA_DIRECTORY>
-AvoidDiskWrites 1
+# Preserve the private Tor cache in the app data directory. This makes warm
+# restarts substantially faster; Android application storage remains private.
 Log notice stdout

@@ -1,0 +1,18 @@
+<template id="tpl-mobile-shell">
+  <div class="shell mobile-shell">
+    {{topbar}}
+    <main class="viewport">{{body}}</main>
+    {{dock}}
+  </div>
+</template>
+<template id="tpl-desktop-shell">
+  <div class="shell desktop-shell {{desktopMode}}">
+    {{desktopStatus}}
+    <div class="desktop-workspace">
+    {{rail}}
+    <section class="list-column">{{list}}</section>
+    <main class="viewport">{{body}}</main>
+    {{inspector}}
+    </div>
+  </div>
+</template>

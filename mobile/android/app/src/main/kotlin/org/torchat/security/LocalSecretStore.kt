@@ -20,7 +20,12 @@ class LocalSecretStore(private val context: Context) {
         if (encoded == null) {
             val raw = ByteArray(32).also { java.security.SecureRandom().nextBytes(it) }
             val encrypted = encrypt(key, raw)
-            prefs.edit().putString("db-passphrase", android.util.Base64.encodeToString(encrypted, android.util.Base64.NO_WRAP)).apply()
+            prefs.edit()
+                .putString(
+                    "db-passphrase",
+                    android.util.Base64.encodeToString(encrypted, android.util.Base64.NO_WRAP),
+                )
+                .apply()
             return raw
         }
         return decrypt(key, android.util.Base64.decode(encoded, android.util.Base64.NO_WRAP))
@@ -32,18 +37,42 @@ class LocalSecretStore(private val context: Context) {
         if (encoded == null) {
             val raw = ByteArray(32).also { java.security.SecureRandom().nextBytes(it) }
             val encrypted = encrypt(key, raw)
-            prefs.edit().putString("identity-private-key", android.util.Base64.encodeToString(encrypted, android.util.Base64.NO_WRAP)).apply()
+            prefs.edit()
+                .putString(
+                    "identity-private-key",
+                    android.util.Base64.encodeToString(encrypted, android.util.Base64.NO_WRAP),
+                )
+                .apply()
             return raw
         }
         return decrypt(key, android.util.Base64.decode(encoded, android.util.Base64.NO_WRAP))
+    }
+
+    fun nickname(): String? = prefs.getString("nickname", null)
+
+    fun saveNickname(value: String) {
+        prefs.edit().putString("nickname", value.trim()).apply()
+    }
+
+    fun clearLocalSecrets() {
+        prefs.edit().clear().commit()
+        val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        if (store.containsAlias(alias)) store.deleteEntry(alias)
     }
 
     private fun key(): SecretKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         if (!store.containsAlias(alias)) {
             KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").apply {
-                init(KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
-                    .setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build())
+                init(
+                    KeyGenParameterSpec.Builder(
+                        alias,
+                        KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
+                    )
+                        .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                        .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                        .build(),
+                )
                 generateKey()
             }
         }
@@ -51,7 +80,9 @@ class LocalSecretStore(private val context: Context) {
     }
 
     private fun encrypt(key: SecretKey, value: ByteArray): ByteArray {
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key) }
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply {
+            init(Cipher.ENCRYPT_MODE, key)
+        }
         return cipher.iv + cipher.doFinal(value)
     }
 

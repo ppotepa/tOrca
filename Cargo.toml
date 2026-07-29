@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "common/torchat-core",
+    "common/torchat-client-runtime",
     "server/torchat-server",
     "desktop",
 ]

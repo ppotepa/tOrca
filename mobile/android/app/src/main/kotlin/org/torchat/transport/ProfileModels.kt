@@ -24,4 +24,11 @@ data class PairingInboxItem(
     val sender: ContactCard,
     val capability: String,
     val expiresAt: Long,
+    val state: String = "PENDING",
+)
+
+data class PairingRequestCreated(
+    val pairingId: String,
+    val expiresAt: Long,
+    val state: String = "PENDING",
 )

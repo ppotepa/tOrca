@@ -21,10 +21,11 @@ Thumbs.db
 .env
 .env.*
 !*.env.example
-data/
+/data/
 secrets/
 tmp/
 .torchat/
+.codegraph/
 *.log
 
 # Generated protocol artifacts

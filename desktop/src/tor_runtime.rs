@@ -16,7 +16,10 @@ use std::{
 pub struct TorStatus {
     pub phase: String,
     pub label: String,
+    pub detail: String,
     pub progress: i32,
+    pub latency_ms: Option<u64>,
+    pub retry_attempt: u32,
 }
 
 pub struct TorRuntime {
@@ -31,7 +34,10 @@ impl TorRuntime {
         let _ = tx.send(TorStatus {
             phase: "external".into(),
             label: "Zewnętrzny Tor SOCKS".into(),
+            detail: "Zewnętrzny Tor SOCKS".into(),
             progress: 70,
+            latency_ms: None,
+            retry_attempt: 0,
         });
         (
             Self {
@@ -73,7 +79,12 @@ impl TorRuntime {
         fs::write(
             &torrc,
             format!(
-                "DataDirectory {}\n{}{}SocksPort 127.0.0.1:{socks_port}\nControlPort 127.0.0.1:{control_port}\nCookieAuthentication 1\nAvoidDiskWrites 1\nLog notice stdout\n",
+                // Keep Tor's directory and descriptor cache in this private
+                // per-client directory. AvoidDiskWrites made every desktop
+                // restart behave like a cold Tor client despite a persistent
+                // data directory, which is particularly costly for onion
+                // services.
+                "DataDirectory {}\n{}{}SocksPort 127.0.0.1:{socks_port}\nControlPort 127.0.0.1:{control_port}\nCookieAuthentication 1\nLog notice stdout\n",
                 tor_path(data_dir),
                 geoip_config,
                 owner_config,
@@ -102,7 +113,10 @@ impl TorRuntime {
         let _ = tx.send(TorStatus {
             phase: "starting".into(),
             label: "Uruchamianie Tor…".into(),
+            detail: "Uruchamianie Tor…".into(),
             progress: 0,
+            latency_ms: None,
+            retry_attempt: 0,
         });
 
         let status_tx = tx.clone();
@@ -124,7 +138,14 @@ impl TorRuntime {
                         } else {
                             format!("Bootstrap Tor: {progress}%")
                         },
+                        detail: if progress >= 100 {
+                            "Tor gotowy, łączenie z onion…".into()
+                        } else {
+                            format!("Bootstrap Tor: {progress}%")
+                        },
                         progress: progress.clamp(0, 100) * 70 / 100,
+                        latency_ms: None,
+                        retry_attempt: 0,
                     });
                 }
             }
@@ -136,7 +157,10 @@ impl TorRuntime {
                     let _ = tx.send(TorStatus {
                         phase: "warning".into(),
                         label: line,
+                        detail: String::new(),
                         progress: 0,
+                        latency_ms: None,
+                        retry_attempt: 0,
                     });
                 }
             }

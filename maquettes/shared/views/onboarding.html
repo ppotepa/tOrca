@@ -1,0 +1,33 @@
+<template id="tpl-splash">
+  <section class="onboarding-screen">
+    <div class="hero-mark">{{brand}}</div>
+    <h1>TorChat</h1>
+    <p>Prywatne wiadomości przez onion i lokalny model kolejki.</p>
+  </section>
+</template>
+<template id="tpl-tor-onboarding">
+  <section class="onboarding-screen">
+    <div class="hero-mark">{{brand}}</div>
+    <div class="onboarding-card">
+      <div class="eyebrow">Status Tor</div>
+      <h1>{{title}}</h1>
+      <p>{{subtitle}}</p>
+      <div class="progress-bar"><span style="width:{{progress}}%"></span></div>
+      <p class="status-line">{{label}}</p>
+      {{retry}}
+    </div>
+  </section>
+</template>
+<template id="tpl-nickname">
+  <section class="onboarding-screen">
+    <div class="hero-mark">{{brand}}</div>
+    <div class="onboarding-card">
+      <div class="eyebrow">Profil</div>
+      <h1>Wybierz nick</h1>
+      <p>Będzie widoczny dla kontaktów i w rozmowach testowych.</p>
+      <label class="field-label">Nick</label>
+      <input data-field="nickname" class="field" value="{{nickname}}" maxlength="32" placeholder="np. Maja">
+      <button class="primary wide" data-action="save-nickname">Kontynuuj</button>
+    </div>
+  </section>
+</template>

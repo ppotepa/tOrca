@@ -3,21 +3,12 @@ package org.torchat.chat
 import android.util.Base64
 import org.json.JSONObject
 import org.torchat.core.NativeIdentity
+import org.torchat.data.ContactSource
+import org.torchat.data.LocalContact
+import org.torchat.transport.WelcomePayload
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.security.MessageDigest
-
-data class WelcomePayload(
-    val senderInstallationId: String,
-    val senderPublicKey: String,
-    val senderFingerprint: String,
-    val senderNickname: String,
-    val recipient: String,
-    val inviteId: String,
-    val welcome: ByteArray,
-    val ratchetTree: ByteArray,
-    val signature: String,
-)
 
 sealed interface DecodedRelayPayload {
     data class PairingOffer(val pairingId: String, val capability: String, val invite: String) : DecodedRelayPayload

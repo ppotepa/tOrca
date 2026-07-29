@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 pub mod c_api;
+pub mod application;
 pub mod mls;
 pub mod relay;
 
@@ -24,7 +25,7 @@ pub fn is_valid_onion_address(value: &str) -> bool {
     host.len() == 56
         && host
             .bytes()
-            .all(|byte| (b'a'..=b'z').contains(&byte) || (b'2'..=b'7').contains(&byte))
+            .all(|byte: u8| byte.is_ascii_lowercase() || (b'2'..=b'7').contains(&byte))
 }
 
 /// Private key is intentionally not serializable or exposed as bytes.
@@ -54,6 +55,28 @@ pub struct ContactInvite {
 }
 
 impl ContactInvite {
+    pub fn from_identity(
+        identity: &Identity,
+        nickname: Option<String>,
+        recipient_installation_id: Option<String>,
+        key_package: String,
+        invite_id: String,
+        expires_at: u64,
+    ) -> Self {
+        Self {
+            version: PROTOCOL_VERSION,
+            installation_id: identity.installation_id(),
+            public_key: identity.public_key(),
+            fingerprint: identity.fingerprint(),
+            nickname,
+            recipient_installation_id,
+            key_package,
+            invite_id,
+            expires_at,
+            signature: None,
+        }
+    }
+
     pub fn signing_bytes(&self) -> Result<Vec<u8>, serde_json::Error> {
         let mut unsigned = self.clone();
         unsigned.signature = None;
@@ -170,6 +193,34 @@ impl Identity {
         })
     }
 
+    pub fn contact_invite_payload(
+        &self,
+        nickname: Option<String>,
+        recipient_installation_id: Option<String>,
+        key_package: String,
+        invite_id: String,
+        expires_at: u64,
+    ) -> Result<String, serde_json::Error> {
+        let mut invite = ContactInvite::from_identity(
+            self,
+            nickname,
+            recipient_installation_id,
+            key_package,
+            invite_id,
+            expires_at,
+        );
+        invite.sign(self)?;
+        serde_json::to_string(&invite)
+    }
+
+    pub fn pairing_code_digits(value: &str) -> Result<String, String> {
+        let code = value.trim();
+        if code.len() != 8 || !code.bytes().all(|byte| byte.is_ascii_digit()) {
+            return Err("pairing code must have exactly 8 digits".into());
+        }
+        Ok(code.to_owned())
+    }
+
     pub fn sign(&self, message: &[u8]) -> String {
         URL_SAFE_NO_PAD.encode(self.0.sign(message).to_bytes())
     }
@@ -240,6 +291,29 @@ mod tests {
     }
 
     #[test]
+    fn contact_invite_from_identity_uses_identity_fields_and_signs() {
+        let identity = Identity::generate();
+        let mut invite = ContactInvite::from_identity(
+            &identity,
+            Some("Alice".into()),
+            Some("recipient-1".into()),
+            "key-package".into(),
+            "00000000-0000-4000-8000-000000000000".into(),
+            4_102_444_800,
+        );
+        invite.sign(&identity).unwrap();
+        assert_eq!(invite.installation_id, identity.installation_id());
+        assert_eq!(invite.public_key, identity.public_key());
+        assert_eq!(invite.fingerprint, identity.fingerprint());
+        assert_eq!(invite.nickname.as_deref(), Some("Alice"));
+        assert!(verify_signature(
+            &identity.public_key(),
+            &invite.signing_bytes().unwrap(),
+            invite.signature.as_deref().unwrap()
+        ));
+    }
+
+    #[test]
     fn contact_invite_rejects_fingerprint_tampering() {
         let identity = Identity::generate();
         let value = serde_json::json!({
@@ -256,6 +330,15 @@ mod tests {
         })
         .to_string();
         assert!(ContactInvite::parse(&value).is_err());
+    }
+
+    #[test]
+    fn pairing_code_digits_trims_and_rejects_invalid_values() {
+        assert_eq!(
+            Identity::pairing_code_digits(" 12345678 ").unwrap(),
+            "12345678"
+        );
+        assert!(Identity::pairing_code_digits("1234").is_err());
     }
 
     #[test]

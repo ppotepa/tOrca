@@ -3,5 +3,5 @@
 ClientOnly 1
 SocksPort 127.0.0.1:<SOCKS_PORT>
 DataDirectory <DATA_DIRECTORY>
-AvoidDiskWrites 1
+# Preserve the private Tor cache in the client data directory for warm starts.
 Log notice stdout

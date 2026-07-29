@@ -1,0 +1,848 @@
+{
+  "protocol": 1,
+  "scenarios": [
+    {
+      "id": "01_bootstrap",
+      "initialState": {
+        "profile": {
+          "installationId": "installation-alice",
+          "nickname": "Alice",
+          "publicKey": "alice-public-key",
+          "fingerprint": "alice-fingerprint"
+        }
+      },
+      "commands": [
+        {"method": "bootstrapRuntime"},
+        {"method": "bootstrapRuntime"}
+      ],
+      "expectedResponses": [
+        {"ok": true, "result": true},
+        {"ok": true, "result": false}
+      ],
+      "expectedEvents": [
+        {"type": "runtime_ready", "protocol": 1},
+        {
+          "type": "profile_ready",
+          "profile": {
+            "installationId": "installation-alice",
+            "nickname": "Alice",
+            "publicKey": "alice-public-key",
+            "fingerprint": "alice-fingerprint"
+          }
+        }
+      ]
+    },
+    {
+      "id": "02_status_dedup",
+      "commands": [
+        {
+          "method": "reportTorStatus",
+          "params": {
+            "status": {
+              "phase": "connected",
+              "label": "connected",
+              "detail": "",
+              "progress": 100,
+              "latencyMs": 10,
+              "retryAttempt": 0
+            }
+          }
+        },
+        {
+          "method": "reportTorStatus",
+          "params": {
+            "status": {
+              "phase": "connected",
+              "label": "connected",
+              "detail": "",
+              "progress": 100,
+              "latencyMs": 10,
+              "retryAttempt": 0
+            }
+          }
+        },
+        {
+          "method": "reportTorStatus",
+          "params": {
+            "status": {
+              "phase": "reconnecting",
+              "label": "reconnecting",
+              "detail": "",
+              "retryAttempt": 1
+            }
+          }
+        }
+      ],
+      "expectedResponses": [
+        {"ok": true, "result": true},
+        {"ok": true, "result": true},
+        {"ok": true, "result": true}
+      ],
+      "expectedEvents": [
+        {"type": "tor_status", "phase": "connected", "label": "connected", "progress": 100, "latencyMs": 10, "retryAttempt": 0},
+        {"type": "tor_status", "phase": "reconnecting", "label": "reconnecting", "retryAttempt": 1}
+      ]
+    },
+    {
+      "id": "03_message_send_success",
+      "initialState": {
+        "contacts": [
+          {
+            "installationId": "installation-bob",
+            "nickname": "Bob",
+            "publicKey": "bob-public-key",
+            "fingerprint": "bob-fingerprint",
+            "verification": "VERIFIED"
+          }
+        ],
+        "conversations": [
+          {
+            "id": "installation-bob",
+            "contactInstallationId": "installation-bob",
+            "status": "ACTIVE",
+            "lastMessagePreview": "",
+            "lastMessageAt": 0,
+            "unreadCount": 0
+          }
+        ]
+      },
+      "commands": [
+        {
+          "method": "sendMessage",
+          "params": {"id": "installation-bob", "text": " hello "}
+        },
+        {
+          "method": "applyMessageTransportOutcome",
+          "params": {"messageId": "$response[0].result.messageId", "outcome": "FORWARDED"}
+        },
+        {
+          "method": "applyMessageTransportOutcome",
+          "params": {"messageId": "$response[0].result.messageId", "outcome": "DELIVERED"}
+        }
+      ],
+      "expectedResponses": [
+        {
+          "ok": true,
+          "result": {
+            "conversationId": "installation-bob",
+            "recipientInstallationId": "installation-bob",
+            "body": "hello"
+          }
+        },
+        {"ok": true, "result": {"state": "SENT"}},
+        {"ok": true, "result": {"state": "DELIVERED"}}
+      ],
+      "expectedEvents": [
+        {"type": "message_state_changed", "state": "QUEUED"},
+        {"type": "changed", "kind": "conversations"},
+        {"type": "message_state_changed", "state": "SENDING"},
+        {"type": "message_state_changed", "state": "SENT"},
+        {"type": "message_state_changed", "state": "DELIVERED"}
+      ],
+      "expectedFinalState": {
+        "messages": [
+          {"conversationId": "installation-bob", "body": "hello", "state": "DELIVERED"}
+        ]
+      }
+    },
+    {
+      "id": "04_message_offline_retry",
+      "initialState": {
+        "contacts": [
+          {
+            "installationId": "installation-bob",
+            "nickname": "Bob",
+            "publicKey": "bob-public-key",
+            "fingerprint": "bob-fingerprint",
+            "verification": "VERIFIED"
+          }
+        ],
+        "conversations": [
+          {
+            "id": "installation-bob",
+            "contactInstallationId": "installation-bob",
+            "status": "ACTIVE",
+            "lastMessagePreview": "hello",
+            "lastMessageAt": 42,
+            "unreadCount": 0
+          }
+        ],
+        "messages": [
+          {
+            "id": "00000000-0000-0000-0000-000000000001",
+            "conversationId": "installation-bob",
+            "outgoing": true,
+            "body": "hello",
+            "state": "SENDING",
+            "createdAt": 42
+          }
+        ]
+      },
+      "commands": [
+        {
+          "method": "applyMessageTransportOutcome",
+          "params": {"messageId": "00000000-0000-0000-0000-000000000001", "outcome": "RETRYABLE_FAILURE"}
+        },
+        {"method": "preparePendingSendEffects"}
+      ],
+      "expectedResponses": [
+        {"ok": true, "result": {"state": "QUEUED"}},
+        {
+          "ok": true,
+          "result": [
+            {
+              "messageId": "00000000-0000-0000-0000-000000000001",
+              "conversationId": "installation-bob",
+              "recipientInstallationId": "installation-bob",
+              "body": "hello"
+            }
+          ]
+        }
+      ],
+      "expectedEvents": [
+        {"type": "message_state_changed", "messageId": "00000000-0000-0000-0000-000000000001", "state": "QUEUED"},
+        {"type": "message_state_changed", "messageId": "00000000-0000-0000-0000-000000000001", "state": "SENDING"}
+      ]
+    },
+    {
+      "id": "05_open_conversation_receive_read",
+      "initialState": {
+        "conversations": [
+          {
+            "id": "installation-bob",
+            "contactInstallationId": "installation-bob",
+            "status": "ACTIVE",
+            "lastMessagePreview": "",
+            "lastMessageAt": 0,
+            "unreadCount": 3
+          }
+        ]
+      },
+      "commands": [
+        {"method": "openConversation", "params": {"id": "installation-bob"}},
+        {"method": "receiveMessage", "params": {"id": "installation-bob", "text": "hi", "messageId": "00000000-0000-0000-0000-000000000002"}}
+      ],
+      "expectedEvents": [
+        {"type": "conversation_read_changed", "conversationId": "installation-bob", "unreadCount": 0},
+        {"type": "message_received", "messageId": "00000000-0000-0000-0000-000000000002", "text": "hi"},
+        {"type": "message_state_changed", "messageId": "00000000-0000-0000-0000-000000000002", "state": "DELIVERED"},
+        {"type": "conversation_read_changed", "conversationId": "installation-bob", "unreadCount": 0},
+        {"type": "changed", "kind": "conversations"}
+      ],
+      "expectedFinalState": {
+        "conversations": [
+          {"id": "installation-bob", "unreadCount": 0, "lastMessagePreview": "hi"}
+        ]
+      }
+    },
+    {
+      "id": "06_pairing_merge_upsert",
+      "initialState": {
+        "pairingInbox": [
+          {
+            "pairingId": "pairing-1",
+            "sender": {
+              "installationId": "installation-bob",
+              "nickname": "Bob",
+              "publicKey": "bob-public-key",
+              "fingerprint": "bob-fingerprint",
+              "verification": "UNVERIFIED"
+            },
+            "capability": "chat",
+            "expiresAt": 9999999999,
+            "state": "PENDING",
+            "received": true,
+            "availableActions": ["ACCEPT", "REJECT"]
+          }
+        ]
+      },
+      "commands": [
+        {
+          "method": "mergePairingInbox",
+          "params": {
+            "items": [
+              {
+                "pairingId": "pairing-1",
+                "sender": {
+                  "installationId": "installation-bob",
+                  "nickname": "Bob",
+                  "publicKey": "bob-public-key",
+                  "fingerprint": "bob-fingerprint",
+                  "verification": "UNVERIFIED"
+                },
+                "capability": "chat",
+                "expiresAt": 9999999999,
+                "state": "ACCEPTED",
+                "received": true,
+                "availableActions": ["ARCHIVE"]
+              }
+            ]
+          }
+        },
+        {
+          "method": "mergePairingInbox",
+          "params": {
+            "items": [
+              {
+                "pairingId": "pairing-1",
+                "sender": {
+                  "installationId": "installation-bob",
+                  "nickname": "Bob",
+                  "publicKey": "bob-public-key",
+                  "fingerprint": "bob-fingerprint",
+                  "verification": "UNVERIFIED"
+                },
+                "capability": "chat",
+                "expiresAt": 9999999999,
+                "state": "PENDING",
+                "received": true,
+                "availableActions": ["ACCEPT", "REJECT"]
+              }
+            ]
+          }
+        }
+      ],
+      "expectedFinalState": {
+        "pairingInbox": [
+          {"pairingId": "pairing-1", "state": "ACCEPTED"}
+        ]
+      }
+    },
+    {
+      "id": "06b_closed_conversation_receive_unread",
+      "initialState": {
+        "conversations": [
+          {
+            "id": "installation-bob",
+            "contactInstallationId": "installation-bob",
+            "status": "ACTIVE",
+            "lastMessagePreview": "",
+            "lastMessageAt": 0,
+            "unreadCount": 0
+          }
+        ]
+      },
+      "commands": [
+        {"method": "closeConversation"},
+        {"method": "receiveMessage", "params": {"id": "installation-bob", "text": "closed hi", "messageId": "00000000-0000-0000-0000-000000000004"}}
+      ],
+      "expectedEvents": [
+        {"type": "message_received", "messageId": "00000000-0000-0000-0000-000000000004", "text": "closed hi"},
+        {"type": "message_state_changed", "messageId": "00000000-0000-0000-0000-000000000004", "state": "DELIVERED"},
+        {"type": "conversation_read_changed", "conversationId": "installation-bob", "unreadCount": 1},
+        {"type": "changed", "kind": "conversations"}
+      ],
+      "expectedFinalState": {
+        "conversations": [
+          {"id": "installation-bob", "unreadCount": 1, "lastMessagePreview": "closed hi"}
+        ]
+      }
+    },
+    {
+      "id": "15_duplicate_receive_idempotent",
+      "initialState": {
+        "conversations": [
+          {
+            "id": "installation-bob",
+            "contactInstallationId": "installation-bob",
+            "status": "ACTIVE",
+            "lastMessagePreview": "",
+            "lastMessageAt": 0,
+            "unreadCount": 0
+          }
+        ]
+      },
+      "commands": [
+        {
+          "method": "receiveMessage",
+          "params": {
+            "id": "installation-bob",
+            "text": "hello",
+            "messageId": "00000000-0000-0000-0000-000000000015"
+          }
+        },
+        {
+          "method": "receiveMessage",
+          "params": {
+            "id": "installation-bob",
+            "text": "hello",
+            "messageId": "00000000-0000-0000-0000-000000000015"
+          }
+        }
+      ],
+      "expectedResponses": [
+        {
+          "ok": true,
+          "result": {
+            "id": "00000000-0000-0000-0000-000000000015",
+            "conversationId": "installation-bob",
+            "outgoing": false,
+            "body": "hello",
+            "state": "DELIVERED",
+            "createdAt": 42
+          }
+        },
+        {
+          "ok": true,
+          "result": {
+            "id": "00000000-0000-0000-0000-000000000015",
+            "conversationId": "installation-bob",
+            "outgoing": false,
+            "body": "hello",
+            "state": "DELIVERED",
+            "createdAt": 42
+          }
+        }
+      ],
+      "expectedEvents": [
+        {"type": "message_received", "messageId": "00000000-0000-0000-0000-000000000015", "text": "hello"},
+        {"type": "message_state_changed", "messageId": "00000000-0000-0000-0000-000000000015", "state": "DELIVERED"},
+        {"type": "conversation_read_changed", "conversationId": "installation-bob", "unreadCount": 1},
+        {"type": "changed", "kind": "conversations"}
+      ],
+      "expectedFinalState": {
+        "messages": [
+          {"conversationId": "installation-bob", "body": "hello", "state": "DELIVERED"}
+        ],
+        "conversations": [
+          {"id": "installation-bob", "unreadCount": 1, "lastMessagePreview": "hello"}
+        ]
+      }
+    },
+    {
+      "id": "07_pairing_peer_rejection",
+      "initialState": {
+        "pairingOutbox": [
+          {
+            "pairingId": "pairing-2",
+            "capability": "chat",
+            "expiresAt": 9999999999,
+            "state": "PENDING",
+            "received": false,
+            "availableActions": ["CANCEL"]
+          }
+        ]
+      },
+      "commands": [
+        {
+          "method": "applyPairingPeerOutcome",
+          "params": {"pairingId": "pairing-2", "outcome": "REJECTION_RECEIVED"}
+        }
+      ],
+      "expectedEvents": [
+        {"type": "invite_state_changed", "pairingId": "pairing-2", "state": "REJECTED"}
+      ],
+      "expectedFinalState": {
+        "pairingOutbox": [
+          {"pairingId": "pairing-2", "state": "REJECTED"}
+        ]
+      }
+    },
+    {
+      "id": "08_invalid_transition",
+      "initialState": {
+        "messages": [
+          {
+            "id": "00000000-0000-0000-0000-000000000003",
+            "conversationId": "installation-bob",
+            "outgoing": true,
+            "body": "done",
+            "state": "DELIVERED",
+            "createdAt": 42
+          }
+        ]
+      },
+      "commands": [
+        {
+          "method": "applyMessageTransportOutcome",
+          "params": {"messageId": "00000000-0000-0000-0000-000000000003", "outcome": "RETRYABLE_FAILURE"}
+        }
+      ],
+      "expectedResponses": [
+        {"ok": false}
+      ]
+    },
+    {
+      "id": "09_pairing_accept",
+      "initialState": {
+        "pairingInbox": [
+          {
+            "pairingId": "pairing-accept",
+            "sender": {
+              "installationId": "installation-bob",
+              "nickname": "Bob",
+              "publicKey": "bob-public-key",
+              "fingerprint": "bob-fingerprint",
+              "verification": "UNVERIFIED"
+            },
+            "capability": "chat",
+            "expiresAt": 9999999999,
+            "state": "PENDING",
+            "received": true,
+            "availableActions": ["ACCEPT", "REJECT"]
+          }
+        ]
+      },
+      "commands": [
+        {"method": "prepareAcceptPairing", "params": {"pairingId": "pairing-accept"}},
+        {
+          "method": "commitAcceptPairing",
+          "params": {
+            "pairingId": "pairing-accept",
+            "offerInviteId": "offer-1",
+            "offerPayload": "offer-payload"
+          }
+        }
+      ],
+      "expectedResponses": [
+        {"ok": true, "result": {"pairingId": "pairing-accept", "recipientInstallationId": "installation-bob", "capability": "chat"}},
+        {"ok": true, "result": {"pairingId": "pairing-accept", "recipientInstallationId": "installation-bob", "kind": "OFFER", "payload": "offer-payload"}}
+      ],
+      "expectedEvents": [
+        {"type": "invite_state_changed", "pairingId": "pairing-accept", "state": "ACCEPTED"}
+      ],
+      "expectedFinalState": {
+        "pairingInbox": [
+          {"pairingId": "pairing-accept", "state": "ACCEPTED", "offerInviteId": "offer-1", "offerPayload": "offer-payload"}
+        ]
+      }
+    },
+    {
+      "id": "10_pairing_reject",
+      "initialState": {
+        "pairingInbox": [
+          {
+            "pairingId": "pairing-reject",
+            "sender": {
+              "installationId": "installation-bob",
+              "nickname": "Bob",
+              "publicKey": "bob-public-key",
+              "fingerprint": "bob-fingerprint",
+              "verification": "UNVERIFIED"
+            },
+            "capability": "chat",
+            "expiresAt": 9999999999,
+            "state": "PENDING",
+            "received": true,
+            "availableActions": ["ACCEPT", "REJECT"]
+          }
+        ]
+      },
+      "commands": [
+        {"method": "prepareRejectPairing", "params": {"pairingId": "pairing-reject"}},
+        {"method": "commitRejectPairing", "params": {"pairingId": "pairing-reject"}}
+      ],
+      "expectedResponses": [
+        {"ok": true, "result": {"pairingId": "pairing-reject", "recipientInstallationId": "installation-bob", "capability": "chat"}},
+        {"ok": true, "result": {"pairingId": "pairing-reject", "recipientInstallationId": "installation-bob", "kind": "REJECTION"}}
+      ],
+      "expectedEvents": [
+        {"type": "invite_state_changed", "pairingId": "pairing-reject", "state": "REJECTED"}
+      ],
+      "expectedFinalState": {
+        "pairingInbox": [
+          {"pairingId": "pairing-reject", "state": "REJECTED"}
+        ]
+      }
+    },
+    {
+      "id": "11_pairing_cancel",
+      "initialState": {
+        "pairingOutbox": [
+          {
+            "pairingId": "pairing-cancel",
+            "capability": "chat",
+            "expiresAt": 9999999999,
+            "state": "PENDING",
+            "received": false,
+            "availableActions": ["CANCEL"]
+          }
+        ]
+      },
+      "commands": [
+        {"method": "prepareCancelPairing", "params": {"pairingId": "pairing-cancel"}},
+        {"method": "confirmPairingCancelled", "params": {"pairingId": "pairing-cancel"}}
+      ],
+      "expectedResponses": [
+        {"ok": true, "result": {"pairingId": "pairing-cancel"}},
+        {"ok": true, "result": true}
+      ],
+      "expectedEvents": [
+        {"type": "invite_state_changed", "pairingId": "pairing-cancel", "state": "CANCELLED"}
+      ],
+      "expectedFinalState": {
+        "pairingOutbox": [
+          {"pairingId": "pairing-cancel", "state": "CANCELLED"}
+        ]
+      }
+    },
+    {
+      "id": "12_welcome_accept",
+      "initialState": {
+        "pairingInbox": [
+          {
+            "pairingId": "pairing-welcome",
+            "sender": {
+              "installationId": "installation-bob",
+              "nickname": "Bob",
+              "publicKey": "bob-public-key",
+              "fingerprint": "bob-fingerprint",
+              "verification": "UNVERIFIED"
+            },
+            "capability": "chat",
+            "expiresAt": 9999999999,
+            "state": "ACCEPTED",
+            "received": true,
+            "availableActions": ["ARCHIVE"],
+            "offerInviteId": "offer-welcome",
+            "offerPayload": "offer-payload"
+          }
+        ]
+      },
+      "commands": [
+        {
+          "method": "welcomeAccepted",
+          "params": {
+            "contact": {
+              "installationId": "installation-bob",
+              "nickname": "Bob",
+              "publicKey": "bob-public-key",
+              "fingerprint": "bob-fingerprint",
+              "verification": "VERIFIED"
+            },
+            "openConversation": true,
+            "inviteId": "offer-welcome"
+          }
+        }
+      ],
+      "expectedResponses": [
+        {"ok": true, "result": {"conversation": {"id": "installation-bob", "status": "VERIFYING"}, "confirmContact": {"pairingId": "pairing-welcome", "capability": "chat", "peerInstallationId": "installation-bob"}}}
+      ],
+      "expectedEvents": [
+        {"type": "changed", "kind": "contacts"},
+        {"type": "changed", "kind": "conversations"},
+        {"type": "invite_state_changed", "pairingId": "pairing-welcome", "state": "COMPLETED"}
+      ],
+      "expectedFinalState": {
+        "pairingInbox": [
+          {"pairingId": "pairing-welcome", "state": "COMPLETED"}
+        ],
+        "conversations": [
+          {"id": "installation-bob", "status": "VERIFYING", "unreadCount": 0}
+        ]
+      }
+    },
+    {
+      "id": "13_expiry_seconds",
+      "initialState": {
+        "pairingInbox": [
+          {
+            "pairingId": "pairing-expired",
+            "capability": "chat",
+            "expiresAt": 41,
+            "state": "PENDING",
+            "received": true,
+            "availableActions": ["ACCEPT", "REJECT"]
+          }
+        ]
+      },
+      "commands": [
+        {"method": "pairingInbox"}
+      ],
+      "expectedResponses": [
+        {"ok": true, "result": {"items": [{"pairingId": "pairing-expired", "state": "EXPIRED"}]}}
+      ],
+      "expectedEvents": [
+        {"type": "invite_state_changed", "pairingId": "pairing-expired", "state": "EXPIRED"}
+      ],
+      "expectedFinalState": {
+        "pairingInbox": [
+          {"pairingId": "pairing-expired", "state": "EXPIRED"}
+        ]
+      }
+    },
+    {
+      "id": "14_unknown_enum",
+      "commands": [
+        {
+          "method": "mergePairingInbox",
+          "params": {
+            "items": [
+              {
+                "pairingId": "pairing-bad",
+                "capability": "chat",
+                "expiresAt": 9999999999,
+                "state": "NOPE",
+                "received": true,
+                "availableActions": []
+              }
+            ]
+          }
+        }
+      ],
+      "expectedResponses": [
+        {"ok": false}
+      ]
+    },
+    {
+      "id": "15_duplicate_receive_idempotent",
+      "initialState": {
+        "conversations": [
+          {
+            "id": "installation-bob",
+            "contactInstallationId": "installation-bob",
+            "status": "ACTIVE",
+            "lastMessagePreview": "",
+            "lastMessageAt": 0,
+            "unreadCount": 0
+          }
+        ]
+      },
+      "commands": [
+        {
+          "method": "receiveMessage",
+          "params": {
+            "id": "installation-bob",
+            "text": "hello",
+            "messageId": "00000000-0000-0000-0000-000000000010"
+          }
+        },
+        {
+          "method": "receiveMessage",
+          "params": {
+            "id": "installation-bob",
+            "text": "hello",
+            "messageId": "00000000-0000-0000-0000-000000000010"
+          }
+        }
+      ],
+      "expectedResponses": [
+        {"ok": true, "result": {"id": "00000000-0000-0000-0000-000000000010", "body": "hello"}},
+        {"ok": true, "result": {"id": "00000000-0000-0000-0000-000000000010", "body": "hello"}}
+      ],
+      "expectedEvents": [
+        {"type": "message_received", "messageId": "00000000-0000-0000-0000-000000000010", "text": "hello"},
+        {"type": "message_state_changed", "messageId": "00000000-0000-0000-0000-000000000010", "state": "DELIVERED"},
+        {"type": "conversation_read_changed", "conversationId": "installation-bob", "unreadCount": 1},
+        {"type": "changed", "kind": "conversations"}
+      ],
+      "expectedFinalState": {
+        "messages": [
+          {
+            "id": "00000000-0000-0000-0000-000000000010",
+            "conversationId": "installation-bob",
+            "outgoing": false,
+            "body": "hello",
+            "state": "DELIVERED"
+          }
+        ],
+        "conversations": [
+          {"id": "installation-bob", "unreadCount": 1, "lastMessagePreview": "hello"}
+        ]
+      }
+    },
+    {
+      "id": "16_sent_retries_back_to_queued",
+      "initialState": {
+        "contacts": [
+          {
+            "installationId": "installation-bob",
+            "nickname": "Bob",
+            "publicKey": "bob-public-key",
+            "fingerprint": "bob-fingerprint",
+            "verification": "VERIFIED"
+          }
+        ],
+        "conversations": [
+          {
+            "id": "installation-bob",
+            "contactInstallationId": "installation-bob",
+            "status": "ACTIVE",
+            "lastMessagePreview": "retry me",
+            "lastMessageAt": 100,
+            "unreadCount": 0
+          }
+        ],
+        "messages": [
+          {
+            "id": "00000000-0000-0000-0000-000000000020",
+            "conversationId": "installation-bob",
+            "outgoing": true,
+            "body": "retry me",
+            "state": "SENT",
+            "createdAt": 100,
+            "nextAttemptAt": 0
+          }
+        ]
+      },
+      "commands": [
+        {
+          "method": "applyMessageTransportOutcome",
+          "params": {
+            "messageId": "00000000-0000-0000-0000-000000000020",
+            "outcome": "RETRYABLE_FAILURE"
+          }
+        },
+        {"method": "preparePendingSendEffects"}
+      ],
+      "expectedResponses": [
+        {"ok": true, "result": {"state": "QUEUED"}},
+        {
+          "ok": true,
+          "result": [
+            {
+              "messageId": "00000000-0000-0000-0000-000000000020",
+              "conversationId": "installation-bob",
+              "recipientInstallationId": "installation-bob",
+              "body": "retry me"
+            }
+          ]
+        }
+      ],
+      "expectedEvents": [
+        {"type": "message_state_changed", "messageId": "00000000-0000-0000-0000-000000000020", "state": "QUEUED"},
+        {"type": "message_state_changed", "messageId": "00000000-0000-0000-0000-000000000020", "state": "SENDING"}
+      ]
+    },
+    {
+      "id": "17_delivered_stays_delivered_on_retryable_failure",
+      "initialState": {
+        "conversations": [
+          {
+            "id": "installation-bob",
+            "contactInstallationId": "installation-bob",
+            "status": "ACTIVE",
+            "lastMessagePreview": "done",
+            "lastMessageAt": 100,
+            "unreadCount": 0
+          }
+        ],
+        "messages": [
+          {
+            "id": "00000000-0000-0000-0000-000000000021",
+            "conversationId": "installation-bob",
+            "outgoing": true,
+            "body": "done",
+            "state": "DELIVERED",
+            "createdAt": 100,
+            "nextAttemptAt": 0
+          }
+        ]
+      },
+      "commands": [
+        {
+          "method": "applyMessageTransportOutcome",
+          "params": {
+            "messageId": "00000000-0000-0000-0000-000000000021",
+            "outcome": "RETRYABLE_FAILURE"
+          }
+        }
+      ],
+      "expectedResponses": [
+        {"ok": false}
+      ],
+      "expectedEvents": []
+    }
+  ]
+}
+
