@@ -26,6 +26,7 @@ pub trait RuntimeStorage {
 
     fn messages(&self, conversation_id: &str) -> RuntimeResult<Vec<ChatMessage>>;
     fn put_message(&mut self, message: ChatMessage) -> RuntimeResult<()>;
+    fn delete_message(&mut self, message_id: &str) -> RuntimeResult<()>;
     fn pending_messages(&self) -> RuntimeResult<Vec<ChatMessage>>;
     fn pending_receipts(&self) -> RuntimeResult<Vec<ReceiptSendEffect>> {
         Ok(Vec::new())

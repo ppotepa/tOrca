@@ -11,8 +11,9 @@ ThemeData buildTorChatTheme({
 }) => switch (brightness) {
   TorChatBrightnessMode.light => TorChatThemeRegistry.light(family),
   TorChatBrightnessMode.dark => TorChatThemeRegistry.dark(family),
-  _ => WidgetsBinding.instance.platformDispatcher.platformBrightness ==
-      Brightness.dark
-  ? TorChatThemeRegistry.dark(family)
-  : TorChatThemeRegistry.light(family),
+  _ =>
+    WidgetsBinding.instance.platformDispatcher.platformBrightness ==
+            Brightness.dark
+        ? TorChatThemeRegistry.dark(family)
+        : TorChatThemeRegistry.light(family),
 };

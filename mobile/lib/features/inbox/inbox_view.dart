@@ -51,12 +51,12 @@ class _InboxViewState extends State<InboxView> {
         segments: [
           ButtonSegment(
             value: 0,
-            icon: const Icon(Icons.move_to_inbox_outlined),
+            icon: const ThemedIcon(Icons.move_to_inbox_outlined),
             label: Text('Inbox (${widget.inbox.length})'),
           ),
           ButtonSegment(
             value: 1,
-            icon: const Icon(Icons.outbox_outlined),
+            icon: const ThemedIcon(Icons.outbox_outlined),
             label: Text('Outbox (${widget.outbox.length})'),
           ),
         ],
@@ -216,7 +216,7 @@ class _InboxCard extends StatelessWidget {
                       dimension: 18,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : Icon(Icons.check, size: theme.actionIconSize),
+                  : ThemedIcon(Icons.check, size: theme.actionIconSize),
             ),
           if (canReject)
             OutlinedButton(
@@ -235,7 +235,7 @@ class _InboxCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(theme.actionRadius),
                 ),
               ),
-              child: Icon(Icons.close, size: theme.actionIconSize),
+              child: ThemedIcon(Icons.close, size: theme.actionIconSize),
             ),
         ],
       ),
@@ -254,7 +254,10 @@ class _InboxCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(theme.actionRadius),
                 ),
               ),
-              icon: Icon(Icons.archive_outlined, size: theme.actionIconSize),
+              icon: ThemedIcon(
+                Icons.archive_outlined,
+                size: theme.actionIconSize,
+              ),
               label: const Text('Archiwizuj'),
             )
           : PairingStatusChip(label: request.status.label),
@@ -296,7 +299,7 @@ class _SwipeAction extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, color: foreground, size: theme.actionIconSize),
+          ThemedIcon(icon, color: foreground, size: theme.actionIconSize),
           const SizedBox(width: 8),
           Text(
             label,
@@ -327,7 +330,7 @@ class _OutboxCard extends StatelessWidget {
     final canCancel = request.can(PairingAvailableAction.cancel);
     final theme = context.inboxTheme;
     return PairingRecordCard(
-      leading: CircleAvatar(child: Icon(request.status.outboxIcon)),
+      leading: CircleAvatar(child: ThemedIcon(request.status.outboxIcon)),
       title: outboxTitle(request),
       subtitle: 'Kod został przyjęty przez relay\n${request.status.label}',
       status: request.status,
@@ -343,7 +346,7 @@ class _OutboxCard extends StatelessWidget {
             borderRadius: BorderRadius.circular(theme.actionRadius),
           ),
         ),
-        icon: Icon(Icons.cancel_outlined, size: theme.actionIconSize),
+        icon: ThemedIcon(Icons.cancel_outlined, size: theme.actionIconSize),
         label: const Text('Anuluj'),
       ),
       completedTrailing: PairingStatusChip(label: request.status.label),

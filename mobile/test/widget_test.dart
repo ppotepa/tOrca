@@ -37,6 +37,19 @@ class _SplashRuntime implements ClientRuntime {
   @override
   Future<void> verifyContact(String installationId) async {}
   @override
+  Future<ContactRecord> updateContactSettings(
+    String installationId, {
+    String? localAlias,
+    required bool muted,
+    required bool blocked,
+  }) async => const ContactRecord(
+    id: '',
+    nickname: '',
+    fingerprint: '',
+    publicKey: '',
+    verified: false,
+  );
+  @override
   Future<List<ContactRecord>> contacts() async => const [];
   @override
   Future<List<ConversationSummary>> conversations() async => const [];
@@ -50,7 +63,21 @@ class _SplashRuntime implements ClientRuntime {
   @override
   Future<void> startConversation(String contactId) async {}
   @override
-  Future<void> sendMessage(String id, String text) async {}
+  Future<void> sendMessage(
+    String id,
+    String text, {
+    String? replyToMessageId,
+  }) async {}
+  @override
+  Future<void> retryMessage(String messageId) async {}
+  @override
+  Future<void> deleteMessageLocal(String messageId) async {}
+  @override
+  Future<void> setTyping(String conversationId, bool typing) async {}
+  @override
+  Future<void> setPresence(bool online) async {}
+  @override
+  Future<void> sendReadReceipts(String conversationId) async {}
 
   @override
   Future<void> updateAppVisibility(bool foreground) async {}

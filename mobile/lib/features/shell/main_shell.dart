@@ -15,7 +15,6 @@ import '../../shared/widgets/section_card.dart';
 import '../../shared/widgets/tor_status_bar.dart';
 import '../chats/chats_view.dart';
 import '../contacts/contacts_view.dart';
-import '../inbox/inbox_view.dart';
 
 class MainShell extends StatelessWidget {
   const MainShell({
@@ -30,9 +29,6 @@ class MainShell extends StatelessWidget {
     required this.contacts,
     required this.conversations,
     required this.messages,
-    required this.inbox,
-    required this.outbox,
-    required this.activeInviteCount,
     required this.selectedConversation,
     required this.selectedContact,
     required this.search,
@@ -47,15 +43,17 @@ class MainShell extends StatelessWidget {
     required this.onScanInvite,
     required this.onShowInvite,
     required this.onSend,
+    required this.onTypingChanged,
+    required this.onRetryMessage,
+    required this.onDeleteMessage,
     required this.onVerifyContact,
+    required this.onUpdateContactSettings,
     required this.onBack,
-    required this.onAcceptRequest,
-    required this.onRejectRequest,
-    required this.onArchiveRequest,
-    required this.onCancelRequest,
     required this.onOpenAccount,
     required this.onOpenSettings,
     required this.onRetryTor,
+    required this.typingContacts,
+    required this.onlineContacts,
   });
   final MobileTab tab;
   final String nickname, fingerprint, ownInvite, status, error, notice, action;
@@ -64,24 +62,24 @@ class MainShell extends StatelessWidget {
   final List<ContactRecord> contacts;
   final List<ConversationSummary> conversations;
   final List<ChatMessage> messages;
-  final List<ContactRequest> inbox;
-  final List<PairingItem> outbox;
-  final int activeInviteCount;
   final String? selectedConversation;
   final ContactRecord? selectedContact;
   final TextEditingController search, composer;
   final ValueChanged<MobileTab> onTab;
-  final VoidCallback onSearch, onSend, onBack;
+  final VoidCallback onSearch, onBack;
+  final ValueChanged<String?> onSend;
+  final ValueChanged<bool> onTypingChanged;
+  final ValueChanged<String> onRetryMessage, onDeleteMessage;
   final ValueChanged<String> onVerifyContact;
+  final Future<void> Function(ContactRecord, String?, bool, bool)
+  onUpdateContactSettings;
   final ValueChanged<String> onOpenConversation;
   final ValueChanged<ContactRecord> onStartConversation;
   final VoidCallback onScanInvite, onShowInvite;
-  final ValueChanged<ContactRequest> onAcceptRequest, onRejectRequest;
-  final ValueChanged<ContactRequest> onArchiveRequest;
-  final ValueChanged<PairingItem> onCancelRequest;
   final VoidCallback onOpenAccount;
   final VoidCallback onOpenSettings;
   final VoidCallback onRetryTor;
+  final Map<String, bool> typingContacts, onlineContacts;
 
   Widget _content(BuildContext context, {bool desktop = false}) =>
       tab == MobileTab.chats
@@ -93,6 +91,9 @@ class MainShell extends StatelessWidget {
           composer: composer,
           onOpenConversation: onOpenConversation,
           onSend: onSend,
+          onTypingChanged: onTypingChanged,
+          onRetryMessage: onRetryMessage,
+          onDeleteMessage: onDeleteMessage,
           onVerifyContact: onVerifyContact,
           onBack: onBack,
           error: error,
@@ -106,36 +107,30 @@ class MainShell extends StatelessWidget {
                     item.id == selectedConversation &&
                     item.state == ConversationState.active,
               ),
+          peerTyping:
+              selectedConversation != null &&
+              (typingContacts[selectedConversation] ?? false),
+          peerOnline:
+              selectedContact != null &&
+              (onlineContacts[selectedContact!.id] ?? false),
         )
-      : tab == MobileTab.contacts
-      ? ContactsView(
+      : ContactsView(
           saved: contacts,
           search: search,
           onSearch: onSearch,
           onSelect: onStartConversation,
           onScanInvite: onScanInvite,
           onShowInvite: onShowInvite,
+          onUpdateContactSettings: onUpdateContactSettings,
           fingerprint: fingerprint,
           ownInvite: ownInvite,
           error: error,
           notice: notice,
           busy: action.isNotEmpty,
           showContactList: !desktop,
-        )
-      : InboxView(
-          inbox: inbox,
-          outbox: outbox,
-          onAccept: onAcceptRequest,
-          onReject: onRejectRequest,
-          onArchive: onArchiveRequest,
-          onCancel: onCancelRequest,
-          error: error,
-          notice: notice,
-          action: action,
         );
 
   int get unreadTotal => conversations.totalUnread;
-  int get inboxTotal => activeInviteCount;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -150,7 +145,6 @@ class MainShell extends StatelessWidget {
             conversations: conversations,
             selectedConversation: selectedConversation,
             unreadTotal: unreadTotal,
-            inboxTotal: inboxTotal,
             action: action,
             onTab: onTab,
             onOpenConversation: onOpenConversation,
@@ -176,12 +170,12 @@ class MainShell extends StatelessWidget {
                 IconButton(
                   tooltip: 'Konto',
                   onPressed: onOpenAccount,
-                  icon: const Icon(Icons.person_outline, size: 18),
+                  icon: const ThemedIcon(Icons.person_outline, size: 18),
                 ),
                 IconButton(
                   tooltip: 'Tor',
                   onPressed: onRetryTor,
-                  icon: const Icon(Icons.eco_outlined, size: 18),
+                  icon: const ThemedIcon(Icons.eco_outlined, size: 18),
                 ),
               ],
             ),
@@ -212,46 +206,19 @@ class MainShell extends StatelessWidget {
                       NavigationDestination(
                         icon: CounterBadge(
                           count: unreadTotal,
-                          child: const Icon(Icons.chat_bubble_outline),
+                          child: const ThemedIcon(Icons.chat_bubble_outline),
                         ),
                         label: 'Czaty',
                       ),
                       NavigationDestination(
-                        icon: Icon(Icons.people_outline),
+                        icon: ThemedIcon(Icons.people_outline),
                         label: 'Kontakty',
-                      ),
-                      NavigationDestination(
-                        icon: _InboxNavIcon(count: inboxTotal),
-                        label: 'Inbox',
                       ),
                     ],
                   )
                 : null,
           ),
   );
-}
-
-class _InboxNavIcon extends StatelessWidget {
-  const _InboxNavIcon({required this.count});
-  final int count;
-
-  @override
-  Widget build(BuildContext context) {
-    final pending = count > 0;
-    return CounterBadge(
-      count: count,
-      glow: true,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 260),
-        padding: const EdgeInsets.all(3),
-        decoration: const BoxDecoration(),
-        child: Icon(
-          Icons.mark_email_unread_outlined,
-          color: pending ? context.statusTheme.warning : null,
-        ),
-      ),
-    );
-  }
 }
 
 class DesktopMainShell extends StatelessWidget {
@@ -266,7 +233,6 @@ class DesktopMainShell extends StatelessWidget {
     required this.conversations,
     required this.selectedConversation,
     required this.unreadTotal,
-    required this.inboxTotal,
     required this.action,
     required this.onTab,
     required this.onOpenConversation,
@@ -285,7 +251,7 @@ class DesktopMainShell extends StatelessWidget {
   final List<ConversationSummary> conversations;
   final String? selectedConversation;
   final String action;
-  final int unreadTotal, inboxTotal;
+  final int unreadTotal;
   final ValueChanged<MobileTab> onTab;
   final ValueChanged<String> onOpenConversation;
   final ValueChanged<ContactRecord> onStartConversation;
@@ -331,24 +297,22 @@ class DesktopMainShell extends StatelessWidget {
                       tab: tab,
                       nickname: nickname,
                       unreadTotal: unreadTotal,
-                      inboxTotal: inboxTotal,
                       onTab: onTab,
                       onAccount: onAccount,
                       onSettings: onSettings,
                     ),
                   ),
-                  if (tab != MobileTab.inbox)
-                    SizedBox(
-                      width: listWidth,
-                      child: DesktopListPane(
-                        tab: tab,
-                        contacts: contacts,
-                        conversations: conversations,
-                        selectedConversation: selectedConversation,
-                        onOpenConversation: onOpenConversation,
-                        onStartConversation: onStartConversation,
-                      ),
+                  SizedBox(
+                    width: listWidth,
+                    child: DesktopListPane(
+                      tab: tab,
+                      contacts: contacts,
+                      conversations: conversations,
+                      selectedConversation: selectedConversation,
+                      onOpenConversation: onOpenConversation,
+                      onStartConversation: onStartConversation,
                     ),
+                  ),
                   Expanded(
                     child: ColoredBox(
                       color: Theme.of(context).scaffoldBackgroundColor,
@@ -382,14 +346,13 @@ class DesktopRail extends StatelessWidget {
     required this.tab,
     required this.nickname,
     required this.unreadTotal,
-    required this.inboxTotal,
     required this.onTab,
     required this.onAccount,
     required this.onSettings,
   });
   final MobileTab tab;
   final String nickname;
-  final int unreadTotal, inboxTotal;
+  final int unreadTotal;
   final ValueChanged<MobileTab> onTab;
   final VoidCallback onAccount;
   final VoidCallback onSettings;
@@ -410,7 +373,7 @@ class DesktopRail extends StatelessWidget {
             padding: EdgeInsets.fromLTRB(16, 16, 16, 14),
             child: Row(
               children: [
-                Icon(Icons.eco_outlined, size: 18),
+                ThemedIcon(Icons.eco_outlined, size: 18),
                 SizedBox(width: 8),
                 Text('TorChat'),
               ],
@@ -421,20 +384,13 @@ class DesktopRail extends StatelessWidget {
           for (final item in [
             (MobileTab.chats, Icons.chat_bubble_outline, 'Czaty'),
             (MobileTab.contacts, Icons.people_outline, 'Kontakty'),
-            (MobileTab.inbox, Icons.inbox_outlined, 'Inbox'),
           ])
             DesktopNavItem(
               selected: tab == item.$1,
               icon: item.$2,
               label: item.$3,
-              alert:
-                  (item.$1 == MobileTab.chats && unreadTotal > 0) ||
-                  (item.$1 == MobileTab.inbox && inboxTotal > 0),
-              badge: item.$1 == MobileTab.chats
-                  ? unreadTotal
-                  : item.$1 == MobileTab.inbox
-                  ? inboxTotal
-                  : 0,
+              alert: item.$1 == MobileTab.chats && unreadTotal > 0,
+              badge: item.$1 == MobileTab.chats ? unreadTotal : 0,
               onPressed: () => onTab(item.$1),
             ),
           const Spacer(),
@@ -513,7 +469,7 @@ class DesktopNavItem extends StatelessWidget {
               borderRadius: BorderRadius.zero,
             ),
           ),
-          icon: Icon(icon, size: 18),
+          icon: ThemedIcon(icon, size: 18),
           label: Row(
             children: [
               Expanded(child: Text(label, overflow: TextOverflow.ellipsis)),
@@ -561,12 +517,10 @@ class DesktopListPane extends StatelessWidget {
               title: switch (tab) {
                 MobileTab.chats => 'Czaty',
                 MobileTab.contacts => 'Kontakty',
-                MobileTab.inbox => 'Inbox',
               },
               subtitle: switch (tab) {
                 MobileTab.chats => 'Wybierz rozmowę',
                 MobileTab.contacts => 'Wybierz kontakt',
-                MobileTab.inbox => 'Zaproszenia do rozmów',
               },
             ),
           ),
@@ -644,7 +598,7 @@ class DesktopInspector extends StatelessWidget {
         children: [
           IdentitySection(
             title: 'TOŻSAMOŚĆ',
-            name: contact.nickname,
+            name: contact.displayName,
             subtitle: 'Kontakt lokalny',
             fingerprint: contact.fingerprint,
           ),
@@ -665,7 +619,7 @@ class DesktopInspector extends StatelessWidget {
           const Divider(),
           TextButton.icon(
             onPressed: onBack,
-            icon: const Icon(Icons.arrow_back),
+            icon: const ThemedIcon(Icons.arrow_back),
             label: const Text('Zamknij rozmowę'),
           ),
         ],

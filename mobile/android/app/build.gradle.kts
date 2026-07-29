@@ -1,3 +1,5 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -27,8 +29,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_17.toString()
+    kotlin {
+        compilerOptions {
+            jvmTarget = JvmTarget.JVM_17
+        }
     }
 
     defaultConfig {
@@ -49,6 +53,12 @@ android {
     }
 
     buildFeatures { buildConfig = true }
+
+    sourceSets {
+        getByName("main").jniLibs.setSrcDirs(
+            listOf(layout.buildDirectory.dir("generated/jniLibs").get().asFile),
+        )
+    }
 
     buildTypes {
         debug {

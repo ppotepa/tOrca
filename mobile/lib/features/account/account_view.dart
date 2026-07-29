@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../app/app_theme.dart';
 import '../../shared/widgets/action_tile.dart';
 import '../../shared/widgets/action_section.dart';
 import '../../shared/widgets/identity_section.dart';
@@ -40,13 +41,13 @@ class AccountView extends StatelessWidget {
           child: Column(
             children: [
               ActionTile(
-                leading: const Icon(Icons.qr_code_2),
+                leading: const ThemedIcon(Icons.qr_code_2),
                 title: 'Mój kod zaproszenia',
                 subtitle: 'Kod jest widoczny tylko w osobnym oknie',
                 onTap: onShowInvite,
               ),
               ActionTile(
-                leading: const Icon(Icons.settings_outlined),
+                leading: const ThemedIcon(Icons.settings_outlined),
                 title: 'Ustawienia',
                 subtitle: 'Otwórz ustawienia aplikacji',
                 onTap: onOpenSettings,

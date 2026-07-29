@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../app/app_theme.dart';
 import '../../shared/widgets/action_tile.dart';
@@ -6,7 +7,7 @@ import '../../shared/widgets/action_section.dart';
 import '../../shared/widgets/callout_card.dart';
 import '../../shared/widgets/info_tile.dart';
 
-class SettingsView extends StatelessWidget {
+class SettingsView extends StatefulWidget {
   const SettingsView({
     super.key,
     required this.nickname,
@@ -27,6 +28,46 @@ class SettingsView extends StatelessWidget {
   final VoidCallback onReset;
 
   @override
+  State<SettingsView> createState() => _SettingsViewState();
+}
+
+class _SettingsViewState extends State<SettingsView> {
+  bool _notifications = true;
+  bool _sound = true;
+  bool _vibration = true;
+  bool _preview = false;
+  bool _pairingAlerts = true;
+  bool _readReceipts = false;
+  bool _typing = true;
+  bool _presence = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPreferences();
+  }
+
+  Future<void> _loadPreferences() async {
+    final store = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _notifications = store.getBool('torchat.notifications.enabled') ?? true;
+      _sound = store.getBool('torchat.notifications.sound') ?? true;
+      _vibration = store.getBool('torchat.notifications.vibration') ?? true;
+      _preview = store.getBool('torchat.notifications.preview') ?? false;
+      _pairingAlerts = store.getBool('torchat.notifications.pairing') ?? true;
+      _readReceipts = store.getBool('torchat.privacy.readReceipts') ?? false;
+      _typing = store.getBool('torchat.privacy.typing') ?? true;
+      _presence = store.getBool('torchat.privacy.presence') ?? true;
+    });
+  }
+
+  Future<void> _set(String key, bool value) async {
+    final store = await SharedPreferences.getInstance();
+    await store.setBool(key, value);
+  }
+
+  @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('Ustawienia')),
     body: ListView(
@@ -38,7 +79,7 @@ class SettingsView extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               InfoTile(
-                leading: const Icon(Icons.palette_outlined),
+                leading: const ThemedIcon(Icons.palette_outlined),
                 title: 'Family',
                 subtitle: 'Classic: klasyczny, Retro: styl retro',
               ),
@@ -54,17 +95,17 @@ class SettingsView extends StatelessWidget {
                     label: Text('Retro'),
                   ),
                 ],
-                selected: {themePreferences.family},
+                selected: {widget.themePreferences.family},
                 onSelectionChanged: (selected) {
                   final family = selected.firstOrNull;
-                  if (family != null) onThemeFamilyChanged(family);
+                  if (family != null) widget.onThemeFamilyChanged(family);
                 },
               ),
               const SizedBox(height: 12),
               InfoTile(
-                leading: const Icon(Icons.brightness_auto_outlined),
+                leading: const ThemedIcon(Icons.brightness_auto_outlined),
                 title: 'Tryb jasności',
-                subtitle: switch (themePreferences.brightness) {
+                subtitle: switch (widget.themePreferences.brightness) {
                   TorChatBrightnessMode.system => 'System',
                   TorChatBrightnessMode.light => 'Jasny',
                   TorChatBrightnessMode.dark => 'Ciemny',
@@ -86,36 +127,111 @@ class SettingsView extends StatelessWidget {
                     label: Text('Ciemny'),
                   ),
                 ],
-                selected: {themePreferences.brightness},
+                selected: {widget.themePreferences.brightness},
                 onSelectionChanged: (selected) {
                   final mode = selected.firstOrNull;
-                  if (mode != null) onBrightnessChanged(mode);
+                  if (mode != null) widget.onBrightnessChanged(mode);
                 },
               ),
             ],
           ),
         ),
+        ActionSection(
+          title: 'POWIADOMIENIA',
+          child: Column(
+            children: [
+              _toggle(
+                'Powiadomienia',
+                'Nowe wiadomości i zaproszenia',
+                _notifications,
+                'torchat.notifications.enabled',
+                (value) => _notifications = value,
+              ),
+              _toggle(
+                'Dźwięk',
+                'Systemowy dźwięk powiadomienia TorChat',
+                _sound,
+                'torchat.notifications.sound',
+                (value) => _sound = value,
+                enabled: _notifications,
+              ),
+              _toggle(
+                'Wibracja',
+                'Wibracja dla zdarzeń przychodzących',
+                _vibration,
+                'torchat.notifications.vibration',
+                (value) => _vibration = value,
+                enabled: _notifications,
+              ),
+              _toggle(
+                'Podgląd treści',
+                'Wyłączone domyślnie dla prywatności',
+                _preview,
+                'torchat.notifications.preview',
+                (value) => _preview = value,
+                enabled: _notifications,
+              ),
+              _toggle(
+                'Zaproszenia do kontaktów',
+                'Powiadamiaj o nowych prośbach pairing',
+                _pairingAlerts,
+                'torchat.notifications.pairing',
+                (value) => _pairingAlerts = value,
+                enabled: _notifications,
+              ),
+            ],
+          ),
+        ),
+        const Divider(),
+        ActionSection(
+          title: 'PRYWATNOŚĆ CZATU',
+          child: Column(
+            children: [
+              _toggle(
+                'Potwierdzenia odczytu',
+                'Informuj kontakt, że wiadomość została odczytana',
+                _readReceipts,
+                'torchat.privacy.readReceipts',
+                (value) => _readReceipts = value,
+              ),
+              _toggle(
+                'Informacja „pisze…”',
+                'Udostępnia chwilową aktywność podczas pisania',
+                _typing,
+                'torchat.privacy.typing',
+                (value) => _typing = value,
+              ),
+              _toggle(
+                'Status online',
+                'Udostępnia tylko bieżącą obecność bez historii',
+                _presence,
+                'torchat.privacy.presence',
+                (value) => _presence = value,
+              ),
+            ],
+          ),
+        ),
         ActionTile(
-          leading: const Icon(Icons.eco_outlined),
+          leading: const ThemedIcon(Icons.eco_outlined),
           title: 'Połączenie Tor',
-          subtitle: torStatus,
-          onTap: onOpenTor,
+          subtitle: widget.torStatus,
+          onTap: widget.onOpenTor,
         ),
         const Divider(),
         ActionSection(
           title: 'TOŻSAMOŚĆ',
           child: ActionTile(
-            leading: const Icon(Icons.person_outline),
+            leading: const ThemedIcon(Icons.person_outline),
             title: 'Profil użytkownika',
-            subtitle: '@$nickname',
-            onTap: onEditProfile,
+            subtitle: '@${widget.nickname}',
+            onTap: widget.onEditProfile,
           ),
         ),
         const Divider(),
         ActionSection(
           title: 'DANE LOKALNE',
           child: CalloutCard(
-            leading: Icon(
+            leading: ThemedIcon(
               Icons.delete_outline,
               color: Theme.of(context).colorScheme.error,
             ),
@@ -128,11 +244,31 @@ class SettingsView extends StatelessWidget {
             child: ActionTile(
               title: 'Wyczyść lokalny stan',
               subtitle: 'Usuwa wszystkie dane testowe i lokalne wpisy',
-              onTap: onReset,
+              onTap: widget.onReset,
             ),
           ),
         ),
       ],
     ),
+  );
+
+  Widget _toggle(
+    String title,
+    String subtitle,
+    bool value,
+    String key,
+    ValueChanged<bool> assign, {
+    bool enabled = true,
+  }) => SwitchListTile(
+    contentPadding: EdgeInsets.zero,
+    title: Text(title),
+    subtitle: Text(subtitle),
+    value: value,
+    onChanged: enabled
+        ? (next) {
+            setState(() => assign(next));
+            _set(key, next);
+          }
+        : null,
   );
 }

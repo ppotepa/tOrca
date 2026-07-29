@@ -31,6 +31,7 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_riverpod: ^2.6.1
+  pixelarticons: ^0.4.0
   shared_preferences: ^2.3.3
 
   qr_flutter: ^4.1.0
@@ -59,6 +60,9 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  assets:
+    - assets/audio/intro.mp3
 
   fonts:
     - family: PressStart2P

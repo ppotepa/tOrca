@@ -14,13 +14,24 @@ abstract interface class ClientRuntime {
   Future<List<PairingItem>> pairingInbox();
   Future<List<PairingItem>> pairingOutbox();
   Future<void> verifyContact(String installationId);
+  Future<ContactRecord> updateContactSettings(
+    String installationId, {
+    String? localAlias,
+    required bool muted,
+    required bool blocked,
+  });
   Future<List<ContactRecord>> contacts();
   Future<List<ConversationSummary>> conversations();
   Future<List<ChatMessage>> messages(String id);
   Future<void> openConversation(String id);
   Future<void> closeConversation();
   Future<void> startConversation(String contactId);
-  Future<void> sendMessage(String id, String text);
+  Future<void> sendMessage(String id, String text, {String? replyToMessageId});
+  Future<void> retryMessage(String messageId) async {}
+  Future<void> deleteMessageLocal(String messageId) async {}
+  Future<void> setTyping(String conversationId, bool typing) async {}
+  Future<void> setPresence(bool online) async {}
+  Future<void> sendReadReceipts(String conversationId) async {}
   Future<void> acceptPairing(String pairingId);
   Future<void> rejectPairing(String pairingId);
   Future<void> cancelPairing(String pairingId);

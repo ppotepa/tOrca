@@ -3,7 +3,10 @@ use crate::{MessageState, MessageTransportOutcome};
 pub fn message_state_on_send_prepare(current: &MessageState) -> Option<MessageState> {
     match current {
         MessageState::Queued | MessageState::Sending => Some(MessageState::Sending),
-        MessageState::Sent | MessageState::Delivered | MessageState::Failed => None,
+        MessageState::Sent
+        | MessageState::Delivered
+        | MessageState::Read
+        | MessageState::Failed => None,
     }
 }
 
@@ -11,7 +14,7 @@ pub fn message_state_after_transport_outcome(
     current: &MessageState,
     outcome: MessageTransportOutcome,
 ) -> Option<MessageState> {
-    use MessageState::{Delivered, Failed, Queued, Sending, Sent};
+    use MessageState::{Delivered, Failed, Queued, Read, Sending, Sent};
     use MessageTransportOutcome::{
         Delivered as OutcomeDelivered, Forwarded, PermanentFailure, RecipientOffline,
         RetryableFailure,
@@ -22,19 +25,21 @@ pub fn message_state_after_transport_outcome(
             Sending => Some(Sent),
             Sent => Some(Sent),
             Delivered => Some(Delivered),
+            Read => Some(Read),
             Queued | Failed => None,
         },
         OutcomeDelivered => match current {
             Sending | Sent | Delivered => Some(Delivered),
+            Read => Some(Read),
             Queued | Failed => None,
         },
         RecipientOffline | RetryableFailure => match current {
             Queued | Sending | Sent => Some(Queued),
-            Delivered | Failed => None,
+            Delivered | Read | Failed => None,
         },
         PermanentFailure => match current {
             Queued | Sending | Sent | Failed => Some(Failed),
-            Delivered => None,
+            Delivered | Read => None,
         },
     }
 }

@@ -611,6 +611,59 @@ where
         self.storage.contacts()
     }
 
+    pub fn update_contact_settings(
+        &mut self,
+        installation_id: &str,
+        local_alias: Option<String>,
+        muted: bool,
+        blocked: bool,
+    ) -> RuntimeResult<ContactRecord> {
+        let mut contact = self
+            .storage
+            .contacts()?
+            .into_iter()
+            .find(|contact| contact.installation_id == installation_id)
+            .ok_or_else(|| RuntimeError::NotFound("contact does not exist".to_owned()))?;
+        contact.local_alias = local_alias
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty());
+        if contact
+            .local_alias
+            .as_ref()
+            .is_some_and(|value| value.chars().count() > 32)
+        {
+            return Err(RuntimeError::InvalidParams(
+                "contact alias must not exceed 32 characters".to_owned(),
+            ));
+        }
+        contact.muted = muted;
+        contact.blocked = blocked;
+        self.storage.put_contact(contact.clone())?;
+        self.session.push_event(RuntimeEvent::Changed {
+            kind: Some("contacts".to_owned()),
+        });
+        Ok(contact)
+    }
+
+    pub fn contact_accepts_messages(&self, installation_id: &str) -> RuntimeResult<bool> {
+        Ok(!self
+            .storage
+            .contacts()?
+            .into_iter()
+            .find(|contact| contact.installation_id == installation_id)
+            .ok_or_else(|| RuntimeError::NotFound("contact does not exist".to_owned()))?
+            .blocked)
+    }
+
+    pub fn contact_allows_notifications(&self, installation_id: &str) -> RuntimeResult<bool> {
+        Ok(self
+            .storage
+            .contacts()?
+            .into_iter()
+            .find(|contact| contact.installation_id == installation_id)
+            .is_some_and(|contact| !contact.blocked && !contact.muted))
+    }
+
     pub fn conversations(&self) -> RuntimeResult<Vec<ConversationSummary>> {
         self.storage.conversations()
     }
@@ -765,14 +818,131 @@ where
         conversation_id: &str,
         text: String,
     ) -> RuntimeResult<MessageSendEffect> {
-        let message = self.queue_outgoing_message(conversation_id, text)?;
+        self.send_message_reply(conversation_id, text, None)
+    }
+
+    pub fn send_message_reply(
+        &mut self,
+        conversation_id: &str,
+        text: String,
+        reply_to_message_id: Option<&str>,
+    ) -> RuntimeResult<MessageSendEffect> {
+        let reply_to = reply_to_message_id
+            .map(|message_id| {
+                self.storage.message(message_id)?.ok_or_else(|| {
+                    RuntimeError::NotFound("reply message does not exist".to_owned())
+                })
+            })
+            .transpose()?
+            .map(|message| {
+                if message.conversation_id != conversation_id {
+                    return Err(RuntimeError::Conflict(
+                        "reply message belongs to another conversation".to_owned(),
+                    ));
+                }
+                Ok(crate::MessageReply {
+                    message_id: message.id,
+                    body: message.body,
+                    outgoing: message.outgoing,
+                })
+            })
+            .transpose()?;
+        let message = self.queue_outgoing_message(conversation_id, text, reply_to)?;
         self.prepare_message_send(&message.id)
+    }
+
+    pub fn retry_message(&mut self, message_id: &str) -> RuntimeResult<MessageSendEffect> {
+        let mut message = self
+            .storage
+            .message(message_id)?
+            .ok_or_else(|| RuntimeError::NotFound("message does not exist".to_owned()))?;
+        if !message.outgoing {
+            return Err(RuntimeError::Conflict(
+                "incoming message cannot be retried".to_owned(),
+            ));
+        }
+        if !matches!(
+            message.state,
+            crate::MessageState::Failed | crate::MessageState::Queued
+        ) {
+            return Err(RuntimeError::Conflict(
+                "message is not eligible for manual retry".to_owned(),
+            ));
+        }
+        let conversation = self
+            .storage
+            .conversations()?
+            .into_iter()
+            .find(|conversation| conversation.id == message.conversation_id)
+            .ok_or_else(|| RuntimeError::NotFound("conversation does not exist".to_owned()))?;
+        let contact = self
+            .storage
+            .contacts()?
+            .into_iter()
+            .find(|contact| contact.installation_id == conversation.contact_installation_id)
+            .ok_or_else(|| RuntimeError::NotFound("recipient contact does not exist".to_owned()))?;
+        if contact.blocked {
+            return Err(RuntimeError::Conflict("contact is blocked".to_owned()));
+        }
+        message.state = crate::MessageState::Queued;
+        message.next_attempt_at = self.clock.now_ms();
+        message.ack_deadline = None;
+        message.last_transport_error = None;
+        self.storage.put_message(message.clone())?;
+        self.session.push_event(RuntimeEvent::MessageStateChanged {
+            message_id: Some(parse_uuid(&message.id)?),
+            state: Some(crate::MessageState::Queued),
+        });
+        self.prepare_message_send(message_id)
+    }
+
+    pub fn delete_message_local(&mut self, message_id: &str) -> RuntimeResult<()> {
+        let message = self
+            .storage
+            .message(message_id)?
+            .ok_or_else(|| RuntimeError::NotFound("message does not exist".to_owned()))?;
+        self.storage.delete_message(message_id)?;
+        self.session.push_event(RuntimeEvent::Changed {
+            kind: Some(format!("messages:{}", message.conversation_id)),
+        });
+        Ok(())
+    }
+
+    pub fn apply_message_read(&mut self, message_id: Uuid) -> RuntimeResult<ChatMessage> {
+        let mut message = self
+            .storage
+            .message(&message_id.to_string())?
+            .ok_or_else(|| RuntimeError::NotFound("message does not exist".to_owned()))?;
+        if !message.outgoing {
+            return Err(RuntimeError::Conflict(
+                "incoming message cannot receive a read receipt".to_owned(),
+            ));
+        }
+        if message.state == crate::MessageState::Read {
+            return Ok(message);
+        }
+        if !matches!(
+            message.state,
+            crate::MessageState::Sent | crate::MessageState::Delivered
+        ) {
+            return Err(RuntimeError::Conflict(
+                "message is not eligible for a read receipt".to_owned(),
+            ));
+        }
+        message.state = crate::MessageState::Read;
+        self.storage.put_message(message.clone())?;
+        self.session.push_event(RuntimeEvent::MessageStateChanged {
+            message_id: Some(message_id),
+            state: Some(crate::MessageState::Read),
+        });
+        Ok(message)
     }
 
     fn queue_outgoing_message(
         &mut self,
         conversation_id: &str,
         text: String,
+        reply_to: Option<crate::MessageReply>,
     ) -> RuntimeResult<ChatMessage> {
         let text = text.trim();
         if text.is_empty() {
@@ -802,6 +972,9 @@ where
                 "contact must be verified before sending".to_owned(),
             ));
         }
+        if contact.blocked {
+            return Err(RuntimeError::Conflict("contact is blocked".to_owned()));
+        }
         let message_id = Uuid::new_v4();
         let created_at = self.clock.now_ms();
         let message = ChatMessage {
@@ -809,6 +982,7 @@ where
             conversation_id: conversation_id.to_owned(),
             outgoing: true,
             body: text.to_owned(),
+            reply_to,
             state: crate::MessageState::Queued,
             created_at,
             attempt_count: 0,
@@ -873,6 +1047,9 @@ where
                 "contact must be verified before sending".to_owned(),
             ));
         }
+        if contact.blocked {
+            return Err(RuntimeError::Conflict("contact is blocked".to_owned()));
+        }
 
         let next_state = crate::message_state_on_send_prepare(&message.state).ok_or_else(|| {
             RuntimeError::Conflict("message is not eligible for a send attempt".to_owned())
@@ -892,6 +1069,7 @@ where
             conversation_id: message.conversation_id,
             recipient_installation_id: contact.installation_id,
             body: message.body,
+            reply_to: message.reply_to,
         })
     }
 
@@ -981,6 +1159,16 @@ where
         body: String,
         message_id: Option<Uuid>,
     ) -> RuntimeResult<ChatMessage> {
+        self.receive_message_reply(conversation_id, body, message_id, None)
+    }
+
+    pub fn receive_message_reply(
+        &mut self,
+        conversation_id: &str,
+        body: String,
+        message_id: Option<Uuid>,
+        reply_to: Option<crate::MessageReply>,
+    ) -> RuntimeResult<ChatMessage> {
         let body = body.trim();
         if body.is_empty() {
             return Err(RuntimeError::InvalidParams(
@@ -1016,6 +1204,7 @@ where
             conversation_id: conversation_id.to_owned(),
             outgoing: false,
             body: body.to_owned(),
+            reply_to,
             state: crate::MessageState::Delivered,
             created_at,
             attempt_count: 0,
@@ -1316,6 +1505,10 @@ mod tests {
             self.messages.push(message);
             Ok(())
         }
+        fn delete_message(&mut self, message_id: &str) -> RuntimeResult<()> {
+            self.messages.retain(|value| value.id != message_id);
+            Ok(())
+        }
         fn pending_messages(&self) -> RuntimeResult<Vec<ChatMessage>> {
             Ok(self
                 .messages
@@ -1330,6 +1523,7 @@ mod tests {
     struct FakeTransport {
         remote_inbox: Vec<PairingItem>,
         submitted: Vec<String>,
+        updated_profiles: Vec<String>,
     }
 
     impl RuntimeTransport for FakeTransport {
@@ -1353,7 +1547,8 @@ mod tests {
                 retry_attempt: 0,
             }
         }
-        fn update_profile(&mut self, _nickname: &str) -> RuntimeResult<()> {
+        fn update_profile(&mut self, nickname: &str) -> RuntimeResult<()> {
+            self.updated_profiles.push(nickname.to_owned());
             Ok(())
         }
         fn refresh_pairing_code(&mut self) -> RuntimeResult<crate::InviteCode> {
@@ -1432,6 +1627,7 @@ mod tests {
                 conversation_id: "peer-1".to_owned(),
                 outgoing: true,
                 body: "hello".to_owned(),
+                reply_to: None,
                 state: MessageState::Queued,
                 created_at: 10,
                 attempt_count: 0,
@@ -1465,6 +1661,7 @@ mod tests {
                 conversation_id: "peer-1".to_owned(),
                 outgoing: true,
                 body: "hello".to_owned(),
+                reply_to: None,
                 state: MessageState::Sending,
                 created_at: 10,
                 attempt_count: 0,
@@ -1483,6 +1680,9 @@ mod tests {
             nickname: "Peer".to_owned(),
             public_key: "pk".to_owned(),
             fingerprint: "fp".to_owned(),
+            local_alias: None,
+            muted: false,
+            blocked: false,
             verification: VerificationState::Verified,
             dev: None,
         }
@@ -1565,6 +1765,7 @@ mod tests {
         let profile = runtime.set_nickname("Alice".to_owned()).unwrap();
 
         assert_eq!(profile.nickname, "Alice");
+        assert_eq!(runtime.transport.updated_profiles, ["Alice"]);
         assert!(matches!(
             runtime.drain_events().as_slice(),
             [RuntimeEvent::ProfileReady { .. }]
@@ -1985,6 +2186,110 @@ mod tests {
         assert!(events.iter().any(|event| matches!(
             event,
             RuntimeEvent::Changed { kind } if kind.as_deref() == Some("conversations")
+        )));
+    }
+
+    #[test]
+    fn retry_failed_message_prepares_a_new_send_attempt() {
+        let mut runtime = runtime_with_sending_message();
+        let message = &mut runtime.storage.messages[0];
+        message.state = MessageState::Failed;
+        message.last_transport_error = Some("offline".to_owned());
+        message.next_attempt_at = 500;
+
+        let effect = runtime
+            .retry_message(&Uuid::from_u128(1).to_string())
+            .unwrap();
+
+        assert_eq!(effect.body, "hello");
+        let message = &runtime.storage.messages[0];
+        assert_eq!(message.state, MessageState::Sending);
+        assert_eq!(message.last_transport_error, None);
+        assert_eq!(message.next_attempt_at, 42);
+    }
+
+    #[test]
+    fn send_reply_snapshots_the_referenced_message() {
+        let mut runtime = runtime_with_sending_message();
+        runtime.storage.messages[0].outgoing = false;
+        runtime.storage.messages[0].state = MessageState::Delivered;
+
+        let effect = runtime
+            .send_message_reply(
+                "peer-1",
+                "answer".to_owned(),
+                Some(&Uuid::from_u128(1).to_string()),
+            )
+            .unwrap();
+
+        let reply = effect.reply_to.expect("reply snapshot");
+        assert_eq!(reply.message_id, Uuid::from_u128(1).to_string());
+        assert_eq!(reply.body, "hello");
+        assert!(!reply.outgoing);
+    }
+
+    #[test]
+    fn read_receipt_advances_only_outgoing_delivered_message() {
+        let mut runtime = runtime_with_sending_message();
+        runtime.storage.messages[0].state = MessageState::Delivered;
+
+        let message = runtime.apply_message_read(Uuid::from_u128(1)).unwrap();
+
+        assert_eq!(message.state, MessageState::Read);
+        assert!(runtime.drain_events().iter().any(|event| matches!(
+            event,
+            RuntimeEvent::MessageStateChanged { state, .. }
+                if *state == Some(MessageState::Read)
+        )));
+    }
+
+    #[test]
+    fn blocked_contact_rejects_new_and_retried_messages() {
+        let mut runtime = runtime_with_sending_message();
+        let updated = runtime
+            .update_contact_settings("peer-1", Some("Local Peer".to_owned()), true, true)
+            .unwrap();
+        assert_eq!(updated.local_alias.as_deref(), Some("Local Peer"));
+        assert!(updated.muted);
+        assert!(updated.blocked);
+
+        let error = runtime
+            .send_message("peer-1", "blocked".to_owned())
+            .unwrap_err();
+        assert!(matches!(error, RuntimeError::Conflict(_)));
+
+        runtime.storage.messages[0].state = MessageState::Failed;
+        let error = runtime
+            .retry_message(&Uuid::from_u128(1).to_string())
+            .unwrap_err();
+        assert!(matches!(error, RuntimeError::Conflict(_)));
+    }
+
+    #[test]
+    fn retry_rejects_an_incoming_message() {
+        let mut runtime = runtime_with_sending_message();
+        runtime.storage.messages[0].outgoing = false;
+        runtime.storage.messages[0].state = MessageState::Failed;
+
+        let error = runtime
+            .retry_message(&Uuid::from_u128(1).to_string())
+            .unwrap_err();
+
+        assert!(matches!(error, RuntimeError::Conflict(_)));
+    }
+
+    #[test]
+    fn delete_message_local_removes_only_local_record_and_emits_refresh() {
+        let mut runtime = runtime_with_sending_message();
+
+        runtime
+            .delete_message_local(&Uuid::from_u128(1).to_string())
+            .unwrap();
+
+        assert!(runtime.storage.messages.is_empty());
+        assert!(runtime.drain_events().iter().any(|event| matches!(
+            event,
+            RuntimeEvent::Changed { kind } if kind.as_deref() == Some("messages:peer-1")
         )));
     }
 

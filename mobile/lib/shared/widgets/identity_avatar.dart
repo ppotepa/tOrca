@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../app/app_theme.dart';
 
 String identityInitial(String value) {
   final normalized = value.trim();
@@ -18,9 +19,29 @@ class IdentityAvatar extends StatelessWidget {
   final Color? backgroundColor;
 
   @override
-  Widget build(BuildContext context) => CircleAvatar(
-    radius: radius,
-    backgroundColor: backgroundColor,
-    child: Text(identityInitial(label)),
-  );
+  Widget build(BuildContext context) {
+    final diameter = (radius ?? 20) * 2;
+    if (!context.effectsTheme.pixelated) {
+      return CircleAvatar(
+        radius: radius,
+        backgroundColor: backgroundColor,
+        child: Text(identityInitial(label)),
+      );
+    }
+    return Container(
+      width: diameter,
+      height: diameter,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color:
+            backgroundColor ??
+            Theme.of(context).colorScheme.surfaceContainerHighest,
+        border: Border.all(
+          color: Theme.of(context).colorScheme.outline,
+          width: 2,
+        ),
+      ),
+      child: Text(identityInitial(label)),
+    );
+  }
 }

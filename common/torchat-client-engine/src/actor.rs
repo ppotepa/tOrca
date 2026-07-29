@@ -14,7 +14,7 @@ use torchat_client_runtime::{
 };
 use torchat_core::{
     ContactInvite, Identity,
-    application::ApplicationPayloadV1,
+    application::{ApplicationPayloadV1, ApplicationReply},
     mls::{DirectConversation, MlsMember},
     relay::{RelayEnvelope, RelayPayloadV1},
 };
@@ -38,6 +38,7 @@ enum PendingRelayDelivery {
     Receipt { message_id: String },
     PairingResponse { pairing_id: String },
     Welcome { invite_id: String },
+    Ephemeral,
 }
 
 pub struct ClientEngineActor {
@@ -265,7 +266,7 @@ impl ClientEngineActor {
                 let (effect, mut commit_events) = self.with_runtime(|runtime| {
                     runtime.commit_accept_pairing(&pairing_id, invite_id, payload)
                 })?;
-                self.deliver_send_effect(effect)?;
+                self.deliver_send_effect(effect.into())?;
                 runtime_events.append(&mut commit_events);
                 Ok((ResponsePayload::Empty, runtime_events, None))
             }
@@ -297,6 +298,17 @@ impl ClientEngineActor {
                     self.with_runtime(|runtime| runtime.verify_contact(&installation_id))?;
                 Ok((json_response(true)?, runtime_events, None))
             }
+            EngineCommand::UpdateContactSettings {
+                installation_id,
+                local_alias,
+                muted,
+                blocked,
+            } => {
+                let (contact, runtime_events) = self.with_runtime(|runtime| {
+                    runtime.update_contact_settings(&installation_id, local_alias, muted, blocked)
+                })?;
+                Ok((json_response(contact)?, runtime_events, None))
+            }
             EngineCommand::StartConversation { contact_id } => {
                 let (created, runtime_events) =
                     self.with_runtime(|runtime| runtime.start_conversation(&contact_id))?;
@@ -317,9 +329,72 @@ impl ClientEngineActor {
             EngineCommand::SendMessage {
                 conversation_id,
                 body,
+                reply_to_message_id,
             } => {
-                let (effect, runtime_events) = self.send_message_command(&conversation_id, body)?;
+                let (effect, runtime_events) = self.send_message_command(
+                    &conversation_id,
+                    body,
+                    reply_to_message_id.as_deref(),
+                )?;
                 Ok((json_response(effect)?, runtime_events, None))
+            }
+            EngineCommand::RetryMessage { message_id } => {
+                let (effect, runtime_events) =
+                    self.with_runtime(|runtime| runtime.retry_message(&message_id))?;
+                self.deliver_send_effect(effect.into())?;
+                Ok((ResponsePayload::Empty, runtime_events, None))
+            }
+            EngineCommand::DeleteMessageLocal { message_id } => {
+                let (_, runtime_events) =
+                    self.with_runtime(|runtime| runtime.delete_message_local(&message_id))?;
+                Ok((ResponsePayload::Empty, runtime_events, None))
+            }
+            EngineCommand::SetTyping {
+                conversation_id,
+                typing,
+            } => {
+                self.send_ephemeral_payload(
+                    &conversation_id,
+                    ApplicationPayloadV1::Typing {
+                        version: torchat_core::PROTOCOL_VERSION,
+                        sent_at: unix_ms(),
+                        typing,
+                    },
+                )?;
+                Ok((ResponsePayload::Empty, Vec::new(), None))
+            }
+            EngineCommand::SetPresence { online } => {
+                let peers = self.conversations.keys().cloned().collect::<Vec<_>>();
+                for peer in peers {
+                    self.send_ephemeral_payload(
+                        &peer,
+                        ApplicationPayloadV1::Presence {
+                            version: torchat_core::PROTOCOL_VERSION,
+                            sent_at: unix_ms(),
+                            online,
+                        },
+                    )?;
+                }
+                Ok((ResponsePayload::Empty, Vec::new(), None))
+            }
+            EngineCommand::SendReadReceipts { conversation_id } => {
+                let message_ids = self
+                    .list_messages(&conversation_id)?
+                    .into_iter()
+                    .filter(|message| !message.outgoing)
+                    .filter_map(|message| uuid::Uuid::parse_str(&message.id).ok())
+                    .collect::<Vec<_>>();
+                if !message_ids.is_empty() {
+                    self.send_ephemeral_payload(
+                        &conversation_id,
+                        ApplicationPayloadV1::ReadReceipt {
+                            version: torchat_core::PROTOCOL_VERSION,
+                            message_ids,
+                            read_at: unix_ms(),
+                        },
+                    )?;
+                }
+                Ok((ResponsePayload::Empty, Vec::new(), None))
             }
             EngineCommand::Connect => {
                 self.advance_connection_generation();
@@ -329,6 +404,12 @@ impl ClientEngineActor {
                     ConnectionState::WaitingForTor
                 };
                 self.relay.ensure_session().map_err(runtime_error)?;
+                let profile = self.runtime_profile()?;
+                if !profile.nickname.trim().is_empty() {
+                    self.relay
+                        .update_profile(&profile.nickname)
+                        .map_err(runtime_error)?;
+                }
                 let (connected, mut runtime_events) =
                     self.with_runtime(|runtime| runtime.connect())?;
                 runtime_events.append(&mut self.sync_pairing_inbox()?);
@@ -838,6 +919,7 @@ impl ClientEngineActor {
                 }
                 Ok(Vec::new())
             }
+            Some(PendingRelayDelivery::Ephemeral) => Ok(Vec::new()),
             None => {
                 // Application envelopes use their public message id as the
                 // relay envelope id. A late outcome can therefore still be
@@ -989,6 +1071,7 @@ impl ClientEngineActor {
                 ApplicationPayloadV1::Message {
                     message_id: payload_message_id,
                     body,
+                    reply_to,
                     ..
                 } => {
                     if payload_message_id != message_id {
@@ -1015,18 +1098,32 @@ impl ClientEngineActor {
                         body: body.clone(),
                         conversation_id: Some(peer.clone()),
                     };
-                    let (_, runtime_events) = self.with_runtime(|runtime| {
-                        runtime.receive_message(&peer, body.clone(), Some(message_id))?;
+                    let (notify, runtime_events) = self.with_runtime(|runtime| {
+                        let accepts = runtime.contact_accepts_messages(&peer)?;
+                        if accepts {
+                            runtime.receive_message_reply(
+                                &peer,
+                                body.clone(),
+                                Some(message_id),
+                                reply_to.clone().map(|reply| {
+                                    torchat_client_runtime::MessageReply {
+                                        message_id: reply.message_id.to_string(),
+                                        body: reply.body,
+                                        outgoing: !reply.outgoing,
+                                    }
+                                }),
+                            )?;
+                            runtime.storage_mut().put_delivery_receipt(&receipt)?;
+                        }
                         runtime
                             .storage_mut()
                             .put_conversation_mls_snapshot(&peer, &snapshot_after)?;
                         runtime
                             .storage_mut()
                             .put_received_envelope(&envelope_record)?;
-                        runtime.storage_mut().put_delivery_receipt(&receipt)?;
-                        Ok(())
+                        Ok(accepts && runtime.contact_allows_notifications(&peer)?)
                     })?;
-                    Ok((runtime_events, Some(notification)))
+                    Ok((runtime_events, notify.then_some(notification)))
                 }
                 ApplicationPayloadV1::DeliveryReceipt {
                     message_id: delivered_message_id,
@@ -1046,6 +1143,35 @@ impl ClientEngineActor {
                         Ok(())
                     })?;
                     Ok((runtime_events, None))
+                }
+                ApplicationPayloadV1::Typing {
+                    sent_at, typing, ..
+                } => Ok((
+                    vec![torchat_client_runtime::RuntimeEvent::TypingChanged {
+                        conversation_id: peer.clone(),
+                        typing,
+                        expires_at: sent_at + 5_000,
+                    }],
+                    None,
+                )),
+                ApplicationPayloadV1::Presence {
+                    sent_at, online, ..
+                } => Ok((
+                    vec![torchat_client_runtime::RuntimeEvent::PresenceChanged {
+                        contact_id: peer.clone(),
+                        online,
+                        observed_at: sent_at,
+                    }],
+                    None,
+                )),
+                ApplicationPayloadV1::ReadReceipt { message_ids, .. } => {
+                    let (_, events) = self.with_runtime(|runtime| {
+                        for message_id in message_ids {
+                            let _ = runtime.apply_message_read(message_id);
+                        }
+                        Ok(())
+                    })?;
+                    Ok((events, None))
                 }
             }
         })();
@@ -1078,10 +1204,16 @@ impl ClientEngineActor {
     ) -> EngineResult<String> {
         let profile = self.runtime_profile()?;
         let nickname = profile.nickname.trim().chars().take(32).collect::<String>();
+        let snapshot_before = self.snapshot_mls_inbox()?;
         let key_package = self
             .mls_inbox
             .key_package()
             .map_err(|error| EngineError::Storage(format!("create MLS key package: {error}")))?;
+        let snapshot_after = self.snapshot_mls_inbox()?;
+        if let Err(error) = self.database.put_mls_inbox_snapshot(&snapshot_after) {
+            self.restore_mls_inbox(&snapshot_before)?;
+            return Err(error);
+        }
         self.identity
             .contact_invite_payload(
                 Some(nickname),
@@ -1143,6 +1275,7 @@ impl ClientEngineActor {
         &mut self,
         conversation_id: &str,
         body: String,
+        reply_to_message_id: Option<&str>,
     ) -> EngineResult<(MessageSendEffect, Vec<torchat_client_runtime::RuntimeEvent>)> {
         let peer_installation_id = self
             .list_conversations()?
@@ -1166,7 +1299,7 @@ impl ClientEngineActor {
         let ack_deadline = Some(now_ms + 60_000);
 
         let transaction_result = self.with_runtime(|runtime| {
-            let effect = runtime.send_message(conversation_id, body)?;
+            let effect = runtime.send_message_reply(conversation_id, body, reply_to_message_id)?;
             let stored = runtime
                 .storage()
                 .message(&effect.message_id)?
@@ -1182,6 +1315,18 @@ impl ClientEngineActor {
                 message_id,
                 sent_at: stored.created_at,
                 body: effect.body.clone(),
+                reply_to: effect
+                    .reply_to
+                    .clone()
+                    .map(|reply| {
+                        Ok::<_, RuntimeError>(ApplicationReply {
+                            message_id: uuid::Uuid::parse_str(&reply.message_id)
+                                .map_err(|error| RuntimeError::Storage(error.to_string()))?,
+                            body: reply.body,
+                            outgoing: reply.outgoing,
+                        })
+                    })
+                    .transpose()?,
             }
             .encode()
             .map_err(RuntimeError::Storage)?;
@@ -1247,6 +1392,54 @@ impl ClientEngineActor {
             )?);
         }
         Ok((effect, runtime_events))
+    }
+
+    fn send_ephemeral_payload(
+        &mut self,
+        conversation_id: &str,
+        application: ApplicationPayloadV1,
+    ) -> EngineResult<()> {
+        let mut conversation = self.conversations.remove(conversation_id).ok_or_else(|| {
+            EngineError::InvalidCommand(
+                "contact requires MLS welcome before sending ephemeral state".to_owned(),
+            )
+        })?;
+        let snapshot_before = conversation
+            .snapshot()
+            .map_err(|error| EngineError::Storage(error.to_string()))?;
+        let persist_result = (|| {
+            let plaintext = application.encode().map_err(EngineError::InvalidCommand)?;
+            let encrypted = conversation
+                .encrypt(&plaintext)
+                .map_err(EngineError::InvalidCommand)?;
+            let payload = RelayPayloadV1::application(&encrypted)
+                .encode()
+                .map_err(EngineError::InvalidCommand)?;
+            let snapshot_after = conversation
+                .snapshot()
+                .map_err(|error| EngineError::Storage(error.to_string()))?;
+            self.database
+                .put_conversation_mls_snapshot(conversation_id, &snapshot_after)?;
+            Ok(payload)
+        })();
+        let payload = match persist_result {
+            Ok(payload) => payload,
+            Err(error) => {
+                conversation = DirectConversation::restore(&snapshot_before)
+                    .map_err(|restore| EngineError::Storage(restore.to_string()))?;
+                self.conversations
+                    .insert(conversation_id.to_owned(), conversation);
+                return Err(error);
+            }
+        };
+        self.conversations
+            .insert(conversation_id.to_owned(), conversation);
+        self.queue_relay_envelope(
+            uuid::Uuid::new_v4(),
+            conversation_id,
+            &payload,
+            PendingRelayDelivery::Ephemeral,
+        )
     }
 
     fn deliver_send_effect(&mut self, effect: RuntimeSendEffect) -> EngineResult<()> {
@@ -1433,6 +1626,18 @@ impl ClientEngineActor {
                 message_id,
                 sent_at: stored.created_at,
                 body: effect.body.clone(),
+                reply_to: effect
+                    .reply_to
+                    .clone()
+                    .map(|reply| {
+                        Ok::<_, EngineError>(ApplicationReply {
+                            message_id: uuid::Uuid::parse_str(&reply.message_id)
+                                .map_err(|error| EngineError::InvalidCommand(error.to_string()))?,
+                            body: reply.body,
+                            outgoing: reply.outgoing,
+                        })
+                    })
+                    .transpose()?,
             }
             .encode()
             .map_err(EngineError::InvalidCommand)?;
@@ -1753,8 +1958,8 @@ impl RuntimeTransport for EngineRuntimeTransport<'_> {
         self.status.clone()
     }
 
-    fn update_profile(&mut self, _nickname: &str) -> torchat_client_runtime::RuntimeResult<()> {
-        Ok(())
+    fn update_profile(&mut self, nickname: &str) -> torchat_client_runtime::RuntimeResult<()> {
+        self.relay.update_profile(nickname)
     }
 
     fn refresh_pairing_code(

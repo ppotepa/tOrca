@@ -3,7 +3,6 @@ import 'package:torchat_mobile/core/models/domain.dart';
 import 'package:torchat_mobile/core/runtime/runtime_arguments.dart';
 import 'package:torchat_mobile/core/runtime/runtime_line.dart';
 import 'package:torchat_mobile/core/runtime/runtime_payload.dart';
-import 'package:torchat_mobile/core/runtime/runtime_response.dart';
 
 void main() {
   test('transport snapshot treats degraded as usable but not connected', () {
@@ -22,7 +21,6 @@ void main() {
     expect(TransportPhase.offline.isError, isTrue);
     expect(TransportPhase.connected.label, 'Połączono z relayem przez Tor');
     expect(TransportPhase.error.label, 'Sprawdzanie połączenia Tor');
-    expect(TransportPhase.connected.toneColor().toARGB32(), 0xff61d095);
     expect(ConversationState.active.presenceLabel, 'online');
     expect(ConversationState.failed.presenceLabel, 'niedostępny');
     expect(InviteState.accepted.label, 'Zaakceptowane, finalizacja kontaktu');
@@ -91,15 +89,15 @@ void main() {
     expect(event, isA<TorStatusEvent>());
   });
 
-  test('runtime response preserves raw payload for event decoding', () {
-    final response = EngineResponse.fromDynamic({
-      'type': 'runtime_error',
-      'message': 'relay stopped',
-    });
+  test('runtime line preserves runtime error event payload', () {
+    final line = EngineLine.parse(
+      '{"type":"runtime","event":{"type":"runtime_error","message":"relay stopped"}}',
+    );
 
-    expect(response.isEvent, isTrue);
-    expect(response.isRuntimeErrorEvent, isTrue);
-    expect(response.payload.string('message'), 'relay stopped');
+    expect(line, isA<EngineRuntimeEventLine>());
+    final event = (line as EngineRuntimeEventLine).payload.runtimeEvent();
+    expect(event, isA<RuntimeErrorEvent>());
+    expect((event as RuntimeErrorEvent).message, 'relay stopped');
   });
 
   test('runtime line parser distinguishes responses, events and bad json', () {

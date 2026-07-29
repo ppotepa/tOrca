@@ -53,10 +53,16 @@ Assert-ExactContractList 'Public engine methods' $contract.methods.public @(
     'archivePairing',
     'cancelPairing',
     'verifyContact',
+    'updateContactSettings',
     'startConversation',
     'openConversation',
     'closeConversation',
     'sendMessage',
+    'retryMessage',
+    'deleteMessageLocal',
+    'setTyping',
+    'setPresence',
+    'sendReadReceipts',
     'platformFact',
     'shutdown'
 )
@@ -79,10 +85,16 @@ Assert-ExactContractList 'Engine command types' $contract.commandTypes @(
     'archive_pairing',
     'cancel_pairing',
     'verify_contact',
+    'update_contact_settings',
     'start_conversation',
     'open_conversation',
     'close_conversation',
     'send_message',
+    'retry_message',
+    'delete_message_local',
+    'set_typing',
+    'set_presence',
+    'send_read_receipts',
     'platform_fact',
     'shutdown'
 )

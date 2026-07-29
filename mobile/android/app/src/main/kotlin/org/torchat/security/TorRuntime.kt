@@ -9,6 +9,7 @@ import android.util.Log
 import java.io.File
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.net.URI
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import org.torproject.jni.TorService
@@ -46,9 +47,19 @@ class TorRuntime(private val context: Context) {
         return prepared
     }
 
-    fun start(onBootstrapProgress: (Int, String) -> Unit = { _, _ -> }): TorRuntimeConfig {
+    fun start(
+        relayOnionUrl: String,
+        onBootstrapProgress: (Int, String) -> Unit = { _, _ -> },
+    ): TorRuntimeConfig {
         check(service == null) { "Tor runtime is already running" }
         val prepared = config ?: prepare()
+        val relayUri = URI(relayOnionUrl)
+        val relayHost = relayUri.host?.lowercase().orEmpty()
+        require(relayHost.matches(Regex("^[a-z2-7]{56}\\.onion$"))) {
+            "Relay URL must contain a Tor v3 onion host"
+        }
+        val relayPort = relayUri.port.takeIf { it > 0 }
+            ?: if (relayUri.scheme.equals("https", ignoreCase = true)) 443 else 80
         val ready = CountDownLatch(1)
         var failure: Throwable? = null
 
@@ -92,14 +103,30 @@ class TorRuntime(private val context: Context) {
             Log.i("TorChat-Tor", "Native Tor SOCKS port detected: $socksPort")
             check(socksPort > 0) { "Native Tor did not publish a SOCKS port" }
 
-            check(probeSocks(socksPort)) {
-                "Tor SOCKS listener nie odpowiada na handshake"
+            val bootstrapStartedAt = System.nanoTime()
+            val bootstrapTimeoutNanos = TimeUnit.MINUTES.toNanos(3)
+            var onionReady = false
+            var attempt = 0
+            while (System.nanoTime() - bootstrapStartedAt < bootstrapTimeoutNanos) {
+                attempt += 1
+                onionReady = probeOnion(socksPort, relayHost, relayPort)
+                if (onionReady) break
+                val elapsedSeconds = TimeUnit.NANOSECONDS.toSeconds(
+                    System.nanoTime() - bootstrapStartedAt,
+                )
+                val progress = (5 + elapsedSeconds * 90 / 180).toInt().coerceIn(5, 95)
+                val summary = "Budowanie obwodu do $relayHost (próba $attempt)"
+                onBootstrapProgress(progress, summary)
+                if (attempt == 1 || attempt % 10 == 0) {
+                    Log.i("TorChat-Tor", "$summary progress=$progress%")
+                }
+                Thread.sleep(1_000)
             }
-            // SOCKS readiness is the local-runtime boundary. Onion circuits
-            // may still be warming up; the relay actor owns retry/backoff and
-            // the UI must be able to open encrypted local state immediately.
-            Log.i("TorChat-Tor", "SOCKS5 readiness probe succeeded on port $socksPort; bootstrap continues in background")
-            onBootstrapProgress(1, "Tor SOCKS gotowy · rozgrzewanie obwodu onion")
+            check(onionReady) {
+                "Tor nie zbudował obwodu do $relayHost w ciągu 3 minut"
+            }
+            Log.i("TorChat-Tor", "Onion circuit ready through SOCKS5 port $socksPort: $relayHost:$relayPort")
+            onBootstrapProgress(100, "Tor gotowy · obwód onion działa")
             return prepared.copy(socksPort = socksPort)
         } catch (error: Throwable) {
             failure = error
@@ -108,17 +135,35 @@ class TorRuntime(private val context: Context) {
         }
     }
 
-    private fun probeSocks(port: Int): Boolean = runCatching {
+    private fun probeOnion(port: Int, host: String, targetPort: Int): Boolean = runCatching {
+        val domain = host.toByteArray(Charsets.US_ASCII)
+        require(domain.size in 1..255) { "Invalid SOCKS5 domain length" }
         Socket().use { socket ->
             socket.connect(InetSocketAddress("127.0.0.1", port), 5_000)
             socket.soTimeout = 5_000
-            socket.getOutputStream().use { output ->
-                output.write(byteArrayOf(0x05, 0x01, 0x00))
-                output.flush()
-                val version = socket.getInputStream().read()
-                val method = socket.getInputStream().read()
-                version == 0x05 && method == 0x00
-            }
+            val output = socket.getOutputStream()
+            val input = socket.getInputStream()
+            output.write(byteArrayOf(0x05, 0x01, 0x00))
+            output.flush()
+            val greeting = input.readNBytes(2)
+            check(greeting.size == 2 && greeting[0] == 0x05.toByte() && greeting[1] == 0x00.toByte())
+
+            val request = ByteArray(7 + domain.size)
+            request[0] = 0x05
+            request[1] = 0x01
+            request[2] = 0x00
+            request[3] = 0x03
+            request[4] = domain.size.toByte()
+            domain.copyInto(request, destinationOffset = 5)
+            request[request.lastIndex - 1] = (targetPort ushr 8).toByte()
+            request[request.lastIndex] = targetPort.toByte()
+            output.write(request)
+            output.flush()
+
+            val response = input.readNBytes(4)
+            response.size == 4 &&
+                response[0] == 0x05.toByte() &&
+                response[1] == 0x00.toByte()
         }
     }.getOrDefault(false)
 

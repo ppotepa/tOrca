@@ -37,6 +37,7 @@ pub trait EngineRelay: Send {
     fn set_socks5_url(&mut self, socks5_url: Option<String>);
     fn shutdown(&mut self);
     fn ensure_session(&mut self) -> RuntimeResult<()>;
+    fn update_profile(&mut self, nickname: &str) -> RuntimeResult<()>;
     fn send_envelope(
         &mut self,
         message_id: uuid::Uuid,
@@ -65,6 +66,12 @@ impl EngineRelay for NoopEngineRelay {
     fn shutdown(&mut self) {}
 
     fn ensure_session(&mut self) -> RuntimeResult<()> {
+        Err(RuntimeError::Unavailable(
+            RelayUnavailableReason::ActorNotAttached.to_string(),
+        ))
+    }
+
+    fn update_profile(&mut self, _nickname: &str) -> RuntimeResult<()> {
         Err(RuntimeError::Unavailable(
             RelayUnavailableReason::ActorNotAttached.to_string(),
         ))

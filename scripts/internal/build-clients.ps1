@@ -34,7 +34,14 @@ function Build-WindowsFlutterOnNtfs([string]$Variant) {
     if ([string]::IsNullOrWhiteSpace($stagingParent)) {
         $stagingParent = $env:TEMP
     }
-    $stagingRoot = Join-Path $stagingParent ("TorChat\flutter-windows-" + [guid]::NewGuid().ToString('N'))
+    $repoBytes = [Text.Encoding]::UTF8.GetBytes([IO.Path]::GetFullPath($repoRoot).ToLowerInvariant())
+    $sha256 = [Security.Cryptography.SHA256]::Create()
+    try {
+        $repoHash = ([BitConverter]::ToString($sha256.ComputeHash($repoBytes)) -replace '-', '').Substring(0, 12).ToLowerInvariant()
+    } finally {
+        $sha256.Dispose()
+    }
+    $stagingRoot = Join-Path $stagingParent "TorChat\flutter-windows\$repoHash"
     $stagingMobile = Join-Path $stagingRoot 'mobile'
     $stagingBuild = Join-Path $stagingMobile 'build\windows'
     $destinationBuild = Join-Path $mobileRoot 'build\windows'
@@ -49,24 +56,22 @@ function Build-WindowsFlutterOnNtfs([string]$Variant) {
         /XD (Join-Path $mobileRoot 'build') `
             (Join-Path $mobileRoot '.dart_tool') `
             (Join-Path $mobileRoot 'windows\flutter\ephemeral') `
-            (Join-Path $mobileRoot 'android\.gradle') `
+            (Join-Path $mobileRoot 'android') `
         /XF '*.apk' '*.aab' '*.log' | Out-Null
     if ($LASTEXITCODE -gt 7) { throw "Could not stage Flutter Windows project (robocopy exit $LASTEXITCODE)." }
 
     Push-Location $stagingMobile
     try {
-        flutter pub get
-        if ($LASTEXITCODE -ne 0) { throw 'Flutter staging pub get failed.' }
         flutter build windows $Variant
         if ($LASTEXITCODE -ne 0) { throw 'Flutter Windows staging build failed.' }
     } finally {
         Pop-Location
     }
 
+    Stop-TorChatFlutterWindows
     New-Item -ItemType Directory -Force -Path $destinationBuild | Out-Null
     & robocopy $stagingBuild $destinationBuild /E /NFL /NDL /NJH /NJS /NP | Out-Null
     if ($LASTEXITCODE -gt 7) { throw "Could not copy Flutter Windows build (robocopy exit $LASTEXITCODE)." }
-    Remove-Item -LiteralPath $stagingRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 Push-Location $repoRoot
@@ -96,7 +101,11 @@ try {
             'mobile\lib',
             'mobile\assets',
             'mobile\android\app\build.gradle.kts',
-            'mobile\android\app\src\main',
+            'mobile\android\app\src\main\AndroidManifest.xml',
+            'mobile\android\app\src\main\assets',
+            'mobile\android\app\src\main\java',
+            'mobile\android\app\src\main\kotlin',
+            'mobile\android\app\src\main\res',
             'mobile\android\gradle',
             'mobile\android\build.gradle.kts',
             'mobile\android\settings.gradle.kts'
@@ -133,10 +142,6 @@ try {
         # Fixtures are opt-in; normal developer builds exercise real onboarding.
         $env:TORCHAT_DEV_PROFILE = ''
         $env:TORCHAT_DEV_PAIR = 'false'
-        if (-not ($Smart -and (($Target -eq 'android' -and $androidFlutterFresh) -or ($Target -eq 'windows' -and $windowsFlutterFresh) -or ($Target -eq 'all' -and $androidFlutterFresh -and $windowsFlutterFresh)))) {
-            flutter pub get
-            if ($LASTEXITCODE -ne 0) { throw 'flutter pub get failed.' }
-        }
         if ($Target -in @('android','all')) {
             if ($androidFlutterFresh) {
                 Write-Host "[torchat] Flutter Android APK unchanged; using $androidApk"
@@ -149,7 +154,6 @@ try {
             }
         }
         if ($Target -in @('windows','all')) {
-            Stop-TorChatFlutterWindows
             if ($windowsFlutterFresh) {
                 Write-Host "[torchat] Flutter Windows client unchanged; using $windowsExe"
             } else {

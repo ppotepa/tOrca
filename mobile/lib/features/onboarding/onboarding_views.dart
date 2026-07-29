@@ -15,13 +15,17 @@ class PairingCodeDialog extends StatefulWidget {
     this.initialExpiresAt = 0,
     required this.refresh,
     required this.onChanged,
-    this.checkUsed,
+    this.checkRequest,
+    this.onAccept,
+    this.onReject,
   });
   final String initialCode;
   final int initialExpiresAt;
   final Future<InviteCode?> Function() refresh;
   final ValueChanged<String> onChanged;
-  final Future<bool> Function()? checkUsed;
+  final Future<PairingItem?> Function()? checkRequest;
+  final Future<bool> Function(PairingItem request)? onAccept;
+  final Future<void> Function(PairingItem request)? onReject;
   @override
   State<PairingCodeDialog> createState() => PairingCodeDialogState();
 }
@@ -32,9 +36,12 @@ class PairingCodeDialogState extends State<PairingCodeDialog> {
   int _remaining = 0;
   int _ttlSeconds = 60;
   bool _refreshing = false;
-  bool _checkingUsed = false;
-  bool _used = false;
-  int _usedCheckTick = 0;
+  bool _checkingRequest = false;
+  bool _processing = false;
+  bool _completed = false;
+  int _requestCheckTick = 0;
+  int _approvalRemaining = 15;
+  PairingItem? _request;
   String _error = '';
 
   @override
@@ -43,9 +50,16 @@ class PairingCodeDialogState extends State<PairingCodeDialog> {
     _updateRemaining();
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       _updateRemaining();
-      _usedCheckTick += 1;
-      if (_usedCheckTick % 2 == 0) unawaited(_checkUsed());
-      if (_remaining == 0 && !_refreshing) _refresh();
+      _requestCheckTick += 1;
+      if (_request == null && _requestCheckTick % 2 == 0) {
+        unawaited(_checkRequest());
+      }
+      if (_request != null && !_processing && !_completed) {
+        setState(() => _approvalRemaining -= 1);
+        if (_approvalRemaining <= 0) unawaited(_reject(expired: true));
+      } else if (_remaining == 0 && !_refreshing && !_completed) {
+        _refresh();
+      }
     });
   }
 
@@ -71,7 +85,7 @@ class PairingCodeDialogState extends State<PairingCodeDialog> {
   }
 
   Future<void> _refresh() async {
-    if (_refreshing || _used) return;
+    if (_refreshing || _request != null || _completed) return;
     setState(() => _refreshing = true);
     try {
       final fresh = await widget.refresh();
@@ -97,27 +111,71 @@ class PairingCodeDialogState extends State<PairingCodeDialog> {
     }
   }
 
-  Future<void> _checkUsed() async {
-    final checkUsed = widget.checkUsed;
-    if (checkUsed == null || _checkingUsed || _used) return;
-    _checkingUsed = true;
+  Future<void> _checkRequest() async {
+    final checkRequest = widget.checkRequest;
+    if (checkRequest == null || _checkingRequest || _request != null) return;
+    _checkingRequest = true;
     try {
-      final used = await checkUsed();
-      if (!mounted || !used) return;
+      final request = await checkRequest();
+      if (!mounted || request == null) return;
       setState(() {
-        _used = true;
+        _request = request;
+        _approvalRemaining = 15;
         _error = '';
       });
-      _timer?.cancel();
-      unawaited(
-        Future<void>.delayed(const Duration(milliseconds: 850), () {
-          if (mounted) Navigator.pop(context, true);
-        }),
-      );
     } catch (_) {
       // The dialog remains useful even if a background inbox poll fails.
     } finally {
-      _checkingUsed = false;
+      _checkingRequest = false;
+    }
+  }
+
+  Future<void> _accept() async {
+    final request = _request;
+    final accept = widget.onAccept;
+    if (request == null || accept == null || _processing) return;
+    setState(() {
+      _processing = true;
+      _error = '';
+    });
+    try {
+      final contactReady = await accept(request);
+      if (!mounted) return;
+      setState(() {
+        _processing = false;
+        _completed = contactReady;
+        if (!contactReady) {
+          _error =
+              'Zaproszenie zaakceptowano, ale bezpieczne połączenie nie zostało jeszcze ukończone.';
+        }
+      });
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _processing = false;
+          _error = error.toString();
+        });
+      }
+    }
+  }
+
+  Future<void> _reject({bool expired = false}) async {
+    final request = _request;
+    if (request == null || _processing) return;
+    setState(() => _processing = true);
+    try {
+      await widget.onReject?.call(request);
+      if (!mounted) return;
+      Navigator.pop(context, false);
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _processing = false;
+          _error = expired
+              ? 'Nie udało się zamknąć wygasłego żądania.'
+              : error.toString();
+        });
+      }
     }
   }
 
@@ -130,20 +188,93 @@ class PairingCodeDialogState extends State<PairingCodeDialog> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (_used) ...[
-              Icon(
+            if (_completed) ...[
+              ThemedIcon(
                 Icons.check_circle,
                 size: 104,
                 color: Theme.of(context).colorScheme.primary,
               ),
               const SizedBox(height: 12),
               Text(
-                'Kod został użyty',
+                'Kontakt został dodany',
                 style: Theme.of(context).textTheme.titleLarge,
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 6),
-              const Text('Otwieram Inbox.', textAlign: TextAlign.center),
+              const Text(
+                'Bezpieczne połączenie zostało potwierdzone.',
+                textAlign: TextAlign.center,
+              ),
+            ] else if (_request case final request?) ...[
+              ThemedIcon(
+                Icons.person_add_alt_1,
+                size: 64,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                request.peer?.nickname.trim().isNotEmpty == true
+                    ? request.peer!.nickname
+                    : 'Nowy kontakt',
+                style: Theme.of(context).textTheme.headlineSmall,
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Chce dodać Cię do kontaktów',
+                textAlign: TextAlign.center,
+              ),
+              if (request.peer?.fingerprint.isNotEmpty == true) ...[
+                const SizedBox(height: 12),
+                ExpansionTile(
+                  tilePadding: EdgeInsets.zero,
+                  childrenPadding: const EdgeInsets.only(bottom: 8),
+                  title: const Text('Szczegóły bezpieczeństwa'),
+                  subtitle: const Text('Fingerprint klucza kontaktu'),
+                  children: [
+                    SelectableText(
+                      request.peer!.fingerprint,
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              ],
+              const SizedBox(height: 18),
+              Text(
+                'Zaakceptuj w ciągu $_approvalRemaining s',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 8),
+              LinearProgressIndicator(
+                value: (_approvalRemaining / 15).clamp(0, 1),
+                minHeight: 6,
+              ),
+              const SizedBox(height: 18),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _processing ? null : _reject,
+                      child: const Text('Odrzuć'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: _processing ? null : _accept,
+                      child: _processing
+                          ? const SizedBox.square(
+                              dimension: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Text('Akceptuj'),
+                    ),
+                  ),
+                ],
+              ),
             ] else ...[
               Container(
                 color: Theme.of(context).colorScheme.surface,
@@ -171,7 +302,7 @@ class PairingCodeDialogState extends State<PairingCodeDialog> {
                 ),
               ),
             ],
-            if (_expiresAt > 0) ...[
+            if (_request == null && !_completed && _expiresAt > 0) ...[
               const SizedBox(height: 8),
               Text(
                 _refreshing
@@ -198,13 +329,15 @@ class PairingCodeDialogState extends State<PairingCodeDialog> {
                 ),
               ),
             TextButton.icon(
-              onPressed: _refreshing || _used ? null : _refresh,
+              onPressed: _refreshing || _request != null || _completed
+                  ? null
+                  : _refresh,
               icon: _refreshing
                   ? const SizedBox.square(
                       dimension: 16,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Icon(Icons.refresh),
+                  : const ThemedIcon(Icons.refresh),
               label: const Text('Odśwież kod'),
             ),
           ],
@@ -228,7 +361,7 @@ class SplashScreen extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
+          ThemedIcon(
             Icons.eco,
             size: 72,
             color: Theme.of(context).colorScheme.primary,
@@ -274,7 +407,7 @@ class BootScreen extends StatelessWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(
+                ThemedIcon(
                   Icons.eco,
                   size: 72,
                   color: Theme.of(context).colorScheme.primary,
@@ -302,7 +435,7 @@ class BootScreen extends StatelessWidget {
                 const SizedBox(height: 14),
                 Row(
                   children: [
-                    const Icon(Icons.eco_outlined, size: 18),
+                    const ThemedIcon(Icons.eco_outlined, size: 18),
                     const SizedBox(width: 8),
                     Expanded(child: Text(status, textAlign: TextAlign.left)),
                   ],
@@ -330,7 +463,7 @@ class BootScreen extends StatelessWidget {
                   const SizedBox(height: 12),
                   FilledButton.icon(
                     onPressed: retry,
-                    icon: const Icon(Icons.refresh),
+                    icon: const ThemedIcon(Icons.refresh),
                     label: const Text('Spróbuj ponownie'),
                   ),
                 ] else if (connecting) ...[
@@ -372,7 +505,7 @@ class TorScreen extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
+              ThemedIcon(
                 Icons.eco,
                 size: 64,
                 color: Theme.of(context).colorScheme.tertiary,
@@ -448,7 +581,7 @@ class NicknameScreen extends StatelessWidget {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(
+                  ThemedIcon(
                     Icons.person_outline,
                     size: 56,
                     color: Theme.of(context).colorScheme.primary,

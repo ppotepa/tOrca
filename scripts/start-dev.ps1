@@ -101,7 +101,6 @@ try {
     }
 
     $up = $composeArgs + @('up', '-d', '--remove-orphans')
-    if (-not $Rebuild) { $up += '--build' }
     if ($ForceRecreate) { $up += '--force-recreate' }
     Invoke-Compose $up 'Local stack failed to start.'
 

@@ -28,6 +28,17 @@ class RuntimeRepository {
   Future<void> cancelPairing(String id) => _runtime.cancelPairing(id);
 
   Future<void> verifyContact(String id) => _runtime.verifyContact(id);
+  Future<ContactRecord> updateContactSettings(
+    String id, {
+    String? localAlias,
+    required bool muted,
+    required bool blocked,
+  }) => _runtime.updateContactSettings(
+    id,
+    localAlias: localAlias,
+    muted: muted,
+    blocked: blocked,
+  );
   Future<List<ContactRecord>> contacts() async => await _runtime.contacts();
   Future<List<ConversationSummary>> conversations() async =>
       await _runtime.conversations();
@@ -38,6 +49,26 @@ class RuntimeRepository {
   Future<void> openConversation(String id) => _runtime.openConversation(id);
   Future<void> closeConversation() => _runtime.closeConversation();
   Future<void> startConversation(String id) => _runtime.startConversation(id);
-  Future<void> sendMessage(String id, String text) =>
-      _runtime.sendMessage(id, text);
+  Future<void> sendMessage(
+    String id,
+    String text, {
+    String? replyToMessageId,
+  }) => _runtime.sendMessage(id, text, replyToMessageId: replyToMessageId);
+
+  Future<void> retryMessage(String messageId) =>
+      _runtime.retryMessage(messageId);
+
+  Future<void> deleteMessageLocal(String messageId) =>
+      _runtime.deleteMessageLocal(messageId);
+
+  Future<void> setTyping(String conversationId, bool typing) =>
+      _runtime.setTyping(conversationId, typing);
+
+  Future<void> setPresence(bool online) => _runtime.setPresence(online);
+
+  Future<void> sendReadReceipts(String conversationId) =>
+      _runtime.sendReadReceipts(conversationId);
+
+  Future<void> updateAppVisibility(bool foreground) =>
+      _runtime.updateAppVisibility(foreground);
 }

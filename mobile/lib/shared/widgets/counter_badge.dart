@@ -28,7 +28,9 @@ class CounterBadge extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
       decoration: BoxDecoration(
         color: badgeColor,
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: context.effectsTheme.pixelated
+            ? BorderRadius.zero
+            : BorderRadius.circular(999),
         boxShadow: glow
             ? [
                 BoxShadow(

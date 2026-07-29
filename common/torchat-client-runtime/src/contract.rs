@@ -11,6 +11,8 @@ pub enum RuntimeType {
     MessageReceived,
     MessageStateChanged,
     ConversationReadChanged,
+    TypingChanged,
+    PresenceChanged,
     Changed,
     RuntimeError,
     RuntimeLog,
@@ -65,6 +67,20 @@ pub enum RuntimeEvent {
         conversation_id: Option<String>,
         #[serde(default, rename = "unreadCount")]
         unread_count: Option<u32>,
+    },
+    TypingChanged {
+        #[serde(rename = "conversationId")]
+        conversation_id: String,
+        typing: bool,
+        #[serde(rename = "expiresAt")]
+        expires_at: i64,
+    },
+    PresenceChanged {
+        #[serde(rename = "contactId")]
+        contact_id: String,
+        online: bool,
+        #[serde(rename = "observedAt")]
+        observed_at: i64,
     },
     Changed {
         #[serde(default)]

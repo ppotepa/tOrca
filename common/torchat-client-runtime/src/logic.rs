@@ -39,6 +39,9 @@ pub fn contact_record_from_card(card: &ContactCard, verified: bool) -> ContactRe
         nickname: card.nickname.clone(),
         public_key: card.public_key.clone(),
         fingerprint: card.fingerprint.clone(),
+        local_alias: None,
+        muted: false,
+        blocked: false,
         verification: if verified {
             VerificationState::Verified
         } else {
@@ -66,6 +69,7 @@ pub fn runtime_message_state(state: &str) -> MessageState {
         "SENDING" => MessageState::Sending,
         "SENT" => MessageState::Sent,
         "DELIVERED" => MessageState::Delivered,
+        "READ" => MessageState::Read,
         _ => MessageState::Failed,
     }
 }
@@ -220,6 +224,7 @@ pub fn runtime_message(
         conversation_id,
         outgoing,
         body,
+        reply_to: None,
         state: runtime_message_state(state),
         created_at,
         attempt_count: 0,

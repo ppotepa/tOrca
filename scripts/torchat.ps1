@@ -169,7 +169,12 @@ switch ($operation) {
         else { Show-TorChatStatus $state }
     }
     'build' {
-        if ($Environment -eq 'local') { Invoke-TorChat 'start-dev.ps1' @{ Rebuild = $true; ForceRecreate = $true; NoCache = $NoCache; Environment = 'local' } }
+        if ($Environment -eq 'local') {
+            Invoke-TorChat 'start-dev.ps1' @{
+                Environment = 'local'
+                SkipOnionHealth = $true
+            }
+        }
         $arguments = @{ Environment = $Environment; Target = $operationTarget }
         if ($Release -or $Environment -ne 'local') { $arguments.Release = $true }
         if ($Incremental) { $arguments.Smart = $true }

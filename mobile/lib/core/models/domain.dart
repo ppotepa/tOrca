@@ -49,7 +49,7 @@ enum TransportPhase {
   };
 }
 
-enum MobileTab { chats, contacts, inbox }
+enum MobileTab { chats, contacts }
 
 enum ConversationState { pending, verifying, active, failed, offline }
 
@@ -155,6 +155,7 @@ enum MessageState {
   sending,
   sent,
   delivered,
+  read,
   failed;
 
   static MessageState fromValue(String? value) =>
@@ -163,6 +164,7 @@ enum MessageState {
         EngineContract.messageStateSending => MessageState.sending,
         EngineContract.messageStateSent => MessageState.sent,
         EngineContract.messageStateDelivered => MessageState.delivered,
+        EngineContract.messageStateRead => MessageState.read,
         EngineContract.messageStateFailed => MessageState.failed,
         final state => throw FormatException('Unknown message state: $state'),
       };
@@ -172,6 +174,7 @@ enum MessageState {
     MessageState.sending => EngineContract.messageStateSending,
     MessageState.sent => EngineContract.messageStateSent,
     MessageState.delivered => EngineContract.messageStateDelivered,
+    MessageState.read => EngineContract.messageStateRead,
     MessageState.failed => EngineContract.messageStateFailed,
   };
 
@@ -180,6 +183,7 @@ enum MessageState {
     MessageState.sending => 'wysyłanie…',
     MessageState.sent => 'wysłano',
     MessageState.delivered => 'dostarczono',
+    MessageState.read => 'odczytano',
     MessageState.failed => 'błąd wysyłania',
   };
 }
@@ -276,6 +280,9 @@ class ContactRecord {
     required this.publicKey,
     required this.verified,
     this.devFixture,
+    this.localAlias,
+    this.muted = false,
+    this.blocked = false,
   });
   final String id;
   final String nickname;
@@ -283,6 +290,12 @@ class ContactRecord {
   final String publicKey;
   final bool verified;
   final String? devFixture;
+  final String? localAlias;
+  final bool muted;
+  final bool blocked;
+
+  String get displayName =>
+      localAlias?.trim().isNotEmpty == true ? localAlias!.trim() : nickname;
 
   factory ContactRecord.fromMap(Map<String, dynamic> map) => ContactRecord(
     id: _string(map, EngineContract.installationId),
@@ -291,6 +304,9 @@ class ContactRecord {
     publicKey: _string(map, EngineContract.publicKey),
     verified: _string(map, EngineContract.verification) == 'VERIFIED',
     devFixture: _optionalString(map, EngineContract.dev),
+    localAlias: _optionalString(map, EngineContract.localAlias),
+    muted: map[EngineContract.muted] as bool? ?? false,
+    blocked: map[EngineContract.blocked] as bool? ?? false,
   );
 }
 
@@ -310,16 +326,19 @@ class ConversationSummary {
   final ConversationState state;
   final String lastMessageAt;
 
-  factory ConversationSummary.fromMap(
-    Map<String, dynamic> map,
-  ) => ConversationSummary(
-    id: _string(map, EngineContract.id),
-    contactId: _string(map, EngineContract.contactInstallationId),
-    preview: _string(map, EngineContract.lastMessagePreview, defaultValue: 'Nowa rozmowa'),
-    unread: _int(map, EngineContract.unreadCount),
-    state: _conversationState(_optionalString(map, EngineContract.status)),
-    lastMessageAt: _timestamp(map[EngineContract.lastMessageAt]),
-  );
+  factory ConversationSummary.fromMap(Map<String, dynamic> map) =>
+      ConversationSummary(
+        id: _string(map, EngineContract.id),
+        contactId: _string(map, EngineContract.contactInstallationId),
+        preview: _string(
+          map,
+          EngineContract.lastMessagePreview,
+          defaultValue: 'Nowa rozmowa',
+        ),
+        unread: _int(map, EngineContract.unreadCount),
+        state: _conversationState(_optionalString(map, EngineContract.status)),
+        lastMessageAt: _timestamp(map[EngineContract.lastMessageAt]),
+      );
 }
 
 ConversationState _conversationState(String? value) => switch (value
@@ -340,12 +359,14 @@ class ChatMessage {
     required this.outgoing,
     required this.state,
     this.createdAt = '',
+    this.replyTo,
   });
   final String id;
   final String text;
   final bool outgoing;
   final MessageState state;
   final String createdAt;
+  final MessageReply? replyTo;
 
   factory ChatMessage.fromMap(Map<String, dynamic> map) => ChatMessage(
     id: _string(map, EngineContract.id),
@@ -353,6 +374,29 @@ class ChatMessage {
     outgoing: map[EngineContract.outgoing] as bool? ?? false,
     state: _messageState(map[EngineContract.state]),
     createdAt: _timestamp(map[EngineContract.createdAt]),
+    replyTo: map[EngineContract.replyTo] is Map
+        ? MessageReply.fromMap(
+            Map<String, dynamic>.from(map[EngineContract.replyTo] as Map),
+          )
+        : null,
+  );
+}
+
+class MessageReply {
+  const MessageReply({
+    required this.messageId,
+    required this.text,
+    required this.outgoing,
+  });
+
+  final String messageId;
+  final String text;
+  final bool outgoing;
+
+  factory MessageReply.fromMap(Map<String, dynamic> map) => MessageReply(
+    messageId: _string(map, EngineContract.messageId),
+    text: _string(map, EngineContract.body),
+    outgoing: map[EngineContract.outgoing] as bool? ?? false,
   );
 }
 

@@ -49,6 +49,10 @@ const DATABASE_MIGRATIONS: &[(&str, &str)] = &[
         "006_pairing_request_deduplication.sql",
         include_str!("../../../infra/db/migrations/006_pairing_request_deduplication.sql"),
     ),
+    (
+        "007_contacts.sql",
+        include_str!("../../../infra/db/migrations/007_contacts.sql"),
+    ),
 ];
 
 const SQL_SCHEMA_MIGRATIONS: &str = include_str!("../sql/schema_migrations.sql");

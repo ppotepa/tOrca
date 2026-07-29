@@ -2,6 +2,14 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplicationReply {
+    pub message_id: Uuid,
+    pub body: String,
+    pub outgoing: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ApplicationPayloadV1 {
     Message {
@@ -14,6 +22,9 @@ pub enum ApplicationPayloadV1 {
         sent_at: i64,
 
         body: String,
+
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reply_to: Option<ApplicationReply>,
     },
 
     DeliveryReceipt {
@@ -24,6 +35,28 @@ pub enum ApplicationPayloadV1 {
 
         #[serde(rename = "receivedAt")]
         received_at: i64,
+    },
+
+    Typing {
+        version: u16,
+        #[serde(rename = "sentAt")]
+        sent_at: i64,
+        typing: bool,
+    },
+
+    Presence {
+        version: u16,
+        #[serde(rename = "sentAt")]
+        sent_at: i64,
+        online: bool,
+    },
+
+    ReadReceipt {
+        version: u16,
+        #[serde(rename = "messageIds")]
+        message_ids: Vec<Uuid>,
+        #[serde(rename = "readAt")]
+        read_at: i64,
     },
 }
 
@@ -49,6 +82,11 @@ mod tests {
             message_id: Uuid::nil(),
             sent_at: 42,
             body: "hi".into(),
+            reply_to: Some(ApplicationReply {
+                message_id: Uuid::from_u128(7),
+                body: "earlier".into(),
+                outgoing: false,
+            }),
         };
         let encoded = message.encode().unwrap();
         assert_eq!(ApplicationPayloadV1::decode(&encoded).unwrap(), message);
@@ -60,5 +98,26 @@ mod tests {
         };
         let encoded = receipt.encode().unwrap();
         assert_eq!(ApplicationPayloadV1::decode(&encoded).unwrap(), receipt);
+
+        for payload in [
+            ApplicationPayloadV1::Typing {
+                version: 1,
+                sent_at: 44,
+                typing: true,
+            },
+            ApplicationPayloadV1::Presence {
+                version: 1,
+                sent_at: 45,
+                online: true,
+            },
+            ApplicationPayloadV1::ReadReceipt {
+                version: 1,
+                message_ids: vec![Uuid::from_u128(9)],
+                read_at: 46,
+            },
+        ] {
+            let encoded = payload.encode().unwrap();
+            assert_eq!(ApplicationPayloadV1::decode(&encoded).unwrap(), payload);
+        }
     }
 }

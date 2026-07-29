@@ -122,6 +122,7 @@ impl<'db> SqliteRuntimeStorage<'db> {
             "SENDING" => Ok(MessageState::Sending),
             "SENT" => Ok(MessageState::Sent),
             "DELIVERED" => Ok(MessageState::Delivered),
+            "READ" => Ok(MessageState::Read),
             "FAILED" => Ok(MessageState::Failed),
             other => Err(RuntimeError::Storage(format!(
                 "unknown message state: {other}"
@@ -404,6 +405,9 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                     nickname: sender_nickname,
                     public_key: sender_public_key,
                     fingerprint: sender_fingerprint,
+                    local_alias: None,
+                    muted: false,
+                    blocked: false,
                     verification: VerificationState::Unverified,
                     dev: None,
                 }),
@@ -517,6 +521,9 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                     nickname: installation_id.clone(),
                     public_key: String::new(),
                     fingerprint: String::new(),
+                    local_alias: None,
+                    muted: false,
+                    blocked: false,
                     installation_id,
                     verification: VerificationState::Unverified,
                     dev: None,
@@ -567,7 +574,8 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
         let mut statement = self
             .tx()
             .prepare(
-                "SELECT installation_id, nickname, public_key, fingerprint, verification
+                "SELECT installation_id, nickname, public_key, fingerprint, verification,
+                        local_alias, muted, blocked
                  FROM contacts
                  ORDER BY updated_at DESC, installation_id ASC;",
             )
@@ -580,17 +588,31 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                     row.get::<_, String>("public_key")?,
                     row.get::<_, String>("fingerprint")?,
                     row.get::<_, String>("verification")?,
+                    row.get::<_, Option<String>>("local_alias")?,
+                    row.get::<_, i64>("muted")?,
+                    row.get::<_, i64>("blocked")?,
                 ))
             })
             .map_err(storage_error)?;
         rows.map(|row| {
-            let (installation_id, nickname, public_key, fingerprint, verification) =
-                row.map_err(storage_error)?;
+            let (
+                installation_id,
+                nickname,
+                public_key,
+                fingerprint,
+                verification,
+                local_alias,
+                muted,
+                blocked,
+            ) = row.map_err(storage_error)?;
             Ok(ContactRecord {
                 installation_id,
                 nickname,
                 public_key,
                 fingerprint,
+                local_alias,
+                muted: muted != 0,
+                blocked: blocked != 0,
                 verification: Self::decode_verification(verification)?,
                 dev: None,
             })
@@ -603,15 +625,18 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
             .execute(
                 "INSERT INTO contacts (
                     installation_id, nickname, public_key, fingerprint, key_package,
-                    verification, source, created_at, updated_at
+                    verification, source, local_alias, muted, blocked, created_at, updated_at
                  ) VALUES (
-                    ?1, ?2, ?3, ?4, NULL, ?5, 'runtime', unixepoch(), unixepoch()
+                    ?1, ?2, ?3, ?4, NULL, ?5, 'runtime', ?6, ?7, ?8, unixepoch(), unixepoch()
                  )
                  ON CONFLICT(installation_id) DO UPDATE SET
                     nickname = excluded.nickname,
                     public_key = excluded.public_key,
                     fingerprint = excluded.fingerprint,
                     verification = excluded.verification,
+                    local_alias = excluded.local_alias,
+                    muted = excluded.muted,
+                    blocked = excluded.blocked,
                     updated_at = unixepoch();",
                 params![
                     contact.installation_id,
@@ -619,6 +644,9 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                     contact.public_key,
                     contact.fingerprint,
                     verification_state_str(contact.verification),
+                    contact.local_alias,
+                    if contact.muted { 1 } else { 0 },
+                    if contact.blocked { 1 } else { 0 },
                 ],
             )
             .map_err(storage_error)?;
@@ -630,7 +658,8 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
             .tx()
             .prepare(
                 "SELECT id, contact_installation_id, state,
-                        COALESCE(last_message_preview, ''), COALESCE(last_message_at, 0),
+                        COALESCE(last_message_preview, '') AS last_message_preview,
+                        COALESCE(last_message_at, 0) AS last_message_at,
                         unread_count
                  FROM conversations
                  ORDER BY COALESCE(last_message_at, 0) DESC, id ASC;",
@@ -714,7 +743,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
         let mut statement = self
             .tx()
             .prepare(
-                "SELECT id, conversation_id, outgoing, body, state, created_at,
+                "SELECT id, conversation_id, outgoing, body, reply_to_json, state, created_at,
                         attempt_count, last_attempt_at, next_attempt_at,
                         ack_deadline, last_transport_error
                  FROM messages
@@ -729,6 +758,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                     row.get::<_, String>("conversation_id")?,
                     row.get::<_, i64>("outgoing")?,
                     row.get::<_, String>("body")?,
+                    row.get::<_, Option<String>>("reply_to_json")?,
                     row.get::<_, String>("state")?,
                     row.get::<_, i64>("created_at")?,
                     row.get::<_, i64>("attempt_count")?,
@@ -745,6 +775,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                 conversation_id,
                 outgoing,
                 body,
+                reply_to_json,
                 state,
                 created_at,
                 attempt_count,
@@ -758,6 +789,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                 conversation_id,
                 outgoing: outgoing != 0,
                 body,
+                reply_to: decode_reply(reply_to_json)?,
                 state: Self::decode_message_state(state)?,
                 created_at,
                 attempt_count: attempt_count as u32,
@@ -791,16 +823,17 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
         self.tx()
             .execute(
                 "INSERT INTO messages (
-                    id, conversation_id, outgoing, body, state, created_at,
+                    id, conversation_id, outgoing, body, reply_to_json, state, created_at,
                     relay_payload, ciphertext_hash, attempt_count, last_attempt_at,
                     next_attempt_at, ack_deadline, last_transport_error
                  ) VALUES (
-                    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13
+                    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14
                  )
                  ON CONFLICT(id) DO UPDATE SET
                     conversation_id = excluded.conversation_id,
                     outgoing = excluded.outgoing,
                     body = excluded.body,
+                    reply_to_json = excluded.reply_to_json,
                     state = excluded.state,
                     created_at = excluded.created_at,
                     attempt_count = excluded.attempt_count,
@@ -813,6 +846,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                     message.conversation_id,
                     if message.outgoing { 1 } else { 0 },
                     message.body,
+                    encode_reply(message.reply_to)?,
                     message.state.as_str(),
                     message.created_at,
                     relay_payload,
@@ -828,11 +862,18 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
         Ok(())
     }
 
+    fn delete_message(&mut self, message_id: &str) -> RuntimeResult<()> {
+        self.tx()
+            .execute("DELETE FROM messages WHERE id = ?1;", [message_id])
+            .map_err(storage_error)?;
+        Ok(())
+    }
+
     fn pending_messages(&self) -> RuntimeResult<Vec<ChatMessage>> {
         let mut statement = self
             .tx()
             .prepare(
-                "SELECT id, conversation_id, outgoing, body, state, created_at,
+                "SELECT id, conversation_id, outgoing, body, reply_to_json, state, created_at,
                         attempt_count, last_attempt_at, next_attempt_at,
                         ack_deadline, last_transport_error
                  FROM messages
@@ -848,6 +889,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                     row.get::<_, String>("conversation_id")?,
                     row.get::<_, i64>("outgoing")?,
                     row.get::<_, String>("body")?,
+                    row.get::<_, Option<String>>("reply_to_json")?,
                     row.get::<_, String>("state")?,
                     row.get::<_, i64>("created_at")?,
                     row.get::<_, i64>("attempt_count")?,
@@ -864,6 +906,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                 conversation_id,
                 outgoing,
                 body,
+                reply_to_json,
                 state,
                 created_at,
                 attempt_count,
@@ -877,6 +920,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                 conversation_id,
                 outgoing: outgoing != 0,
                 body,
+                reply_to: decode_reply(reply_to_json)?,
                 state: Self::decode_message_state(state)?,
                 created_at,
                 attempt_count: attempt_count as u32,
@@ -953,7 +997,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
         let message = self
             .tx()
             .query_row(
-                "SELECT id, conversation_id, outgoing, body, state, created_at,
+                "SELECT id, conversation_id, outgoing, body, reply_to_json, state, created_at,
                         attempt_count, last_attempt_at, next_attempt_at,
                         ack_deadline, last_transport_error
                  FROM messages
@@ -965,6 +1009,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                         row.get::<_, String>("conversation_id")?,
                         row.get::<_, i64>("outgoing")?,
                         row.get::<_, String>("body")?,
+                        row.get::<_, Option<String>>("reply_to_json")?,
                         row.get::<_, String>("state")?,
                         row.get::<_, i64>("created_at")?,
                         row.get::<_, i64>("attempt_count")?,
@@ -982,6 +1027,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
             conversation_id,
             outgoing,
             body,
+            reply_to_json,
             state,
             created_at,
             attempt_count,
@@ -998,6 +1044,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
             conversation_id,
             outgoing: outgoing != 0,
             body,
+            reply_to: decode_reply(reply_to_json)?,
             state: Self::decode_message_state(state)?,
             created_at,
             attempt_count: attempt_count as u32,
@@ -1012,6 +1059,26 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
 const SETTING_IDENTITY: &str = "runtime_identity_v1";
 const SETTING_PROFILE: &str = "runtime_profile_v1";
 const SETTING_PAIRING_CODE: &str = "pairing_code_v1";
+
+fn encode_reply(
+    reply: Option<torchat_client_runtime::MessageReply>,
+) -> RuntimeResult<Option<String>> {
+    reply
+        .map(|value| {
+            serde_json::to_string(&value).map_err(|error| RuntimeError::Storage(error.to_string()))
+        })
+        .transpose()
+}
+
+fn decode_reply(
+    value: Option<String>,
+) -> RuntimeResult<Option<torchat_client_runtime::MessageReply>> {
+    value
+        .map(|value| {
+            serde_json::from_str(&value).map_err(|error| RuntimeError::Storage(error.to_string()))
+        })
+        .transpose()
+}
 
 fn finalize_pairing_item(mut item: PairingItem) -> PairingItem {
     item.available_actions =

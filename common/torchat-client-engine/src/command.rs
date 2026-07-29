@@ -76,6 +76,15 @@ pub enum EngineCommand {
     VerifyContact {
         installation_id: String,
     },
+    UpdateContactSettings {
+        installation_id: String,
+        #[serde(default)]
+        local_alias: Option<String>,
+        #[serde(default)]
+        muted: bool,
+        #[serde(default)]
+        blocked: bool,
+    },
     StartConversation {
         contact_id: String,
     },
@@ -86,6 +95,24 @@ pub enum EngineCommand {
     SendMessage {
         conversation_id: String,
         body: String,
+        #[serde(default)]
+        reply_to_message_id: Option<String>,
+    },
+    RetryMessage {
+        message_id: String,
+    },
+    DeleteMessageLocal {
+        message_id: String,
+    },
+    SetTyping {
+        conversation_id: String,
+        typing: bool,
+    },
+    SetPresence {
+        online: bool,
+    },
+    SendReadReceipts {
+        conversation_id: String,
     },
     PlatformFact {
         fact: PlatformFact,

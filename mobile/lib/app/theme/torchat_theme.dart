@@ -8,3 +8,4 @@ export 'extensions/torchat_shell_theme.dart';
 export 'extensions/torchat_status_theme.dart';
 export 'families/retro_theme.dart';
 export 'families/current_theme.dart';
+export 'widgets/themed_icon.dart';

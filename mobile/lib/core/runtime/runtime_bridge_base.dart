@@ -97,6 +97,24 @@ mixin RuntimeBridgeMethods implements ClientRuntime {
   );
 
   @override
+  Future<ContactRecord> updateContactSettings(
+    String installationId, {
+    String? localAlias,
+    required bool muted,
+    required bool blocked,
+  }) async => RuntimePayload.fromDynamic(
+    await callRuntime(
+      EngineContract.updateContactSettings,
+      RuntimeArguments.contactSettings(
+        installationId,
+        localAlias: localAlias,
+        muted: muted,
+        blocked: blocked,
+      ),
+    ),
+  ).contact();
+
+  @override
   Future<List<ContactRecord>> contacts() async =>
       RuntimePayload.listFromDynamicOrNull(
         await callRuntime(EngineContract.listContacts),
@@ -129,9 +147,43 @@ mixin RuntimeBridgeMethods implements ClientRuntime {
   );
 
   @override
-  Future<void> sendMessage(String id, String text) => callRuntime(
+  Future<void> sendMessage(
+    String id,
+    String text, {
+    String? replyToMessageId,
+  }) => callRuntime(
     EngineContract.sendMessage,
-    RuntimeArguments.message(id, text),
+    RuntimeArguments.message(id, text, replyToMessageId: replyToMessageId),
+  );
+
+  @override
+  Future<void> retryMessage(String messageId) => callRuntime(
+    EngineContract.retryMessage,
+    RuntimeArguments.messageId(messageId),
+  );
+
+  @override
+  Future<void> deleteMessageLocal(String messageId) => callRuntime(
+    EngineContract.deleteMessageLocal,
+    RuntimeArguments.messageId(messageId),
+  );
+
+  @override
+  Future<void> setTyping(String conversationId, bool typing) => callRuntime(
+    EngineContract.setTyping,
+    RuntimeArguments.typing(conversationId, typing),
+  );
+
+  @override
+  Future<void> setPresence(bool online) => callRuntime(
+    EngineContract.setPresence,
+    RuntimeArguments.presence(online),
+  );
+
+  @override
+  Future<void> sendReadReceipts(String conversationId) => callRuntime(
+    EngineContract.sendReadReceipts,
+    RuntimeArguments.id(conversationId),
   );
 
   @override

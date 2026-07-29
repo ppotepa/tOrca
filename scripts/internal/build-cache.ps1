@@ -45,7 +45,8 @@ function Get-TorChatInputHash {
         $files = if (Test-Path -LiteralPath $path -PathType Leaf) {
             @(Get-Item -LiteralPath $path)
         } else {
-            @(Get-ChildItem -LiteralPath $path -Recurse -File -Force | Where-Object {
+            @(Get-ChildItem -LiteralPath $path -Recurse -File -Force -ErrorAction SilentlyContinue |
+                Where-Object {
                 $relative = Get-TorChatRelativePath $repoFull $_.FullName
                 $parts = $relative -split '[\\/]'
                 -not @($parts | Where-Object { $excludedDirectories -contains $_ })

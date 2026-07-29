@@ -33,7 +33,7 @@ pub use logic::{
 pub use message_rules::{message_state_after_transport_outcome, message_state_on_send_prepare};
 pub use models::{
     ChatMessage, ContactRecord, ConversationState, ConversationSummary, InviteCode, InviteState,
-    MessageSendEffect, MessageState, MessageTransportOutcome, PairingAcknowledgeEffect,
+    MessageReply, MessageSendEffect, MessageState, MessageTransportOutcome, PairingAcknowledgeEffect,
     PairingAvailableAction, PairingCancelEffect, PairingConfirmContactEffect, PairingItem,
     PairingPeerOutcome, PairingPreparation, PairingSendEffect, PairingSendKind, PairingSyncResult,
     ReceiptSendEffect, RuntimeBootstrap, RuntimeEnvelope, RuntimeFixture, RuntimeIdentity,

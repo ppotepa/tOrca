@@ -9,6 +9,7 @@ fn runtime_send_effect_serializes_like_existing_transport_payloads() {
         conversation_id: "conversation-1".to_owned(),
         recipient_installation_id: "installation-bob".to_owned(),
         body: "hello".to_owned(),
+        reply_to: None,
     });
     let pairing = RuntimeSendEffect::from(PairingSendEffect {
         pairing_id: "pairing-1".to_owned(),

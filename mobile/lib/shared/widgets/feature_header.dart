@@ -27,7 +27,10 @@ class FeatureHeader extends StatelessWidget {
           ],
         ),
       ),
-      for (final action in actions) action,
+      for (var index = 0; index < actions.length; index++) ...[
+        if (index > 0) const SizedBox(width: 8),
+        actions[index],
+      ],
     ],
   );
 }

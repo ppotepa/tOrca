@@ -2,6 +2,7 @@ package org.torchat.mobile
 
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.MediaPlayer
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -87,6 +88,30 @@ class MainActivity : FlutterActivity() {
             })
         MethodChannel(engine.dartExecutor.binaryMessenger, "org.torchat/mobile")
             .setMethodCallHandler { call, result -> handle(call, result) }
+        MethodChannel(engine.dartExecutor.binaryMessenger, "org.torchat/audio")
+            .setMethodCallHandler { call, result ->
+                if (call.method != "playIntro") {
+                    result.notImplemented()
+                    return@setMethodCallHandler
+                }
+                runCatching {
+                    val descriptor = assets.openFd("flutter_assets/assets/audio/intro.mp3")
+                    MediaPlayer().apply {
+                        descriptor.use {
+                            setDataSource(it.fileDescriptor, it.startOffset, it.length)
+                        }
+                        setOnCompletionListener(MediaPlayer::release)
+                        setOnErrorListener { player, _, _ ->
+                            player.release()
+                            true
+                        }
+                        prepare()
+                        start()
+                    }
+                }
+                    .onSuccess { result.success(null) }
+                    .onFailure { result.error("AUDIO", it.message, null) }
+            }
     }
 
     private suspend fun readyEngineHost(): AndroidEngineHost {
@@ -155,6 +180,26 @@ class MainActivity : FlutterActivity() {
                     ),
                 discardPayload = true,
             )
+            EngineContract.UPDATE_CONTACT_SETTINGS -> submitCommandResult(
+                result,
+                engineCommand(EngineContract.COMMAND_UPDATE_CONTACT_SETTINGS)
+                    .put(
+                        EngineContract.COMMAND_INSTALLATION_ID,
+                        call.argument<String>(EngineContract.ARG_INSTALLATION_ID).orEmpty(),
+                    )
+                    .put(
+                        EngineContract.LOCAL_ALIAS,
+                        call.argument<String>(EngineContract.LOCAL_ALIAS),
+                    )
+                    .put(
+                        EngineContract.MUTED,
+                        call.argument<Boolean>(EngineContract.MUTED) ?: false,
+                    )
+                    .put(
+                        EngineContract.BLOCKED,
+                        call.argument<Boolean>(EngineContract.BLOCKED) ?: false,
+                    ),
+            )
             EngineContract.LIST_CONTACTS -> submitQueryResult(
                 result,
                 EngineContract.COMMAND_LIST_CONTACTS,
@@ -204,6 +249,60 @@ class MainActivity : FlutterActivity() {
                     .put(
                         EngineContract.BODY,
                         call.argument<String>(EngineContract.ARG_TEXT).orEmpty(),
+                    )
+                    .apply {
+                        call.argument<String>(EngineContract.ARG_REPLY_TO_MESSAGE_ID)?.let {
+                            put(EngineContract.COMMAND_REPLY_TO_MESSAGE_ID, it)
+                        }
+                    },
+                discardPayload = true,
+            )
+            EngineContract.RETRY_MESSAGE -> submitCommandResult(
+                result,
+                engineCommand(EngineContract.COMMAND_RETRY_MESSAGE)
+                    .put(
+                        EngineContract.MESSAGE_ID,
+                        call.argument<String>(EngineContract.MESSAGE_ID).orEmpty(),
+                    ),
+                discardPayload = true,
+            )
+            EngineContract.DELETE_MESSAGE_LOCAL -> submitCommandResult(
+                result,
+                engineCommand(EngineContract.COMMAND_DELETE_MESSAGE_LOCAL)
+                    .put(
+                        EngineContract.MESSAGE_ID,
+                        call.argument<String>(EngineContract.MESSAGE_ID).orEmpty(),
+                    ),
+                discardPayload = true,
+            )
+            EngineContract.SET_TYPING -> submitCommandResult(
+                result,
+                engineCommand(EngineContract.COMMAND_SET_TYPING)
+                    .put(
+                        EngineContract.COMMAND_CONVERSATION_ID,
+                        call.argument<String>(EngineContract.CONVERSATION_ID).orEmpty(),
+                    )
+                    .put(
+                        EngineContract.TYPING,
+                        call.argument<Boolean>(EngineContract.TYPING) ?: false,
+                    ),
+                discardPayload = true,
+            )
+            EngineContract.SET_PRESENCE -> submitCommandResult(
+                result,
+                engineCommand(EngineContract.COMMAND_SET_PRESENCE)
+                    .put(
+                        EngineContract.ONLINE,
+                        call.argument<Boolean>(EngineContract.ONLINE) ?: false,
+                    ),
+                discardPayload = true,
+            )
+            EngineContract.SEND_READ_RECEIPTS -> submitCommandResult(
+                result,
+                engineCommand(EngineContract.COMMAND_SEND_READ_RECEIPTS)
+                    .put(
+                        EngineContract.COMMAND_CONVERSATION_ID,
+                        call.argument<String>(EngineContract.ARG_ID).orEmpty(),
                     ),
                 discardPayload = true,
             )

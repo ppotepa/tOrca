@@ -38,6 +38,16 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "004_retry_indexes.sql",
         sql: include_str!("../../sql/migrations/004_retry_indexes.sql"),
     },
+    Migration {
+        version: 5,
+        name: "005_message_replies.sql",
+        sql: include_str!("../../sql/migrations/005_message_replies.sql"),
+    },
+    Migration {
+        version: 6,
+        name: "006_contact_preferences.sql",
+        sql: include_str!("../../sql/migrations/006_contact_preferences.sql"),
+    },
 ];
 
 pub struct ClientDatabase {
@@ -1080,7 +1090,7 @@ mod tests {
             })
             .expect("schema_migrations version is readable");
 
-        assert_eq!(latest_version, 4);
+        assert_eq!(latest_version, 6);
         assert_eq!(database.migration_runner().checksum().len(), 64);
 
         drop(database);

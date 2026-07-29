@@ -1,5 +1,7 @@
 #include "flutter_window.h"
 
+#include <filesystem>
+#include <mmsystem.h>
 #include <optional>
 #include <thread>
 
@@ -55,6 +57,36 @@ bool FlutterWindow::OnCreate() {
         }).detach();
         result->Success();
       });
+  audio_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(), "org.torchat/audio",
+          &flutter::StandardMethodCodec::GetInstance());
+  audio_channel_->SetMethodCallHandler([](const auto& call, auto result) {
+    if (call.method_name() != "playIntro") {
+      result->NotImplemented();
+      return;
+    }
+    wchar_t executable_path[MAX_PATH] = {};
+    const DWORD length =
+        GetModuleFileNameW(nullptr, executable_path, MAX_PATH);
+    if (length == 0 || length == MAX_PATH) {
+      result->Error("AUDIO", "Could not resolve application directory");
+      return;
+    }
+    const auto intro_path =
+        std::filesystem::path(executable_path).parent_path() / L"data" /
+        L"flutter_assets" / L"assets" / L"audio" / L"intro.mp3";
+    std::thread([intro_path] {
+      mciSendStringW(L"close torchat_intro", nullptr, 0, nullptr);
+      const std::wstring open_command =
+          L"open \"" + intro_path.wstring() +
+          L"\" type mpegvideo alias torchat_intro";
+      if (mciSendStringW(open_command.c_str(), nullptr, 0, nullptr) == 0) {
+        mciSendStringW(L"play torchat_intro", nullptr, 0, nullptr);
+      }
+    }).detach();
+    result->Success();
+  });
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {

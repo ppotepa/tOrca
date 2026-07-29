@@ -25,7 +25,10 @@ class GeneratedRuntimePayload {
     if (value is! List) return const [];
     return value
         .whereType<Map>()
-        .map((item) => GeneratedRuntimePayload.fromMap(Map<String, dynamic>.from(item)))
+        .map(
+          (item) =>
+              GeneratedRuntimePayload.fromMap(Map<String, dynamic>.from(item)),
+        )
         .toList();
   }
 
@@ -134,14 +137,18 @@ class GeneratedEngineResponse {
     if (rawResult is! Map) {
       throw FormatException('engine response is missing result envelope');
     }
-    final resultEnvelope = GeneratedRuntimePayload.fromMap(Map<String, dynamic>.from(rawResult));
+    final resultEnvelope = GeneratedRuntimePayload.fromMap(
+      Map<String, dynamic>.from(rawResult),
+    );
     final status = resultEnvelope.string(EngineContract.status);
     if (status == EngineContract.responseStatusOk) {
       final rawPayload = resultEnvelope[EngineContract.payload];
       if (rawPayload is! Map) {
         throw FormatException('engine response is missing payload envelope');
       }
-      final payload = GeneratedRuntimePayload.fromMap(Map<String, dynamic>.from(rawPayload));
+      final payload = GeneratedRuntimePayload.fromMap(
+        Map<String, dynamic>.from(rawPayload),
+      );
       final payloadType = payload.string(EngineContract.type);
       final Object? decodedResult;
       if (payloadType == EngineContract.responsePayloadEmpty) {
@@ -206,6 +213,7 @@ const generatedMessageStates = <String>[
   'SENDING',
   'SENT',
   'DELIVERED',
+  'READ',
   'FAILED',
 ];
 
@@ -247,4 +255,3 @@ const generatedPairingPeerOutcomes = <String>[
   'REJECTION_RECEIVED',
   'WELCOME_PREPARED',
 ];
-

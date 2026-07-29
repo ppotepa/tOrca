@@ -16,10 +16,11 @@ ThemeData buildRetroDarkTheme() {
   const Color border = Color(0xffF7F7F7);
   const Color text = Color(0xffFFFFFF);
   const Color muted = Color(0xffB8B8B8);
-  const Color danger = Color(0xffFF3B30);
-  const Color warning = Color(0xffFBD000);
+  const Color success = Color(0xff61d095);
+  const Color danger = Color(0xffef7180);
+  const Color warning = Color(0xffe9b85d);
   const Color incoming = Color(0xff292929);
-  const Color outgoing = Color(0xff8B1A17);
+  const Color outgoing = Color(0xff244c3d);
 
   final shadow = const BoxShadow(
     color: Color(0xff000000),
@@ -85,6 +86,10 @@ ThemeData buildRetroDarkTheme() {
     elevatedButtonTheme: _retroElevatedButtonTheme(primary, text, border),
     outlinedButtonTheme: _retroOutlinedButtonTheme(surface, text, border),
     navigationBarTheme: _retroNavigationTheme(surface, tertiary, text),
+    chipTheme: _retroChipTheme(raisedSurface, text, border),
+    dialogTheme: _retroDialogTheme(surface, border),
+    snackBarTheme: _retroSnackBarTheme(raisedSurface, text, border),
+    iconButtonTheme: _retroIconButtonTheme(border),
     extensions: [
       TorChatChatTheme(
         incomingBubble: incoming,
@@ -94,8 +99,8 @@ ThemeData buildRetroDarkTheme() {
         metadataForeground: tertiary,
         composerBackground: raisedSurface,
         composerBorder: border,
-        unreadBackground: const Color(0xff4a3d12),
-        unreadBorder: warning,
+        unreadBackground: const Color(0x21ffcc80),
+        unreadBorder: const Color(0x40ffcc80),
         bubbleRadius: 0,
         bubbleBorderWidth: 3,
         bubblePadding: const EdgeInsets.fromLTRB(14, 10, 12, 7),
@@ -116,7 +121,7 @@ ThemeData buildRetroDarkTheme() {
         listItemBorderWidth: 3,
       ),
       TorChatInboxTheme(
-        accept: Color(0xff43B047),
+        accept: success,
         acceptForeground: background,
         reject: danger,
         rejectForeground: background,
@@ -134,13 +139,13 @@ ThemeData buildRetroDarkTheme() {
         actionIconSize: 20,
       ),
       TorChatStatusTheme(
-        success: secondary,
+        success: success,
         warning: warning,
         danger: danger,
         offline: muted,
-        statusBackground: const Color(0x33283D30),
-        statusForeground: text,
-        statusBorder: border,
+        statusBackground: const Color(0x1ad7973c),
+        statusForeground: const Color(0xffedf2f7),
+        statusBorder: const Color(0xff303944),
       ),
       TorChatEffectsTheme(
         raisedShadow: [shadow],
@@ -163,10 +168,11 @@ ThemeData buildRetroLightTheme() {
   const Color border = Color(0xff1A1A1A);
   const Color text = Color(0xff1A1A1A);
   const Color muted = Color(0xff585858);
-  const Color danger = Color(0xffB91C1C);
-  const Color warning = Color(0xff8A6500);
+  const Color success = Color(0xff187a52);
+  const Color danger = Color(0xffb72f45);
+  const Color warning = Color(0xff9b6500);
   const Color incoming = Color(0xffE8E8E8);
-  const Color outgoing = Color(0xffBDE8FA);
+  const Color outgoing = Color(0xffcde9da);
 
   final shadow = const BoxShadow(
     color: Color(0xff1A1A1A),
@@ -236,17 +242,21 @@ ThemeData buildRetroLightTheme() {
     ),
     outlinedButtonTheme: _retroOutlinedButtonTheme(surface, text, border),
     navigationBarTheme: _retroNavigationTheme(surface, primary, text),
+    chipTheme: _retroChipTheme(raisedSurface, text, border),
+    dialogTheme: _retroDialogTheme(surface, border),
+    snackBarTheme: _retroSnackBarTheme(raisedSurface, text, border),
+    iconButtonTheme: _retroIconButtonTheme(border),
     extensions: [
       TorChatChatTheme(
         incomingBubble: incoming,
         incomingForeground: text,
         outgoingBubble: outgoing,
-        outgoingForeground: text,
+        outgoingForeground: const Color(0xff123c29),
         metadataForeground: text,
         composerBackground: raisedSurface,
         composerBorder: border,
-        unreadBackground: const Color(0xffffe69a),
-        unreadBorder: warning,
+        unreadBackground: const Color(0xfffff2cd),
+        unreadBorder: const Color(0xffc88400),
         bubbleRadius: 0,
         bubbleBorderWidth: 3,
         bubblePadding: const EdgeInsets.fromLTRB(14, 10, 12, 7),
@@ -267,7 +277,7 @@ ThemeData buildRetroLightTheme() {
         listItemBorderWidth: 3,
       ),
       TorChatInboxTheme(
-        accept: const Color(0xff43B047),
+        accept: success,
         acceptForeground: text,
         reject: danger,
         rejectForeground: background,
@@ -285,13 +295,13 @@ ThemeData buildRetroLightTheme() {
         actionIconSize: 20,
       ),
       TorChatStatusTheme(
-        success: primary,
+        success: success,
         warning: warning,
         danger: danger,
         offline: muted,
-        statusBackground: const Color(0x334c4f3b),
-        statusForeground: text,
-        statusBorder: border,
+        statusBackground: const Color(0x1a187a52),
+        statusForeground: const Color(0xff17201b),
+        statusBorder: const Color(0xffc8cec7),
       ),
       TorChatEffectsTheme(
         raisedShadow: [shadow],
@@ -392,5 +402,52 @@ NavigationBarThemeData _retroNavigationTheme(
       fontSize: 12,
       fontWeight: FontWeight.w700,
     ),
+  ),
+);
+
+ChipThemeData _retroChipTheme(Color background, Color text, Color border) =>
+    ChipThemeData(
+      backgroundColor: background,
+      selectedColor: background,
+      side: BorderSide(color: border, width: 3),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+      labelStyle: TextStyle(
+        color: text,
+        fontFamily: 'PixelifySans',
+        fontWeight: FontWeight.w700,
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+    );
+
+DialogThemeData _retroDialogTheme(Color background, Color border) =>
+    DialogThemeData(
+      backgroundColor: background,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.zero,
+        side: BorderSide(color: border, width: 3),
+      ),
+    );
+
+SnackBarThemeData _retroSnackBarTheme(
+  Color background,
+  Color text,
+  Color border,
+) => SnackBarThemeData(
+  backgroundColor: background,
+  contentTextStyle: TextStyle(color: text, fontFamily: 'PixelifySans'),
+  behavior: SnackBarBehavior.floating,
+  shape: RoundedRectangleBorder(
+    borderRadius: BorderRadius.zero,
+    side: BorderSide(color: border, width: 3),
+  ),
+);
+
+IconButtonThemeData _retroIconButtonTheme(Color border) => IconButtonThemeData(
+  style: ButtonStyle(
+    shape: const WidgetStatePropertyAll(
+      RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+    ),
+    side: WidgetStatePropertyAll(BorderSide(color: border, width: 2)),
   ),
 );

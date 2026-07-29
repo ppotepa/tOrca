@@ -19,15 +19,15 @@ class RuntimePayload {
   }
 
   static List<RuntimePayload> listFromDynamicOrNull(Object? value) {
-    return GeneratedRuntimePayload.listFromDynamicOrNull(value)
-        .map(RuntimePayload.new)
-        .toList();
+    return GeneratedRuntimePayload.listFromDynamicOrNull(
+      value,
+    ).map(RuntimePayload.new).toList();
   }
 
   static List<RuntimePayload> itemsFromDynamicOrNull(Object? value) {
-    return GeneratedRuntimePayload.itemsFromDynamicOrNull(value)
-        .map(RuntimePayload.new)
-        .toList();
+    return GeneratedRuntimePayload.itemsFromDynamicOrNull(
+      value,
+    ).map(RuntimePayload.new).toList();
   }
 
   String? string(String key) => _wire.string(key);
@@ -76,16 +76,23 @@ class RuntimePayload {
             detail: string(EngineContract.detail) ?? '',
             progress: intValue(EngineContract.progress),
             latencyMs: intValue(EngineContract.latencyMs),
-            retryAttempt: intValue(EngineContract.retryAttempt) ?? intValue(EngineContract.attempt) ?? 0,
+            retryAttempt:
+                intValue(EngineContract.retryAttempt) ??
+                intValue(EngineContract.attempt) ??
+                0,
           ),
         );
       case EngineContract.profileReady:
         return ProfileReadyEvent(
-          RuntimePayload.fromDynamicOrNull(this[EngineContract.profile])?.profile() ??
+          RuntimePayload.fromDynamicOrNull(
+                this[EngineContract.profile],
+              )?.profile() ??
               const RuntimeProfile(),
         );
       case EngineContract.runtimeError:
-        return RuntimeErrorEvent(string(EngineContract.message) ?? 'Runtime error');
+        return RuntimeErrorEvent(
+          string(EngineContract.message) ?? 'Runtime error',
+        );
       case EngineContract.runtimeLog:
         return RuntimeLogEvent(string(EngineContract.message) ?? '');
       default:
@@ -97,9 +104,10 @@ class RuntimePayload {
             type == EngineContract.inviteStateChanged ||
             type == EngineContract.messageReceived ||
             type == EngineContract.messageStateChanged ||
-            type == EngineContract.conversationReadChanged) {
-          final payload = toMap()
-            ..remove(EngineContract.type);
+            type == EngineContract.conversationReadChanged ||
+            type == EngineContract.typingChanged ||
+            type == EngineContract.presenceChanged) {
+          final payload = toMap()..remove(EngineContract.type);
           return DataChangedEvent(type, payload);
         }
         throw FormatException('unknown runtime event type: $type');

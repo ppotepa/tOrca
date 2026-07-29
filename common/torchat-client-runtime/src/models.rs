@@ -73,6 +73,12 @@ pub struct ContactRecord {
     pub nickname: String,
     pub public_key: String,
     pub fingerprint: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_alias: Option<String>,
+    #[serde(default)]
+    pub muted: bool,
+    #[serde(default)]
+    pub blocked: bool,
     #[serde(default = "default_verification_state")]
     pub verification: VerificationState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -154,6 +160,7 @@ pub enum MessageState {
     Sending,
     Sent,
     Delivered,
+    Read,
     Failed,
 }
 
@@ -171,7 +178,7 @@ impl MessageState {
     }
 
     pub fn is_delivered(&self) -> bool {
-        matches!(self, MessageState::Delivered)
+        matches!(self, MessageState::Delivered | MessageState::Read)
     }
 
     pub fn is_failed(&self) -> bool {
@@ -179,7 +186,10 @@ impl MessageState {
     }
 
     pub fn is_terminal(&self) -> bool {
-        matches!(self, MessageState::Delivered | MessageState::Failed)
+        matches!(
+            self,
+            MessageState::Delivered | MessageState::Read | MessageState::Failed
+        )
     }
 
     pub fn as_str(&self) -> &'static str {
@@ -188,6 +198,7 @@ impl MessageState {
             MessageState::Sending => "SENDING",
             MessageState::Sent => "SENT",
             MessageState::Delivered => "DELIVERED",
+            MessageState::Read => "READ",
             MessageState::Failed => "FAILED",
         }
     }
@@ -200,6 +211,8 @@ pub struct ChatMessage {
     pub conversation_id: String,
     pub outgoing: bool,
     pub body: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply_to: Option<MessageReply>,
     pub state: MessageState,
     pub created_at: i64,
     #[serde(default)]
@@ -216,11 +229,21 @@ pub struct ChatMessage {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct MessageReply {
+    pub message_id: String,
+    pub body: String,
+    pub outgoing: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MessageSendEffect {
     pub message_id: String,
     pub conversation_id: String,
     pub recipient_installation_id: String,
     pub body: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply_to: Option<MessageReply>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

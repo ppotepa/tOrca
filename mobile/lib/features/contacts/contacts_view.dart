@@ -16,6 +16,7 @@ class ContactsView extends StatelessWidget {
     required this.onSelect,
     required this.onScanInvite,
     required this.onShowInvite,
+    required this.onUpdateContactSettings,
     required this.fingerprint,
     required this.ownInvite,
     required this.error,
@@ -28,6 +29,8 @@ class ContactsView extends StatelessWidget {
   final VoidCallback onSearch;
   final ValueChanged<ContactRecord> onSelect;
   final VoidCallback onScanInvite, onShowInvite;
+  final Future<void> Function(ContactRecord, String?, bool, bool)
+  onUpdateContactSettings;
   final String fingerprint, ownInvite;
   final String error, notice;
   final bool busy;
@@ -51,12 +54,12 @@ class ContactsView extends StatelessWidget {
             IconButton.filledTonal(
               onPressed: onScanInvite,
               tooltip: 'Dodaj kontakt',
-              icon: const Icon(Icons.person_add_alt_1),
+              icon: const ThemedIcon(Icons.person_add_alt_1),
             ),
             IconButton.filledTonal(
               onPressed: onShowInvite,
               tooltip: 'Mój kod parowania',
-              icon: const Icon(Icons.qr_code_2),
+              icon: const ThemedIcon(Icons.qr_code_2),
             ),
           ],
         ),
@@ -75,7 +78,7 @@ class ContactsView extends StatelessWidget {
           decoration: InputDecoration(
             counterText: '',
             hintText: 'Wpisz 8-cyfrowy kod parowania',
-            prefixIcon: const Icon(Icons.password),
+            prefixIcon: const ThemedIcon(Icons.password),
             suffixIcon: IconButton(
               onPressed: busy ? null : onSearch,
               icon: busy
@@ -83,7 +86,7 @@ class ContactsView extends StatelessWidget {
                       dimension: 18,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Icon(Icons.arrow_forward),
+                  : const ThemedIcon(Icons.arrow_forward),
             ),
           ),
         ),
@@ -110,7 +113,12 @@ class ContactsView extends StatelessWidget {
                 children: [
                   if (contact.devFixture != null)
                     const Chip(label: Text('DEV')),
-                  const Icon(Icons.chevron_right),
+                  IconButton(
+                    tooltip: 'Szczegóły kontaktu',
+                    onPressed: () => _showContactDetails(context, contact),
+                    icon: const ThemedIcon(Icons.info_outline),
+                  ),
+                  const ThemedIcon(Icons.chevron_right),
                 ],
               ),
             ),
@@ -118,5 +126,85 @@ class ContactsView extends StatelessWidget {
         ],
       ],
     );
+  }
+
+  Future<void> _showContactDetails(
+    BuildContext context,
+    ContactRecord contact,
+  ) {
+    final alias = TextEditingController(text: contact.localAlias ?? '');
+    var muted = contact.muted;
+    var blocked = contact.blocked;
+    return showDialog<void>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text(contact.displayName),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                contact.verified ? 'Kontakt zweryfikowany' : 'Brak weryfikacji',
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: alias,
+                maxLength: 32,
+                decoration: const InputDecoration(labelText: 'Lokalny alias'),
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Wycisz powiadomienia'),
+                value: muted,
+                onChanged: (value) => setDialogState(() => muted = value),
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Zablokuj kontakt'),
+                subtitle: const Text('Nie odbieraj ani nie wysyłaj wiadomości'),
+                value: blocked,
+                onChanged: (value) => setDialogState(() => blocked = value),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Installation ID',
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+              SelectableText(contact.id),
+              const SizedBox(height: 12),
+              Text(
+                'Fingerprint',
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+              SelectableText(
+                contact.fingerprint.isEmpty
+                    ? 'Fingerprint niedostępny'
+                    : contact.fingerprint,
+                style: const TextStyle(fontFamily: 'monospace'),
+              ),
+            ],
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () async {
+                await onUpdateContactSettings(
+                  contact,
+                  alias.text.trim().isEmpty ? null : alias.text.trim(),
+                  muted,
+                  blocked,
+                );
+                if (context.mounted) Navigator.pop(context);
+              },
+              child: const Text('Zapisz'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Zamknij'),
+            ),
+          ],
+        ),
+      ),
+    ).whenComplete(alias.dispose);
   }
 }

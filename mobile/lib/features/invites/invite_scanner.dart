@@ -1,6 +1,8 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+
+import '../../app/app_theme.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../shared/formatters/invite_code.dart';
@@ -69,7 +71,7 @@ class _ManualInviteCodePageState extends State<ManualInviteCodePage> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.qr_code_2, size: 56),
+              const ThemedIcon(Icons.qr_code_2, size: 56),
               const SizedBox(height: 16),
               const Text(
                 'Desktop nie używa kamery. Wpisz 8-cyfrowy kod wyświetlony na drugim urządzeniu.',
@@ -87,13 +89,13 @@ class _ManualInviteCodePageState extends State<ManualInviteCodePage> {
                 decoration: InputDecoration(
                   labelText: 'Kod parowania',
                   errorText: _error.isEmpty ? null : _error,
-                  prefixIcon: const Icon(Icons.password),
+                  prefixIcon: const ThemedIcon(Icons.password),
                 ),
               ),
               const SizedBox(height: 12),
               FilledButton.icon(
                 onPressed: _submit,
-                icon: const Icon(Icons.arrow_forward),
+                icon: const ThemedIcon(Icons.arrow_forward),
                 label: const Text('Dodaj kontakt'),
               ),
             ],

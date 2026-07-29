@@ -17,6 +17,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -66,7 +67,7 @@ class TorChatForegroundService : Service() {
                     val tor = TorRuntime(applicationContext).also { runtime = it }
                     val config = withContext(Dispatchers.IO) {
                         tor.prepare()
-                        tor.start { progress, summary ->
+                        tor.start(BuildConfig.TORCHAT_SERVER_URL) { progress, summary ->
                             // Native Tor reaching 100% completes the first
                             // phase, not the whole application connection.
                             val snapshot = torStatusSnapshot(
@@ -98,7 +99,7 @@ class TorChatForegroundService : Service() {
                     } else {
                         secrets.identityPrivateKey()
                     }
-                    val socks5Url = "socks5://127.0.0.1:${config.socksPort}"
+                    val socks5Url = "socks5h://127.0.0.1:${config.socksPort}"
                     val host = AndroidEngineHost.create(
                         AndroidEngineHost.Config(
                             databasePath = File(applicationContext.noBackupFilesDir, "torchat-client-v1.db"),
@@ -141,7 +142,7 @@ class TorChatForegroundService : Service() {
                         "TorChat-Engine",
                         "Foreground service client engine initialized connected=false",
                     )
-                    host.submitCommandAndAwait(engineCommand(EngineContract.COMMAND_CONNECT))
+                    connectEngine(host)
                     config
                 }.onSuccess {
                     starting = false
@@ -202,6 +203,26 @@ class TorChatForegroundService : Service() {
             .onFailure { error -> Log.w("TorChat-Engine", "Engine shutdown failed", error) }
         engineHost = null
         activeEngineHost = null
+    }
+
+    private suspend fun connectEngine(host: AndroidEngineHost) {
+        var attempt = 0
+        while (true) {
+            attempt += 1
+            val result = runCatching {
+                host.submitCommandAndAwait(engineCommand(EngineContract.COMMAND_CONNECT))
+            }
+            if (result.isSuccess) return
+
+            val retryDelayMs = (1_000L shl (attempt - 1).coerceAtMost(5)).coerceAtMost(30_000L)
+            Log.w(
+                "TorChat-Engine",
+                "Relay connect attempt $attempt failed; retrying in ${retryDelayMs}ms",
+                result.exceptionOrNull(),
+            )
+            updateNotification("Łączenie z relayem · próba $attempt")
+            delay(retryDelayMs)
+        }
     }
 
     private fun publish(event: Map<String, Any?>) {
@@ -369,15 +390,29 @@ class TorChatForegroundService : Service() {
             text: String,
             notificationId: Int,
         ) {
+            val preferences = context.getSharedPreferences(
+                "FlutterSharedPreferences",
+                Context.MODE_PRIVATE,
+            )
+            if (!preferences.getBoolean("flutter.torchat.notifications.enabled", true)) return
+            val sound = preferences.getBoolean("flutter.torchat.notifications.sound", true)
+            val vibration = preferences.getBoolean("flutter.torchat.notifications.vibration", true)
+            val preview = preferences.getBoolean("flutter.torchat.notifications.preview", false)
+            val visibleTitle = if (preview) title else "TorChat"
+            val visibleText = if (preview) text else "Nowa prywatna wiadomość"
             ensureIncomingNotificationChannel(context)
             val notification = NotificationCompat.Builder(context, ALERT_CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_stat_tor)
-                .setContentTitle(title)
-                .setContentText(text.take(120))
-                .setStyle(NotificationCompat.BigTextStyle().bigText(text.take(400)))
+                .setContentTitle(visibleTitle)
+                .setContentText(visibleText.take(120))
+                .setStyle(NotificationCompat.BigTextStyle().bigText(visibleText.take(400)))
                 .setCategory(NotificationCompat.CATEGORY_MESSAGE)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setDefaults(Notification.DEFAULT_SOUND or Notification.DEFAULT_VIBRATE)
+                .setDefaults(
+                    (if (sound) Notification.DEFAULT_SOUND else 0) or
+                        (if (vibration) Notification.DEFAULT_VIBRATE else 0),
+                )
+                .setSilent(!sound && !vibration)
                 .setAutoCancel(true)
                 .setContentIntent(
                     PendingIntent.getActivity(
@@ -435,4 +470,3 @@ class TorChatForegroundService : Service() {
 
 private fun String?.ifNullOrBlank(fallback: () -> String): String =
     if (this.isNullOrBlank()) fallback() else this
-

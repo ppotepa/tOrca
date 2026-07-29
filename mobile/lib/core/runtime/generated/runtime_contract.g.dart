@@ -20,6 +20,7 @@ abstract final class EngineContract {
   static const commandConversationId = 'conversation_id';
   static const commandInstallationId = 'installation_id';
   static const commandContactId = 'contact_id';
+  static const commandReplyToMessageId = 'reply_to_message_id';
   static const factSocks5Url = 'socks5_url';
   static const pairingId = 'pairingId';
   static const conversationId = 'conversationId';
@@ -30,6 +31,9 @@ abstract final class EngineContract {
   static const fingerprint = 'fingerprint';
   static const verification = 'verification';
   static const dev = 'dev';
+  static const localAlias = 'localAlias';
+  static const muted = 'muted';
+  static const blocked = 'blocked';
   static const contactInstallationId = 'contactInstallationId';
   static const lastMessagePreview = 'lastMessagePreview';
   static const lastMessageAt = 'lastMessageAt';
@@ -52,10 +56,14 @@ abstract final class EngineContract {
   static const profile = 'profile';
   static const kind = 'kind';
   static const messageId = 'messageId';
+  static const replyTo = 'replyTo';
   static const text = 'text';
   static const items = 'items';
   static const level = 'level';
   static const body = 'body';
+  static const typing = 'typing';
+  static const online = 'online';
+  static const observedAt = 'observedAt';
   static const phase = 'phase';
   static const progress = 'progress';
   static const detail = 'detail';
@@ -83,6 +91,7 @@ abstract final class EngineContract {
   static const argContactId = 'contactId';
   static const argId = 'id';
   static const argText = 'text';
+  static const argReplyToMessageId = 'replyToMessageId';
 
   static const bootstrap = 'bootstrap';
   static const connect = 'connect';
@@ -101,10 +110,16 @@ abstract final class EngineContract {
   static const archivePairing = 'archivePairing';
   static const cancelPairing = 'cancelPairing';
   static const verifyContact = 'verifyContact';
+  static const updateContactSettings = 'updateContactSettings';
   static const startConversation = 'startConversation';
   static const openConversation = 'openConversation';
   static const closeConversation = 'closeConversation';
   static const sendMessage = 'sendMessage';
+  static const retryMessage = 'retryMessage';
+  static const deleteMessageLocal = 'deleteMessageLocal';
+  static const setTyping = 'setTyping';
+  static const setPresence = 'setPresence';
+  static const sendReadReceipts = 'sendReadReceipts';
   static const platformFact = 'platformFact';
   static const shutdown = 'shutdown';
 
@@ -125,10 +140,16 @@ abstract final class EngineContract {
   static const commandArchivePairing = 'archive_pairing';
   static const commandCancelPairing = 'cancel_pairing';
   static const commandVerifyContact = 'verify_contact';
+  static const commandUpdateContactSettings = 'update_contact_settings';
   static const commandStartConversation = 'start_conversation';
   static const commandOpenConversation = 'open_conversation';
   static const commandCloseConversation = 'close_conversation';
   static const commandSendMessage = 'send_message';
+  static const commandRetryMessage = 'retry_message';
+  static const commandDeleteMessageLocal = 'delete_message_local';
+  static const commandSetTyping = 'set_typing';
+  static const commandSetPresence = 'set_presence';
+  static const commandSendReadReceipts = 'send_read_receipts';
   static const commandPlatformFact = 'platform_fact';
   static const commandShutdown = 'shutdown';
 
@@ -164,6 +185,8 @@ abstract final class EngineContract {
   static const messageReceived = 'message_received';
   static const messageStateChanged = 'message_state_changed';
   static const conversationReadChanged = 'conversation_read_changed';
+  static const typingChanged = 'typing_changed';
+  static const presenceChanged = 'presence_changed';
   static const changed = 'changed';
   static const runtimeError = 'runtime_error';
   static const runtimeLog = 'runtime_log';
@@ -190,6 +213,7 @@ abstract final class EngineContract {
   static const messageStateSending = 'SENDING';
   static const messageStateSent = 'SENT';
   static const messageStateDelivered = 'DELIVERED';
+  static const messageStateRead = 'READ';
   static const messageStateFailed = 'FAILED';
 
   static const conversationStatePending = 'PENDING';

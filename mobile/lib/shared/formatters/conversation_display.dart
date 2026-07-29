@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../../app/app_theme.dart';
 import '../../core/models/domain.dart';
-import 'message_timestamps.dart';
 
 String messageStateLabel(MessageState value) => value.label;
 
@@ -24,12 +23,7 @@ String conversationPresenceLabel(
 String conversationLastSeenLabel(
   String? id,
   List<ConversationSummary> conversations,
-) {
-  final conversation = conversations.where((item) => item.id == id).firstOrNull;
-  if (conversation == null || conversation.lastMessageAt.isEmpty) return '';
-  final seen = formatMessageDayOrTime(conversation.lastMessageAt);
-  return seen.isEmpty ? '' : ' • ostatnio: $seen';
-}
+) => '';
 
 Color conversationPresenceColorByState(BuildContext context, String? state) {
   final theme = context.statusTheme;

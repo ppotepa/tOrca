@@ -128,8 +128,8 @@ class ContactListTile extends StatelessWidget {
     final tile = ListTile(
       contentPadding: EdgeInsets.zero,
       onTap: () => onTap(contact),
-      leading: IdentityAvatar(label: contact.nickname),
-      title: Text(contact.nickname),
+      leading: IdentityAvatar(label: contact.displayName),
+      title: Text(contact.displayName),
       subtitle: Text(
         subtitle ??
             (contact.verified

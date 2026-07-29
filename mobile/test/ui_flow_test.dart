@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:torchat_mobile/app/app_controller.dart';
 import 'package:torchat_mobile/core/runtime/runtime_contract.dart';
@@ -17,7 +18,6 @@ import 'package:torchat_mobile/features/shell/main_shell.dart';
 import 'package:torchat_mobile/client_runtime.dart';
 import 'package:torchat_mobile/core/runtime/runtime_payload.dart';
 import 'package:torchat_mobile/shared/widgets/action_status_strip.dart';
-import 'package:torchat_mobile/shared/widgets/counter_badge.dart';
 
 ContactRecord _contact() => const ContactRecord(
   id: 'alice-installation',
@@ -61,6 +61,8 @@ void main() {
         EngineContract.openConversation,
         EngineContract.closeConversation,
         EngineContract.sendMessage,
+        EngineContract.retryMessage,
+        EngineContract.deleteMessageLocal,
         EngineContract.platformFact,
         EngineContract.shutdown,
       ],
@@ -86,6 +88,8 @@ void main() {
         'openConversation',
         'closeConversation',
         'sendMessage',
+        'retryMessage',
+        'deleteMessageLocal',
         'platformFact',
         'shutdown',
       ]),
@@ -170,7 +174,6 @@ void main() {
     expect(
       parsed.whereType<DataChangedEvent>().map((event) => event.type),
       containsAll(const [
-        EngineContract.runtimeReady,
         EngineContract.inviteReceived,
         EngineContract.inviteStateChanged,
         EngineContract.messageReceived,
@@ -297,6 +300,26 @@ void main() {
     },
   );
 
+  test('controller localizes an expired pairing code error', () async {
+    final runtime = _StatefulRuntime()
+      ..submitPairingError = PlatformException(
+        code: 'RUNTIME',
+        message: 'pairing code expired or invalid',
+      );
+    final container = ProviderContainer(
+      overrides: [clientRuntimeProvider.overrideWithValue(runtime)],
+    );
+    addTearDown(container.dispose);
+
+    final controller = container.read(appControllerProvider.notifier);
+    await controller.initialize();
+    await controller.submitPairingCode('87654321');
+
+    final state = container.read(appControllerProvider);
+    expect(state.error, contains('nieprawidłowy albo wygasł'));
+    expect(state.error, isNot(contains('relay transport error')));
+  });
+
   test(
     'message_received event refreshes selected conversation messages',
     () async {
@@ -381,8 +404,8 @@ void main() {
 
   test('pairing request accepts seconds-based expiry payload', () {
     final request = PairingItem.fromMap(const {
-      'pairing_id': 'pairing-1',
-      'expires_at': 1,
+      'pairingId': 'pairing-1',
+      'expiresAt': 1,
       'state': 'PENDING',
     });
     expect(request.id, 'pairing-1');
@@ -414,6 +437,7 @@ void main() {
           'pairingId': 'pending',
           'state': 'PENDING',
           'sender': {'nickname': 'Bob'},
+          'availableActions': ['ACCEPT', 'REJECT'],
         }),
         PairingItem.fromMap(const {
           'pairingId': 'accepted',
@@ -497,6 +521,7 @@ void main() {
             onSelect: (_) => selected = true,
             onScanInvite: () {},
             onShowInvite: () {},
+            onUpdateContactSettings: (_, _, _, _) async {},
             fingerprint: 'SELF',
             ownInvite: '12345678',
             error: '',
@@ -517,6 +542,10 @@ void main() {
       id: 'pairing-1',
       peer: _contact(),
       status: InviteState.pending,
+      availableActions: const [
+        PairingAvailableAction.accept,
+        PairingAvailableAction.reject,
+      ],
     );
 
     await tester.pumpWidget(
@@ -535,7 +564,7 @@ void main() {
     );
 
     expect(find.text('@Alice'), findsOneWidget);
-    await tester.tap(find.byIcon(Icons.check));
+    await tester.tap(find.byType(FilledButton).first);
     expect(accepted, isTrue);
   });
 
@@ -547,6 +576,7 @@ void main() {
       id: 'pairing-1',
       peer: _contact(),
       status: InviteState.completed,
+      availableActions: const [PairingAvailableAction.archive],
     );
 
     await tester.pumpWidget(
@@ -607,6 +637,7 @@ void main() {
         'expiresAt': 1760000060,
         'state': 'PENDING',
         'received': false,
+        'availableActions': ['CANCEL'],
       });
 
       await tester.pumpWidget(
@@ -624,6 +655,8 @@ void main() {
         ),
       );
 
+      await tester.tap(find.text('Outbox (1)'));
+      await tester.pumpAndSettle();
       expect(find.text('Wysłane zaproszenie'), findsOneWidget);
       expect(find.textContaining('Oczekuje na decyzję'), findsOneWidget);
       await tester.tap(find.byIcon(Icons.cancel_outlined));
@@ -700,34 +733,53 @@ void main() {
     expect(find.text('8765 4321'), findsOneWidget);
   });
 
-  testWidgets('desktop inbox tab shows badge only for active invites', (
+  testWidgets('pairing code dialog shows a timed contact approval', (
     tester,
   ) async {
+    final expiresAt = DateTime.now().millisecondsSinceEpoch ~/ 1000 + 90;
     await tester.pumpWidget(
       MaterialApp(
-        home: Scaffold(
-          body: DesktopRail(
-            tab: MobileTab.inbox,
-            nickname: 'Alice',
-            unreadTotal: 0,
-            inboxTotal: 0,
-            onTab: (_) {},
-            onAccount: () {},
-            onSettings: () {},
+        home: PairingCodeDialog(
+          initialCode: '12345678',
+          initialExpiresAt: expiresAt,
+          refresh: () async => null,
+          onChanged: (_) {},
+          checkRequest: () async => PairingItem(
+            id: 'pairing-approval',
+            status: InviteState.pending,
+            peer: _contact(),
+            expiresAt: expiresAt,
           ),
+          onAccept: (_) async => true,
+          onReject: (_) async {},
         ),
       ),
     );
-    expect(find.byType(Badge), findsNothing);
 
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump();
+
+    expect(find.text('Alice'), findsOneWidget);
+    expect(find.text('AA:BB'), findsNothing);
+    expect(find.text('Zaakceptuj w ciągu 15 s'), findsOneWidget);
+    expect(find.text('Akceptuj'), findsOneWidget);
+    expect(find.text('Odrzuć'), findsOneWidget);
+    expect(find.text('1234 5678'), findsNothing);
+
+    await tester.tap(find.text('Akceptuj'));
+    await tester.pump();
+    expect(find.text('Kontakt został dodany'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('desktop navigation no longer exposes inbox', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
           body: DesktopRail(
-            tab: MobileTab.inbox,
+            tab: MobileTab.contacts,
             nickname: 'Alice',
             unreadTotal: 0,
-            inboxTotal: 2,
             onTab: (_) {},
             onAccount: () {},
             onSettings: () {},
@@ -735,8 +787,10 @@ void main() {
         ),
       ),
     );
-    expect(find.text('2'), findsOneWidget);
-    expect(find.byType(CounterBadge), findsOneWidget);
+
+    expect(find.text('Inbox'), findsNothing);
+    expect(find.text('Czaty'), findsOneWidget);
+    expect(find.text('Kontakty'), findsOneWidget);
   });
 
   testWidgets('message bubbles show timestamps for both directions', (
@@ -755,6 +809,9 @@ void main() {
                   'state': MessageState.delivered,
                   'createdAt': 1760000000000,
                 }),
+                onDelete: (_) {},
+                onRetry: (_) {},
+                onReply: (_) {},
               ),
               MessageBubble(
                 message: ChatMessage.fromMap(const {
@@ -764,6 +821,9 @@ void main() {
                   'state': MessageState.queued,
                   'createdAt': 1760000000000,
                 }),
+                onDelete: (_) {},
+                onRetry: (_) {},
+                onReply: (_) {},
               ),
             ],
           ),
@@ -809,7 +869,10 @@ void main() {
             ],
             composer: TextEditingController(),
             onOpenConversation: (_) {},
-            onSend: () {},
+            onSend: (_) {},
+            onTypingChanged: (_) {},
+            onRetryMessage: (_) {},
+            onDeleteMessage: (_) {},
             onVerifyContact: (_) {},
             onBack: () {},
             error: '',
@@ -831,12 +894,12 @@ void main() {
     await tester.pumpWidget(const MaterialApp(home: ManualInviteCodePage()));
 
     await tester.enterText(find.byType(TextField), '1234');
-    await tester.tap(find.text('Wyślij zaproszenie'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Dodaj kontakt'));
     await tester.pump();
     expect(find.text('Kod musi zawierać dokładnie 8 cyfr.'), findsOneWidget);
 
     await tester.enterText(find.byType(TextField), '1234 5678');
-    await tester.tap(find.text('Wyślij zaproszenie'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Dodaj kontakt'));
     await tester.pumpAndSettle();
     expect(find.byType(ManualInviteCodePage), findsNothing);
   });
@@ -926,7 +989,26 @@ class _EventRuntime implements ClientRuntime {
       const InviteCode(code: '', expiresAt: 0);
 
   @override
-  Future<void> sendMessage(String id, String text) async {}
+  Future<void> sendMessage(
+    String id,
+    String text, {
+    String? replyToMessageId,
+  }) async {}
+
+  @override
+  Future<void> retryMessage(String messageId) async {}
+
+  @override
+  Future<void> deleteMessageLocal(String messageId) async {}
+
+  @override
+  Future<void> setTyping(String conversationId, bool typing) async {}
+
+  @override
+  Future<void> setPresence(bool online) async {}
+
+  @override
+  Future<void> sendReadReceipts(String conversationId) async {}
 
   @override
   Future<RuntimeProfile> setNickname(String nickname) async =>
@@ -941,6 +1023,20 @@ class _EventRuntime implements ClientRuntime {
 
   @override
   Future<void> verifyContact(String installationId) async {}
+
+  @override
+  Future<ContactRecord> updateContactSettings(
+    String installationId, {
+    String? localAlias,
+    required bool muted,
+    required bool blocked,
+  }) async => const ContactRecord(
+    id: '',
+    nickname: '',
+    fingerprint: '',
+    publicKey: '',
+    verified: false,
+  );
 
   @override
   Future<void> updateAppVisibility(bool foreground) async {}
@@ -976,6 +1072,7 @@ class _StatefulRuntime implements ClientRuntime {
   var _inbox = <PairingItem>[];
   var _outbox = <PairingItem>[];
   var submitPairingCalls = 0;
+  Object? submitPairingError;
 
   _StatefulRuntime() {
     _inbox = [
@@ -1026,7 +1123,10 @@ class _StatefulRuntime implements ClientRuntime {
   }
 
   @override
-  Future<bool> connect() async => true;
+  Future<bool> connect() async {
+    emitTorStatus(phase: 'connected', label: 'Połączono');
+    return true;
+  }
 
   @override
   Future<RuntimeIdentity?> identity() async => RuntimeIdentity(
@@ -1053,6 +1153,8 @@ class _StatefulRuntime implements ClientRuntime {
   @override
   Future<PairingItem> submitPairingCode(String code) async {
     submitPairingCalls += 1;
+    final error = submitPairingError;
+    if (error != null) throw error;
     final value = const PairingItem(
       id: 'pairing-out',
       status: InviteState.pending,
@@ -1114,6 +1216,14 @@ class _StatefulRuntime implements ClientRuntime {
   }
 
   @override
+  Future<ContactRecord> updateContactSettings(
+    String installationId, {
+    String? localAlias,
+    required bool muted,
+    required bool blocked,
+  }) async => _bob;
+
+  @override
   Future<List<ContactRecord>> contacts() async =>
       List<ContactRecord>.from(_contacts);
 
@@ -1164,7 +1274,11 @@ class _StatefulRuntime implements ClientRuntime {
   }
 
   @override
-  Future<void> sendMessage(String id, String text) async {
+  Future<void> sendMessage(
+    String id,
+    String text, {
+    String? replyToMessageId,
+  }) async {
     final current = _messages[id] ?? const [];
     _messages[id] = [
       ...current,
@@ -1177,6 +1291,21 @@ class _StatefulRuntime implements ClientRuntime {
       ),
     ];
   }
+
+  @override
+  Future<void> retryMessage(String messageId) async {}
+
+  @override
+  Future<void> deleteMessageLocal(String messageId) async {}
+
+  @override
+  Future<void> setTyping(String conversationId, bool typing) async {}
+
+  @override
+  Future<void> setPresence(bool online) async {}
+
+  @override
+  Future<void> sendReadReceipts(String conversationId) async {}
 
   void receiveRemoteMessage(String conversationId, String text) {
     final current = _messages[conversationId] ?? const [];

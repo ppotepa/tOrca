@@ -46,7 +46,8 @@ pub(crate) fn relay_url(cli: &Cli) -> Result<Url> {
     let value = cli
         .server_url
         .clone()
-        .context("desktop engine stdio requires --server-url")?;
+        .or_else(|| option_env!("TORCHAT_COMPILED_ONION_URL").map(ToOwned::to_owned))
+        .context("desktop engine stdio requires a compiled onion or --server-url")?;
     value.parse().context("parse --server-url")
 }
 

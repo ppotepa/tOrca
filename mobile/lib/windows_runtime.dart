@@ -89,19 +89,21 @@ class WindowsRuntime extends Object
     final directory = Directory(
       '${dateDirectory.path}/run-${runNumber.toString().padLeft(4, '0')}',
     )..createSync(recursive: true);
-    return File('${directory.path}/desktop.log').openWrite(
-      mode: FileMode.append,
-    );
+    return File(
+      '${directory.path}/desktop.log',
+    ).openWrite(mode: FileMode.append);
   }
 
   int _nextRunNumber(Directory dateDirectory) {
     final runs = dateDirectory
         .listSync(followLinks: false)
         .whereType<Directory>()
-        .map((entry) => entry.uri.pathSegments.lastWhere(
-              (segment) => segment.isNotEmpty,
-              orElse: () => '',
-            ))
+        .map(
+          (entry) => entry.uri.pathSegments.lastWhere(
+            (segment) => segment.isNotEmpty,
+            orElse: () => '',
+          ),
+        )
         .where((name) => RegExp(r'^run-\d{4}$').hasMatch(name))
         .map((name) => int.tryParse(name.substring(4)) ?? 0)
         .toList();
@@ -177,8 +179,8 @@ class WindowsRuntime extends Object
             id: notification[EngineContract.id]?.toString() ?? '',
             title: notification[EngineContract.title]?.toString() ?? 'TorChat',
             body: notification[EngineContract.body]?.toString() ?? '',
-            conversationId:
-                notification[EngineContract.conversationId]?.toString(),
+            conversationId: notification[EngineContract.conversationId]
+                ?.toString(),
           ),
         );
       case EngineLogLine(:final log):
@@ -276,7 +278,19 @@ class WindowsRuntime extends Object
       },
       EngineContract.verifyContact => {
         EngineContract.type: EngineContract.commandVerifyContact,
-        EngineContract.commandInstallationId: text(EngineContract.argInstallationId),
+        EngineContract.commandInstallationId: text(
+          EngineContract.argInstallationId,
+        ),
+      },
+      EngineContract.updateContactSettings => {
+        EngineContract.type: EngineContract.commandUpdateContactSettings,
+        EngineContract.commandInstallationId: text(
+          EngineContract.argInstallationId,
+        ),
+        if (params[EngineContract.localAlias] != null)
+          EngineContract.localAlias: text(EngineContract.localAlias),
+        EngineContract.muted: params[EngineContract.muted] == true,
+        EngineContract.blocked: params[EngineContract.blocked] == true,
       },
       EngineContract.startConversation => {
         EngineContract.type: EngineContract.commandStartConversation,
@@ -293,6 +307,33 @@ class WindowsRuntime extends Object
         EngineContract.type: EngineContract.commandSendMessage,
         EngineContract.commandConversationId: text(EngineContract.argId),
         EngineContract.body: text(EngineContract.argText),
+        if (params[EngineContract.argReplyToMessageId] != null)
+          EngineContract.commandReplyToMessageId: text(
+            EngineContract.argReplyToMessageId,
+          ),
+      },
+      EngineContract.retryMessage => {
+        EngineContract.type: EngineContract.commandRetryMessage,
+        EngineContract.messageId: text(EngineContract.messageId),
+      },
+      EngineContract.deleteMessageLocal => {
+        EngineContract.type: EngineContract.commandDeleteMessageLocal,
+        EngineContract.messageId: text(EngineContract.messageId),
+      },
+      EngineContract.setTyping => {
+        EngineContract.type: EngineContract.commandSetTyping,
+        EngineContract.commandConversationId: text(
+          EngineContract.conversationId,
+        ),
+        EngineContract.typing: params[EngineContract.typing] == true,
+      },
+      EngineContract.setPresence => {
+        EngineContract.type: EngineContract.commandSetPresence,
+        EngineContract.online: params[EngineContract.online] == true,
+      },
+      EngineContract.sendReadReceipts => {
+        EngineContract.type: EngineContract.commandSendReadReceipts,
+        EngineContract.commandConversationId: text(EngineContract.argId),
       },
       EngineContract.platformFact => {
         EngineContract.type: EngineContract.commandPlatformFact,

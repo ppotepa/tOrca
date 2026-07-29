@@ -7,7 +7,10 @@ use std::{
 };
 
 use futures_util::{SinkExt, StreamExt};
-use reqwest::{Url, blocking::Client};
+use reqwest::{
+    StatusCode, Url,
+    blocking::{Client, Response},
+};
 use serde::{Deserialize, Serialize};
 use tokio::{
     io::{AsyncRead, AsyncWrite, ReadBuf},
@@ -163,8 +166,7 @@ impl SharedRelayActor {
             .json(&serde_json::json!({}))
             .send()
             .map_err(http_error)?
-            .error_for_status()
-            .map_err(http_error)?
+            .relay_status()?
             .json()
             .map_err(http_error)?;
         let session: SessionResponse = client
@@ -176,8 +178,7 @@ impl SharedRelayActor {
             })
             .send()
             .map_err(http_error)?
-            .error_for_status()
-            .map_err(http_error)?
+            .relay_status()?
             .json()
             .map_err(http_error)?;
         self.session_token = Some(session.session_token.clone());
@@ -261,6 +262,22 @@ impl EngineRelay for SharedRelayActor {
         self.ensure_writer(&token)
     }
 
+    fn update_profile(&mut self, nickname: &str) -> RuntimeResult<()> {
+        let token = self.ensure_session_token()?;
+        let client = self.build_client()?;
+        let base_url = self.base_url()?;
+        client
+            .put(base_url.join("/v1/profile").map_err(http_error)?)
+            .bearer_auth(token)
+            .json(&UpdateProfileRequest {
+                nickname: nickname.to_owned(),
+            })
+            .send()
+            .map_err(http_error)?
+            .relay_status()?;
+        Ok(())
+    }
+
     fn send_envelope(
         &mut self,
         message_id: Uuid,
@@ -295,8 +312,7 @@ impl EngineRelay for SharedRelayActor {
             .bearer_auth(token)
             .send()
             .map_err(http_error)?
-            .error_for_status()
-            .map_err(http_error)?
+            .relay_status()?
             .json()
             .map_err(http_error)?;
         Ok(InviteCode {
@@ -317,8 +333,7 @@ impl EngineRelay for SharedRelayActor {
             })
             .send()
             .map_err(http_error)?
-            .error_for_status()
-            .map_err(http_error)?
+            .relay_status()?
             .json()
             .map_err(http_error)?;
         Ok(PairingItem {
@@ -350,8 +365,7 @@ impl EngineRelay for SharedRelayActor {
             .bearer_auth(token)
             .send()
             .map_err(http_error)?
-            .error_for_status()
-            .map_err(http_error)?
+            .relay_status()?
             .json()
             .map_err(http_error)?;
         Ok(response
@@ -363,6 +377,9 @@ impl EngineRelay for SharedRelayActor {
                     nickname: item.sender.nickname,
                     public_key: item.sender.public_key,
                     fingerprint: item.sender.fingerprint,
+                    local_alias: None,
+                    muted: false,
+                    blocked: false,
                     verification: VerificationState::Unverified,
                     dev: None,
                 }),
@@ -395,8 +412,7 @@ impl EngineRelay for SharedRelayActor {
             .bearer_auth(token)
             .send()
             .map_err(http_error)?
-            .error_for_status()
-            .map_err(http_error)?;
+            .relay_status()?;
         Ok(())
     }
 
@@ -415,8 +431,7 @@ impl EngineRelay for SharedRelayActor {
             .bearer_auth(token)
             .send()
             .map_err(http_error)?
-            .error_for_status()
-            .map_err(http_error)?;
+            .relay_status()?;
         Ok(())
     }
 
@@ -437,8 +452,7 @@ impl EngineRelay for SharedRelayActor {
             })
             .send()
             .map_err(http_error)?
-            .error_for_status()
-            .map_err(http_error)?;
+            .relay_status()?;
         Ok(())
     }
 }
@@ -747,6 +761,11 @@ struct CreatePairingRequest {
 }
 
 #[derive(Clone, Debug, Serialize)]
+struct UpdateProfileRequest {
+    nickname: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
 struct ConfirmContactRequest {
     capability: String,
     peer_installation_id: String,
@@ -776,4 +795,69 @@ struct PairingInboxItemResponse {
 
 fn http_error(error: impl std::fmt::Display) -> RuntimeError {
     RuntimeError::Unavailable(format!("relay transport error: {error}"))
+}
+
+trait RelayResponseExt {
+    fn relay_status(self) -> RuntimeResult<Response>;
+}
+
+impl RelayResponseExt for Response {
+    fn relay_status(self) -> RuntimeResult<Response> {
+        let status = self.status();
+        if status.is_success() {
+            return Ok(self);
+        }
+        let message = self
+            .json::<RelayErrorResponse>()
+            .map(|body| body.error)
+            .unwrap_or_else(|_| {
+                status
+                    .canonical_reason()
+                    .unwrap_or("relay request failed")
+                    .to_owned()
+            });
+        Err(relay_status_error(status, message))
+    }
+}
+
+fn relay_status_error(status: StatusCode, message: String) -> RuntimeError {
+    match status {
+        StatusCode::BAD_REQUEST | StatusCode::UNPROCESSABLE_ENTITY => {
+            RuntimeError::InvalidParams(message)
+        }
+        StatusCode::NOT_FOUND => RuntimeError::NotFound(message),
+        StatusCode::CONFLICT => RuntimeError::Conflict(message),
+        StatusCode::REQUEST_TIMEOUT | StatusCode::GATEWAY_TIMEOUT => RuntimeError::Timeout(message),
+        _ => RuntimeError::Unavailable(message),
+    }
+}
+
+#[derive(Deserialize)]
+struct RelayErrorResponse {
+    error: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn relay_statuses_preserve_domain_error_categories() {
+        assert_eq!(
+            relay_status_error(StatusCode::BAD_REQUEST, "invalid code".to_owned()),
+            RuntimeError::InvalidParams("invalid code".to_owned()),
+        );
+        assert_eq!(
+            relay_status_error(StatusCode::NOT_FOUND, "expired code".to_owned()),
+            RuntimeError::NotFound("expired code".to_owned()),
+        );
+        assert_eq!(
+            relay_status_error(StatusCode::CONFLICT, "already pending".to_owned()),
+            RuntimeError::Conflict("already pending".to_owned()),
+        );
+        assert_eq!(
+            relay_status_error(StatusCode::TOO_MANY_REQUESTS, "try later".to_owned()),
+            RuntimeError::Unavailable("try later".to_owned()),
+        );
+    }
 }

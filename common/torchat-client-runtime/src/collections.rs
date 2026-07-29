@@ -36,6 +36,7 @@ where
             conversation_id: item.runtime_message_conversation_id(),
             outgoing: item.runtime_message_outgoing(),
             body: item.runtime_message_body(),
+            reply_to: None,
             state: crate::runtime_message_state(&item.runtime_message_state()),
             created_at: item.runtime_message_created_at(),
             attempt_count: 0,

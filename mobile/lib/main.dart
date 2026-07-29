@@ -64,7 +64,8 @@ class ControllerHomePage extends ConsumerStatefulWidget {
   ConsumerState<ControllerHomePage> createState() => _ControllerHomePageState();
 }
 
-class _ControllerHomePageState extends ConsumerState<ControllerHomePage> with WidgetsBindingObserver {
+class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
+    with WidgetsBindingObserver {
   final _search = TextEditingController();
   final _composer = TextEditingController();
   final _nickname = TextEditingController();
@@ -97,7 +98,7 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage> with Wi
       AppLifecycleState.detached => false,
     };
     unawaited(
-      ref.read(clientRuntimeProvider).updateAppVisibility(foreground),
+      ref.read(appControllerProvider.notifier).updateVisibility(foreground),
     );
   }
 
@@ -129,26 +130,41 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage> with Wi
         .inbox
         .map((item) => item.id)
         .toSet();
-    final used = await showDialog<bool>(
+    await showDialog<bool>(
       context: context,
       builder: (_) => PairingCodeDialog(
         initialCode: code.code,
         initialExpiresAt: code.expiresAt,
         refresh: controller.refreshInviteCode,
         onChanged: (_) {},
-        checkUsed: () async {
+        checkRequest: () async {
           await controller.refreshData();
           final inbox = ref.read(appControllerProvider).inbox;
-          return inbox.any(
+          return inbox.firstOrNullWhere(
             (item) =>
                 !knownInboxIds.contains(item.id) &&
                 item.can(PairingAvailableAction.accept),
           );
         },
+        onAccept: (request) async {
+          await controller.acceptPairing(request.id);
+          final peerId = request.peer?.id;
+          if (peerId == null || peerId.isEmpty) return false;
+          for (var attempt = 0; attempt < 15; attempt += 1) {
+            await controller.refreshData();
+            if (ref
+                .read(appControllerProvider)
+                .contacts
+                .any((contact) => contact.id == peerId)) {
+              return true;
+            }
+            await Future<void>.delayed(const Duration(seconds: 1));
+          }
+          return false;
+        },
+        onReject: (request) => controller.rejectPairing(request.id),
       ),
     );
-    if (!mounted || used != true) return;
-    controller.selectDestination(MainDestination.inbox);
   }
 
   Future<void> _scanInvite() async {
@@ -159,11 +175,15 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage> with Wi
     await ref.read(appControllerProvider.notifier).submitPairingCode(value);
   }
 
-  void _sendMessage() {
+  void _sendMessage(String? replyToMessageId) {
     final text = _composer.text.trim();
     if (text.isEmpty) return;
     _composer.clear();
-    unawaited(ref.read(appControllerProvider.notifier).sendMessage(text));
+    unawaited(
+      ref
+          .read(appControllerProvider.notifier)
+          .sendMessage(text, replyToMessageId: replyToMessageId),
+    );
   }
 
   void _openAccount() {
@@ -194,7 +214,8 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage> with Wi
         builder: (_) => SettingsView(
           nickname: state.profile.nickname,
           torStatus: state.transport.label,
-          themePreferences: ref.read(themeControllerProvider).valueOrNull ??
+          themePreferences:
+              ref.read(themeControllerProvider).valueOrNull ??
               const TorChatThemePreferences(),
           onThemeFamilyChanged: (family) {
             unawaited(
@@ -203,7 +224,9 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage> with Wi
           },
           onBrightnessChanged: (brightness) {
             unawaited(
-              ref.read(themeControllerProvider.notifier).setBrightness(brightness),
+              ref
+                  .read(themeControllerProvider.notifier)
+                  .setBrightness(brightness),
             );
           },
           onOpenTor: () {
@@ -303,12 +326,10 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage> with Wi
 
     final contacts = state.contacts;
     final conversations = state.conversations;
-    final requests = state.pairingRequests();
     final selectedContact = state.selectedContact(contacts, conversations);
     return MainShell(
       tab: switch (state.destination) {
         MainDestination.contacts => MobileTab.contacts,
-        MainDestination.inbox => MobileTab.inbox,
         _ => MobileTab.chats,
       },
       nickname: state.profile.nickname,
@@ -322,9 +343,6 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage> with Wi
       messages: state.messages,
       selectedConversation: state.selectedConversationId,
       selectedContact: selectedContact,
-      inbox: requests,
-      outbox: state.outbox,
-      activeInviteCount: state.activeInviteCount,
       search: _search,
       composer: _composer,
       error: state.error,
@@ -332,7 +350,6 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage> with Wi
       action: state.action,
       onTab: (tab) => controller.selectDestination(switch (tab) {
         MobileTab.contacts => MainDestination.contacts,
-        MobileTab.inbox => MainDestination.inbox,
         MobileTab.chats => MainDestination.chats,
       }),
       onSearch: () => controller.submitPairingCode(_search.text),
@@ -341,15 +358,17 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage> with Wi
       onScanInvite: _scanInvite,
       onShowInvite: _showInvite,
       onSend: _sendMessage,
+      onTypingChanged: controller.setTyping,
+      onRetryMessage: controller.retryMessage,
+      onDeleteMessage: controller.deleteMessageLocal,
       onVerifyContact: controller.verifyContact,
+      onUpdateContactSettings: controller.updateContactSettings,
       onBack: controller.closeConversation,
-      onAcceptRequest: (request) => controller.acceptPairing(request.id),
-      onRejectRequest: (request) => controller.rejectPairing(request.id),
-      onArchiveRequest: (request) => controller.archiveInvite(request.id),
-      onCancelRequest: (request) => controller.cancelPairing(request.id),
       onOpenAccount: _openAccount,
       onOpenSettings: _openSettings,
       onRetryTor: controller.retryTor,
+      typingContacts: state.typingContacts,
+      onlineContacts: state.onlineContacts,
     );
   }
 }

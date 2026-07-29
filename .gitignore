@@ -51,3 +51,6 @@ tmp/
 
 # Generated protocol artifacts not used as checked-in host contracts
 protocol/generated/
+
+# Local source aggregation used for manual review
+/scripts/concat.txt
