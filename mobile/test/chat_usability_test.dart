@@ -98,4 +98,43 @@ void main() {
     expect(replyId, 'message-1');
     composer.dispose();
   });
+
+  testWidgets('composer uses the full chat panel width', (tester) async {
+    final composer = TextEditingController();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ChatsView(
+          selected: const ContactRecord(
+            id: 'peer',
+            nickname: 'Ala',
+            fingerprint: 'abcd',
+            publicKey: 'pk',
+            verified: true,
+          ),
+          contacts: const [],
+          conversations: const [],
+          messages: const [],
+          composer: composer,
+          onOpenConversation: (_) {},
+          onSend: (_) {},
+          onTypingChanged: (_) {},
+          onRetryMessage: (_) {},
+          onDeleteMessage: (_) {},
+          onVerifyContact: (_) {},
+          onBack: () {},
+          error: '',
+          notice: '',
+          canSend: true,
+        ),
+      ),
+    );
+
+    final fieldRect = tester.getRect(find.byType(TextField).last);
+    expect(fieldRect.left, 0);
+    expect(
+      fieldRect.right,
+      tester.view.physicalSize.width / tester.view.devicePixelRatio,
+    );
+    composer.dispose();
+  });
 }

@@ -7,13 +7,19 @@ import 'theme_preferences.dart';
 abstract final class TorChatThemeRegistry {
   const TorChatThemeRegistry._();
 
-  static ThemeData light(TorChatThemeFamily family) => switch (family) {
+  static ThemeData light(
+    TorChatThemeFamily family, {
+    TorChatRetroPalette retroPalette = TorChatRetroPalette.mocha,
+  }) => switch (family) {
     TorChatThemeFamily.current => buildCurrentLightTheme(),
-    TorChatThemeFamily.retro => buildRetroLightTheme(),
+    TorChatThemeFamily.retro => buildRetroLightTheme(retroPalette),
   };
 
-  static ThemeData dark(TorChatThemeFamily family) => switch (family) {
+  static ThemeData dark(
+    TorChatThemeFamily family, {
+    TorChatRetroPalette retroPalette = TorChatRetroPalette.mocha,
+  }) => switch (family) {
     TorChatThemeFamily.current => buildCurrentDarkTheme(),
-    TorChatThemeFamily.retro => buildRetroDarkTheme(),
+    TorChatThemeFamily.retro => buildRetroDarkTheme(retroPalette),
   };
 }

@@ -13,10 +13,11 @@ class FeatureHeader extends StatelessWidget {
   final List<Widget> actions;
 
   @override
-  Widget build(BuildContext context) => Row(
-    children: [
-      Expanded(
-        child: Column(
+  Widget build(BuildContext context) => SizedBox(
+    width: double.infinity,
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        final heading = Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(title, style: Theme.of(context).textTheme.headlineMedium),
@@ -25,12 +26,34 @@ class FeatureHeader extends StatelessWidget {
               Text(subtitle!, style: Theme.of(context).textTheme.bodySmall),
             ],
           ],
-        ),
-      ),
-      for (var index = 0; index < actions.length; index++) ...[
-        if (index > 0) const SizedBox(width: 8),
-        actions[index],
-      ],
-    ],
+        );
+        final actionRow = Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          alignment: WrapAlignment.end,
+          children: actions,
+        );
+        if (actions.isNotEmpty && constraints.maxWidth < 480) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              heading,
+              const SizedBox(height: 12),
+              Align(alignment: Alignment.centerRight, child: actionRow),
+            ],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: heading),
+            if (actions.isNotEmpty) ...[
+              const SizedBox(width: 16),
+              Flexible(child: actionRow),
+            ],
+          ],
+        );
+      },
+    ),
   );
 }

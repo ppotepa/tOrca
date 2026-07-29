@@ -6,6 +6,7 @@ import '../../shared/widgets/action_tile.dart';
 import '../../shared/widgets/action_section.dart';
 import '../../shared/widgets/callout_card.dart';
 import '../../shared/widgets/info_tile.dart';
+import '../../shared/widgets/themed_switch_list_tile.dart';
 
 class SettingsView extends StatefulWidget {
   const SettingsView({
@@ -15,6 +16,7 @@ class SettingsView extends StatefulWidget {
     required this.themePreferences,
     required this.onThemeFamilyChanged,
     required this.onBrightnessChanged,
+    required this.onRetroPaletteChanged,
     required this.onOpenTor,
     required this.onEditProfile,
     required this.onReset,
@@ -24,6 +26,7 @@ class SettingsView extends StatefulWidget {
   final TorChatThemePreferences themePreferences;
   final ValueChanged<TorChatThemeFamily> onThemeFamilyChanged;
   final ValueChanged<TorChatBrightnessMode> onBrightnessChanged;
+  final ValueChanged<TorChatRetroPalette> onRetroPaletteChanged;
   final VoidCallback onOpenTor, onEditProfile;
   final VoidCallback onReset;
 
@@ -32,6 +35,7 @@ class SettingsView extends StatefulWidget {
 }
 
 class _SettingsViewState extends State<SettingsView> {
+  late TorChatThemePreferences _themePreferences;
   bool _notifications = true;
   bool _sound = true;
   bool _vibration = true;
@@ -44,7 +48,16 @@ class _SettingsViewState extends State<SettingsView> {
   @override
   void initState() {
     super.initState();
+    _themePreferences = widget.themePreferences;
     _loadPreferences();
+  }
+
+  @override
+  void didUpdateWidget(covariant SettingsView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.themePreferences != widget.themePreferences) {
+      _themePreferences = widget.themePreferences;
+    }
   }
 
   Future<void> _loadPreferences() async {
@@ -95,17 +108,58 @@ class _SettingsViewState extends State<SettingsView> {
                     label: Text('Retro'),
                   ),
                 ],
-                selected: {widget.themePreferences.family},
+                selected: {_themePreferences.family},
                 onSelectionChanged: (selected) {
                   final family = selected.firstOrNull;
-                  if (family != null) widget.onThemeFamilyChanged(family);
+                  if (family != null) {
+                    setState(() {
+                      _themePreferences = _themePreferences.copyWith(
+                        family: family,
+                      );
+                    });
+                    widget.onThemeFamilyChanged(family);
+                  }
                 },
               ),
+              if (_themePreferences.family == TorChatThemeFamily.retro) ...[
+                const SizedBox(height: 12),
+                InfoTile(
+                  leading: const ThemedIcon(Icons.terminal_outlined),
+                  title: 'Paleta terminalowa',
+                  subtitle: _themePreferences.retroPalette.label,
+                ),
+                const SizedBox(height: 6),
+                SizedBox(
+                  width: double.infinity,
+                  child: SegmentedButton<TorChatRetroPalette>(
+                    segments: [
+                      for (final palette in TorChatRetroPalette.values)
+                        ButtonSegment(
+                          value: palette,
+                          label: Text(palette.label),
+                        ),
+                    ],
+                    selected: {_themePreferences.retroPalette},
+                    showSelectedIcon: false,
+                    onSelectionChanged: (selected) {
+                      final palette = selected.firstOrNull;
+                      if (palette != null) {
+                        setState(() {
+                          _themePreferences = _themePreferences.copyWith(
+                            retroPalette: palette,
+                          );
+                        });
+                        widget.onRetroPaletteChanged(palette);
+                      }
+                    },
+                  ),
+                ),
+              ],
               const SizedBox(height: 12),
               InfoTile(
                 leading: const ThemedIcon(Icons.brightness_auto_outlined),
                 title: 'Tryb jasności',
-                subtitle: switch (widget.themePreferences.brightness) {
+                subtitle: switch (_themePreferences.brightness) {
                   TorChatBrightnessMode.system => 'System',
                   TorChatBrightnessMode.light => 'Jasny',
                   TorChatBrightnessMode.dark => 'Ciemny',
@@ -127,10 +181,17 @@ class _SettingsViewState extends State<SettingsView> {
                     label: Text('Ciemny'),
                   ),
                 ],
-                selected: {widget.themePreferences.brightness},
+                selected: {_themePreferences.brightness},
                 onSelectionChanged: (selected) {
                   final mode = selected.firstOrNull;
-                  if (mode != null) widget.onBrightnessChanged(mode);
+                  if (mode != null) {
+                    setState(() {
+                      _themePreferences = _themePreferences.copyWith(
+                        brightness: mode,
+                      );
+                    });
+                    widget.onBrightnessChanged(mode);
+                  }
                 },
               ),
             ],
@@ -259,7 +320,7 @@ class _SettingsViewState extends State<SettingsView> {
     String key,
     ValueChanged<bool> assign, {
     bool enabled = true,
-  }) => SwitchListTile(
+  }) => ThemedSwitchListTile(
     contentPadding: EdgeInsets.zero,
     title: Text(title),
     subtitle: Text(subtitle),

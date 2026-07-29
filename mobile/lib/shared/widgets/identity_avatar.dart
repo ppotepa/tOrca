@@ -20,12 +20,34 @@ class IdentityAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return ThemedAvatar(
+      radius: radius,
+      backgroundColor: backgroundColor,
+      child: Text(identityInitial(label)),
+    );
+  }
+}
+
+class ThemedAvatar extends StatelessWidget {
+  const ThemedAvatar({
+    super.key,
+    required this.child,
+    this.radius,
+    this.backgroundColor,
+  });
+
+  final Widget child;
+  final double? radius;
+  final Color? backgroundColor;
+
+  @override
+  Widget build(BuildContext context) {
     final diameter = (radius ?? 20) * 2;
     if (!context.effectsTheme.pixelated) {
       return CircleAvatar(
         radius: radius,
         backgroundColor: backgroundColor,
-        child: Text(identityInitial(label)),
+        child: child,
       );
     }
     return Container(
@@ -41,7 +63,7 @@ class IdentityAvatar extends StatelessWidget {
           width: 2,
         ),
       ),
-      child: Text(identityInitial(label)),
+      child: child,
     );
   }
 }

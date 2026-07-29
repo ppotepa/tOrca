@@ -6,6 +6,7 @@ import '../../shared/formatters/invite_code.dart';
 import '../../shared/widgets/contact_list_section.dart';
 import '../../shared/widgets/feature_header.dart';
 import '../../shared/widgets/status_banner.dart';
+import '../../shared/widgets/themed_switch_list_tile.dart';
 
 class ContactsView extends StatelessWidget {
   const ContactsView({
@@ -153,13 +154,13 @@ class ContactsView extends StatelessWidget {
                 maxLength: 32,
                 decoration: const InputDecoration(labelText: 'Lokalny alias'),
               ),
-              SwitchListTile(
+              ThemedSwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text('Wycisz powiadomienia'),
                 value: muted,
                 onChanged: (value) => setDialogState(() => muted = value),
               ),
-              SwitchListTile(
+              ThemedSwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text('Zablokuj kontakt'),
                 subtitle: const Text('Nie odbieraj ani nie wysyłaj wiadomości'),

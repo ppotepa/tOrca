@@ -23,6 +23,9 @@ class ThemeController extends AsyncNotifier<TorChatThemePreferences> {
   Future<void> setBrightness(TorChatBrightnessMode brightness) =>
       _update((value) => value.copyWith(brightness: brightness));
 
+  Future<void> setRetroPalette(TorChatRetroPalette palette) =>
+      _update((value) => value.copyWith(retroPalette: palette));
+
   Future<void> _update(
     TorChatThemePreferences Function(TorChatThemePreferences) mutate,
   ) async {

@@ -7,6 +7,7 @@ class ThemePreferencesStore {
 
   static const _familyKey = 'torchat.theme.family';
   static const _brightnessKey = 'torchat.theme.brightness';
+  static const _retroPaletteKey = 'torchat.theme.retroPalette';
 
   final SharedPreferences _preferences;
 
@@ -20,12 +21,23 @@ class ThemePreferencesStore {
     final brightness = TorChatThemePreferences.parseBrightness(
       _preferences.getString(_brightnessKey),
     );
+    final retroPalette = TorChatThemePreferences.parseRetroPalette(
+      _preferences.getString(_retroPaletteKey),
+    );
 
-    return TorChatThemePreferences(family: family, brightness: brightness);
+    return TorChatThemePreferences(
+      family: family,
+      brightness: brightness,
+      retroPalette: retroPalette,
+    );
   }
 
   Future<void> save(TorChatThemePreferences value) async {
     await _preferences.setString(_familyKey, value.family.storageValue);
     await _preferences.setString(_brightnessKey, value.brightness.storageValue);
+    await _preferences.setString(
+      _retroPaletteKey,
+      value.retroPalette.storageValue,
+    );
   }
 }

@@ -126,16 +126,21 @@ Uwaga srodowiskowa:
   `assets/audio/intro.mp3` na Androidzie i Windows. Flutter wyzwala wspolny
   kanal `org.torchat/audio`; Android korzysta z `MediaPlayer`, a Windows z MCI.
   Blad opcjonalnego audio nie zmienia poprawnego statusu polaczenia.
-- [x] Retro zachowuje te same semantyczne barwy co Classic dla `success`,
-  `warning`, `danger`, statusu Tor, wysylanych wiadomosci i unread. Roznice
-  motywu dotycza powierzchni, typografii i geometrii, nie znaczenia kolorow.
+- [x] Retro zachowuje stale role semantyczne `success`, `warning`, `danger`
+  i `info`, ale kazda paleta moze stosowac wlasny, zblizony odcien. Status Tor,
+  wysylane wiadomosci, alerty i unread nadal korzystaja z tych samych rol.
+- [x] Retro ma cztery zapisywane palety terminalowe: `Arcade`, domyslna ciemna
+  `Mocha`, `Gruvbox` i `Nord`, kazda ze spojnym wariantem jasnym i ciemnym.
+  Zmiana palety jest widoczna natychmiast bez ponownego otwierania ustawien.
 - [x] Kontrakt geometrii Retro jest prostokatny dla kart, inputow, chipow,
-  dialogow, snackbarow, przyciskow ikonowych, nawigacji, badge'y, separatorow
-  daty i awatarow. Composer ma akcje wysylania wewnatrz pola zamiast osobnego
-  przycisku obok.
-- [x] Spacing akcji naglowka, w tym `Dodaj kontakt`, jest jawny i rowny.
-- [x] Dodany `theme_contract_test.dart`, ktory pilnuje wspolnych kolorow
-  semantycznych oraz prostokatnej geometrii Retro.
+  dialogow, snackbarow, segmented buttons, przyciskow, nawigacji, badge'y,
+  separatorow daty, awatarow i przelacznikow. Retro switch ma prostokatny tor
+  i kwadratowy suwak; Classic nadal uzywa kontrolki Material.
+- [x] Composer zajmuje cala szerokosc aktywnego panelu czatu bez podwojnego
+  bocznego paddingu. `FeatureHeader` zajmuje cala szerokosc i przy waskim
+  ekranie przenosi akcje pod tytul zamiast powodowac sciskanie lub overflow.
+- [x] `theme_contract_test.dart` pilnuje rol kolorystycznych wszystkich palet,
+  prostokatnej geometrii, switcha Retro i selektora ustawien przy 400 px.
 - [x] Dodany niezalezny zestaw ikon `pixelarticons` i centralny `ThemedIcon`.
   Classic zachowuje Material Icons, a Retro mapuje te same role na pikselowe
   glify dla nawigacji, czatow, kontaktow, pairing, onboardingu, konta,
@@ -238,6 +243,11 @@ cargo check -p torchat-server -p torchat-desktop
 .\scripts\torchat.ps1 run-desktop -SkipEnvironmentStart
 .\scripts\torchat.ps1 logs
 rtk test cargo test -p torchat-client-engine
+flutter analyze
+flutter test
+.\scripts\torchat.ps1 build-clients -Target all -Incremental
+.\scripts\torchat.ps1 deploy-mobile
+.\scripts\torchat.ps1 run-desktop -SkipEnvironmentStart
 rg -n "RuntimeRequest|RuntimeResponse|dispatch_runtime|map_runtime_request|response_to_runtime_response" desktop mobile common
 rg -n '"type", "[a-z_]+"|put\("type", "[a-z_]+"|''method'': method|''params'': params' mobile desktop common
 codegraph sync
@@ -247,4 +257,4 @@ codegraph sync
 
 - [x] Wszystkie funkcjonalne punkty z planu w `SUMMARY.MD` sa domkniete.
 - [x] Rust engine, Rust FFI, desktop, Flutter i Android maja lokalne potwierdzenie.
-- [x] Branch zostal sfinalizowany commitem i wypchniety do `origin`.
+- [ ] Biezace zmiany palet i geometrii Retro oczekuja na osobny commit/push.

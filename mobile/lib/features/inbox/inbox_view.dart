@@ -330,7 +330,7 @@ class _OutboxCard extends StatelessWidget {
     final canCancel = request.can(PairingAvailableAction.cancel);
     final theme = context.inboxTheme;
     return PairingRecordCard(
-      leading: CircleAvatar(child: ThemedIcon(request.status.outboxIcon)),
+      leading: ThemedAvatar(child: ThemedIcon(request.status.outboxIcon)),
       title: outboxTitle(request),
       subtitle: 'Kod został przyjęty przez relay\n${request.status.label}',
       status: request.status,

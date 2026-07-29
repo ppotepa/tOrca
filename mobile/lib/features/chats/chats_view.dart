@@ -333,7 +333,7 @@ class _Composer extends StatelessWidget {
     return SafeArea(
       top: false,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+        padding: const EdgeInsets.fromLTRB(0, 4, 0, 8),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -386,8 +386,8 @@ class _Composer extends StatelessWidget {
                     ),
                   ),
                   suffixIconConstraints: const BoxConstraints.tightFor(
-                    width: 52,
-                    height: 52,
+                    width: 56,
+                    height: 56,
                   ),
                   suffixIcon: FilledButton(
                     onPressed: canSend ? onSend : null,

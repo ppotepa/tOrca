@@ -28,10 +28,16 @@ class CounterBadge extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
       decoration: BoxDecoration(
         color: badgeColor,
+        border: context.effectsTheme.pixelated
+            ? Border.all(
+                color: Theme.of(context).colorScheme.onSurface,
+                width: 2,
+              )
+            : null,
         borderRadius: context.effectsTheme.pixelated
             ? BorderRadius.zero
             : BorderRadius.circular(999),
-        boxShadow: glow
+        boxShadow: glow && !context.effectsTheme.pixelated
             ? [
                 BoxShadow(
                   color: badgeColor.withValues(alpha: .40),

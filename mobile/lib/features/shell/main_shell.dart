@@ -190,7 +190,9 @@ class MainShell extends StatelessWidget {
                   ActionStatusStrip(action: action),
                   Expanded(
                     child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                      padding: selectedConversation == null
+                          ? const EdgeInsets.fromLTRB(16, 4, 16, 0)
+                          : EdgeInsets.zero,
                       child: _content(context),
                     ),
                   ),

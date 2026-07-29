@@ -45,8 +45,14 @@ class _TorChatAppView extends ConsumerWidget {
     return MaterialApp(
       title: 'TorChat',
       debugShowCheckedModeBanner: false,
-      theme: TorChatThemeRegistry.light(preferences.family),
-      darkTheme: TorChatThemeRegistry.dark(preferences.family),
+      theme: TorChatThemeRegistry.light(
+        preferences.family,
+        retroPalette: preferences.retroPalette,
+      ),
+      darkTheme: TorChatThemeRegistry.dark(
+        preferences.family,
+        retroPalette: preferences.retroPalette,
+      ),
       themeMode: switch (preferences.brightness) {
         TorChatBrightnessMode.system => ThemeMode.system,
         TorChatBrightnessMode.light => ThemeMode.light,
@@ -227,6 +233,13 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
               ref
                   .read(themeControllerProvider.notifier)
                   .setBrightness(brightness),
+            );
+          },
+          onRetroPaletteChanged: (palette) {
+            unawaited(
+              ref
+                  .read(themeControllerProvider.notifier)
+                  .setRetroPalette(palette),
             );
           },
           onOpenTor: () {
