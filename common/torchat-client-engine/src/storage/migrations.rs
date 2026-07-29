@@ -25,6 +25,18 @@ impl MigrationRunner {
 
     pub fn run(&self, connection: &Connection) -> EngineResult<()> {
         for migration in self.migrations {
+            if migration.version == 0 && !schema_migrations_table_exists(connection)? {
+                connection
+                    .execute_batch(migration.sql)
+                    .map_err(sqlite_error)?;
+                connection
+                    .execute(
+                        super::sqlite::MIGRATION_INSERT,
+                        params![migration.version, migration.name],
+                    )
+                    .map_err(sqlite_error)?;
+                continue;
+            }
             let applied: Option<i64> = connection
                 .query_row(super::sqlite::MIGRATION_LOOKUP, [migration.name], |row| {
                     row.get("version")
@@ -60,4 +72,19 @@ impl MigrationRunner {
 
 fn sqlite_error(error: rusqlite::Error) -> EngineError {
     EngineError::Storage(format!("{error:#}"))
+}
+
+fn schema_migrations_table_exists(connection: &Connection) -> EngineResult<bool> {
+    connection
+        .query_row(
+            "SELECT 1
+             FROM sqlite_master
+             WHERE type = 'table'
+               AND name = 'schema_migrations';",
+            [],
+            |_| Ok(()),
+        )
+        .optional()
+        .map(|value| value.is_some())
+        .map_err(sqlite_error)
 }

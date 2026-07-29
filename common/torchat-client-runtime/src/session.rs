@@ -28,11 +28,11 @@ impl RuntimeSession {
         self.selected_conversation_id = None;
     }
 
-    pub(crate) fn begin_transaction(&mut self) {
+    pub fn begin_transaction(&mut self) {
         self.transaction_depth = self.transaction_depth.saturating_add(1);
     }
 
-    pub(crate) fn commit_transaction(&mut self) {
+    pub fn commit_transaction(&mut self) {
         if self.transaction_depth == 0 {
             return;
         }
@@ -42,7 +42,7 @@ impl RuntimeSession {
         }
     }
 
-    pub(crate) fn rollback_transaction(&mut self) {
+    pub fn rollback_transaction(&mut self) {
         if self.transaction_depth == 0 {
             return;
         }

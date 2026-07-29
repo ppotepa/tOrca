@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, bail};
-use torchat_client_engine::TorPhase;
+#[cfg(test)]
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
     fs,
     io::{BufRead, BufReader},
@@ -8,8 +9,7 @@ use std::{
     process::{Child, Command, Stdio},
     sync::{Arc, Mutex, mpsc},
 };
-#[cfg(test)]
-use std::sync::atomic::{AtomicBool, Ordering};
+use torchat_client_engine::TorPhase;
 
 #[derive(Clone, Debug)]
 pub struct TorStatus {

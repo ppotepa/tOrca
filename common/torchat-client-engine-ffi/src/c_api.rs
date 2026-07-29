@@ -278,7 +278,7 @@ mod tests {
             "databasePath": database_path,
             "databaseKey": bytes(3),
             "identityPrivateKey": bytes(4),
-            "relayOnionUrl": "http://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.onion:80",
+            "relayOnionUrl": "http://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.onion/",
             "initialSocks5Url": null,
             "logDirectory": null,
             "platform": "desktop"

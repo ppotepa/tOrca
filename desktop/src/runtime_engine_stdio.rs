@@ -4,8 +4,7 @@ use sha2::{Digest, Sha256};
 use std::io::{BufRead, Write};
 use torchat_client_engine::{
     ClientEngine, EngineCommand, EngineCommandEnvelope, EngineConfig, EngineEvent,
-    EngineFatalError, PlatformFact, PlatformKind,
-    config::SecretBytes,
+    EngineFatalError, PlatformFact, PlatformKind, config::SecretBytes,
 };
 use url::Url;
 
@@ -75,7 +74,9 @@ pub fn run_stdio_engine(cli: Cli) -> Result<()> {
     runtime.block_on(async move {
         let identity = identity_store::load_or_create(cli.identity_file.as_deref())?;
         let database_path = identity_store::state_path(cli.identity_file.as_deref())?;
-        let log_directory = database_path.parent().map(|parent| parent.join("engine-logs"));
+        let log_directory = database_path
+            .parent()
+            .map(|parent| parent.join("engine-logs"));
         let (tor_runtime, status_rx) = start_tor(&cli)?;
         let socks_url: Url = tor_runtime
             .socks_url()
@@ -144,13 +145,7 @@ pub fn run_stdio_engine(cli: Cli) -> Result<()> {
                 })?;
                 continue;
             }
-            wait_for_response(
-                &mut engine,
-                &status_rx,
-                &mut tor_status_seq,
-                &request_id,
-            )
-            .await?;
+            wait_for_response(&mut engine, &status_rx, &mut tor_status_seq, &request_id).await?;
             if shutdown {
                 break;
             }
@@ -221,4 +216,3 @@ pub(crate) async fn wait_for_response(
         }
     }
 }
-
