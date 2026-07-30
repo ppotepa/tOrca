@@ -74,6 +74,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "011_pending_pairing_acknowledgements.sql",
         sql: include_str!("../../sql/migrations/011_pending_pairing_acknowledgements.sql"),
     },
+    Migration {
+        version: 12,
+        name: "012_pending_peer_endpoint_inbox.sql",
+        sql: include_str!("../../sql/migrations/012_pending_peer_endpoint_inbox.sql"),
+    },
 ];
 
 pub struct ClientDatabase {
@@ -184,6 +189,14 @@ pub struct PeerEndpointBootstrapRecord {
     pub attempt_count: u32,
     pub next_attempt_at: i64,
     pub last_error: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PendingPeerEndpointInboxRecord {
+    pub contact_installation_id: String,
+    pub payload: Vec<u8>,
+    pub endpoint_sequence: u64,
+    pub received_at: i64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1251,6 +1264,68 @@ impl ClientDatabase {
         Ok(())
     }
 
+    pub fn put_pending_peer_endpoint_inbox(
+        &self,
+        record: &PendingPeerEndpointInboxRecord,
+    ) -> EngineResult<()> {
+        self.connection
+            .execute(
+                "INSERT INTO pending_peer_endpoint_inbox (
+                    contact_installation_id, payload, endpoint_sequence, received_at
+                 ) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(contact_installation_id) DO UPDATE SET
+                    payload = excluded.payload,
+                    endpoint_sequence = excluded.endpoint_sequence,
+                    received_at = excluded.received_at
+                 WHERE excluded.endpoint_sequence > pending_peer_endpoint_inbox.endpoint_sequence;",
+                params![
+                    record.contact_installation_id,
+                    record.payload,
+                    record.endpoint_sequence as i64,
+                    record.received_at,
+                ],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
+    pub fn pending_peer_endpoint_inbox(
+        &self,
+        contact_installation_id: &str,
+    ) -> EngineResult<Option<PendingPeerEndpointInboxRecord>> {
+        self.connection
+            .query_row(
+                "SELECT contact_installation_id, payload, endpoint_sequence, received_at
+                 FROM pending_peer_endpoint_inbox
+                 WHERE contact_installation_id = ?1;",
+                [contact_installation_id],
+                |row| {
+                    Ok(PendingPeerEndpointInboxRecord {
+                        contact_installation_id: row.get("contact_installation_id")?,
+                        payload: row.get("payload")?,
+                        endpoint_sequence: row.get::<_, i64>("endpoint_sequence")? as u64,
+                        received_at: row.get("received_at")?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(sqlite_error)
+    }
+
+    pub fn remove_pending_peer_endpoint_inbox(
+        &self,
+        contact_installation_id: &str,
+    ) -> EngineResult<()> {
+        self.connection
+            .execute(
+                "DELETE FROM pending_peer_endpoint_inbox
+                 WHERE contact_installation_id = ?1;",
+                [contact_installation_id],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
     pub fn invite_used(&self, invite_id: &str) -> EngineResult<bool> {
         self.connection
             .query_row(
@@ -2063,7 +2138,7 @@ mod tests {
             })
             .expect("schema_migrations version is readable");
 
-        assert_eq!(latest_version, 11);
+        assert_eq!(latest_version, 12);
         assert_eq!(database.migration_runner().checksum().len(), 64);
 
         drop(database);
@@ -2114,7 +2189,7 @@ mod tests {
             .expect("latest migration is readable");
 
         assert_eq!(policy, "RELAY_ONLY");
-        assert_eq!(latest_version, 11);
+        assert_eq!(latest_version, 12);
         drop(database);
         let _ = std::fs::remove_file(path);
     }

@@ -21,9 +21,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import org.torchat.generated.EngineContract
-import org.torchat.security.LocalSecretStore
-
-
 class MainActivity : FlutterActivity() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -31,44 +28,19 @@ class MainActivity : FlutterActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        resetLocalStateIfRequested()
-        ContextCompat.startForegroundService(this, Intent(this, TorChatForegroundService::class.java))
+        val serviceIntent = Intent(this, TorChatForegroundService::class.java)
+        val resetDev = BuildConfig.DEBUG && intent.getBooleanExtra("reset_dev_state", false)
+        val clean = intent.getBooleanExtra("clean_state", false)
+        if (resetDev) serviceIntent.putExtra("reset_dev_state", true)
+        if (clean) serviceIntent.putExtra("clean_state", true)
+        intent.removeExtra("reset_dev_state")
+        intent.removeExtra("clean_state")
+        ContextCompat.startForegroundService(this, serviceIntent)
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED
         ) {
             requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 4102)
         }
-    }
-
-    private fun resetLocalStateIfRequested() {
-        val resetDev = BuildConfig.DEBUG && intent.getBooleanExtra("reset_dev_state", false)
-        val clean = intent.getBooleanExtra("clean_state", false)
-        if (!resetDev && !clean) return
-
-        // Deployment reset flags are one-shot. Activity recreation must never
-        // delete a database already owned by the foreground service.
-        intent.removeExtra("reset_dev_state")
-        intent.removeExtra("clean_state")
-        listOf(
-            "torchat-client-v1.db",
-            "torchat-client-v1.db-wal",
-            "torchat-client-v1.db-shm",
-            "torchat-client-v1.db-journal",
-        ).forEach { name ->
-            runCatching {
-                val target = noBackupFilesDir.resolve(name).canonicalFile
-                val root = noBackupFilesDir.canonicalFile
-                require(target.parentFile == root) {
-                    "Reset path escaped TorChat data directory: ${target.absolutePath}"
-                }
-                target.delete()
-            }
-        }
-        if (clean) LocalSecretStore(this).clearLocalSecrets()
-        android.util.Log.i(
-            "TorChat-Engine",
-            "Developer local client state reset completed resetDev=$resetDev clean=$clean",
-        )
     }
 
     override fun configureFlutterEngine(engine: FlutterEngine) {
@@ -79,7 +51,7 @@ class MainActivity : FlutterActivity() {
                 override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
                     eventSink = events
                     val sink = events ?: return
-                    TorChatForegroundService.lastTorStatus?.let(sink::success)
+                    TorChatForegroundService.runtimeSnapshot().forEach(sink::success)
                 }
 
                 override fun onCancel(arguments: Any?) {

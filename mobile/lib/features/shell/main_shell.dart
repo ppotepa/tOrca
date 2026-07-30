@@ -11,6 +11,7 @@ import '../../shared/widgets/feature_header.dart';
 import '../../shared/widgets/identity_section.dart';
 import '../../shared/widgets/info_list_section.dart';
 import '../../shared/widgets/info_tile.dart';
+import '../../shared/widgets/list_items.dart';
 import '../../shared/widgets/section_card.dart';
 import '../../shared/widgets/tor_status_bar.dart';
 import '../chats/chats_view.dart';
@@ -655,9 +656,29 @@ class DesktopInspector extends StatelessWidget {
             fingerprint: contact.fingerprint,
           ),
           const Divider(),
-          const SectionCard(
+          SectionCard(
             title: 'POŁĄCZENIE',
-            child: InfoTile(title: 'Transport', subtitle: 'Przez onion'),
+            child: Row(
+              children: [
+                PeerTransportIndicator(
+                  connectionStatus: contact.peerConnectionStatus,
+                  transportPolicy: contact.transportPolicy,
+                  endpointStatus: contact.peerEndpointStatus,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: InfoTile(
+                    title: 'Transport',
+                    subtitle: switch (contact.transportPolicy) {
+                      ContactTransportPolicy.relayOnly => 'Tylko relay',
+                      ContactTransportPolicy.peerOnly => 'Tylko P2P',
+                      ContactTransportPolicy.peerWithRelayFallback =>
+                        'P2P z fallbackiem relay',
+                    },
+                  ),
+                ),
+              ],
+            ),
           ),
           const Divider(),
           const InfoListSection(

@@ -102,6 +102,16 @@ class TorChatForegroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val resetDev = BuildConfig.DEBUG && intent?.getBooleanExtra("reset_dev_state", false) == true
+        val clean = intent?.getBooleanExtra("clean_state", false) == true
+        if ((resetDev || clean) && runtime == null && engineHost == null && !starting) {
+            resetLocalState(resetDev = resetDev, clean = clean)
+        } else if ((resetDev || clean) && (runtime != null || engineHost != null || starting)) {
+            Log.w(
+                "TorChat-Engine",
+                "Ignoring late client-state reset because the service already owns an active runtime",
+            )
+        }
         if (runtime == null && !starting) {
             starting = true
             scope.launch {
@@ -252,6 +262,29 @@ class TorChatForegroundService : Service() {
         return START_STICKY
     }
 
+    private fun resetLocalState(resetDev: Boolean, clean: Boolean) {
+        val root = applicationContext.noBackupFilesDir.canonicalFile
+        listOf(
+            "torchat-client-v1.db",
+            "torchat-client-v1.db-wal",
+            "torchat-client-v1.db-shm",
+            "torchat-client-v1.db-journal",
+        ).forEach { name ->
+            val target = root.resolve(name).canonicalFile
+            require(target.parentFile == root) {
+                "Reset path escaped TorChat data directory: ${target.absolutePath}"
+            }
+            if (target.exists() && !target.delete()) {
+                error("Unable to delete client state file: ${target.absolutePath}")
+            }
+        }
+        if (clean) LocalSecretStore(applicationContext).clearLocalSecrets()
+        Log.i(
+            "TorChat-Engine",
+            "Service-owned client state reset completed resetDev=$resetDev clean=$clean",
+        )
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
@@ -320,9 +353,8 @@ class TorChatForegroundService : Service() {
     }
 
     private fun publish(event: Map<String, Any?>) {
-        if (event[EngineContract.TYPE] == EngineContract.TOR_STATUS) {
-            lastTorStatus = event
-        }
+        val type = event[EngineContract.TYPE] as? String
+        if (type != null) lastRuntimeSnapshot[type] = event
         eventListener?.invoke(event)
     }
 
@@ -575,7 +607,11 @@ class TorChatForegroundService : Service() {
         @Volatile private var localReady = kotlinx.coroutines.CompletableDeferred<Unit>()
         @Volatile var eventListener: ((Map<String, Any?>) -> Unit)? = null
         @Volatile var activeEngineHost: AndroidEngineHost? = null
-        @Volatile var lastTorStatus: Map<String, Any?>? = null
+        private val lastRuntimeSnapshot =
+            java.util.concurrent.ConcurrentHashMap<String, Map<String, Any?>>()
+
+        fun runtimeSnapshot(): List<Map<String, Any?>> =
+            lastRuntimeSnapshot.values.toList()
 
         private fun notifyIncomingNotification(
             context: Context,

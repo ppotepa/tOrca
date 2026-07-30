@@ -1,4 +1,7 @@
-use std::{collections::HashMap, mem};
+use std::{
+    collections::{HashMap, HashSet},
+    mem,
+};
 
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use sha2::{Digest, Sha256};
@@ -34,8 +37,9 @@ use crate::{
     relay::{EngineRelay, RelayEvent, SharedRelayActor},
     storage::{
         DeliveryReceiptRecord, InboundEnvelopeStoreResult, PairingResponseRecord,
-        PeerEndpointBootstrapRecord, PendingContactConfirmationRecord, PendingWelcomeRecord,
-        ReceivedEnvelopeRecord, RetryDeadline, RetryKind, SqliteRuntimeStorage,
+        PeerEndpointBootstrapRecord, PendingContactConfirmationRecord,
+        PendingPeerEndpointInboxRecord, PendingWelcomeRecord, ReceivedEnvelopeRecord,
+        RetryDeadline, RetryKind, SqliteRuntimeStorage,
     },
 };
 
@@ -58,6 +62,7 @@ pub struct ClientEngineActor {
     pub pending_welcomes: HashMap<String, PendingWelcomeRecord>,
     pending_relay_deliveries: HashMap<uuid::Uuid, PendingRelayDelivery>,
     pending_engine_events: Vec<EngineEvent>,
+    active_peer_sessions: HashMap<String, HashSet<uuid::Uuid>>,
     connection_generation: u64,
     app_foreground: bool,
     pub session: RuntimeSession,
@@ -106,6 +111,7 @@ impl ClientEngineActor {
             pending_welcomes,
             pending_relay_deliveries: HashMap::new(),
             pending_engine_events: Vec::new(),
+            active_peer_sessions: HashMap::new(),
             connection_generation: 0,
             app_foreground: true,
             session: RuntimeSession::new(),
@@ -1032,10 +1038,41 @@ impl ClientEngineActor {
             }
             PeerTransportEvent::ConnectionChanged {
                 installation_id,
+                session_id,
                 status,
                 error,
                 delivery,
             } => {
+                if let Some(session_id) = session_id {
+                    let sessions = self
+                        .active_peer_sessions
+                        .entry(installation_id.clone())
+                        .or_default();
+                    match status {
+                        PeerConnectionStatus::Connected => {
+                            sessions.insert(session_id);
+                        }
+                        PeerConnectionStatus::Offline => {
+                            sessions.remove(&session_id);
+                            if !sessions.is_empty() {
+                                return Ok(Vec::new());
+                            }
+                        }
+                        _ => {}
+                    }
+                } else if self
+                    .active_peer_sessions
+                    .get(&installation_id)
+                    .is_some_and(|sessions| !sessions.is_empty())
+                    && matches!(
+                        status,
+                        PeerConnectionStatus::Connecting
+                            | PeerConnectionStatus::Authenticating
+                            | PeerConnectionStatus::Backoff
+                    )
+                {
+                    return Ok(Vec::new());
+                }
                 if status == PeerConnectionStatus::Connected {
                     self.database
                         .mark_peer_connected(&installation_id, unix_secs())?;
@@ -2027,16 +2064,33 @@ impl ClientEngineActor {
                         &self.identity.installation_id(),
                     )
                     .map_err(EngineError::InvalidCommand)?;
-                let mut runtime_events = Vec::new();
                 let contact = self
                     .list_contacts()?
                     .into_iter()
-                    .find(|contact| contact.installation_id == endpoint.installation_id)
-                    .ok_or_else(|| {
-                        EngineError::InvalidCommand(
-                            "peer endpoint bootstrap received for unknown contact".to_owned(),
-                        )
-                    })?;
+                    .find(|contact| contact.installation_id == endpoint.installation_id);
+                let Some(contact) = contact else {
+                    self.database.put_pending_peer_endpoint_inbox(
+                        &PendingPeerEndpointInboxRecord {
+                            contact_installation_id: endpoint.installation_id.clone(),
+                            payload: payload
+                                .encode()
+                                .map_err(EngineError::InvalidCommand)?
+                                .into_bytes(),
+                            endpoint_sequence: endpoint.sequence,
+                            received_at: unix_ms(),
+                        },
+                    )?;
+                    self.pending_engine_events.push(EngineEvent::Log {
+                        log: EngineLogEvent {
+                            level: "info".to_owned(),
+                            message: format!(
+                                "peer endpoint bootstrap deferred until contact exists contact={}",
+                                endpoint.installation_id
+                            ),
+                        },
+                    });
+                    return Ok(Vec::new());
+                };
                 if !contact.public_key.trim().is_empty()
                     && contact.public_key != endpoint.identity_public_key
                 {
@@ -2044,32 +2098,66 @@ impl ClientEngineActor {
                         "peer endpoint bootstrap identity does not match contact".to_owned(),
                     ));
                 }
-                match self.database.contact_peer_endpoint(&endpoint.installation_id)? {
-                    Some(previous) => {
-                        if endpoint.sequence <= previous.sequence {
-                            return Ok(Vec::new());
-                        }
-                        endpoint
-                            .validate_successor(&previous, unix_secs())
-                            .map_err(EngineError::InvalidCommand)?;
-                    }
-                    None => {
-                        endpoint
-                            .validate(unix_secs())
-                            .map_err(EngineError::InvalidCommand)?;
-                    }
-                }
-                self.database.put_contact_peer_endpoint(&endpoint)?;
-                if let Some(transport) = &self.peer_transport {
-                    transport.authorize_contact(&endpoint);
-                }
-                runtime_events.push(torchat_client_runtime::RuntimeEvent::PeerEndpointChanged {
-                    contact_id: endpoint.installation_id.clone(),
-                    status: PeerEndpointStatus::Verified,
-                });
-                Ok(runtime_events)
+                self.apply_peer_endpoint(endpoint)
             }
         }
+    }
+
+    fn apply_peer_endpoint(
+        &mut self,
+        endpoint: PeerEndpointBundle,
+    ) -> EngineResult<Vec<torchat_client_runtime::RuntimeEvent>> {
+        match self.database.contact_peer_endpoint(&endpoint.installation_id)? {
+            Some(previous) => {
+                if endpoint.sequence <= previous.sequence {
+                    return Ok(Vec::new());
+                }
+                endpoint
+                    .validate_successor(&previous, unix_secs())
+                    .map_err(EngineError::InvalidCommand)?;
+            }
+            None => {
+                endpoint
+                    .validate(unix_secs())
+                    .map_err(EngineError::InvalidCommand)?;
+            }
+        }
+        self.database.put_contact_peer_endpoint(&endpoint)?;
+        if let Some(transport) = &self.peer_transport {
+            transport.authorize_contact(&endpoint);
+        }
+        Ok(vec![
+            torchat_client_runtime::RuntimeEvent::PeerEndpointChanged {
+                contact_id: endpoint.installation_id,
+                status: PeerEndpointStatus::Verified,
+            },
+        ])
+    }
+
+    fn apply_pending_peer_endpoint(
+        &mut self,
+        contact_installation_id: &str,
+    ) -> EngineResult<Vec<torchat_client_runtime::RuntimeEvent>> {
+        let Some(record) = self
+            .database
+            .pending_peer_endpoint_inbox(contact_installation_id)?
+        else {
+            return Ok(Vec::new());
+        };
+        let payload = String::from_utf8(record.payload).map_err(|error| {
+            EngineError::Storage(format!("stored peer endpoint bootstrap is not UTF-8: {error}"))
+        })?;
+        let payload = RelayPayloadV1::decode(&payload).map_err(EngineError::InvalidCommand)?;
+        let endpoint = payload
+            .verify_peer_endpoint_bootstrap(
+                &record.contact_installation_id,
+                &self.identity.installation_id(),
+            )
+            .map_err(EngineError::InvalidCommand)?;
+        let runtime_events = self.apply_peer_endpoint(endpoint)?;
+        self.database
+            .remove_pending_peer_endpoint_inbox(contact_installation_id)?;
+        Ok(runtime_events)
     }
 
     fn handle_application_envelope(
@@ -3329,7 +3417,7 @@ impl ClientEngineActor {
         let conversation_snapshot = conversation
             .snapshot()
             .map_err(|error| EngineError::Storage(error.to_string()))?;
-        let (result, runtime_events): (WelcomeAcceptedResult, _) =
+        let (result, mut runtime_events): (WelcomeAcceptedResult, _) =
             self.with_runtime(|runtime| {
                 if let Some(invite_id) = consume_invite_id {
                     if !runtime.storage_mut().consume_invite(invite_id)? {
@@ -3359,7 +3447,8 @@ impl ClientEngineActor {
                 Ok(result)
             })?;
         self.conversations
-            .insert(card.installation_id, conversation);
+            .insert(card.installation_id.clone(), conversation);
+        runtime_events.extend(self.apply_pending_peer_endpoint(&card.installation_id)?);
         if let Some(confirm) = result.confirm_contact {
             self.database.put_pending_contact_confirmation(
                 &confirm.pairing_id,

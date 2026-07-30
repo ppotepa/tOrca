@@ -173,6 +173,59 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
     );
   }
 
+  Future<void> _showTransportStatus() => showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    builder: (sheetContext) {
+      final state = ref.read(appControllerProvider);
+      return SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Status transportu', style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: 12),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.eco_outlined),
+                title: Text(state.transport.label),
+                subtitle: Text(state.transport.detail),
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.cell_tower),
+                title: Text(state.peerServerStatus.label),
+                subtitle: const Text('Lokalny endpoint P2P'),
+              ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(sheetContext),
+                    child: const Text('Zamknij'),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton.icon(
+                    onPressed: () {
+                      Navigator.pop(sheetContext);
+                      unawaited(
+                        ref.read(appControllerProvider.notifier).retryTor(),
+                      );
+                    },
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Ponów relay'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      );
+    },
+  );
+
   Future<void> _scanInvite() async {
     final value = await Navigator.of(context).push<String>(
       MaterialPageRoute(builder: (_) => const InviteScannerPage()),
@@ -382,7 +435,7 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
       onBack: controller.closeConversation,
       onOpenAccount: _openAccount,
       onOpenSettings: _openSettings,
-      onRetryTor: controller.retryTor,
+      onRetryTor: _showTransportStatus,
       typingContacts: state.typingContacts,
       onlineContacts: state.onlineContacts,
     );

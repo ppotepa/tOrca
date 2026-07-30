@@ -2,6 +2,7 @@
 
 #include <dwmapi.h>
 #include <flutter_windows.h>
+#include <shellapi.h>
 
 #include "resource.h"
 
@@ -17,6 +18,9 @@ namespace {
 #endif
 
 constexpr const wchar_t kWindowClassName[] = L"FLUTTER_RUNNER_WIN32_WINDOW";
+constexpr UINT kTrayMessage = WM_APP + 1;
+constexpr UINT kTrayOpen = 41001;
+constexpr UINT kTrayExit = 41002;
 
 /// Registry key for app theme preference.
 ///
@@ -179,10 +183,58 @@ Win32Window::MessageHandler(HWND hwnd,
                             WPARAM const wparam,
                             LPARAM const lparam) noexcept {
   switch (message) {
+    case WM_CLOSE:
+      if (!quit_on_close_ && !exit_requested_) {
+        ShowWindow(hwnd, SW_HIDE);
+        return 0;
+      }
+      DestroyWindow(hwnd);
+      return 0;
+
+    case WM_COMMAND:
+      switch (LOWORD(wparam)) {
+        case kTrayOpen:
+          ShowWindow(hwnd, SW_RESTORE);
+          SetForegroundWindow(hwnd);
+          return 0;
+        case kTrayExit:
+          exit_requested_ = true;
+          DestroyWindow(hwnd);
+          return 0;
+      }
+      break;
+
+    case kTrayMessage:
+      if (lparam == WM_LBUTTONDBLCLK) {
+        ShowWindow(hwnd, SW_RESTORE);
+        SetForegroundWindow(hwnd);
+        return 0;
+      }
+      if (lparam == WM_RBUTTONUP || lparam == WM_CONTEXTMENU) {
+        POINT cursor{};
+        GetCursorPos(&cursor);
+        HMENU menu = CreatePopupMenu();
+        if (menu != nullptr) {
+          AppendMenu(menu, MF_STRING, kTrayOpen, L"Otwórz TorChat");
+          AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
+          AppendMenu(menu, MF_STRING, kTrayExit, L"Zakończ TorChat");
+          SetForegroundWindow(hwnd);
+          TrackPopupMenu(menu, TPM_RIGHTBUTTON | TPM_BOTTOMALIGN,
+                         cursor.x, cursor.y, 0, hwnd, nullptr);
+          DestroyMenu(menu);
+        }
+        return 0;
+      }
+      break;
+
     case WM_DESTROY:
+      if (tray_icon_.cbSize != 0) {
+        Shell_NotifyIcon(NIM_DELETE, &tray_icon_);
+        tray_icon_.cbSize = 0;
+      }
       window_handle_ = nullptr;
       Destroy();
-      if (quit_on_close_) {
+      if (quit_on_close_ || exit_requested_) {
         PostQuitMessage(0);
       }
       return 0;
@@ -264,12 +316,23 @@ void Win32Window::SetQuitOnClose(bool quit_on_close) {
 }
 
 bool Win32Window::OnCreate() {
-  // No-op; provided for subclasses.
+  tray_icon_ = {};
+  tray_icon_.cbSize = sizeof(tray_icon_);
+  tray_icon_.hWnd = window_handle_;
+  tray_icon_.uID = 1;
+  tray_icon_.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
+  tray_icon_.uCallbackMessage = kTrayMessage;
+  tray_icon_.hIcon = LoadIcon(GetModuleHandle(nullptr), MAKEINTRESOURCE(IDI_APP_ICON));
+  wcscpy_s(tray_icon_.szTip, L"TorChat");
+  Shell_NotifyIcon(NIM_ADD, &tray_icon_);
   return true;
 }
 
 void Win32Window::OnDestroy() {
-  // No-op; provided for subclasses.
+  if (tray_icon_.cbSize != 0) {
+    Shell_NotifyIcon(NIM_DELETE, &tray_icon_);
+    tray_icon_.cbSize = 0;
+  }
 }
 
 void Win32Window::UpdateTheme(HWND const window) {

@@ -248,7 +248,15 @@ class AppController extends Notifier<AppState> {
     }
   }
 
-  Future<void> retryTor() => initialize();
+  Future<void> retryTor() async {
+    state = state.copyWith(error: '', notice: 'Ponawianie połączenia transportowego…');
+    try {
+      await _repository.connect();
+      await refreshData();
+    } catch (error) {
+      state = state.copyWith(error: _message(error), notice: '');
+    }
+  }
 
   Future<void> setNickname(String nickname) async {
     try {
@@ -968,21 +976,8 @@ class AppController extends Notifier<AppState> {
     RuntimeTorStatus transport, {
     List<StartupStep>? startupSteps,
   }) {
-    if (!transport.connected) return ControllerScreen.boot;
-    if (startupSteps != null && !_startupAllowsContinue(startupSteps)) {
-      return ControllerScreen.boot;
-    }
     if (profile.nickname.trim().isNotEmpty) return ControllerScreen.main;
     return ControllerScreen.nickname;
-  }
-
-  bool _startupAllowsContinue(List<StartupStep> steps) {
-    return StartupStepKind.values.every(
-      (kind) => steps.any(
-        (step) =>
-            step.kind == kind && step.state == StartupStepState.ready,
-      ),
-    );
   }
 
   PeerServerStatus _peerServerStatusForRefresh(

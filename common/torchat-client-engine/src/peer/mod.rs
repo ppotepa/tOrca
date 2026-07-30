@@ -85,10 +85,29 @@ pub enum PeerTransportEvent {
     },
     ConnectionChanged {
         installation_id: String,
+        session_id: Option<Uuid>,
         status: PeerConnectionStatus,
         error: Option<String>,
         delivery: Option<PeerDeliveryTag>,
     },
+}
+
+struct PeerSessionLease {
+    events: mpsc::Sender<PeerTransportEvent>,
+    installation_id: String,
+    session_id: Uuid,
+}
+
+impl Drop for PeerSessionLease {
+    fn drop(&mut self) {
+        let _ = self.events.try_send(PeerTransportEvent::ConnectionChanged {
+            installation_id: self.installation_id.clone(),
+            session_id: Some(self.session_id),
+            status: PeerConnectionStatus::Offline,
+            error: None,
+            delivery: None,
+        });
+    }
 }
 
 #[derive(Clone)]
@@ -161,7 +180,7 @@ impl PeerTransportHandle {
                 let installation_id = command.endpoint.installation_id.clone();
                 let limit = peer_limits
                     .entry(installation_id.clone())
-                    .or_insert_with(|| Arc::new(Semaphore::new(2)))
+                    .or_insert_with(|| Arc::new(Semaphore::new(1)))
                     .clone();
                 tokio::spawn(async move {
                     let Ok(_permit) = limit.acquire_owned().await else {
@@ -173,6 +192,7 @@ impl PeerTransportHandle {
                         let _ = events
                             .send(PeerTransportEvent::ConnectionChanged {
                                 installation_id,
+                                session_id: None,
                                 status: PeerConnectionStatus::Backoff,
                                 error: Some(error),
                                 delivery: Some(command.delivery.clone()),
@@ -272,11 +292,17 @@ async fn serve_inbound(
     let _ = events
         .send(PeerTransportEvent::ConnectionChanged {
             installation_id: peer_id.clone(),
+            session_id: Some(session_id),
             status: PeerConnectionStatus::Connected,
             error: None,
             delivery: None,
         })
         .await;
+    let _session_lease = PeerSessionLease {
+        events: events.clone(),
+        installation_id: peer_id.clone(),
+        session_id,
+    };
 
     while let Some(message) = websocket.next().await {
         let message = message.map_err(|error| format!("read peer frame: {error}"))?;
@@ -345,14 +371,7 @@ async fn serve_inbound(
             _ => return Err("unexpected authenticated peer frame".into()),
         }
     }
-    let _ = events
-        .send(PeerTransportEvent::ConnectionChanged {
-            installation_id: peer_id,
-            status: PeerConnectionStatus::Offline,
-            error: None,
-            delivery: None,
-        })
-        .await;
+    close_websocket(&mut websocket).await;
     Ok(())
 }
 
@@ -448,6 +467,7 @@ async fn send_outbound(
     let _ = events
         .send(PeerTransportEvent::ConnectionChanged {
             installation_id: command.endpoint.installation_id.clone(),
+            session_id: None,
             status: PeerConnectionStatus::Connecting,
             error: None,
             delivery: Some(command.delivery.clone()),
@@ -494,6 +514,7 @@ async fn send_outbound(
     let _ = events
         .send(PeerTransportEvent::ConnectionChanged {
             installation_id: command.endpoint.installation_id.clone(),
+            session_id: None,
             status: PeerConnectionStatus::Authenticating,
             error: None,
             delivery: Some(command.delivery.clone()),
@@ -566,11 +587,17 @@ async fn send_outbound(
     let _ = events
         .send(PeerTransportEvent::ConnectionChanged {
             installation_id: command.endpoint.installation_id.clone(),
+            session_id: Some(session_id),
             status: PeerConnectionStatus::Connected,
             error: None,
             delivery: None,
         })
         .await;
+    let _session_lease = PeerSessionLease {
+        events: events.clone(),
+        installation_id: command.endpoint.installation_id.clone(),
+        session_id,
+    };
     for update in &command.endpoint_updates {
         send_frame(
             &mut websocket,
@@ -600,6 +627,7 @@ async fn send_outbound(
                                 .map(|update| update.endpoint.sequence),
                         })
                         .await;
+                    close_websocket(&mut websocket).await;
                     return Ok(());
                 }
                 _ => continue,
@@ -626,6 +654,7 @@ async fn send_outbound(
                 // PERSISTED is the transport durability boundary. Losing the
                 // socket while waiting for the optional DELIVERED progression
                 // must not enqueue the same ciphertext for another delivery.
+                close_websocket(&mut websocket).await;
                 return Ok(());
             }
             Ok(Err(error)) => return Err(error),
@@ -659,6 +688,7 @@ async fn send_outbound(
             break;
         }
     }
+    close_websocket(&mut websocket).await;
     Ok(())
 }
 
@@ -699,6 +729,13 @@ where
         .send(Message::Binary(encode_frame(&frame)?.into()))
         .await
         .map_err(|error| format!("write peer websocket: {error}"))
+}
+
+async fn close_websocket<S>(websocket: &mut WebSocketStream<S>)
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let _ = timeout(Duration::from_secs(5), websocket.close(None)).await;
 }
 
 fn message_bytes(message: Message) -> Result<Vec<u8>, String> {

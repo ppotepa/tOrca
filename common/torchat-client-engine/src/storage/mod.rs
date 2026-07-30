@@ -8,7 +8,8 @@ pub use runtime_storage::SqliteRuntimeStorage;
 pub use sqlite::{
     ClientDatabase, DeliveryReceiptRecord, InboundEnvelopeStoreResult, InboundPeerEnvelopeRecord,
     OutboundDeliveryRecord, PairingResponseRecord, PeerEndpointBootstrapRecord,
-    PendingContactConfirmationRecord, PendingWelcomeRecord, ReceivedEnvelopeRecord,
+    PendingContactConfirmationRecord, PendingPeerEndpointInboxRecord, PendingWelcomeRecord,
+    ReceivedEnvelopeRecord,
     RetryDeadline, RetryKind, StoredMessageRecord,
 };
 pub use transaction::SqliteTransaction;

@@ -63,6 +63,14 @@ class ConversationListSection extends StatelessWidget {
                     lastMessageAt: conversation.lastMessageAt,
                     unread: conversation.unread,
                     lastSeen: lastSeen,
+                    peerConnectionStatus:
+                        contact?.peerConnectionStatus ??
+                        PeerConnectionStatus.offline,
+                    transportPolicy:
+                        contact?.transportPolicy ??
+                        ContactTransportPolicy.peerWithRelayFallback,
+                    peerEndpointStatus:
+                        contact?.peerEndpointStatus ?? PeerEndpointStatus.missing,
                     selected: selectedConversation == conversation.id,
                     onTap: () => onOpenConversation(conversation.id),
                     asCard: asCard,

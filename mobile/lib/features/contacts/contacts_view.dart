@@ -118,6 +118,12 @@ class ContactsView extends StatelessWidget {
               contactTrailingBuilder: (contact) => Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  PeerTransportIndicator(
+                    connectionStatus: contact.peerConnectionStatus,
+                    transportPolicy: contact.transportPolicy,
+                    endpointStatus: contact.peerEndpointStatus,
+                  ),
+                  const SizedBox(width: 4),
                   if (contact.devFixture != null)
                     const Chip(label: Text('DEV')),
                   IconButton(

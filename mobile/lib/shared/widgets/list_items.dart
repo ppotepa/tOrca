@@ -16,6 +16,9 @@ class ConversationListTile extends StatelessWidget {
     required this.unread,
     required this.selected,
     required this.onTap,
+    this.peerConnectionStatus = PeerConnectionStatus.offline,
+    this.transportPolicy = ContactTransportPolicy.peerWithRelayFallback,
+    this.peerEndpointStatus = PeerEndpointStatus.missing,
     this.asCard = false,
   });
 
@@ -26,6 +29,9 @@ class ConversationListTile extends StatelessWidget {
   final int unread;
   final bool selected;
   final VoidCallback onTap;
+  final PeerConnectionStatus peerConnectionStatus;
+  final ContactTransportPolicy transportPolicy;
+  final PeerEndpointStatus peerEndpointStatus;
   final bool asCard;
 
   @override
@@ -88,6 +94,11 @@ class ConversationListTile extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
+          PeerTransportIndicator(
+            connectionStatus: peerConnectionStatus,
+            transportPolicy: transportPolicy,
+            endpointStatus: peerEndpointStatus,
+          ),
           Text(
             formatMessageTime(lastMessageAt),
             style: Theme.of(context).textTheme.labelSmall,
@@ -137,7 +148,66 @@ class ContactListTile extends StatelessWidget {
                 : 'Fingerprint niepotwierdzony'),
       ),
       trailing: trailing ?? const Icon(Icons.chevron_right),
+      titleAlignment: ListTileTitleAlignment.center,
     );
     return asCard ? Card(child: tile) : tile;
+  }
+}
+
+class PeerTransportIndicator extends StatelessWidget {
+  const PeerTransportIndicator({
+    super.key,
+    required this.connectionStatus,
+    required this.transportPolicy,
+    this.endpointStatus = PeerEndpointStatus.verified,
+  });
+
+  final PeerConnectionStatus connectionStatus;
+  final ContactTransportPolicy transportPolicy;
+  final PeerEndpointStatus endpointStatus;
+
+  @override
+  Widget build(BuildContext context) {
+    final (icon, color, label) = switch ((
+      transportPolicy,
+      endpointStatus,
+      connectionStatus,
+    )) {
+      (ContactTransportPolicy.relayOnly, _, _) => (
+        Icons.shield_outlined,
+        Colors.blueGrey,
+        'Tylko relay',
+      ),
+      (_, PeerEndpointStatus.missing || PeerEndpointStatus.invalid, _) => (
+        Icons.portable_wifi_off,
+        Colors.grey,
+        'Brak poprawnego endpointu P2P',
+      ),
+      (_, _, PeerConnectionStatus.connected) => (
+        Icons.cell_tower,
+        Colors.green,
+        'P2P połączone',
+      ),
+      (_, _, PeerConnectionStatus.connecting) => (
+        Icons.cell_tower,
+        Colors.orange,
+        'P2P: łączenie',
+      ),
+      (_, _, PeerConnectionStatus.authenticating) => (
+        Icons.cell_tower,
+        Colors.orange,
+        'P2P: uwierzytelnianie',
+      ),
+      (_, _, PeerConnectionStatus.backoff) => (
+        Icons.cell_tower,
+        Colors.orange,
+        'P2P: ponowienie',
+      ),
+      _ => (Icons.cell_tower, Colors.grey, 'P2P offline'),
+    };
+    return Tooltip(
+      message: label,
+      child: Icon(icon, size: 17, color: color),
+    );
   }
 }
