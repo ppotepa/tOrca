@@ -43,6 +43,8 @@ class TorChatForegroundService : Service() {
     private var secretStore: LocalSecretStore? = null
     private var engineHost: AndroidEngineHost? = null
     private var engineEventPump: AndroidEngineEventPump? = null
+    @Volatile private var pendingOnionAction: JSONObject? = null
+    @Volatile private var torReadyForOnion = false
     @Volatile private var starting = false
     @Volatile private var networkOnline = false
     private val pendingTorStatuses = ArrayDeque<JSONObject>()
@@ -104,6 +106,66 @@ class TorChatForegroundService : Service() {
             starting = true
             scope.launch {
                 runCatching {
+                    val secrets = LocalSecretStore(applicationContext).also { secretStore = it }
+                    val databasePassphrase = secrets.databasePassphrase()
+                    val identitySeed = if (BuildConfig.DEBUG && BuildConfig.TORCHAT_DEV_IDENTITY_KEY.isNotBlank()) {
+                        Base64.decode(
+                            BuildConfig.TORCHAT_DEV_IDENTITY_KEY,
+                            Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING,
+                        )
+                    } else {
+                        secrets.identityPrivateKey()
+                    }
+                    val host = AndroidEngineHost.create(
+                        AndroidEngineHost.Config(
+                            databasePath = File(applicationContext.noBackupFilesDir, "torchat-client-v1.db"),
+                            databaseKey = databasePassphrase,
+                            identityPrivateKey = identitySeed,
+                            relayOnionUrl = BuildConfig.TORCHAT_SERVER_URL,
+                            initialSocks5Url = null,
+                            logDirectory = File(applicationContext.noBackupFilesDir, "engine-logs"),
+                        ),
+                    )
+                    host.start()
+                    engineHost = host
+                    activeEngineHost = host
+                    engineEventPump = AndroidEngineEventPump(
+                        host = host,
+                        scope = scope,
+                        onEvent = ::handleEngineEvent,
+                        onFailure = { error ->
+                            Log.w("TorChat-Engine", "Engine event pump stopped", error)
+                        },
+                    ).also { it.start() }
+                    publishEngineFact(engineAppVisibilityChangedFactJson(foreground = true))
+                    publishPowerFacts()
+                    publishBackgroundRestrictionFact()
+                    publishEngineFact(engineNetworkChangedFactJson(networkOnline))
+
+                    val debugNickname = BuildConfig.TORCHAT_DEV_PROFILE
+                        .takeIf { BuildConfig.DEBUG }
+                        ?.trim()
+                        .orEmpty()
+                    if (debugNickname.length in 2..32) {
+                        host.submitCommandAndAwait(
+                            engineCommand(EngineContract.COMMAND_SET_NICKNAME)
+                                .put(EngineContract.NICKNAME, debugNickname),
+                        )
+                    }
+                    val profile = host.submitQueryAndAwait(EngineContract.COMMAND_GET_PROFILE)
+                    publishProfileReady(profile)
+                    Log.i(
+                        "TorChat-Engine",
+                        "Foreground service client engine initialized connected=false",
+                    )
+                    startupLogger.write(
+                        "info",
+                        "engine",
+                        "engine_initialized",
+                        "ENGINE",
+                        "Foreground service client engine initialized",
+                    )
+
                     val tor = TorRuntime(applicationContext).also { runtime = it }
                     val config = withContext(Dispatchers.IO) {
                         tor.prepare()
@@ -136,69 +198,15 @@ class TorChatForegroundService : Service() {
                             updateNotification("Tor bootstrap: $progress%")
                         }
                     }
-                    val secrets = LocalSecretStore(applicationContext).also { secretStore = it }
-                    val databasePassphrase = secrets.databasePassphrase()
-                    val identitySeed = if (BuildConfig.DEBUG && BuildConfig.TORCHAT_DEV_IDENTITY_KEY.isNotBlank()) {
-                        Base64.decode(
-                            BuildConfig.TORCHAT_DEV_IDENTITY_KEY,
-                            Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING,
-                        )
-                    } else {
-                        secrets.identityPrivateKey()
-                    }
                     val socks5Url = "socks5h://127.0.0.1:${config.socksPort}"
-                    val host = AndroidEngineHost.create(
-                        AndroidEngineHost.Config(
-                            databasePath = File(applicationContext.noBackupFilesDir, "torchat-client-v1.db"),
-                            databaseKey = databasePassphrase,
-                            identityPrivateKey = identitySeed,
-                            relayOnionUrl = BuildConfig.TORCHAT_SERVER_URL,
-                            initialSocks5Url = socks5Url,
-                            logDirectory = File(applicationContext.noBackupFilesDir, "engine-logs"),
-                        ),
-                    )
-                    host.start()
-                    engineHost = host
-                    activeEngineHost = host
-                    engineEventPump = AndroidEngineEventPump(
-                        host = host,
-                        scope = scope,
-                        onEvent = ::handleEngineEvent,
-                        onFailure = { error ->
-                            Log.w("TorChat-Engine", "Engine event pump stopped", error)
-                        },
-                    ).also { it.start() }
-                    publishEngineFact(engineAppVisibilityChangedFactJson(foreground = true))
+                    torReadyForOnion = true
                     publishEngineFact(engineTorEndpointAvailableFactJson(socks5Url))
-                    publishPowerFacts()
-                    publishBackgroundRestrictionFact()
                     pendingTorStatuses.forEach(::publishTorStatusFact)
-                    publishEngineFact(engineNetworkChangedFactJson(networkOnline))
-
-                    val debugNickname = BuildConfig.TORCHAT_DEV_PROFILE
-                        .takeIf { BuildConfig.DEBUG }
-                        ?.trim()
-                        .orEmpty()
-                    if (debugNickname.length in 2..32) {
-                        host.submitCommandAndAwait(
-                            engineCommand(EngineContract.COMMAND_SET_NICKNAME)
-                                .put(EngineContract.NICKNAME, debugNickname),
-                        )
+                    pendingOnionAction?.also { action ->
+                        pendingOnionAction = null
+                        handlePlatformAction(action)
                     }
-                    val profile = host.submitQueryAndAwait(EngineContract.COMMAND_GET_PROFILE)
-                    publishProfileReady(profile)
                     localReady.complete(Unit)
-                    Log.i(
-                        "TorChat-Engine",
-                        "Foreground service client engine initialized connected=false",
-                    )
-                    startupLogger.write(
-                        "info",
-                        "engine",
-                        "engine_initialized",
-                        "ENGINE",
-                        "Foreground service client engine initialized",
-                    )
                     connectEngine(host)
                     config
                 }.onSuccess {
@@ -218,6 +226,8 @@ class TorChatForegroundService : Service() {
                     // listener can remain bound after a failed bootstrap on
                     // some OEM builds, so a simple Activity retry is unsafe.
                     shutdownEngineHost()
+                    torReadyForOnion = false
+                    pendingOnionAction = null
                     runtime?.stop()
                     runtime = null
                     val failedReady = ready
@@ -251,10 +261,13 @@ class TorChatForegroundService : Service() {
         }
         runCatching { unregisterReceiver(powerModeReceiver) }
         publishEngineFact(engineAppVisibilityChangedFactJson(foreground = false))
+        publishEngineFact(engineOnionServiceLostFactJson("TorChat service stopped"))
         publishEngineFact(engineTorEndpointLostFactJson("TorChat service stopped"))
         shutdownEngineHost()
         runtime?.release()
         runtime = null
+        torReadyForOnion = false
+        pendingOnionAction = null
         secretStore = null
         starting = false
         activeEngineHost = null
@@ -448,6 +461,17 @@ class TorChatForegroundService : Service() {
     }
 
     private fun handlePlatformAction(action: JSONObject) {
+        if (!torReadyForOnion) {
+            pendingOnionAction = JSONObject(action.toString())
+            startupLogger.write(
+                "info",
+                "peer",
+                "onion_action_queued",
+                "ONION_SERVICE",
+                "Waiting for Tor control readiness",
+            )
+            return
+        }
         val tor = runtime ?: error("Tor runtime is not running")
         val secrets = secretStore ?: error("Local secret store is not initialized")
         val generation = action.getLong(EngineContract.GENERATION)

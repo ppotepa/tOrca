@@ -17,6 +17,7 @@ class WindowsRuntime extends Object
   WindowsRuntime();
   Process? _process;
   IOSink? _logSink;
+  bool _stopping = false;
   final _events = StreamController<RuntimeEvent>.broadcast();
   final _pending = <String, Completer<Object?>>{};
   int _nextId = 0;
@@ -51,6 +52,7 @@ class WindowsRuntime extends Object
     }
     final process = await Process.start(executable, args, runInShell: false);
     _process = process;
+    _stopping = false;
     _logSink = _openLogSink();
     _log('START $executable ${args.join(' ')}');
     process.stdout
@@ -58,12 +60,17 @@ class WindowsRuntime extends Object
         .transform(const LineSplitter())
         .listen(
           (line) {
-            _log('STDOUT $line');
+            _log('STDOUT ${_wireSummary(line)}');
             _onLine(line);
           },
           onDone: () {
-            _log('STOP runtime stdout closed');
-            _failAll(StateError('TorChat runtime stopped'));
+            _log('STOP runtime stdout closed expected=$_stopping');
+            if (_stopping) {
+              _process = null;
+              _stopping = false;
+            } else {
+              _failAll(StateError('TorChat runtime stopped unexpectedly'));
+            }
           },
         );
     process.stderr.transform(utf8.decoder).listen((value) {
@@ -116,6 +123,27 @@ class WindowsRuntime extends Object
     final sink = _logSink;
     if (sink == null) return;
     sink.writeln('${DateTime.now().toIso8601String()} $message');
+  }
+
+  String _wireSummary(String line) {
+    try {
+      final decoded = jsonDecode(line);
+      if (decoded is! Map) return 'non_object bytes=${utf8.encode(line).length}';
+      final type = decoded[EngineContract.type]?.toString() ?? 'unknown';
+      final requestId = decoded[EngineContract.requestId]?.toString();
+      final runtime = decoded[EngineContract.event];
+      final runtimeType = runtime is Map
+          ? runtime[EngineContract.type]?.toString()
+          : null;
+      return [
+        'type=$type',
+        if (requestId != null && requestId.isNotEmpty) 'requestId=$requestId',
+        if (runtimeType != null && runtimeType.isNotEmpty)
+          'runtimeType=$runtimeType',
+      ].join(' ');
+    } catch (_) {
+      return 'unparseable bytes=${utf8.encode(line).length}';
+    }
   }
 
   String _findRuntime() {
@@ -368,11 +396,15 @@ class WindowsRuntime extends Object
     final id = (++_nextId).toString();
     final completer = Completer<Object?>();
     _pending[id] = completer;
+    final command = _engineCommand(method, params);
     final request = {
       EngineContract.requestId: id,
-      EngineContract.command: _engineCommand(method, params),
+      EngineContract.command: command,
     };
-    _log('STDIN ${jsonEncode(request)}');
+    if (method == EngineContract.shutdown) _stopping = true;
+    _log(
+      'STDIN requestId=$id command=${command[EngineContract.type] ?? method}',
+    );
     _process!.stdin.writeln(jsonEncode(request));
     return completer.future.timeout(
       const Duration(seconds: 45),

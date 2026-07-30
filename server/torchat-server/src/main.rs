@@ -1173,12 +1173,7 @@ async fn route_envelope(
         || envelope.sender != sender_id
         || envelope.recipient.is_empty()
         || envelope.ciphertext.len() > 128 * 1024
-        || !matches!(
-            torchat_core::relay::RelayPayloadV1::decode(&envelope.ciphertext),
-            Ok(torchat_core::relay::RelayPayloadV1::PairingOffer { .. })
-                | Ok(torchat_core::relay::RelayPayloadV1::PairingRejected { .. })
-                | Ok(torchat_core::relay::RelayPayloadV1::Welcome { .. })
-        )
+        || !relay_ciphertext_allowed(&envelope.ciphertext)
     {
         tracing::warn!(
             sender = %sender_id,
@@ -1251,6 +1246,18 @@ async fn route_envelope(
         .await?;
     }
     Ok(())
+}
+
+fn relay_ciphertext_allowed(ciphertext: &str) -> bool {
+    match torchat_core::relay::RelayPayloadV1::decode(ciphertext) {
+        Ok(
+            torchat_core::relay::RelayPayloadV1::PairingOffer { .. }
+            | torchat_core::relay::RelayPayloadV1::PairingRejected { .. }
+            | torchat_core::relay::RelayPayloadV1::Welcome { .. }
+            | torchat_core::relay::RelayPayloadV1::PeerEndpointBootstrap { .. },
+        ) => true,
+        Err(_) => torchat_core::peer_protocol::PeerCiphertextPayload::decode(ciphertext).is_ok(),
+    }
 }
 
 async fn send_server_frame(
@@ -1369,7 +1376,8 @@ mod tests {
         PairingRequestCreated, SQL_PAIRING_CODE_INSERT, SQL_PAIRING_REQUEST_INSERT,
     };
     use super::{
-        Connection, OutboundCommand, WebSocketFrameAction, route_envelope, websocket_frame_action,
+        Connection, OutboundCommand, WebSocketFrameAction, relay_ciphertext_allowed,
+        route_envelope, websocket_frame_action,
     };
     use axum::extract::ws::Message;
     use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -1461,6 +1469,34 @@ mod tests {
             websocket_frame_action(&Message::Pong(vec![4, 5, 6].into())),
             WebSocketFrameAction::Continue
         );
+    }
+
+    #[test]
+    fn relay_accepts_p2p_endpoint_bootstrap_and_opaque_fallback_ciphertext() {
+        let alice = torchat_core::Identity::generate();
+        let bob = torchat_core::Identity::generate();
+        let endpoint = torchat_core::peer_protocol::PeerEndpointBundle::new(
+            &alice,
+            format!("{}.onion", "a".repeat(56)),
+            1,
+            10,
+            None,
+        );
+        let bootstrap = torchat_core::relay::RelayPayloadV1::peer_endpoint_bootstrap(
+            &alice,
+            "Alice",
+            bob.installation_id(),
+            endpoint,
+        )
+        .encode()
+        .unwrap();
+        let ciphertext = torchat_core::peer_protocol::PeerCiphertextPayload::new(b"opaque")
+            .encode()
+            .unwrap();
+
+        assert!(relay_ciphertext_allowed(&bootstrap));
+        assert!(relay_ciphertext_allowed(&ciphertext));
+        assert!(!relay_ciphertext_allowed("not-a-relay-payload"));
     }
 
     fn envelope(message_id: Uuid) -> torchat_core::relay::RelayEnvelope {

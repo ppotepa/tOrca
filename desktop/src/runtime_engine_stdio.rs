@@ -78,22 +78,18 @@ pub fn run_stdio_engine(cli: Cli) -> Result<()> {
         let log_directory = database_path
             .parent()
             .map(|parent| parent.join("engine-logs"));
-        let (tor_runtime, status_rx) = start_tor(&cli)?;
-        let socks_url: Url = tor_runtime
-            .socks_url()
-            .parse()
-            .context("parse SOCKS5 URL")?;
         let config = EngineConfig {
             database_path,
             database_key: SecretBytes(database_key(&identity)),
             identity_private_key: SecretBytes(identity.private_key_bytes().to_vec()),
             relay_onion_url: relay_url(&cli)?,
-            initial_socks5_url: Some(socks_url),
+            initial_socks5_url: None,
             log_directory,
             platform: platform_kind(),
         };
         let mut engine = ClientEngine::new(config)?;
         engine.start().await?;
+        let (tor_runtime, status_rx) = start_tor(&cli)?;
 
         let (request_tx, request_rx) = std::sync::mpsc::channel::<String>();
         std::thread::spawn(move || {

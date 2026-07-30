@@ -288,7 +288,7 @@ void main() {
       'late event',
     );
     expect(lateTor.first.state, StartupStepState.error);
-    expect(lateTor[1].state, StartupStepState.pending);
+    expect(lateTor[1].state, StartupStepState.blocked);
     expect(
       lateTor.where((step) => step.state == StartupStepState.running),
       isEmpty,
@@ -310,6 +310,6 @@ void main() {
       'late peer',
     );
     expect(blockedPeer.first.state, StartupStepState.error);
-    expect(blockedPeer[2].state, StartupStepState.pending);
+    expect(blockedPeer[2].state, StartupStepState.blocked);
   });
 }

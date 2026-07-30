@@ -37,7 +37,7 @@ use uuid::Uuid;
 
 use crate::{EngineError, EngineResult};
 
-const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
 const ACK_TIMEOUT: Duration = Duration::from_secs(60);
 const OUTBOUND_CAPACITY: usize = 64;
 const EVENT_CAPACITY: usize = 64;
@@ -79,6 +79,9 @@ pub enum PeerTransportEvent {
     },
     EndpointUpdated {
         endpoint: PeerEndpointBundle,
+    },
+    IngressError {
+        error: String,
     },
     ConnectionChanged {
         installation_id: String,
@@ -140,7 +143,13 @@ impl PeerTransportHandle {
                 let events = ingress_events.clone();
                 tokio::spawn(async move {
                     let _permit = _permit;
-                    let _ = serve_inbound(stream, identity_private_key, state, events).await;
+                    if let Err(error) =
+                        serve_inbound(stream, identity_private_key, state, events.clone()).await
+                    {
+                        let _ = events
+                            .send(PeerTransportEvent::IngressError { error })
+                            .await;
+                    }
                 });
             }
         });
@@ -362,7 +371,13 @@ async fn authenticate_inbound(
     ),
     String,
 > {
-    let frame = recv_frame(&mut websocket, false).await?;
+    let frame = recv_frame_with_timeout(
+        &mut websocket,
+        false,
+        HANDSHAKE_TIMEOUT,
+        "peer client hello",
+    )
+    .await?;
     let PeerFrame::ClientHello { hello } = frame else {
         return Err("expected peer client hello".into());
     };
@@ -399,7 +414,14 @@ async fn authenticate_inbound(
         signature: identity.sign(&transcript),
     };
     send_frame(&mut websocket, PeerFrame::ServerChallenge { challenge }).await?;
-    let PeerFrame::ClientProof { proof } = recv_frame(&mut websocket, false).await? else {
+    let PeerFrame::ClientProof { proof } = recv_frame_with_timeout(
+        &mut websocket,
+        false,
+        HANDSHAKE_TIMEOUT,
+        "peer client proof",
+    )
+    .await?
+    else {
         return Err("expected peer client proof".into());
     };
     if proof.session_id != session_id
@@ -492,7 +514,14 @@ async fn send_outbound(
         },
     )
     .await?;
-    let PeerFrame::ServerChallenge { challenge } = recv_frame(&mut websocket, false).await? else {
+    let PeerFrame::ServerChallenge { challenge } = recv_frame_with_timeout(
+        &mut websocket,
+        false,
+        HANDSHAKE_TIMEOUT,
+        "peer server challenge",
+    )
+    .await?
+    else {
         return Err("expected peer server challenge".into());
     };
     if challenge.installation_id != command.endpoint.installation_id
@@ -521,7 +550,13 @@ async fn send_outbound(
         },
     )
     .await?;
-    let PeerFrame::HandshakeAccepted { session_id } = recv_frame(&mut websocket, false).await?
+    let PeerFrame::HandshakeAccepted { session_id } = recv_frame_with_timeout(
+        &mut websocket,
+        false,
+        HANDSHAKE_TIMEOUT,
+        "peer handshake acceptance",
+    )
+    .await?
     else {
         return Err("expected peer handshake acceptance".into());
     };
@@ -583,10 +618,19 @@ async fn send_outbound(
     let expected_ciphertext_hash = envelope.ciphertext_hash();
     send_frame(&mut websocket, PeerFrame::Message { envelope }).await?;
 
+    let mut persisted = false;
     loop {
-        let frame = timeout(ACK_TIMEOUT, recv_frame(&mut websocket, true))
-            .await
-            .map_err(|_| "peer acknowledgement timed out".to_owned())??;
+        let frame = match timeout(ACK_TIMEOUT, recv_frame(&mut websocket, true)).await {
+            Ok(Ok(frame)) => frame,
+            Ok(Err(_)) | Err(_) if persisted => {
+                // PERSISTED is the transport durability boundary. Losing the
+                // socket while waiting for the optional DELIVERED progression
+                // must not enqueue the same ciphertext for another delivery.
+                return Ok(());
+            }
+            Ok(Err(error)) => return Err(error),
+            Err(_) => return Err("peer acknowledgement timed out".to_owned()),
+        };
         let PeerFrame::Ack { ack } = frame else {
             continue;
         };
@@ -608,7 +652,10 @@ async fn send_outbound(
                     .map(|update| update.endpoint.sequence),
             })
             .await;
-        if matches!(kind, PeerAckKind::Persisted | PeerAckKind::Delivered) {
+        if kind == PeerAckKind::Persisted {
+            persisted = true;
+        }
+        if kind == PeerAckKind::Delivered {
             break;
         }
     }
@@ -622,12 +669,26 @@ async fn recv_frame<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    let message = timeout(HANDSHAKE_TIMEOUT, websocket.next())
+    let message = websocket
+        .next()
         .await
-        .map_err(|_| "peer frame timed out".to_owned())?
         .ok_or_else(|| "peer websocket closed".to_owned())?
         .map_err(|error| format!("read peer websocket: {error}"))?;
     decode_frame(&message_bytes(message)?, authenticated)
+}
+
+async fn recv_frame_with_timeout<S>(
+    websocket: &mut WebSocketStream<S>,
+    authenticated: bool,
+    wait: Duration,
+    operation: &str,
+) -> Result<PeerFrame, String>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    timeout(wait, recv_frame(websocket, authenticated))
+        .await
+        .map_err(|_| format!("{operation} timed out"))?
 }
 
 async fn send_frame<S>(websocket: &mut WebSocketStream<S>, frame: PeerFrame) -> Result<(), String>

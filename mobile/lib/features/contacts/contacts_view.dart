@@ -30,7 +30,13 @@ class ContactsView extends StatelessWidget {
   final VoidCallback onSearch;
   final ValueChanged<ContactRecord> onSelect;
   final VoidCallback onScanInvite, onShowInvite;
-  final Future<void> Function(ContactRecord, String?, bool, bool)
+  final Future<void> Function(
+    ContactRecord,
+    String?,
+    bool,
+    bool,
+    ContactTransportPolicy,
+  )
   onUpdateContactSettings;
   final String fingerprint, ownInvite;
   final String error, notice;
@@ -136,6 +142,7 @@ class ContactsView extends StatelessWidget {
     final alias = TextEditingController(text: contact.localAlias ?? '');
     var muted = contact.muted;
     var blocked = contact.blocked;
+    var transportPolicy = contact.transportPolicy;
     return showDialog<void>(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -155,6 +162,25 @@ class ContactsView extends StatelessWidget {
               Text(
                 'Połączenie bezpośrednie: '
                 '${_peerConnectionLabel(contact.peerConnectionStatus)}',
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<ContactTransportPolicy>(
+                initialValue: transportPolicy,
+                decoration: const InputDecoration(
+                  labelText: 'Polityka transportu',
+                ),
+                items: [
+                  for (final policy in ContactTransportPolicy.values)
+                    DropdownMenuItem(
+                      value: policy,
+                      child: Text(_transportPolicyLabel(policy)),
+                    ),
+                ],
+                onChanged: (value) {
+                  if (value != null) {
+                    setDialogState(() => transportPolicy = value);
+                  }
+                },
               ),
               const SizedBox(height: 12),
               TextField(
@@ -202,6 +228,7 @@ class ContactsView extends StatelessWidget {
                   alias.text.trim().isEmpty ? null : alias.text.trim(),
                   muted,
                   blocked,
+                  transportPolicy,
                 );
                 if (context.mounted) Navigator.pop(context);
               },
@@ -231,4 +258,10 @@ String _peerConnectionLabel(PeerConnectionStatus status) => switch (status) {
   PeerConnectionStatus.authenticating => 'uwierzytelnianie',
   PeerConnectionStatus.backoff => 'oczekiwanie na ponowienie',
   PeerConnectionStatus.offline => 'offline',
+};
+
+String _transportPolicyLabel(ContactTransportPolicy policy) => switch (policy) {
+  ContactTransportPolicy.peerOnly => 'Tylko P2P',
+  ContactTransportPolicy.peerWithRelayFallback => 'P2P z fallbackiem relay',
+  ContactTransportPolicy.relayOnly => 'Tylko relay',
 };

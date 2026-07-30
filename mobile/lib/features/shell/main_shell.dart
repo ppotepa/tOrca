@@ -73,7 +73,13 @@ class MainShell extends StatelessWidget {
   final ValueChanged<bool> onTypingChanged;
   final ValueChanged<String> onRetryMessage, onDeleteMessage;
   final ValueChanged<String> onVerifyContact;
-  final Future<void> Function(ContactRecord, String?, bool, bool)
+  final Future<void> Function(
+    ContactRecord,
+    String?,
+    bool,
+    bool,
+    ContactTransportPolicy,
+  )
   onUpdateContactSettings;
   final ValueChanged<String> onOpenConversation;
   final ValueChanged<ContactRecord> onStartConversation;

@@ -541,6 +541,9 @@ class _StartupTimelineRowState extends State<_StartupTimelineRow>
       StartupStepState.ready => theme.success,
       StartupStepState.warning => theme.warning,
       StartupStepState.error => theme.danger,
+      StartupStepState.blocked => Theme.of(
+        context,
+      ).colorScheme.onSurfaceVariant.withValues(alpha: .55),
     };
     final icon = switch (step.state) {
       StartupStepState.pending => Icons.circle_outlined,
@@ -548,6 +551,7 @@ class _StartupTimelineRowState extends State<_StartupTimelineRow>
       StartupStepState.ready => Icons.check,
       StartupStepState.warning => Icons.priority_high,
       StartupStepState.error => Icons.close,
+      StartupStepState.blocked => Icons.remove,
     };
     return SizedBox(
       height: widget.last ? 58 : 68,
