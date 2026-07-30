@@ -80,20 +80,13 @@ try {
     & adb -s $DeviceAddress shell am force-stop org.torchat.mobile
     if ($LASTEXITCODE -ne 0) { throw 'Could not stop the previous Flutter mobile process.' }
 
-    $serviceArgs = @(
-        '-s', $DeviceAddress, 'shell', 'am', 'start-foreground-service',
-        '-n', 'org.torchat.mobile/.TorChatForegroundService',
-        '--es', 'deploy_run_id', $deployRunId
-    )
-    if ($ResetDevState) { $serviceArgs += @('--ez', 'reset_dev_state', 'true') }
-    if ($Clean) { $serviceArgs += @('--ez', 'clean_state', 'true') }
-    $serviceOutput = @(& adb @serviceArgs 2>&1)
-    if ($LASTEXITCODE -ne 0) {
-        throw "Could not start TorChatForegroundService: $(($serviceOutput -join ' ').Trim())"
-    }
-
+    # TorChatForegroundService is deliberately not exported. Starting it from
+    # the adb shell UID is rejected by Android. Launch the exported activity and
+    # let MainActivity start the foreground service from the application UID.
     $launchArgs = @('-s', $DeviceAddress, 'shell', 'am', 'start', '-W', '-n', 'org.torchat.mobile/.MainActivity')
     $launchArgs += @('--es', 'deploy_run_id', $deployRunId)
+    if ($ResetDevState) { $launchArgs += @('--ez', 'reset_dev_state', 'true') }
+    if ($Clean) { $launchArgs += @('--ez', 'clean_state', 'true') }
     $launchOutput = @(& adb @launchArgs 2>&1)
     if ($LASTEXITCODE -ne 0) {
         throw "Could not launch Flutter mobile app: $(($launchOutput -join ' ').Trim())"
