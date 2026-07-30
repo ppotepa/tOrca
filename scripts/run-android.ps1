@@ -7,7 +7,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$deployRunId = [Guid]::NewGuid().ToString('N')
+$deployRunId = if ($env:TORCHAT_DEPLOY_RUN_ID) { $env:TORCHAT_DEPLOY_RUN_ID } else { [Guid]::NewGuid().ToString('N') }
+$env:TORCHAT_DEPLOY_RUN_ID = $deployRunId
 
 function Get-ConnectedDevices {
     @(adb devices 2>$null | Where-Object { $_ -match '^\S+\s+device$' } | ForEach-Object { ($_ -split '\s+')[0] })
@@ -50,7 +51,12 @@ function Save-AndroidLaunchDiagnostics {
     New-Item -ItemType Directory -Force -Path $root | Out-Null
     & adb -s $Device shell dumpsys activity activities 2>&1 | Out-File -LiteralPath (Join-Path $root 'activity.txt') -Encoding utf8
     & adb -s $Device shell dumpsys activity services org.torchat.mobile 2>&1 | Out-File -LiteralPath (Join-Path $root 'services.txt') -Encoding utf8
-    & adb -s $Device logcat -d -v threadtime 2>&1 | Out-File -LiteralPath (Join-Path $root 'logcat.txt') -Encoding utf8
+    $pid = Get-AppPid -Device $Device
+    if ($pid) {
+        & adb -s $Device logcat -d --pid=$pid -v threadtime 2>&1 | Out-File -LiteralPath (Join-Path $root 'app-logcat.txt') -Encoding utf8
+    }
+    & adb -s $Device logcat -d -v threadtime 'TorChat-Engine:*' 'TorChat-Tor:*' 'AndroidRuntime:E' 'ActivityManager:W' '*:S' 2>&1 |
+        Out-File -LiteralPath (Join-Path $root 'filtered-logcat.txt') -Encoding utf8
     Write-Warning "Android launch diagnostics saved to $root"
 }
 
@@ -74,9 +80,19 @@ try {
     & adb -s $DeviceAddress shell am force-stop org.torchat.mobile
     if ($LASTEXITCODE -ne 0) { throw 'Could not stop the previous Flutter mobile process.' }
 
+    $serviceArgs = @(
+        '-s', $DeviceAddress, 'shell', 'am', 'start-foreground-service',
+        '-n', 'org.torchat.mobile/.TorChatForegroundService',
+        '--es', 'deploy_run_id', $deployRunId
+    )
+    if ($ResetDevState) { $serviceArgs += @('--ez', 'reset_dev_state', 'true') }
+    if ($Clean) { $serviceArgs += @('--ez', 'clean_state', 'true') }
+    $serviceOutput = @(& adb @serviceArgs 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not start TorChatForegroundService: $(($serviceOutput -join ' ').Trim())"
+    }
+
     $launchArgs = @('-s', $DeviceAddress, 'shell', 'am', 'start', '-W', '-n', 'org.torchat.mobile/.MainActivity')
-    if ($ResetDevState) { $launchArgs += @('--ez', 'reset_dev_state', 'true') }
-    if ($Clean) { $launchArgs += @('--ez', 'clean_state', 'true') }
     $launchArgs += @('--es', 'deploy_run_id', $deployRunId)
     $launchOutput = @(& adb @launchArgs 2>&1)
     if ($LASTEXITCODE -ne 0) {
@@ -111,8 +127,8 @@ try {
         throw "Android process was not stable for five seconds after launch (initial PID $initialPid, current PID $stablePid)."
     }
 
-    Write-Host "[torchat] Android APP_READY run=$deployRunId device=$DeviceAddress pid=$stablePid"
-    Write-Host '[torchat] Android ENGINE_READY; Tor SOCKS, onion P2P and relay continue independently and are reported in the application.'
+    Write-Host "[torchat] Android APP_READY deployRunId=$deployRunId device=$DeviceAddress pid=$stablePid"
+    Write-Host '[torchat] Android ENGINE_READY; TOR_READY, ONION_READY and RELAY_READY continue independently.'
 } catch {
     Save-AndroidLaunchDiagnostics -Device $DeviceAddress -RunId $deployRunId
     throw
