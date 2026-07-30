@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import '../../client_runtime.dart';
 
 class RuntimeRepository {
@@ -14,37 +12,16 @@ class RuntimeRepository {
   final Map<String, Future<List<ChatMessage>>> _messagesInFlight = {};
   final Map<String, bool> _lastTyping = {};
   bool? _lastPresence;
-  Future<bool>? _connectionInFlight;
 
   Stream<RuntimeEvent> get events => _runtime.events;
 
   Future<bool> connect() async {
-    // Android's foreground service owns the potentially slow Tor/onion relay
-    // bootstrap. Starting the Flutter UI must not wait for that remote route:
-    // all local queries below already wait for the engine's localReady barrier.
-    // Keep one background connect request in flight and let transport events
-    // report progress, reconnects and failures to the UI.
-    final current = _connectionInFlight;
-    if (current == null) {
-      final request = _runtime.connect();
-      _connectionInFlight = request;
-      unawaited(
-        request.then<void>(
-          (_) {},
-          onError: (Object _, StackTrace __) {},
-        ).whenComplete(() {
-          if (identical(_connectionInFlight, request)) {
-            _connectionInFlight = null;
-          }
-        }),
-      );
-    }
-
+    final connected = await _runtime.connect();
     // A new transport generation must be allowed to publish the latest
     // ephemeral state again even when the UI value did not change.
     _lastTyping.clear();
     _lastPresence = null;
-    return true;
+    return connected;
   }
 
   Future<RuntimeIdentity> identity() async =>
