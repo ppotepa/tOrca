@@ -1,4 +1,4 @@
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use sha2::{Digest, Sha256};
 
 use crate::{EngineError, EngineResult};
@@ -23,40 +23,45 @@ impl MigrationRunner {
         self.migrations
     }
 
-    pub fn run(&self, connection: &Connection) -> EngineResult<()> {
+    pub fn run(&self, connection: &mut Connection) -> EngineResult<()> {
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(sqlite_error)?;
+
         for migration in self.migrations {
-            if migration.version == 0 && !schema_migrations_table_exists(connection)? {
-                connection
-                    .execute_batch(migration.sql)
-                    .map_err(sqlite_error)?;
-                connection
-                    .execute(
-                        super::sqlite::MIGRATION_INSERT,
-                        params![migration.version, migration.name],
-                    )
-                    .map_err(sqlite_error)?;
-                continue;
+            if migration.version == 0 && !schema_migrations_table_exists(&transaction)? {
+                transaction.execute_batch(migration.sql).map_err(sqlite_error)?;
             }
-            let applied: Option<i64> = connection
-                .query_row(super::sqlite::MIGRATION_LOOKUP, [migration.name], |row| {
-                    row.get("version")
-                })
-                .optional()
-                .map_err(sqlite_error)?;
+
+            let applied = applied_version(&transaction, migration.name)?;
             if applied == Some(migration.version) {
                 continue;
             }
-            connection
-                .execute_batch(migration.sql)
-                .map_err(sqlite_error)?;
-            connection
+            if let Some(other_version) = applied {
+                return Err(EngineError::Storage(format!(
+                    "migration {} was recorded with version {}, expected {}",
+                    migration.name, other_version, migration.version,
+                )));
+            }
+
+            transaction.execute_batch(migration.sql).map_err(sqlite_error)?;
+            transaction
                 .execute(
-                    super::sqlite::MIGRATION_INSERT,
+                    "INSERT OR IGNORE INTO schema_migrations (version, name) VALUES (?1, ?2);",
                     params![migration.version, migration.name],
                 )
                 .map_err(sqlite_error)?;
+
+            let verified = applied_version(&transaction, migration.name)?;
+            if verified != Some(migration.version) {
+                return Err(EngineError::Storage(format!(
+                    "migration {} verification failed: expected version {}, found {:?}",
+                    migration.name, migration.version, verified,
+                )));
+            }
         }
-        Ok(())
+
+        transaction.commit().map_err(sqlite_error)
     }
 
     pub fn checksum(&self) -> String {
@@ -68,6 +73,18 @@ impl MigrationRunner {
         }
         format!("{:x}", digest.finalize())
     }
+}
+
+fn applied_version(
+    connection: &Connection,
+    migration_name: &str,
+) -> EngineResult<Option<i64>> {
+    connection
+        .query_row(super::sqlite::MIGRATION_LOOKUP, [migration_name], |row| {
+            row.get("version")
+        })
+        .optional()
+        .map_err(sqlite_error)
 }
 
 fn sqlite_error(error: rusqlite::Error) -> EngineError {
