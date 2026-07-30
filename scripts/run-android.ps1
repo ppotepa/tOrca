@@ -36,9 +36,9 @@ function Test-ForegroundServiceRunning {
 }
 
 function Test-EngineInitialized {
-    param([string]$Device, [int]$Pid)
-    if (-not $Pid) { return $false }
-    $logs = (& adb -s $Device logcat -d --pid=$Pid -v brief 2>$null | Out-String)
+    param([string]$Device, [int]$AppPid)
+    if (-not $AppPid) { return $false }
+    $logs = (& adb -s $Device logcat -d --pid=$AppPid -v brief 2>$null | Out-String)
     return (
         $logs -match 'engine_initialized' -or
         $logs -match 'Foreground service client engine initialized'
@@ -51,9 +51,9 @@ function Save-AndroidLaunchDiagnostics {
     New-Item -ItemType Directory -Force -Path $root | Out-Null
     & adb -s $Device shell dumpsys activity activities 2>&1 | Out-File -LiteralPath (Join-Path $root 'activity.txt') -Encoding utf8
     & adb -s $Device shell dumpsys activity services org.torchat.mobile 2>&1 | Out-File -LiteralPath (Join-Path $root 'services.txt') -Encoding utf8
-    $pid = Get-AppPid -Device $Device
-    if ($pid) {
-        & adb -s $Device logcat -d --pid=$pid -v threadtime 2>&1 | Out-File -LiteralPath (Join-Path $root 'app-logcat.txt') -Encoding utf8
+    $diagnosticAppPid = Get-AppPid -Device $Device
+    if ($diagnosticAppPid) {
+        & adb -s $Device logcat -d --pid=$diagnosticAppPid -v threadtime 2>&1 | Out-File -LiteralPath (Join-Path $root 'app-logcat.txt') -Encoding utf8
     }
     & adb -s $Device logcat -d -v threadtime 'TorChat-Engine:*' 'TorChat-Tor:*' 'AndroidRuntime:E' 'ActivityManager:W' '*:S' 2>&1 |
         Out-File -LiteralPath (Join-Path $root 'filtered-logcat.txt') -Encoding utf8
@@ -112,7 +112,7 @@ try {
         $appPid = Get-AppPid -Device $DeviceAddress
         $activityReady = Test-MainActivityResumed -Device $DeviceAddress
         $serviceReady = Test-ForegroundServiceRunning -Device $DeviceAddress
-        $engineReady = Test-EngineInitialized -Device $DeviceAddress -Pid $appPid
+        $engineReady = Test-EngineInitialized -Device $DeviceAddress -AppPid $appPid
         if ($appPid -and $activityReady -and $serviceReady -and $engineReady) { break }
     }
     if (-not $appPid) { throw 'Android process did not remain alive after launch.' }
