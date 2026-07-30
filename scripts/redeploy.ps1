@@ -26,18 +26,11 @@ function Invoke-Step {
     if (-not $?) { throw "$Name failed." }
 }
 
-function Test-DesktopClientRunning {
-    $windowsRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot 'mobile\build\windows'))
+function Get-DesktopClientProcesses {
     return @(
-        Get-CimInstance Win32_Process -Filter "Name='torchat_mobile.exe'" -ErrorAction SilentlyContinue |
-            Where-Object {
-                $_.ExecutablePath -and
-                [IO.Path]::GetFullPath($_.ExecutablePath).StartsWith(
-                    $windowsRoot,
-                    [StringComparison]::OrdinalIgnoreCase
-                )
-            }
-    ).Count -gt 0
+        Get-Process -Name 'torchat_mobile' -ErrorAction SilentlyContinue |
+            Where-Object { -not $_.HasExited }
+    )
 }
 
 if ($Incremental -and $PreserveTor) {
@@ -132,6 +125,7 @@ try {
     }
 
     Invoke-Step 'Start Windows desktop app' {
+        $beforePids = @(Get-DesktopClientProcesses | ForEach-Object Id)
         $runArgs = @{
             Command = 'run-desktop'
             Environment = 'local'
@@ -142,22 +136,24 @@ try {
         if ($Release) { $runArgs.Release = $true }
         & (Join-Path $PSScriptRoot 'torchat.ps1') @runArgs
 
-        Start-Sleep -Seconds 2
-        if (-not (Test-DesktopClientRunning)) {
-            $variant = if ($Release) { 'Release' } else { 'Debug' }
-            $desktopClient = Join-Path $repoRoot "mobile\build\windows\x64\runner\$variant\torchat_mobile.exe"
-            if (-not (Test-Path -LiteralPath $desktopClient)) {
-                throw "Windows desktop executable is missing after build: $desktopClient"
-            }
-            Write-Warning '[torchat] Desktop process was not detected after the normal launcher; retrying once directly.'
-            Start-Process -FilePath $desktopClient -WorkingDirectory (Split-Path -Parent $desktopClient)
-            Start-Sleep -Seconds 2
+        $desktopProcesses = @()
+        for ($attempt = 1; $attempt -le 10; $attempt++) {
+            Start-Sleep -Milliseconds 500
+            $desktopProcesses = @(Get-DesktopClientProcesses)
+            if ($desktopProcesses.Count -gt 0) { break }
         }
 
-        if (-not (Test-DesktopClientRunning)) {
+        if ($desktopProcesses.Count -eq 0) {
             throw 'Windows desktop process exited immediately after launch. Inspect .torchat\command-logs and .torchat\logs.'
         }
-        Write-Host '[torchat] Windows desktop process is running.'
+
+        $newProcesses = @($desktopProcesses | Where-Object { $_.Id -notin $beforePids })
+        $processLabel = if ($newProcesses.Count -gt 0) {
+            ($newProcesses | ForEach-Object Id) -join ', '
+        } else {
+            ($desktopProcesses | ForEach-Object Id) -join ', '
+        }
+        Write-Host "[torchat] Windows desktop process is running (PID $processLabel)."
     }
 } finally {
     Pop-Location
