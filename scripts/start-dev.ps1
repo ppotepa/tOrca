@@ -37,6 +37,43 @@ function Wait-Health([string]$url) {
     throw "Local server healthcheck failed: $url"
 }
 
+function Wait-TorBootstrap {
+    $bootstrapTimeoutSeconds = 300
+    $pollDelaySeconds = 2
+    $deadline = [DateTimeOffset]::UtcNow.AddSeconds($bootstrapTimeoutSeconds)
+    $lastProgress = ''
+
+    Write-Host "[torchat] Waiting up to ${bootstrapTimeoutSeconds}s for Tor bootstrap before probing the onion service."
+    while ([DateTimeOffset]::UtcNow -lt $deadline) {
+        $torLogs = & docker @($composeArgs + @('logs', '--no-color', '--tail', '80', 'tor')) 2>&1
+        $torLogText = ($torLogs | Out-String)
+        if ($LASTEXITCODE -eq 0) {
+            if ($torLogText -match 'Bootstrapped 100% \(done\): Done') {
+                Write-Host '[torchat] Tor bootstrap reached 100%; beginning onion descriptor health probes.'
+                return
+            }
+
+            $progressMatches = [regex]::Matches($torLogText, 'Bootstrapped ([0-9]{1,3})% \(([^)]+)\): ([^\r\n]+)')
+            if ($progressMatches.Count -gt 0) {
+                $latest = $progressMatches[$progressMatches.Count - 1]
+                $progress = "$($latest.Groups[1].Value)% ($($latest.Groups[2].Value)): $($latest.Groups[3].Value.Trim())"
+                if ($progress -ne $lastProgress) {
+                    Write-Host "[torchat] Tor bootstrap: $progress"
+                    $lastProgress = $progress
+                }
+            }
+        }
+        Start-Sleep -Seconds $pollDelaySeconds
+    }
+
+    $torLogs = & docker @($composeArgs + @('logs', '--tail', '30', 'tor')) 2>&1
+    $torLogText = ($torLogs | Out-String).Trim()
+    if ($torLogText) {
+        Write-Warning "[torchat] Last Tor log lines:`n$torLogText"
+    }
+    throw "Tor did not finish bootstrapping within ${bootstrapTimeoutSeconds}s. Clients were not built or launched."
+}
+
 function Wait-OnionHealth([string]$url, [int]$socksPort) {
     $warmupTimeoutSeconds = 180
     $probeTimeoutSeconds = 20
@@ -90,7 +127,7 @@ function Wait-OnionHealth([string]$url, [int]$socksPort) {
     }
 
     if ($AllowOnionWarmup) {
-        Write-Warning "[torchat] Onion is still unavailable after ${warmupTimeoutSeconds}s. Continuing only because -AllowOnionWarmup was explicitly supplied. Last result: $lastFailure"
+        Write-Warning "[torchat] Onion is still unavailable after ${warmupTimeoutSeconds}s following Tor bootstrap. Continuing only because -AllowOnionWarmup was explicitly supplied. Last result: $lastFailure"
         return $false
     }
 
@@ -99,7 +136,7 @@ function Wait-OnionHealth([string]$url, [int]$socksPort) {
     if ($torLogText) {
         Write-Warning "[torchat] Last Tor log lines:`n$torLogText"
     }
-    throw "Tor onion healthcheck failed through SOCKS after ${warmupTimeoutSeconds}s. Clients were not built or launched. Last result: $lastFailure"
+    throw "Tor onion healthcheck failed through SOCKS after ${warmupTimeoutSeconds}s following Tor bootstrap. Clients were not built or launched. Last result: $lastFailure"
 }
 
 function Get-OnionHostname {
@@ -138,6 +175,7 @@ try {
     if ($SkipOnionHealth) {
         Write-Host '[torchat] Skipping Tor SOCKS onion healthcheck; clients will retry while circuits warm up.'
     } else {
+        Wait-TorBootstrap
         Wait-OnionHealth $env:TORCHAT_ONION_URL ([int]$state.Values['TORCHAT_SOCKS_PORT'])
     }
     & docker @($composeArgs + @('ps'))
