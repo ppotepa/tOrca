@@ -44,7 +44,7 @@ function Stop-DesktopClientProcesses {
     }
 
     for ($attempt = 1; $attempt -le 20; $attempt++) {
-        if ((Get-DesktopClientProcesses).Count -eq 0) { return }
+        if (@(Get-DesktopClientProcesses).Count -eq 0) { return }
         Start-Sleep -Milliseconds 100
     }
     throw 'Could not stop the previous Windows desktop process before redeploy.'
