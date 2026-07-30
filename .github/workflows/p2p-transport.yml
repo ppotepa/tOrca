@@ -32,7 +32,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        env:
+          REPOSITORY: ${{ github.repository }}
+          REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          git init .
+          git remote add origin "https://github.com/${REPOSITORY}.git"
+          git fetch --depth 1 origin "${REVISION}"
+          git checkout --detach FETCH_HEAD
       - name: Select repository Rust toolchain
         run: |
           rustup toolchain install 1.94.0 --profile minimal
