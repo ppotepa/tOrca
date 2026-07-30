@@ -1,0 +1,39 @@
+name: P2P transport validation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "common/torchat-client-engine/src/peer/**"
+      - "common/torchat-client-engine/Cargo.toml"
+      - "common/torchat-core/src/peer_protocol.rs"
+      - "mobile/lib/core/runtime/runtime_repository.dart"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/p2p-transport.yml"
+  pull_request:
+    paths:
+      - "common/torchat-client-engine/src/peer/**"
+      - "common/torchat-client-engine/Cargo.toml"
+      - "common/torchat-core/src/peer_protocol.rs"
+      - "mobile/lib/core/runtime/runtime_repository.dart"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/p2p-transport.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    name: Rust peer transport
+    runs-on: ubuntu-latest
+    container: rust:1.94-bookworm
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check client engine
+        run: cargo check --locked -p torchat-client-engine
+      - name: Test peer scheduler
+        run: cargo test --locked -p torchat-client-engine peer::queue
