@@ -88,6 +88,26 @@ function Write-Utf8 {
     Set-Content -LiteralPath $Path -Value $Value -Encoding UTF8
 }
 
+function Set-ClipboardFile {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not $IsWindows) {
+        Write-Warning "Clipboard file copy is only supported on Windows. ZIP path: $Path"
+        return
+    }
+
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+        $absolutePath = [IO.Path]::GetFullPath($Path)
+        $files = [Collections.Specialized.StringCollection]::new()
+        [void]$files.Add($absolutePath)
+        [Windows.Forms.Clipboard]::SetFileDropList($files)
+        Write-Host "[torchat] ZIP copied to clipboard: $absolutePath"
+    } catch {
+        Write-Warning "ZIP was created but could not be copied to clipboard: $($_.Exception.Message)"
+    }
+}
+
 function Invoke-GitText {
     param([Parameter(Mandatory = $true)][string[]]$Arguments)
     $result = (& git @Arguments 2>&1 | Out-String).TrimEnd()
@@ -533,6 +553,7 @@ try {
         $snapshotSucceeded = $true
         Write-Host "[torchat] Snapshot ready: $archivePath"
         Write-Host "[torchat] SHA256: $archiveHash"
+        Set-ClipboardFile $archivePath
     } finally {
         Pop-Location
     }
