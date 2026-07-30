@@ -19,22 +19,23 @@ $ErrorActionPreference = 'Stop'
 $cli = Join-Path $PSScriptRoot 'torchat.ps1'
 if ($PairingAddress) {
     if (-not $PairingCode) { throw 'PairingCode is required with PairingAddress.' }
-    & $cli device pair -PairAddress $PairingAddress -PairCode $PairingCode
+    & $cli -Command device -Target pair -PairAddress $PairingAddress -PairCode $PairingCode
 }
 
 $buildPolicy = if ($SkipCoreBuild -and $SkipApkBuild) { 'skip' } elseif ($Rebuild) { 'rebuild' } else { 'smart' }
 $clientData = if ($Clean -or $ResetDevState) { 'reset' } else { 'preserve' }
 $stackPolicy = if ($SkipServer) { 'skip' } else { 'ensure' }
-$arguments = @(
-    'deploy', 'android',
-    '-Environment', $Environment,
-    '-BuildPolicy', $buildPolicy,
-    '-StackPolicy', $stackPolicy,
-    '-ClientDataPolicy', $clientData,
-    '-OnionPolicy', 'preserve',
-    '-DatabasePolicy', 'preserve',
-    '-Readiness', 'development'
-)
-if ($Release) { $arguments += '-Release' }
-if ($DeviceAddress) { $arguments += @('-Device', $DeviceAddress) }
-& $cli @arguments
+$parameters = @{
+    Command = 'deploy'
+    Target = 'android'
+    Environment = $Environment
+    BuildPolicy = $buildPolicy
+    StackPolicy = $stackPolicy
+    ClientDataPolicy = $clientData
+    OnionPolicy = 'preserve'
+    DatabasePolicy = 'preserve'
+    Readiness = 'development'
+}
+if ($Release) { $parameters.Release = $true }
+if ($DeviceAddress) { $parameters.Device = $DeviceAddress }
+& $cli @parameters
