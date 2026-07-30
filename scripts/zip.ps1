@@ -1,17 +1,23 @@
 <#
 .SYNOPSIS
-Creates a committed, portable TorChat repository and diagnostics snapshot.
+Creates a committed TorChat diagnostics snapshot, optionally with a repository copy.
 
 .DESCRIPTION
 Stages the entire Git worktree, creates an automatic checkpoint commit, gathers
 diagnostics for the latest recorded run from Docker, Tor, server, Android and
-desktop, copies the repository including .git, writes manifests and SHA-256
-inventories, and emits a verified ZIP plus a sidecar SHA-256 file. Android
+desktop, writes manifests and SHA-256 inventories, and emits a verified ZIP
+plus a sidecar SHA-256 file. By default the ZIP contains diagnostics only;
+source is recoverable from the recorded Git commit and remote. Android
 bugreport and all historical logs are opt-in because they contain much more
 data than is normally needed to diagnose the last run.
 
+The default archive is log-only: source code is identified by the checkpoint
+commit and Git remote in the manifest. Use -IncludeRepository only when a
+portable local copy including .git is explicitly required.
+
 Operational secrets, private keys and client databases are intentionally
-excluded. The complete .git directory is included as explicitly requested.
+excluded. Use -IncludeRepository to add a portable working-tree copy including
+.git when a self-contained archive is needed.
 
 .EXAMPLE
 .\scripts\zip.ps1
@@ -32,7 +38,8 @@ param(
     [switch]$AllowMissingAndroid,
     [switch]$AllowMissingDesktop,
     [switch]$AllHistory,
-    [switch]$IncludeBugreport
+    [switch]$IncludeBugreport,
+    [switch]$IncludeRepository
 )
 
 $ErrorActionPreference = 'Stop'
@@ -82,6 +89,22 @@ function Invoke-GitText {
     $result = (& git @Arguments 2>&1 | Out-String).TrimEnd()
     Assert-LastExitCode "git $($Arguments -join ' ') failed.`n$result"
     $result
+}
+
+function Get-SafeGitRemote {
+    $remote = (& git remote get-url origin 2>$null | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($remote)) { return $null }
+    # Do not put an embedded username/password or token into a diagnostic
+    # archive. Keep the host, path and revision information useful instead.
+    try {
+        $uri = [Uri]$remote
+        if ($uri.UserInfo) {
+            return ([UriBuilder]$uri).ToString() -replace '^([^:]+://)[^@]+@', '$1'
+        }
+    } catch {
+        # SCP-style remotes (git@github.com:owner/repo.git) are already safe.
+    }
+    $remote
 }
 
 function Assert-RepositoryClean {
@@ -213,8 +236,24 @@ function Copy-RepositorySnapshot {
 
 function Write-RepositoryMetadata {
     New-Item -ItemType Directory -Force -Path $metadataRoot | Out-Null
+    $gitRemote = Get-SafeGitRemote
+    $remoteForFile = if ([string]::IsNullOrWhiteSpace($gitRemote)) { '(no origin remote configured)' } else { $gitRemote }
     Write-Utf8 (Join-Path $metadataRoot 'commit.txt') (Invoke-GitText @('show', '-s', '--format=fuller', 'HEAD'))
     Write-Utf8 (Join-Path $metadataRoot 'branch.txt') (Invoke-GitText @('branch', '--show-current'))
+    Write-Utf8 (Join-Path $metadataRoot 'git-remote.txt') $remoteForFile
+    $restoreInstructions = if ([string]::IsNullOrWhiteSpace($gitRemote)) {
+        @(
+            'No origin remote is configured in this checkout.'
+            "git checkout $(Invoke-GitText @('rev-parse', 'HEAD'))"
+        )
+    } else {
+        @(
+            "git clone $gitRemote torchat"
+            'cd torchat'
+            "git checkout $(Invoke-GitText @('rev-parse', 'HEAD'))"
+        )
+    }
+    Write-Utf8 (Join-Path $metadataRoot 'restore-source.txt') ($restoreInstructions -join [Environment]::NewLine)
     Write-Utf8 (Join-Path $metadataRoot 'status.txt') (Invoke-GitText @('status', '--short', '--branch'))
     Write-Utf8 (Join-Path $metadataRoot 'recent-commits.txt') (Invoke-GitText @('log', '-n', '50', '--date=iso-strict', '--pretty=fuller'))
     Write-Utf8 (Join-Path $metadataRoot 'submodules.txt') (Invoke-GitText @('submodule', 'status', '--recursive'))
@@ -232,15 +271,20 @@ function Write-RepositoryMetadata {
         createdAt = (Get-Date).ToUniversalTime().ToString('o')
         repository = $repoRoot
         branch = Invoke-GitText @('branch', '--show-current')
+        gitRemote = $gitRemote
         commit = Invoke-GitText @('rev-parse', 'HEAD')
         shortCommit = Invoke-GitText @('rev-parse', '--short=12', 'HEAD')
         commitMessage = Invoke-GitText @('log', '-1', '--pretty=%B')
         environment = $Environment
         deviceAddress = if ($DeviceAddress) { $DeviceAddress } else { $null }
-        includesGitDirectory = $true
+        includesGitDirectory = $IncludeRepository
         logsMode = if ($AllHistory) { 'all-history' } else { 'latest-run' }
         includeBugreport = $IncludeBugreport
-        repositoryCopy = 'working tree immediately after automatic snapshot commit'
+        repositoryCopy = if ($IncludeRepository) {
+            'working tree immediately after automatic snapshot commit'
+        } else {
+            'not included; restore source from the recorded Git commit'
+        }
         excludedOperationalData = @(
             '.torchat (logs are included separately; client keys, databases and runtime environment are excluded)',
             'secrets',
@@ -414,14 +458,18 @@ try {
         }
 
         Assert-RepositoryClean 'while diagnostics were being collected'
-        Write-SnapshotStage 5 8 'Copying the complete repository, including .git...'
-        Copy-RepositorySnapshot
-        Assert-RepositoryClean 'while the repository was being copied'
+        if ($IncludeRepository) {
+            Write-SnapshotStage 5 8 'Copying the complete repository, including .git...'
+            Copy-RepositorySnapshot
+            Assert-RepositoryClean 'while the repository was being copied'
+        } else {
+            Write-SnapshotStage 5 8 'Preparing the log-only archive; source is identified by Git commit...'
+        }
         Write-SnapshotStage 6 8 'Writing snapshot metadata and SHA-256 inventory...'
         Write-RepositoryMetadata
         Write-FileInventory
 
-        Write-SnapshotStage 7 8 'Compressing the repository and logs...'
+        Write-SnapshotStage 7 8 $(if ($IncludeRepository) { 'Compressing the repository and logs...' } else { 'Compressing diagnostics and logs...' })
         $archiveName = "torchat-snapshot-$timestamp-$shortCommit.zip"
         $archivePath = Join-Path $snapshotRoot $archiveName
         New-RepositoryArchive -SourceDirectory $stagingRoot -ArchivePath $archivePath
@@ -431,11 +479,13 @@ try {
         try {
             $entryNames = @($archive.Entries | ForEach-Object { $_.FullName.Replace('\', '/') })
             $requiredEntries = @(
-                'repository/.git/HEAD',
                 'snapshot/manifest.json',
                 'snapshot/files.sha256',
                 'logs/last-run/startup-summary.txt'
             )
+            if ($IncludeRepository) {
+                $requiredEntries += 'repository/.git/HEAD'
+            }
             if (-not $AllowMissingAndroid) {
                 $requiredEntries += 'logs/last-run/android-app.log'
             }
