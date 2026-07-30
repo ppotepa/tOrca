@@ -1,7 +1,10 @@
 Set-StrictMode -Version Latest
 
 function Get-TorChatBuildStatePath {
-    param([Parameter(Mandatory = $true)][string]$RepositoryRoot, [Parameter(Mandatory = $true)][string]$Key)
+    param(
+        [Parameter(Mandatory = $true)][string]$RepositoryRoot,
+        [Parameter(Mandatory = $true)][string]$Key
+    )
     $safeKey = $Key -replace '[^A-Za-z0-9_.-]', '_'
     $root = Join-Path $RepositoryRoot '.torchat\build-state'
     New-Item -ItemType Directory -Force -Path $root | Out-Null
@@ -9,10 +12,13 @@ function Get-TorChatBuildStatePath {
 }
 
 function Get-TorChatRelativePath {
-    param([Parameter(Mandatory = $true)][string]$BasePath, [Parameter(Mandatory = $true)][string]$Path)
+    param(
+        [Parameter(Mandatory = $true)][string]$BasePath,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
     $base = [IO.Path]::GetFullPath($BasePath).TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
-    $baseUri = [Uri]::new($base)
-    $pathUri = [Uri]::new([IO.Path]::GetFullPath($Path))
+    $baseUri = New-Object Uri($base)
+    $pathUri = New-Object Uri([IO.Path]::GetFullPath($Path))
     [Uri]::UnescapeDataString($baseUri.MakeRelativeUri($pathUri).ToString()) -replace '/', '\'
 }
 
@@ -33,7 +39,7 @@ function Get-TorChatInputHash {
             @(Get-ChildItem -LiteralPath $path -Recurse -File -Force -ErrorAction SilentlyContinue | Where-Object {
                 $relative = Get-TorChatRelativePath -BasePath $RepositoryRoot -Path $_.FullName
                 $parts = $relative -split '[\\/]'
-                -not @($parts | Where-Object { $excluded -contains $_ })
+                @($parts | Where-Object { $excluded -contains $_ }).Count -eq 0
             })
         }
         foreach ($file in $files) {
@@ -45,7 +51,11 @@ function Get-TorChatInputHash {
     foreach ($value in $ExtraValues) { $records.Add("env=$value") }
     $payload = [Text.Encoding]::UTF8.GetBytes((@($records | Sort-Object) -join "`n"))
     $sha = [Security.Cryptography.SHA256]::Create()
-    try { return (($sha.ComputeHash($payload) | ForEach-Object { $_.ToString('x2') }) -join '') } finally { $sha.Dispose() }
+    try {
+        (($sha.ComputeHash($payload) | ForEach-Object { $_.ToString('x2') }) -join '')
+    } finally {
+        $sha.Dispose()
+    }
 }
 
 function Test-TorChatBuildFresh {
@@ -55,10 +65,16 @@ function Test-TorChatBuildFresh {
         [Parameter(Mandatory = $true)][string]$Hash,
         [Parameter(Mandatory = $true)][string[]]$Artifacts
     )
-    foreach ($artifact in $Artifacts) { if (-not (Test-Path -LiteralPath $artifact)) { return $false } }
+    foreach ($artifact in $Artifacts) {
+        if (-not (Test-Path -LiteralPath $artifact)) { return $false }
+    }
     $statePath = Get-TorChatBuildStatePath -RepositoryRoot $RepositoryRoot -Key $Key
     if (-not (Test-Path -LiteralPath $statePath)) { return $false }
-    try { return (Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json).hash -eq $Hash } catch { return $false }
+    try {
+        return (Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json).hash -eq $Hash
+    } catch {
+        return $false
+    }
 }
 
 function Set-TorChatBuildFresh {
@@ -76,8 +92,26 @@ function Set-TorChatBuildFresh {
     } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Get-TorChatBuildStatePath -RepositoryRoot $RepositoryRoot -Key $Key) -Encoding UTF8
 }
 
+function Get-TorChatFileSha256 {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+    try {
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try {
+            ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-', '')
+        } finally {
+            $sha.Dispose()
+        }
+    } finally {
+        $stream.Dispose()
+    }
+}
+
 function Remove-TorChatDirectoryRobust {
-    param([Parameter(Mandatory = $true)][string]$Path, [Parameter(Mandatory = $true)][string]$Description)
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Description
+    )
     if (-not (Test-Path -LiteralPath $Path)) { return }
     $resolved = [IO.Path]::GetFullPath($Path)
     for ($attempt = 1; $attempt -le 4; $attempt++) {
@@ -86,6 +120,7 @@ function Remove-TorChatDirectoryRobust {
             return
         } catch {
             if ($attempt -eq 4) { break }
+            Write-TorChatWarning "$Description removal attempt $attempt failed: $($_.Exception.Message)"
             Start-Sleep -Milliseconds (250 * $attempt)
         }
     }
@@ -110,20 +145,66 @@ function Stop-TorChatBuildProcesses {
         $running = @(Get-CimInstance Win32_Process -Filter "Name='$name'" -ErrorAction SilentlyContinue | Where-Object {
             $_.ExecutablePath -and [IO.Path]::GetFullPath($_.ExecutablePath).StartsWith($repoPath, [StringComparison]::OrdinalIgnoreCase)
         })
-        foreach ($process in $running) { Stop-Process -Id ([int]$process.ProcessId) -Force -ErrorAction SilentlyContinue }
+        foreach ($process in $running) {
+            Stop-Process -Id ([int]$process.ProcessId) -Force -ErrorAction SilentlyContinue
+        }
     }
-    Start-Sleep -Milliseconds 400
+    Start-Sleep -Milliseconds 500
 }
 
 function Resolve-TorChatAndroidNdk {
     param([string]$AndroidNdk)
-    if (-not [string]::IsNullOrWhiteSpace($AndroidNdk) -and (Test-Path -LiteralPath $AndroidNdk)) { return $AndroidNdk }
+    if (-not [string]::IsNullOrWhiteSpace($AndroidNdk) -and (Test-Path -LiteralPath $AndroidNdk)) {
+        return $AndroidNdk
+    }
     $sdk = $env:ANDROID_SDK_ROOT
     if ([string]::IsNullOrWhiteSpace($sdk)) { $sdk = $env:ANDROID_HOME }
     if ([string]::IsNullOrWhiteSpace($sdk)) { $sdk = Join-Path $env:LOCALAPPDATA 'Android\Sdk' }
-    $resolved = Get-ChildItem (Join-Path $sdk 'ndk') -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1 -ExpandProperty FullName
-    if ([string]::IsNullOrWhiteSpace($resolved) -or -not (Test-Path -LiteralPath $resolved)) { throw 'Android NDK not found. Install it through Android Studio or set ANDROID_NDK_HOME.' }
-    return $resolved
+    $resolved = Get-ChildItem (Join-Path $sdk 'ndk') -Directory -ErrorAction SilentlyContinue |
+        Sort-Object Name -Descending |
+        Select-Object -First 1 -ExpandProperty FullName
+    if ([string]::IsNullOrWhiteSpace($resolved) -or -not (Test-Path -LiteralPath $resolved)) {
+        throw 'Android NDK not found. Install it through Android Studio or set ANDROID_NDK_HOME.'
+    }
+    $resolved
+}
+
+function Initialize-TorChatAndroidToolchain {
+    param(
+        [Parameter(Mandatory = $true)][string]$AndroidNdk,
+        [Parameter(Mandatory = $true)][string]$RustTarget,
+        [Parameter(Mandatory = $true)][string]$ToolPrefix
+    )
+    foreach ($candidate in @('C:\msys64\usr\bin','C:\Program Files\Git\usr\bin','C:\Strawberry\perl\bin')) {
+        if (Test-Path -LiteralPath (Join-Path $candidate 'perl.exe')) {
+            $env:PATH = "$candidate;$env:PATH"
+            break
+        }
+    }
+    $env:ANDROID_NDK_HOME = $AndroidNdk -replace '\\', '/'
+    $targetEnv = $RustTarget.ToUpperInvariant().Replace('-','_')
+    $targetUnderscore = $RustTarget.Replace('-','_')
+    $llvmBin = "$env:ANDROID_NDK_HOME/toolchains/llvm/prebuilt/windows-x86_64/bin"
+    $clang = "$llvmBin/$($ToolPrefix)21-clang.cmd"
+    $clangExe = "$llvmBin/clang.exe"
+    $ar = "$llvmBin/llvm-ar.exe"
+    $ranlib = "$llvmBin/llvm-ranlib.exe"
+    if (-not (Test-Path -LiteralPath $clang) -or -not (Test-Path -LiteralPath $clangExe)) {
+        throw "Android NDK clang not found for $RustTarget in $llvmBin."
+    }
+    [Environment]::SetEnvironmentVariable("CARGO_TARGET_$($targetEnv)_LINKER", $clang, 'Process')
+    foreach ($name in @("CC_$RustTarget","CC_$targetUnderscore")) {
+        [Environment]::SetEnvironmentVariable($name, $clangExe, 'Process')
+    }
+    foreach ($name in @("AR_$RustTarget","AR_$targetUnderscore")) {
+        [Environment]::SetEnvironmentVariable($name, $ar, 'Process')
+    }
+    foreach ($name in @("RANLIB_$RustTarget","RANLIB_$targetUnderscore")) {
+        [Environment]::SetEnvironmentVariable($name, $ranlib, 'Process')
+    }
+    foreach ($name in @("CFLAGS_$RustTarget","CFLAGS_$targetUnderscore")) {
+        [Environment]::SetEnvironmentVariable($name, "--target=$($RustTarget)21", 'Process')
+    }
 }
 
 function Build-TorChatDesktopEngine {
@@ -138,15 +219,24 @@ function Build-TorChatDesktopEngine {
     $binaryName = if ($env:OS -eq 'Windows_NT') { 'torchat-desktop.exe' } else { 'torchat-desktop' }
     $artifact = Join-Path $Context.RepositoryRoot "target\$profile\$binaryName"
     $hash = Get-TorChatInputHash -RepositoryRoot $Context.RepositoryRoot -Roots @(
-        'Cargo.toml','Cargo.lock','common\client-engine-contract.json','common\torchat-core','common\torchat-client-runtime','common\torchat-client-engine','desktop'
-    ) -ExtraValues @("profile=$profile","onion=$($EnvironmentState.Values['TORCHAT_ONION_URL'])","os=$env:OS")
+        'Cargo.toml','Cargo.lock','common\client-engine-contract.json','common\torchat-core',
+        'common\torchat-client-runtime','common\torchat-client-engine','desktop'
+    ) -ExtraValues @(
+        "profile=$profile",
+        "onion=$($EnvironmentState.Values['TORCHAT_ONION_URL'])",
+        "os=$env:OS"
+    )
     if ($Policy -eq 'smart' -and (Test-TorChatBuildFresh -RepositoryRoot $Context.RepositoryRoot -Key "desktop-runtime-$profile" -Hash $hash -Artifacts @($artifact))) {
         return [pscustomobject]@{ State = 'Skipped'; Code = 'DESKTOP_ENGINE_FRESH'; Message = 'Desktop engine unchanged'; Artifact = $artifact }
     }
     Stop-TorChatBuildProcesses -RepositoryRoot $Context.RepositoryRoot
     if ($env:OS -eq 'Windows_NT') {
-        $perlRoot = @('C:\Strawberry\perl\bin','C:\Perl64\bin','C:\Perl\bin') | Where-Object { Test-Path -LiteralPath (Join-Path $_ 'perl.exe') } | Select-Object -First 1
-        if ([string]::IsNullOrWhiteSpace($perlRoot)) { throw 'Native Windows Perl is required for desktop OpenSSL builds.' }
+        $perlRoot = @('C:\Strawberry\perl\bin','C:\Perl64\bin','C:\Perl\bin') |
+            Where-Object { Test-Path -LiteralPath (Join-Path $_ 'perl.exe') } |
+            Select-Object -First 1
+        if ([string]::IsNullOrWhiteSpace($perlRoot)) {
+            throw 'Native Windows Perl is required for desktop OpenSSL builds.'
+        }
         $env:PATH = "$perlRoot;$env:PATH"
     }
     $previous = $env:TORCHAT_COMPILED_ONION_URL
@@ -155,7 +245,9 @@ function Build-TorChatDesktopEngine {
         $args = @('build','-p','torchat-desktop')
         if ($Context.Configuration -eq 'release') { $args += '--release' }
         [void](Invoke-TorChatNative -Context $Context -FilePath 'cargo' -ArgumentList $args -WorkingDirectory $Context.RepositoryRoot -LogName 'cargo-desktop.log')
-    } finally { $env:TORCHAT_COMPILED_ONION_URL = $previous }
+    } finally {
+        $env:TORCHAT_COMPILED_ONION_URL = $previous
+    }
     if (-not (Test-Path -LiteralPath $artifact)) { throw "Desktop engine artifact missing: $artifact" }
     Set-TorChatBuildFresh -RepositoryRoot $Context.RepositoryRoot -Key "desktop-runtime-$profile" -Hash $hash -Artifacts @($artifact)
     [pscustomobject]@{ State = 'Ready'; Code = 'DESKTOP_ENGINE_BUILT'; Message = $artifact; Artifact = $artifact }
@@ -171,7 +263,6 @@ function Build-TorChatAndroidEngine {
     Assert-TorChatTool -Name cargo
     Assert-TorChatTool -Name rustup
     $ndk = Resolve-TorChatAndroidNdk -AndroidNdk $AndroidNdk
-    $env:ANDROID_NDK_HOME = $ndk -replace '\\','/'
     $abi = switch ($RustTarget) {
         'aarch64-linux-android' { 'arm64-v8a' }
         'armv7-linux-androideabi' { 'armeabi-v7a' }
@@ -185,30 +276,29 @@ function Build-TorChatAndroidEngine {
         'x86_64-linux-android' { 'x86_64-linux-android' }
         'i686-linux-android' { 'i686-linux-android' }
     }
+    Initialize-TorChatAndroidToolchain -AndroidNdk $ndk -RustTarget $RustTarget -ToolPrefix $toolPrefix
     $out = Join-Path $Context.RepositoryRoot "mobile\build\app\generated\jniLibs\$abi"
     $artifact = Join-Path $out 'libtorchat_client_engine.so'
     $hash = Get-TorChatInputHash -RepositoryRoot $Context.RepositoryRoot -Roots @(
-        'Cargo.toml','Cargo.lock','common\client-engine-contract.json','common\torchat-core','common\torchat-client-runtime','common\torchat-client-engine','common\torchat-client-engine-ffi'
+        'Cargo.toml','Cargo.lock','common\client-engine-contract.json','common\torchat-core',
+        'common\torchat-client-runtime','common\torchat-client-engine','common\torchat-client-engine-ffi'
     ) -ExtraValues @("target=$RustTarget","ndk=$env:ANDROID_NDK_HOME")
     if ($Policy -eq 'smart' -and (Test-TorChatBuildFresh -RepositoryRoot $Context.RepositoryRoot -Key "android-core-$RustTarget" -Hash $hash -Artifacts @($artifact))) {
         return [pscustomobject]@{ State = 'Skipped'; Code = 'ANDROID_ENGINE_FRESH'; Message = 'Android engine unchanged'; Artifact = $artifact }
     }
     [void](Invoke-TorChatNative -Context $Context -FilePath 'rustup' -ArgumentList @('target','add',$RustTarget) -LogName 'rustup-android.log')
-    $targetEnv = $RustTarget.ToUpperInvariant().Replace('-','_')
-    $llvmBin = "$env:ANDROID_NDK_HOME/toolchains/llvm/prebuilt/windows-x86_64/bin"
-    $clang = "$llvmBin/$toolPrefix" + '21-clang.cmd'
-    $clangExe = "$llvmBin/clang.exe"
-    if (-not (Test-Path -LiteralPath $clang)) { throw "Android NDK clang not found: $clang" }
-    [Environment]::SetEnvironmentVariable("CARGO_TARGET_$($targetEnv)_LINKER", $clang, 'Process')
-    [Environment]::SetEnvironmentVariable("CC_$RustTarget", $clangExe, 'Process')
-    [Environment]::SetEnvironmentVariable("AR_$RustTarget", "$llvmBin/llvm-ar.exe", 'Process')
-    [Environment]::SetEnvironmentVariable("RANLIB_$RustTarget", "$llvmBin/llvm-ranlib.exe", 'Process')
-    [Environment]::SetEnvironmentVariable("CFLAGS_$RustTarget", "--target=$($RustTarget)21", 'Process')
     [void](Invoke-TorChatNative -Context $Context -FilePath 'cargo' -ArgumentList @('build','--target',$RustTarget,'-p','torchat-client-engine-ffi','--release') -WorkingDirectory $Context.RepositoryRoot -LogName 'cargo-android.log')
     $source = Join-Path $Context.RepositoryRoot "target\$RustTarget\release\libtorchat_client_engine_ffi.so"
     if (-not (Test-Path -LiteralPath $source)) { throw "Android engine source library missing: $source" }
     New-Item -ItemType Directory -Force -Path $out | Out-Null
-    Copy-Item -LiteralPath $source -Destination $artifact -Force
+    try {
+        Copy-Item -LiteralPath $source -Destination $artifact -Force -ErrorAction Stop
+    } catch [UnauthorizedAccessException] {
+        if (-not (Test-Path -LiteralPath $artifact)) { throw }
+        if ((Get-TorChatFileSha256 -Path $source) -ne (Get-TorChatFileSha256 -Path $artifact)) { throw }
+        Write-TorChatWarning "Android engine library is locked but already current: $artifact"
+    }
+    if (-not (Test-Path -LiteralPath $artifact)) { throw "Android engine artifact missing: $artifact" }
     Set-TorChatBuildFresh -RepositoryRoot $Context.RepositoryRoot -Key "android-core-$RustTarget" -Hash $hash -Artifacts @($artifact)
     [pscustomobject]@{ State = 'Ready'; Code = 'ANDROID_ENGINE_BUILT'; Message = $artifact; Artifact = $artifact }
 }
@@ -224,8 +314,13 @@ function Build-TorChatAndroidClient {
     $variant = $Context.Configuration
     $artifact = Join-Path $Context.RepositoryRoot "mobile\build\app\outputs\flutter-apk\app-$variant.apk"
     $hash = Get-TorChatInputHash -RepositoryRoot $Context.RepositoryRoot -Roots @(
-        'common\client-engine-contract.json','mobile\pubspec.yaml','mobile\pubspec.lock','mobile\lib','mobile\assets','mobile\android'
-    ) -ExtraValues @("environment=$($Context.Environment)","onion=$($EnvironmentState.Values['TORCHAT_ONION_URL'])","variant=$variant")
+        'common\client-engine-contract.json','mobile\pubspec.yaml','mobile\pubspec.lock',
+        'mobile\lib','mobile\assets','mobile\android'
+    ) -ExtraValues @(
+        "environment=$($Context.Environment)",
+        "onion=$($EnvironmentState.Values['TORCHAT_ONION_URL'])",
+        "variant=$variant"
+    )
     if ($Policy -eq 'smart' -and (Test-TorChatBuildFresh -RepositoryRoot $Context.RepositoryRoot -Key "flutter-android-$variant" -Hash $hash -Artifacts @($artifact))) {
         return [pscustomobject]@{ State = 'Skipped'; Code = 'ANDROID_APK_FRESH'; Message = 'Android APK unchanged'; Artifact = $artifact }
     }
@@ -261,8 +356,13 @@ function Build-TorChatWindowsClient {
     $flutterVariant = if ($Context.Configuration -eq 'release') { '--release' } else { '--debug' }
     $artifact = Join-Path $Context.RepositoryRoot "mobile\build\windows\x64\runner\$variant\torchat_mobile.exe"
     $hash = Get-TorChatInputHash -RepositoryRoot $Context.RepositoryRoot -Roots @(
-        'common\client-engine-contract.json','mobile\pubspec.yaml','mobile\pubspec.lock','mobile\lib','mobile\assets','mobile\windows'
-    ) -ExtraValues @("environment=$($Context.Environment)","onion=$($EnvironmentState.Values['TORCHAT_ONION_URL'])","variant=$variant")
+        'common\client-engine-contract.json','mobile\pubspec.yaml','mobile\pubspec.lock',
+        'mobile\lib','mobile\assets','mobile\windows'
+    ) -ExtraValues @(
+        "environment=$($Context.Environment)",
+        "onion=$($EnvironmentState.Values['TORCHAT_ONION_URL'])",
+        "variant=$variant"
+    )
     if ($Policy -eq 'smart' -and (Test-TorChatBuildFresh -RepositoryRoot $Context.RepositoryRoot -Key "flutter-windows-$variant" -Hash $hash -Artifacts @($artifact))) {
         return [pscustomobject]@{ State = 'Skipped'; Code = 'WINDOWS_CLIENT_FRESH'; Message = 'Windows client unchanged'; Artifact = $artifact }
     }
@@ -270,19 +370,31 @@ function Build-TorChatWindowsClient {
     $stagingParent = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { $env:TEMP }
     $repoBytes = [Text.Encoding]::UTF8.GetBytes(([IO.Path]::GetFullPath($Context.RepositoryRoot)).ToLowerInvariant())
     $sha = [Security.Cryptography.SHA256]::Create()
-    try { $repoHash = ([BitConverter]::ToString($sha.ComputeHash($repoBytes)) -replace '-','').Substring(0,12).ToLowerInvariant() } finally { $sha.Dispose() }
+    try {
+        $repoHash = ([BitConverter]::ToString($sha.ComputeHash($repoBytes)) -replace '-','').Substring(0,12).ToLowerInvariant()
+    } finally {
+        $sha.Dispose()
+    }
+    $mobileRoot = Join-Path $Context.RepositoryRoot 'mobile'
     $stagingMobile = Join-Path $stagingParent "TorChat\flutter-windows\$repoHash\mobile"
     $stagingBuild = Join-Path $stagingMobile 'build\windows'
-    $destinationBuild = Join-Path $Context.RepositoryRoot 'mobile\build\windows'
+    $destinationBuild = Join-Path $mobileRoot 'build\windows'
     Remove-TorChatDirectoryRobust -Path $stagingMobile -Description 'Windows Flutter staging directory'
     New-Item -ItemType Directory -Force -Path $stagingMobile | Out-Null
-    & robocopy (Join-Path $Context.RepositoryRoot 'mobile') $stagingMobile /E /NFL /NDL /NJH /NJS /NP /XD 'build' '.dart_tool' 'windows\flutter\ephemeral' 'android' /XF '*.apk' '*.aab' '*.log' | Out-Null
+    & robocopy $mobileRoot $stagingMobile /E /NFL /NDL /NJH /NJS /NP `
+        /XD (Join-Path $mobileRoot 'build') `
+            (Join-Path $mobileRoot '.dart_tool') `
+            (Join-Path $mobileRoot 'windows\flutter\ephemeral') `
+            (Join-Path $mobileRoot 'android') `
+        /XF '*.apk' '*.aab' '*.log' | Out-Null
     if ($LASTEXITCODE -gt 7) { throw "Windows Flutter staging copy failed with robocopy exit $LASTEXITCODE." }
     $previousConfig = $env:TORCHAT_CONFIG_FILE
     $env:TORCHAT_CONFIG_FILE = $EnvironmentState.Paths.RuntimeEnvironment
     try {
         [void](Invoke-TorChatNative -Context $Context -FilePath 'flutter' -ArgumentList @('build','windows',$flutterVariant) -WorkingDirectory $stagingMobile -LogName 'flutter-windows.log')
-    } finally { $env:TORCHAT_CONFIG_FILE = $previousConfig }
+    } finally {
+        $env:TORCHAT_CONFIG_FILE = $previousConfig
+    }
     Remove-TorChatDirectoryRobust -Path $destinationBuild -Description 'Windows Flutter output directory'
     New-Item -ItemType Directory -Force -Path $destinationBuild | Out-Null
     & robocopy $stagingBuild $destinationBuild /E /NFL /NDL /NJH /NJS /NP | Out-Null
@@ -307,6 +419,12 @@ function Build-TorChatServerImage {
 }
 
 Export-ModuleMember -Function @(
-    'Get-TorChatInputHash','Test-TorChatBuildFresh','Set-TorChatBuildFresh',
-    'Build-TorChatDesktopEngine','Build-TorChatAndroidEngine','Build-TorChatAndroidClient','Build-TorChatWindowsClient','Build-TorChatServerImage'
+    'Get-TorChatInputHash',
+    'Test-TorChatBuildFresh',
+    'Set-TorChatBuildFresh',
+    'Build-TorChatDesktopEngine',
+    'Build-TorChatAndroidEngine',
+    'Build-TorChatAndroidClient',
+    'Build-TorChatWindowsClient',
+    'Build-TorChatServerImage'
 )
