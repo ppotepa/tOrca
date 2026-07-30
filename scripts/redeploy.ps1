@@ -33,6 +33,23 @@ function Get-DesktopClientProcesses {
     )
 }
 
+function Stop-DesktopClientProcesses {
+    $processes = @(Get-DesktopClientProcesses)
+    foreach ($process in $processes) {
+        Write-Host "[torchat] Stopping stale Windows desktop PID $($process.Id) before launch."
+        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+    }
+    foreach ($process in $processes) {
+        try { Wait-Process -Id $process.Id -Timeout 5 -ErrorAction SilentlyContinue } catch { }
+    }
+
+    for ($attempt = 1; $attempt -le 20; $attempt++) {
+        if ((Get-DesktopClientProcesses).Count -eq 0) { return }
+        Start-Sleep -Milliseconds 100
+    }
+    throw 'Could not stop the previous Windows desktop process before redeploy.'
+}
+
 if ($Incremental -and $PreserveTor) {
     throw 'Use either -Incremental or -PreserveTor, not both.'
 }
@@ -125,7 +142,7 @@ try {
     }
 
     Invoke-Step 'Start Windows desktop app' {
-        $beforePids = @(Get-DesktopClientProcesses | ForEach-Object Id)
+        Stop-DesktopClientProcesses
         $runArgs = @{
             Command = 'run-desktop'
             Environment = 'local'
@@ -137,7 +154,7 @@ try {
         & (Join-Path $PSScriptRoot 'torchat.ps1') @runArgs
 
         $desktopProcesses = @()
-        for ($attempt = 1; $attempt -le 10; $attempt++) {
+        for ($attempt = 1; $attempt -le 20; $attempt++) {
             Start-Sleep -Milliseconds 500
             $desktopProcesses = @(Get-DesktopClientProcesses)
             if ($desktopProcesses.Count -gt 0) { break }
@@ -147,12 +164,7 @@ try {
             throw 'Windows desktop process exited immediately after launch. Inspect .torchat\command-logs and .torchat\logs.'
         }
 
-        $newProcesses = @($desktopProcesses | Where-Object { $_.Id -notin $beforePids })
-        $processLabel = if ($newProcesses.Count -gt 0) {
-            ($newProcesses | ForEach-Object Id) -join ', '
-        } else {
-            ($desktopProcesses | ForEach-Object Id) -join ', '
-        }
+        $processLabel = ($desktopProcesses | ForEach-Object Id) -join ', '
         Write-Host "[torchat] Windows desktop process is running (PID $processLabel)."
     }
 } finally {
