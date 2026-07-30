@@ -1,4 +1,4 @@
-use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use sha2::{Digest, Sha256};
 
 use crate::{EngineError, EngineResult};
@@ -23,17 +23,33 @@ impl MigrationRunner {
         self.migrations
     }
 
-    pub fn run(&self, connection: &mut Connection) -> EngineResult<()> {
-        let transaction = connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)
+    pub fn run(&self, connection: &Connection) -> EngineResult<()> {
+        connection
+            .execute_batch("BEGIN IMMEDIATE;")
             .map_err(sqlite_error)?;
 
+        let result = self.run_locked(connection);
+        match result {
+            Ok(()) => connection.execute_batch("COMMIT;").map_err(sqlite_error),
+            Err(error) => {
+                let rollback = connection.execute_batch("ROLLBACK;");
+                if let Err(rollback_error) = rollback {
+                    return Err(EngineError::Storage(format!(
+                        "{error}; rollback failed: {rollback_error:#}",
+                    )));
+                }
+                Err(error)
+            }
+        }
+    }
+
+    fn run_locked(&self, connection: &Connection) -> EngineResult<()> {
         for migration in self.migrations {
-            if migration.version == 0 && !schema_migrations_table_exists(&transaction)? {
-                transaction.execute_batch(migration.sql).map_err(sqlite_error)?;
+            if migration.version == 0 && !schema_migrations_table_exists(connection)? {
+                connection.execute_batch(migration.sql).map_err(sqlite_error)?;
             }
 
-            let applied = applied_version(&transaction, migration.name)?;
+            let applied = applied_version(connection, migration.name)?;
             if applied == Some(migration.version) {
                 continue;
             }
@@ -44,15 +60,15 @@ impl MigrationRunner {
                 )));
             }
 
-            transaction.execute_batch(migration.sql).map_err(sqlite_error)?;
-            transaction
+            connection.execute_batch(migration.sql).map_err(sqlite_error)?;
+            connection
                 .execute(
                     "INSERT OR IGNORE INTO schema_migrations (version, name) VALUES (?1, ?2);",
                     params![migration.version, migration.name],
                 )
                 .map_err(sqlite_error)?;
 
-            let verified = applied_version(&transaction, migration.name)?;
+            let verified = applied_version(connection, migration.name)?;
             if verified != Some(migration.version) {
                 return Err(EngineError::Storage(format!(
                     "migration {} verification failed: expected version {}, found {:?}",
@@ -60,8 +76,7 @@ impl MigrationRunner {
                 )));
             }
         }
-
-        transaction.commit().map_err(sqlite_error)
+        Ok(())
     }
 
     pub fn checksum(&self) -> String {
