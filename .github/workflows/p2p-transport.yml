@@ -30,10 +30,13 @@ jobs:
   rust:
     name: Rust peer transport
     runs-on: ubuntu-latest
-    container: rust:1.94-bookworm
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - name: Select repository Rust toolchain
+        run: |
+          rustup toolchain install 1.94.0 --profile minimal
+          rustup default 1.94.0
       - name: Check client engine
         run: cargo check --locked -p torchat-client-engine
       - name: Test peer scheduler
