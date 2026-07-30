@@ -51,6 +51,25 @@ function Wait-ConnectedMdnsDevice {
     return $null
 }
 
+function Get-AppPid {
+    param([string]$Device)
+    $value = (& adb -s $Device shell pidof -s org.torchat.mobile 2>$null | Out-String).Trim()
+    if ($value -match '^\d+$') { return [int]$value }
+    return $null
+}
+
+function Test-MainActivityResumed {
+    param([string]$Device)
+    $activity = (& adb -s $Device shell dumpsys activity activities 2>$null | Out-String)
+    return $activity -match 'mResumedActivity.*org\.torchat\.mobile/.MainActivity'
+}
+
+function Test-ForegroundServiceRunning {
+    param([string]$Device)
+    $services = (& adb -s $Device shell dumpsys activity services org.torchat.mobile 2>$null | Out-String)
+    return $services -match 'TorChatForegroundService'
+}
+
 if ($PairingAddress) {
     if (-not $PairingCode) { throw "PairingCode is required with PairingAddress." }
     adb pair $PairingAddress $PairingCode
@@ -63,8 +82,6 @@ if (-not $DeviceAddress) {
         $_ -match '^\d{1,3}(?:\.\d{1,3}){3}:\d+$'
     })
     if ($wifiDevices.Count -eq 1) {
-        # ADB can expose the same phone twice: once as an mDNS service name
-        # and once as its concrete Wi-Fi endpoint. Prefer the routable address.
         $DeviceAddress = $wifiDevices[0]
     } elseif ($wifiDevices.Count -gt 1) {
         $discovered = @(Find-MdnsConnectAddresses)
@@ -149,20 +166,12 @@ $savedErrorActionPreference = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
 $installArgs = @("-s", $DeviceAddress, "install", "-r")
 $installArgs += @("--no-streaming", $apk)
-# Reinstall in place for every variant. Android preserves Keystore-backed
-# identity and SQLCipher state across a signed update. A destructive reset is
-# deliberately available only through `torchat reset -Confirm -Scope client`
-# (or the explicit debug-only -ResetDevState switch below).
 $installOutput = @(& adb @installArgs 2>&1)
 $installExitCode = $LASTEXITCODE
 $ErrorActionPreference = $savedErrorActionPreference
 if ($installExitCode -ne 0) {
     $details = ($installOutput -join " ").Trim()
     if ($details -match "INSTALL_FAILED_USER_RESTRICTED") {
-        # Some Xiaomi/HyperOS builds block the high-level `adb install`
-        # command but still allow an explicit package-manager install after
-        # the APK has been copied over Wireless Debugging. Try that route
-        # before reporting the device policy as fatal.
         Write-Warning "ADB install was restricted; trying adb push + pm install on $DeviceAddress."
         $remoteApk = "/data/local/tmp/torchat-mobile-$variant.apk"
         $savedFallbackErrorActionPreference = $ErrorActionPreference
@@ -196,15 +205,41 @@ if ($installExitCode -ne 0) {
     }
     if ($installExitCode -ne 0) { throw "Flutter APK installation failed: $details" }
 }
-adb -s $DeviceAddress shell am force-stop org.torchat.mobile
+
+& adb -s $DeviceAddress shell am force-stop org.torchat.mobile
 if ($LASTEXITCODE -ne 0) { throw "Could not stop the previous Flutter mobile process." }
-$launchArgs = @("-s", $DeviceAddress, "shell", "am", "start", "-n", "org.torchat.mobile/.MainActivity")
-if ($ResetDevState) {
-    # Reset from inside the debug app after a successful install. This keeps
-    # the old working APK intact when Android rejects an installation.
-    $launchArgs += @("--ez", "reset_dev_state", "true")
-}
+
+$launchArgs = @("-s", $DeviceAddress, "shell", "am", "start", "-W", "-n", "org.torchat.mobile/.MainActivity")
+if ($ResetDevState) { $launchArgs += @("--ez", "reset_dev_state", "true") }
 if ($Clean) { $launchArgs += @("--ez", "clean_state", "true") }
-& adb @launchArgs
-if ($LASTEXITCODE -ne 0) { throw "Could not launch Flutter mobile app." }
-Write-Host "TorChat Flutter mobile deployed to $DeviceAddress"
+$launchOutput = @(& adb @launchArgs 2>&1)
+if ($LASTEXITCODE -ne 0) {
+    throw "Could not launch Flutter mobile app: $(($launchOutput -join ' ').Trim())"
+}
+$launchText = $launchOutput -join "`n"
+if ($launchText -notmatch '(?m)^Status:\s+ok\s*$') {
+    throw "Android ActivityManager did not report a successful launch: $launchText"
+}
+
+$appPid = $null
+$activityReady = $false
+$serviceReady = $false
+for ($attempt = 1; $attempt -le 30; $attempt++) {
+    Start-Sleep -Milliseconds 500
+    $appPid = Get-AppPid -Device $DeviceAddress
+    $activityReady = Test-MainActivityResumed -Device $DeviceAddress
+    $serviceReady = Test-ForegroundServiceRunning -Device $DeviceAddress
+    if ($appPid -and $activityReady -and $serviceReady) { break }
+}
+if (-not $appPid) { throw 'Android process did not remain alive after launch.' }
+if (-not $activityReady) { throw 'Android MainActivity did not reach the resumed state.' }
+if (-not $serviceReady) { throw 'TorChatForegroundService did not start.' }
+
+$initialPid = $appPid
+Start-Sleep -Seconds 5
+$stablePid = Get-AppPid -Device $DeviceAddress
+if (-not $stablePid -or $stablePid -ne $initialPid) {
+    throw "Android process was not stable for five seconds after launch (initial PID $initialPid, current PID $stablePid)."
+}
+
+Write-Host "[torchat] Android app ready on $DeviceAddress (PID $stablePid, Activity resumed, foreground service running)."
