@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../app/app_theme.dart';
@@ -155,77 +156,118 @@ class ContactsView extends StatelessWidget {
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
           title: Text(contact.displayName),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                contact.verified ? 'Kontakt zweryfikowany' : 'Brak weryfikacji',
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'P2P przez Tor: ${_peerEndpointLabel(contact.peerEndpointStatus)}',
-              ),
-              Text(
-                'Połączenie bezpośrednie: '
-                '${_peerConnectionLabel(contact.peerConnectionStatus)}',
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<ContactTransportPolicy>(
-                initialValue: transportPolicy,
-                decoration: const InputDecoration(
-                  labelText: 'Polityka transportu',
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  contact.verified ? 'Kontakt zweryfikowany' : 'Brak weryfikacji',
                 ),
-                items: [
-                  for (final policy in ContactTransportPolicy.values)
-                    DropdownMenuItem(
-                      value: policy,
-                      child: Text(_transportPolicyLabel(policy)),
-                    ),
+                const SizedBox(height: 6),
+                Text(
+                  'P2P przez Tor: ${_peerEndpointLabel(contact.peerEndpointStatus)}',
+                ),
+                Text(
+                  'Połączenie bezpośrednie: '
+                  '${_peerConnectionLabel(contact.peerConnectionStatus)}',
+                ),
+                Text('Aktualna trasa: ${_effectiveRouteLabel(contact)}'),
+                if (kDebugMode) ...[
+                  const SizedBox(height: 12),
+                  const Divider(),
+                  Text(
+                    'Diagnostyka transportu DEV',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  const SizedBox(height: 6),
+                  _DiagnosticLine(
+                    label: 'Polityka',
+                    value: _transportPolicyLabel(contact.transportPolicy),
+                  ),
+                  _DiagnosticLine(
+                    label: 'Efektywna trasa',
+                    value: _effectiveRouteLabel(contact),
+                  ),
+                  _DiagnosticLine(
+                    label: 'Stan endpointu',
+                    value: _peerEndpointLabel(contact.peerEndpointStatus),
+                  ),
+                  _DiagnosticLine(
+                    label: 'Stan sesji P2P',
+                    value: _peerConnectionLabel(contact.peerConnectionStatus),
+                  ),
+                  _DiagnosticLine(
+                    label: 'Ostatnie P2P',
+                    value: contact.lastPeerConnectedAt?.trim().isNotEmpty == true
+                        ? contact.lastPeerConnectedAt!
+                        : 'brak',
+                  ),
+                  _DiagnosticLine(
+                    label: 'Fallback relay',
+                    value: contact.transportPolicy ==
+                            ContactTransportPolicy.peerWithRelayFallback
+                        ? 'dozwolony'
+                        : 'wyłączony',
+                  ),
                 ],
-                onChanged: (value) {
-                  if (value != null) {
-                    setDialogState(() => transportPolicy = value);
-                  }
-                },
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: alias,
-                maxLength: 32,
-                decoration: const InputDecoration(labelText: 'Lokalny alias'),
-              ),
-              ThemedSwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Wycisz powiadomienia'),
-                value: muted,
-                onChanged: (value) => setDialogState(() => muted = value),
-              ),
-              ThemedSwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Zablokuj kontakt'),
-                subtitle: const Text('Nie odbieraj ani nie wysyłaj wiadomości'),
-                value: blocked,
-                onChanged: (value) => setDialogState(() => blocked = value),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Installation ID',
-                style: Theme.of(context).textTheme.labelLarge,
-              ),
-              SelectableText(contact.id),
-              const SizedBox(height: 12),
-              Text(
-                'Fingerprint',
-                style: Theme.of(context).textTheme.labelLarge,
-              ),
-              SelectableText(
-                contact.fingerprint.isEmpty
-                    ? 'Fingerprint niedostępny'
-                    : contact.fingerprint,
-                style: const TextStyle(fontFamily: 'monospace'),
-              ),
-            ],
+                const SizedBox(height: 12),
+                DropdownButtonFormField<ContactTransportPolicy>(
+                  initialValue: transportPolicy,
+                  decoration: const InputDecoration(
+                    labelText: 'Polityka transportu',
+                  ),
+                  items: [
+                    for (final policy in ContactTransportPolicy.values)
+                      DropdownMenuItem(
+                        value: policy,
+                        child: Text(_transportPolicyLabel(policy)),
+                      ),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) {
+                      setDialogState(() => transportPolicy = value);
+                    }
+                  },
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: alias,
+                  maxLength: 32,
+                  decoration: const InputDecoration(labelText: 'Lokalny alias'),
+                ),
+                ThemedSwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Wycisz powiadomienia'),
+                  value: muted,
+                  onChanged: (value) => setDialogState(() => muted = value),
+                ),
+                ThemedSwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Zablokuj kontakt'),
+                  subtitle: const Text('Nie odbieraj ani nie wysyłaj wiadomości'),
+                  value: blocked,
+                  onChanged: (value) => setDialogState(() => blocked = value),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Installation ID',
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+                SelectableText(contact.id),
+                const SizedBox(height: 12),
+                Text(
+                  'Fingerprint',
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+                SelectableText(
+                  contact.fingerprint.isEmpty
+                      ? 'Fingerprint niedostępny'
+                      : contact.fingerprint,
+                  style: const TextStyle(fontFamily: 'monospace'),
+                ),
+              ],
+            ),
           ),
           actions: [
             FilledButton(
@@ -250,6 +292,42 @@ class ContactsView extends StatelessWidget {
       ),
     ).whenComplete(alias.dispose);
   }
+}
+
+class _DiagnosticLine extends StatelessWidget {
+  const _DiagnosticLine({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 4),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 126,
+          child: Text(label, style: Theme.of(context).textTheme.labelMedium),
+        ),
+        Expanded(child: SelectableText(value)),
+      ],
+    ),
+  );
+}
+
+String _effectiveRouteLabel(ContactRecord contact) {
+  if (contact.transportPolicy == ContactTransportPolicy.relayOnly) {
+    return 'relay';
+  }
+  if (contact.peerConnectionStatus == PeerConnectionStatus.connected) {
+    return 'P2P onion';
+  }
+  if (contact.transportPolicy ==
+      ContactTransportPolicy.peerWithRelayFallback) {
+    return 'relay fallback (P2P nieaktywne)';
+  }
+  return 'P2P oczekuje / offline';
 }
 
 String _peerEndpointLabel(PeerEndpointStatus status) => switch (status) {
