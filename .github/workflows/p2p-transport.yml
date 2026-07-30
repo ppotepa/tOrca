@@ -1,5 +1,6 @@
 name: P2P transport validation
 
+# This workflow is intentionally narrow so transport regressions fail quickly.
 on:
   push:
     branches: [main]
