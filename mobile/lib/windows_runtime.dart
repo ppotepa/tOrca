@@ -15,9 +15,14 @@ class WindowsRuntime extends Object
     with RuntimeBridgeMethods
     implements RuntimeCallBridge {
   WindowsRuntime();
+
   Process? _process;
   IOSink? _logSink;
+  Future<void>? _startInFlight;
+  Future<void>? _bootstrapInFlight;
   bool _stopping = false;
+  int _processGeneration = 0;
+  int? _stoppingGeneration;
   final _events = StreamController<RuntimeEvent>.broadcast();
   final _pending = <String, Completer<Object?>>{};
   int _nextId = 0;
@@ -26,13 +31,31 @@ class WindowsRuntime extends Object
   Stream<RuntimeEvent> get events => _events.stream;
 
   Future<void> _ensureProcess() async {
-    if (_process != null) return;
+    final currentProcess = _process;
+    if (currentProcess != null) {
+      final bootstrap = _bootstrapInFlight;
+      if (bootstrap != null) await bootstrap;
+      return;
+    }
+
+    final currentStart = _startInFlight;
+    if (currentStart != null) {
+      await currentStart;
+      return;
+    }
+
+    final start = _startProcess();
+    _startInFlight = start;
+    try {
+      await start;
+    } finally {
+      if (identical(_startInFlight, start)) _startInFlight = null;
+    }
+  }
+
+  Future<void> _startProcess() async {
     final executable =
         Platform.environment['TORCHAT_DESKTOP_PATH'] ?? _findRuntime();
-    // The Rust sidecar contains the onion captured during its build. Passing
-    // an environment value is deliberately only an explicit development
-    // override; the desktop client must remain usable without a LAN/runtime
-    // address being injected by Flutter.
     final server =
         Platform.environment['TORCHAT_ONION_URL'] ??
         Platform.environment['TORCHAT_SERVER_URL'];
@@ -50,36 +73,120 @@ class WindowsRuntime extends Object
     if (identity != null && identity.isNotEmpty) {
       args.addAll(['--identity-file', identity]);
     }
+
     final process = await Process.start(executable, args, runInShell: false);
+    final generation = ++_processGeneration;
+    final logSink = _openLogSink();
     _process = process;
+    _logSink = logSink;
     _stopping = false;
-    _logSink = _openLogSink();
-    _log('START $executable ${args.join(' ')}');
+    _stoppingGeneration = null;
+    _writeLog(
+      logSink,
+      generation,
+      'START pid=${process.pid} $executable ${args.join(' ')}',
+    );
+
     process.stdout
         .transform(utf8.decoder)
         .transform(const LineSplitter())
         .listen(
           (line) {
-            _log('STDOUT ${_wireSummary(line)}');
+            _writeLog(
+              logSink,
+              generation,
+              'STDOUT ${_wireSummary(line)}',
+            );
+            if (!_owns(process, generation)) return;
             _onLine(line);
           },
+          onError: (Object error, StackTrace stackTrace) {
+            _writeLog(logSink, generation, 'STDOUT_ERROR $error');
+            if (!_owns(process, generation)) return;
+            _failCurrent(process, generation, error, stackTrace);
+          },
           onDone: () {
-            _log('STOP runtime stdout closed expected=$_stopping');
-            if (_stopping) {
+            final expected =
+                _stopping && _stoppingGeneration == generation;
+            _writeLog(
+              logSink,
+              generation,
+              'STOP pid=${process.pid} stdout_closed expected=$expected',
+            );
+            if (!_owns(process, generation)) {
+              unawaited(logSink?.close());
+              return;
+            }
+            if (expected) {
               _process = null;
+              _logSink = null;
+              _bootstrapInFlight = null;
               _stopping = false;
+              _stoppingGeneration = null;
+              unawaited(logSink?.close());
             } else {
-              _failAll(StateError('TorChat runtime stopped unexpectedly'));
+              _failCurrent(
+                process,
+                generation,
+                StateError('TorChat runtime stopped unexpectedly'),
+                StackTrace.current,
+              );
             }
           },
         );
+
     process.stderr.transform(utf8.decoder).listen((value) {
-      if (value.trim().isNotEmpty) {
-        final text = value.trim();
-        _log('STDERR $text');
+      final text = value.trim();
+      if (text.isEmpty) return;
+      _writeLog(logSink, generation, 'STDERR $text');
+      if (_owns(process, generation)) {
         _events.add(RuntimeLogEvent(text));
       }
     });
+
+    final bootstrap = _sendRequest(
+      EngineContract.bootstrap,
+      RuntimeArguments.empty,
+      process: process,
+      generation: generation,
+    ).then<void>((_) {});
+    _bootstrapInFlight = bootstrap;
+    try {
+      await bootstrap.timeout(const Duration(seconds: 30));
+      _writeLog(logSink, generation, 'READY bootstrap_complete');
+    } catch (error, stackTrace) {
+      if (_owns(process, generation)) {
+        process.kill();
+        _failCurrent(process, generation, error, stackTrace);
+      }
+      rethrow;
+    } finally {
+      if (identical(_bootstrapInFlight, bootstrap)) {
+        _bootstrapInFlight = null;
+      }
+    }
+  }
+
+  bool _owns(Process process, int generation) =>
+      identical(_process, process) && _processGeneration == generation;
+
+  void _failCurrent(
+    Process process,
+    int generation,
+    Object error,
+    StackTrace stackTrace,
+  ) {
+    if (!_owns(process, generation)) return;
+    final sink = _logSink;
+    _failPending(error, stackTrace);
+    _process = null;
+    _logSink = null;
+    _bootstrapInFlight = null;
+    _stopping = false;
+    _stoppingGeneration = null;
+    _writeLog(sink, generation, 'FAIL pid=${process.pid} $error');
+    unawaited(sink?.close());
+    _events.add(RuntimeErrorEvent(error.toString()));
   }
 
   IOSink? _openLogSink() {
@@ -119,10 +226,18 @@ class WindowsRuntime extends Object
     return runs.last + 1;
   }
 
-  void _log(String message) {
-    final sink = _logSink;
+  void _log(String message) =>
+      _writeLog(_logSink, _processGeneration, message);
+
+  void _writeLog(IOSink? sink, int generation, String message) {
     if (sink == null) return;
-    sink.writeln('${DateTime.now().toIso8601String()} $message');
+    final deployRunId =
+        Platform.environment['TORCHAT_DEPLOY_RUN_ID']?.trim();
+    sink.writeln(
+      '${DateTime.now().toIso8601String()} '
+      'deployRunId=${deployRunId?.isNotEmpty == true ? deployRunId : '-'} '
+      'runtimeGeneration=$generation processRole=desktop-engine $message',
+    );
   }
 
   String _wireSummary(String line) {
@@ -170,9 +285,7 @@ class WindowsRuntime extends Object
   }
 
   void _onLine(String line) {
-    if (line.trim().isEmpty) {
-      return;
-    }
+    if (line.trim().isEmpty) return;
     final frame = EngineLine.parse(line);
     switch (frame) {
       case EngineResponseLine(:final response):
@@ -194,7 +307,7 @@ class WindowsRuntime extends Object
           final event = payload.runtimeEvent();
           _events.add(event);
           if (event is RuntimeErrorEvent) {
-            _failPending(StateError(event.message));
+            _failPending(StateError(event.message), StackTrace.current);
           }
         } catch (error) {
           _events.add(RuntimeErrorEvent(error.toString()));
@@ -221,25 +334,20 @@ class WindowsRuntime extends Object
         final code = error['code']?.toString() ?? 'engine_fatal';
         final message = error['message']?.toString() ?? 'Client engine failed';
         final failure = StateError('$code: $message');
-        _failPending(failure);
+        _failPending(failure, StackTrace.current);
         _events.add(RuntimeErrorEvent(failure.toString()));
       case EngineParseErrorLine(:final error):
         _events.add(RuntimeErrorEvent(error.toString()));
     }
   }
 
-  void _failPending(Object error) {
+  void _failPending(Object error, [StackTrace? stackTrace]) {
     for (final completer in _pending.values) {
-      completer.completeError(error);
+      if (!completer.isCompleted) {
+        completer.completeError(error, stackTrace ?? StackTrace.current);
+      }
     }
     _pending.clear();
-  }
-
-  void _failAll(Object error) {
-    _failPending(error);
-    _process = null;
-    _log('FAIL $error');
-    _events.add(RuntimeErrorEvent(error.toString()));
   }
 
   Map<String, Object?> _engineCommand(
@@ -388,11 +496,17 @@ class WindowsRuntime extends Object
     };
   }
 
-  Future<Object?> _call(
-    String method, [
-    RuntimeArguments params = RuntimeArguments.empty,
-  ]) async {
-    await _ensureProcess();
+  Future<Object?> _sendRequest(
+    String method,
+    RuntimeArguments params, {
+    required Process process,
+    required int generation,
+  }) {
+    if (!_owns(process, generation)) {
+      return Future<Object?>.error(
+        StateError('Desktop runtime generation changed before command send'),
+      );
+    }
     final id = (++_nextId).toString();
     final completer = Completer<Object?>();
     _pending[id] = completer;
@@ -401,17 +515,45 @@ class WindowsRuntime extends Object
       EngineContract.requestId: id,
       EngineContract.command: command,
     };
-    if (method == EngineContract.shutdown) _stopping = true;
-    _log(
+    if (method == EngineContract.shutdown) {
+      _stopping = true;
+      _stoppingGeneration = generation;
+    }
+    _writeLog(
+      _logSink,
+      generation,
       'STDIN requestId=$id command=${command[EngineContract.type] ?? method}',
     );
-    _process!.stdin.writeln(jsonEncode(request));
+    try {
+      process.stdin.writeln(jsonEncode(request));
+    } catch (error, stackTrace) {
+      _pending.remove(id);
+      completer.completeError(error, stackTrace);
+    }
     return completer.future.timeout(
       const Duration(seconds: 45),
       onTimeout: () {
         _pending.remove(id);
         throw TimeoutException('Client engine command timed out: $method');
       },
+    );
+  }
+
+  Future<Object?> _call(
+    String method, [
+    RuntimeArguments params = RuntimeArguments.empty,
+  ]) async {
+    await _ensureProcess();
+    final process = _process;
+    final generation = _processGeneration;
+    if (process == null) {
+      throw StateError('Desktop runtime is not available after bootstrap');
+    }
+    return _sendRequest(
+      method,
+      params,
+      process: process,
+      generation: generation,
     );
   }
 
