@@ -3,7 +3,7 @@ param(
     [ValidateSet('local')]
     [string]$Environment = 'local',
     [ValidateSet('clean','preserve')]
-    [string]$ClientState = 'clean',
+    [string]$ClientState = 'preserve',
     [switch]$Release,
     [switch]$Incremental,
     [switch]$PreserveTor,
@@ -15,6 +15,18 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $compose = Join-Path $repoRoot 'infra\docker\compose.dev.yml'
 . (Join-Path $PSScriptRoot 'internal\environment.ps1')
+
+$deployMutex = [System.Threading.Mutex]::new($false, 'Global\TorChat-Redeploy')
+$deployMutexAcquired = $false
+try {
+    $deployMutexAcquired = $deployMutex.WaitOne(0)
+} catch [System.Threading.AbandonedMutexException] {
+    $deployMutexAcquired = $true
+}
+if (-not $deployMutexAcquired) {
+    $deployMutex.Dispose()
+    throw 'Another TorChat redeploy is already running. Wait for it to finish before starting a new deploy.'
+}
 
 function Invoke-Step {
     param(
@@ -33,21 +45,58 @@ function Get-DesktopClientProcesses {
     )
 }
 
-function Stop-DesktopClientProcesses {
-    $processes = @(Get-DesktopClientProcesses)
-    foreach ($process in $processes) {
-        Write-Host "[torchat] Stopping stale Windows desktop PID $($process.Id) before launch."
-        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-    }
-    foreach ($process in $processes) {
-        try { Wait-Process -Id $process.Id -Timeout 5 -ErrorAction SilentlyContinue } catch { }
-    }
+function Get-DesktopSidecarProcesses {
+    return @(
+        Get-Process -Name 'torchat-desktop' -ErrorAction SilentlyContinue |
+            Where-Object { -not $_.HasExited }
+    )
+}
 
-    for ($attempt = 1; $attempt -le 20; $attempt++) {
-        if (@(Get-DesktopClientProcesses).Count -eq 0) { return }
-        Start-Sleep -Milliseconds 100
+function Get-DesktopTorProcesses {
+    $normalizedRoot = [System.IO.Path]::GetFullPath($repoRoot)
+    return @(
+        Get-CimInstance Win32_Process -Filter "Name = 'tor.exe'" -ErrorAction SilentlyContinue |
+            Where-Object {
+                $commandLine = [string]$_.CommandLine
+                $commandLine -and (
+                    $commandLine.Contains($normalizedRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
+                    $commandLine.Contains('.torchat', [System.StringComparison]::OrdinalIgnoreCase)
+                )
+            }
+    )
+}
+
+function Stop-ProcessSet {
+    param(
+        [object[]]$Processes,
+        [string]$Role
+    )
+    foreach ($process in @($Processes)) {
+        $pidValue = if ($process.PSObject.Properties.Name -contains 'ProcessId') {
+            [int]$process.ProcessId
+        } else {
+            [int]$process.Id
+        }
+        if ($pidValue -le 0) { continue }
+        Write-Host "[torchat] Stopping stale $Role PID $pidValue before launch."
+        Stop-Process -Id $pidValue -Force -ErrorAction SilentlyContinue
+        try { Wait-Process -Id $pidValue -Timeout 5 -ErrorAction SilentlyContinue } catch { }
     }
-    throw 'Could not stop the previous Windows desktop process before redeploy.'
+}
+
+function Stop-DesktopRuntimeTree {
+    Stop-ProcessSet -Processes @(Get-DesktopClientProcesses) -Role 'Windows runner'
+    Stop-ProcessSet -Processes @(Get-DesktopSidecarProcesses) -Role 'desktop engine'
+    Stop-ProcessSet -Processes @(Get-DesktopTorProcesses) -Role 'desktop Tor'
+
+    for ($attempt = 1; $attempt -le 30; $attempt++) {
+        $runnerCount = @(Get-DesktopClientProcesses).Count
+        $sidecarCount = @(Get-DesktopSidecarProcesses).Count
+        $torCount = @(Get-DesktopTorProcesses).Count
+        if ($runnerCount -eq 0 -and $sidecarCount -eq 0 -and $torCount -eq 0) { return }
+        Start-Sleep -Milliseconds 200
+    }
+    throw 'Could not stop the previous Windows runner, engine sidecar and desktop Tor before redeploy.'
 }
 
 if ($Incremental -and $PreserveTor) {
@@ -64,6 +113,10 @@ $composeArgs = @(
 
 Push-Location $repoRoot
 try {
+    if ($ClientState -eq 'clean') {
+        Write-Warning '[torchat] ClientState=clean will remove local client identity, contacts and message state.'
+    }
+
     if ($Incremental) {
         Invoke-Step 'Reuse local Docker/Tor stack' {
             & (Join-Path $PSScriptRoot 'start-dev.ps1') -Environment local -SkipOnionHealth
@@ -142,7 +195,7 @@ try {
     }
 
     Invoke-Step 'Start Windows desktop app' {
-        Stop-DesktopClientProcesses
+        Stop-DesktopRuntimeTree
         $runArgs = @{
             Command = 'run-desktop'
             Environment = 'local'
@@ -154,19 +207,29 @@ try {
         & (Join-Path $PSScriptRoot 'torchat.ps1') @runArgs
 
         $desktopProcesses = @()
-        for ($attempt = 1; $attempt -le 20; $attempt++) {
+        $sidecarProcesses = @()
+        for ($attempt = 1; $attempt -le 40; $attempt++) {
             Start-Sleep -Milliseconds 500
             $desktopProcesses = @(Get-DesktopClientProcesses)
-            if ($desktopProcesses.Count -gt 0) { break }
+            $sidecarProcesses = @(Get-DesktopSidecarProcesses)
+            if ($desktopProcesses.Count -eq 1 -and $sidecarProcesses.Count -eq 1) { break }
         }
 
-        if ($desktopProcesses.Count -eq 0) {
-            throw 'Windows desktop process exited immediately after launch. Inspect .torchat\command-logs and .torchat\logs.'
+        if ($desktopProcesses.Count -ne 1) {
+            throw "Expected exactly one Windows runner after launch, found $($desktopProcesses.Count). Inspect .torchat\command-logs and .torchat\logs."
+        }
+        if ($sidecarProcesses.Count -ne 1) {
+            throw "Expected exactly one desktop engine sidecar after launch, found $($sidecarProcesses.Count). Inspect .torchat\command-logs and .torchat\logs."
         }
 
-        $processLabel = ($desktopProcesses | ForEach-Object Id) -join ', '
-        Write-Host "[torchat] Windows desktop process is running (PID $processLabel)."
+        $runnerPid = $desktopProcesses[0].Id
+        $sidecarPid = $sidecarProcesses[0].Id
+        Write-Host "[torchat] Windows desktop is ready (runner PID $runnerPid, engine PID $sidecarPid)."
     }
 } finally {
     Pop-Location
+    if ($deployMutexAcquired) {
+        try { $deployMutex.ReleaseMutex() } catch { }
+    }
+    $deployMutex.Dispose()
 }
