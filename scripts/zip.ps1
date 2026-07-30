@@ -464,9 +464,7 @@ try {
         Assert-RepositoryClean 'while diagnostics were being collected'
         Write-SnapshotStage 5 8 $(if ($IncludeGit) { 'Copying tracked source and .git...' } else { 'Copying tracked source tree...' })
         Copy-RepositorySnapshot
-        if ($IncludeGit) {
-            Assert-RepositoryClean 'while the repository was being copied'
-        }
+        Assert-RepositoryClean 'while the source tree was being copied'
         Write-SnapshotStage 6 8 'Writing snapshot metadata and SHA-256 inventory...'
         Write-RepositoryMetadata
         Write-FileInventory
