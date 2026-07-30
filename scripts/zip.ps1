@@ -49,6 +49,16 @@ function Assert-LastExitCode {
     if ($LASTEXITCODE -ne 0) { throw $Message }
 }
 
+function Write-SnapshotStage {
+    param(
+        [Parameter(Mandatory = $true)][int]$Number,
+        [Parameter(Mandatory = $true)][int]$Total,
+        [Parameter(Mandatory = $true)][string]$Message
+    )
+    Write-Host ''
+    Write-Host "[torchat][snapshot][$Number/$Total] $Message" -ForegroundColor Cyan
+}
+
 function Write-Utf8 {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -64,6 +74,15 @@ function Invoke-GitText {
     $result = (& git @Arguments 2>&1 | Out-String).TrimEnd()
     Assert-LastExitCode "git $($Arguments -join ' ') failed.`n$result"
     $result
+}
+
+function Assert-RepositoryClean {
+    param([Parameter(Mandatory = $true)][string]$Context)
+    $dirty = (& git status --porcelain=v1 --untracked-files=all 2>$null | Out-String).TrimEnd()
+    Assert-LastExitCode "Could not inspect repository state $Context."
+    if ($dirty) {
+        throw "Repository changed $Context. Snapshot aborted to avoid mixing code from different commits:`n$dirty"
+    }
 }
 
 function Get-SnapshotRelativePath {
@@ -87,6 +106,12 @@ function Copy-RepositorySnapshot {
         (Join-Path $repoRoot '.torchat'),
         (Join-Path $repoRoot 'secrets')
     )
+    # These are local diagnostic scratch directories. They are not source
+    # code and may contain ACL-protected JVM artifacts that make robocopy
+    # report a partial failure for an otherwise valid repository snapshot.
+    $excludedDirectories += @(Get-ChildItem -LiteralPath $repoRoot -Directory -Force -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -like '.tmp-*' } |
+        Select-Object -ExpandProperty FullName)
     if ($snapshotRoot.StartsWith(
         $repoRoot.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar,
         [StringComparison]::OrdinalIgnoreCase
@@ -125,9 +150,48 @@ function Copy-RepositorySnapshot {
         '/NJS',
         '/XD'
     ) + $excludedDirectories + @('/XF') + $excludedFiles
-    & robocopy @arguments | Out-Null
-    if ($LASTEXITCODE -ge 8) {
-        throw "Repository copy failed with robocopy exit code $LASTEXITCODE."
+    $copyStartedAt = Get-Date
+    $nextSizeRefresh = 0
+    [double]$copiedBytes = 0
+    $robocopyLogPath = Join-Path $temporaryRoot 'robocopy.log'
+    $copyJob = Start-Job -ScriptBlock {
+        param([object[]]$RobocopyArguments, [string]$LogPath)
+        & robocopy @RobocopyArguments 2>&1 | Tee-Object -FilePath $LogPath
+        $LASTEXITCODE
+    } -ArgumentList (,$arguments), $robocopyLogPath
+    try {
+        while ($copyJob.State -in @('NotStarted', 'Running')) {
+            $elapsed = [int]((Get-Date) - $copyStartedAt).TotalSeconds
+            if ($elapsed -ge $nextSizeRefresh) {
+                $copiedBytes = if (Test-Path -LiteralPath $stagedRepository) {
+                    (Get-ChildItem -LiteralPath $stagedRepository -Recurse -File -Force -ErrorAction SilentlyContinue |
+                        Measure-Object Length -Sum).Sum
+                } else {
+                    0
+                }
+                $nextSizeRefresh = $elapsed + 10
+            }
+            $copiedGiB = [Math]::Round(([double]$copiedBytes / 1GB), 2)
+            Write-Progress -Activity 'TorChat snapshot' `
+                -Status "Copying repository including .git: ${copiedGiB} GiB copied, ${elapsed}s elapsed" `
+                -PercentComplete -1
+            if ($elapsed -gt 0 -and ($elapsed % 10) -eq 0) {
+                Write-Host "[torchat][snapshot] Repository copy is running: ${copiedGiB} GiB, ${elapsed}s."
+            }
+            Wait-Job -Job $copyJob -Timeout 2 | Out-Null
+        }
+        $copyExitCode = @(Receive-Job -Job $copyJob)[-1]
+    } finally {
+        Write-Progress -Activity 'TorChat snapshot' -Completed
+        Remove-Job -Job $copyJob -Force -ErrorAction SilentlyContinue
+    }
+    if ($copyExitCode -ge 8) {
+        $details = if (Test-Path -LiteralPath $robocopyLogPath) {
+            (Get-Content -LiteralPath $robocopyLogPath | Select-Object -Last 80) -join [Environment]::NewLine
+        } else {
+            'robocopy diagnostic log was not created'
+        }
+        throw "Repository copy failed with robocopy exit code $copyExitCode.`n$details"
     }
     if (-not (Test-Path -LiteralPath (Join-Path $stagedRepository '.git\HEAD'))) {
         throw 'Repository snapshot does not contain .git\HEAD.'
@@ -179,14 +243,31 @@ function Write-RepositoryMetadata {
 
 function Write-FileInventory {
     $inventoryPath = Join-Path $metadataRoot 'files.sha256'
-    $entries = Get-ChildItem -LiteralPath $stagingRoot -Recurse -File -Force |
+    $files = @(Get-ChildItem -LiteralPath $stagingRoot -Recurse -File -Force |
         Where-Object { $_.FullName -ne $inventoryPath } |
-        Sort-Object FullName |
-        ForEach-Object {
-            $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-            $relative = (Get-SnapshotRelativePath $stagingRoot $_.FullName).Replace('\', '/')
-            "$hash  $relative"
+        Sort-Object FullName)
+    $entries = [Collections.Generic.List[string]]::new()
+    $totalBytes = [double](($files | Measure-Object Length -Sum).Sum)
+    [double]$processedBytes = 0
+    for ($index = 0; $index -lt $files.Count; $index++) {
+        $file = $files[$index]
+        $relative = (Get-SnapshotRelativePath $stagingRoot $file.FullName).Replace('\', '/')
+        $percent = if ($totalBytes -gt 0) {
+            [Math]::Min(99, [int](100 * $processedBytes / $totalBytes))
+        } else {
+            100
         }
+        Write-Progress -Activity 'TorChat snapshot' `
+            -Status "Hashing $($index + 1)/$($files.Count): $relative" `
+            -PercentComplete $percent
+        if ($index -eq 0 -or (($index + 1) % 250) -eq 0) {
+            Write-Host "[torchat][snapshot] Hashing file $($index + 1)/$($files.Count) ($percent%)."
+        }
+        $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        $entries.Add("$hash  $relative")
+        $processedBytes += $file.Length
+    }
+    Write-Progress -Activity 'TorChat snapshot' -Completed
     Write-Utf8 $inventoryPath ($entries -join [Environment]::NewLine)
 }
 
@@ -210,17 +291,34 @@ function New-RepositoryArchive {
             $true
         )
         try {
-            Get-ChildItem -LiteralPath $SourceDirectory -Recurse -File -Force |
-                Sort-Object FullName |
-                ForEach-Object {
-                    $entryName = (Get-SnapshotRelativePath $SourceDirectory $_.FullName).Replace('\', '/')
+            $files = @(Get-ChildItem -LiteralPath $SourceDirectory -Recurse -File -Force |
+                Sort-Object FullName)
+            $totalBytes = [double](($files | Measure-Object Length -Sum).Sum)
+            [double]$processedBytes = 0
+            for ($index = 0; $index -lt $files.Count; $index++) {
+                    $file = $files[$index]
+                    $entryName = (Get-SnapshotRelativePath $SourceDirectory $file.FullName).Replace('\', '/')
+                    $percent = if ($totalBytes -gt 0) {
+                        [Math]::Min(99, [int](100 * $processedBytes / $totalBytes))
+                    } else {
+                        100
+                    }
+                    Write-Progress -Activity 'TorChat snapshot' `
+                        -Status "Compressing $($index + 1)/$($files.Count): $entryName" `
+                        -PercentComplete $percent
+                    if ($index -eq 0 -or (($index + 1) % 250) -eq 0) {
+                        $archiveSizeGiB = [Math]::Round(([double]$archiveStream.Length / 1GB), 2)
+                        Write-Host "[torchat][snapshot] Compressing file $($index + 1)/$($files.Count) ($percent%); ZIP is ${archiveSizeGiB} GiB."
+                    }
                     [void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
                         $archive,
-                        $_.FullName,
+                        $file.FullName,
                         $entryName,
                         [IO.Compression.CompressionLevel]::Optimal
                     )
-                }
+                    $processedBytes += $file.Length
+            }
+            Write-Progress -Activity 'TorChat snapshot' -Completed
         } finally {
             $archive.Dispose()
         }
@@ -236,6 +334,7 @@ New-Item -ItemType Directory -Force -Path $temporaryRoot, $snapshotRoot | Out-Nu
 try {
     Push-Location $repoRoot
     try {
+        Write-SnapshotStage 1 8 'Validating repository state...'
         $actualRoot = Invoke-GitText @('rev-parse', '--show-toplevel')
         if ([IO.Path]::GetFullPath($actualRoot).TrimEnd('\') -ne $repoRoot.TrimEnd('\')) {
             throw "Refusing to snapshot unexpected Git root: $actualRoot"
@@ -244,18 +343,27 @@ try {
         Assert-LastExitCode 'Could not inspect the repository for unmerged files.'
         if ($unmerged) { throw "Resolve unmerged files before creating a snapshot:`n$unmerged" }
 
-        & git add --all
-        Assert-LastExitCode 'git add --all failed.'
-        $message = if ($CommitMessage) {
-            $CommitMessage
+        Write-SnapshotStage 2 8 'Creating or reusing the checkpoint commit...'
+        $pendingChanges = (& git status --porcelain=v1 --untracked-files=all 2>$null | Out-String).TrimEnd()
+        Assert-LastExitCode 'Could not inspect pending repository changes.'
+        if ($pendingChanges) {
+            & git add --all
+            Assert-LastExitCode 'git add --all failed.'
+            $message = if ($CommitMessage) {
+                $CommitMessage
+            } else {
+                "snapshot: $timestamp"
+            }
+            & git commit -m $message
+            Assert-LastExitCode 'Automatic snapshot commit failed.'
         } else {
-            "snapshot: $timestamp"
+            Write-Host '[torchat] Worktree is already clean; reusing the current checkpoint commit.'
         }
-        & git commit --allow-empty -m $message
-        Assert-LastExitCode 'Automatic snapshot commit failed.'
         $shortCommit = Invoke-GitText @('rev-parse', '--short=12', 'HEAD')
+        Assert-RepositoryClean 'immediately after the checkpoint commit'
         Write-Host "[torchat] Snapshot commit created: $shortCommit"
 
+        Write-SnapshotStage 3 8 'Collecting uncapped Docker, Android and desktop diagnostics...'
         New-Item -ItemType Directory -Force -Path $collectedLogs | Out-Null
         $collectorArguments = @{
             Environment = $Environment
@@ -266,6 +374,7 @@ try {
         & (Join-Path $PSScriptRoot 'collect-logs.ps1') @collectorArguments
         if (-not $?) { throw 'Full log collection failed.' }
 
+        Write-SnapshotStage 4 8 'Validating required diagnostic sources...'
         $androidLog = Join-Path $collectedLogs 'android-full.log'
         if (-not $AllowMissingAndroid) {
             if (-not (Test-Path -LiteralPath $androidLog)) {
@@ -280,14 +389,20 @@ try {
             throw 'The latest desktop log is missing. Run the desktop app or use -AllowMissingDesktop explicitly.'
         }
 
+        Assert-RepositoryClean 'while diagnostics were being collected'
+        Write-SnapshotStage 5 8 'Copying the complete repository, including .git...'
         Copy-RepositorySnapshot
+        Assert-RepositoryClean 'while the repository was being copied'
+        Write-SnapshotStage 6 8 'Writing snapshot metadata and SHA-256 inventory...'
         Write-RepositoryMetadata
         Write-FileInventory
 
+        Write-SnapshotStage 7 8 'Compressing the repository and logs...'
         $archiveName = "torchat-snapshot-$timestamp-$shortCommit.zip"
         $archivePath = Join-Path $snapshotRoot $archiveName
         New-RepositoryArchive -SourceDirectory $stagingRoot -ArchivePath $archivePath
 
+        Write-SnapshotStage 8 8 'Verifying archive contents and final checksum...'
         $archive = [IO.Compression.ZipFile]::OpenRead($archivePath)
         try {
             $entryNames = @($archive.Entries | ForEach-Object { $_.FullName.Replace('\', '/') })

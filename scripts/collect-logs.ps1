@@ -40,6 +40,11 @@ function Get-ConnectedDevices {
     @(adb devices 2>$null | Where-Object { $_ -match '^\S+\s+device$' } | ForEach-Object { ($_ -split '\s+')[0] })
 }
 
+function Write-LogStage {
+    param([Parameter(Mandatory = $true)][string]$Message)
+    Write-Host "[torchat][logs] $Message"
+}
+
 $date = Get-Date -Format 'yyyyMMdd'
 $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 if (-not $OutputDirectory) {
@@ -57,6 +62,8 @@ if (-not $OutputDirectory) {
 }
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 
+Write-LogStage "Output directory: $OutputDirectory"
+Write-LogStage 'Collecting sanitized environment and Docker state...'
 $environmentState = Ensure-TorChatEnvironment $repoRoot $Environment
 $compose = Join-Path $repoRoot 'infra\docker\compose.dev.yml'
 $composeArgs = @(
@@ -95,6 +102,7 @@ Invoke-Capture (Join-Path $OutputDirectory 'health.txt') {
     } else { 'Onion health skipped: no valid TORCHAT_ONION_URL.' }
 }
 foreach ($service in @('tor', 'server', 'postgres')) {
+    Write-LogStage "Collecting complete $service logs..."
     $domainLog = if ($service -eq 'server') { 'server.log' } else { "docker-$service.log" }
     Invoke-Capture (Join-Path $OutputDirectory $domainLog) {
         $logArguments = if ($Full) {
@@ -107,6 +115,7 @@ foreach ($service in @('tor', 'server', 'postgres')) {
 }
 
 if ($Full) {
+    Write-LogStage 'Collecting extended Docker diagnostics...'
     Invoke-Capture (Join-Path $OutputDirectory 'docker-info.txt') {
         docker info
         docker version
@@ -132,6 +141,7 @@ if ($Full) {
 $devices = @(if ($DeviceAddress) { $DeviceAddress } else { Get-ConnectedDevices })
 if ($devices.Count -gt 0) {
     $device = $devices[0]
+    Write-LogStage "Collecting Android diagnostics from $device..."
     Invoke-Capture (Join-Path $OutputDirectory 'adb-device.txt') {
         adb -s $device shell getprop ro.product.manufacturer
         adb -s $device shell getprop ro.product.model
@@ -156,11 +166,13 @@ if ($devices.Count -gt 0) {
             Where-Object { $_ -match '^(startup|platform)-[A-Za-z0-9_.-]+\.jsonl$' }
     )
     foreach ($logName in $androidEngineLogs) {
+        Write-LogStage "Copying Android engine journal $logName..."
         Invoke-Capture (Join-Path $OutputDirectory "android-$logName") {
             adb -s $device exec-out run-as org.torchat.mobile cat "no_backup/engine-logs/$logName"
         }
     }
     if ($Full) {
+        Write-LogStage 'Collecting Android power, network, process and scheduler state...'
         foreach ($diagnostic in @(
             @{ Name = 'android-dumpsys-activity.txt'; Args = @('dumpsys', 'activity', 'services', 'org.torchat.mobile') },
             @{ Name = 'android-dumpsys-package.txt'; Args = @('dumpsys', 'package', 'org.torchat.mobile') },
@@ -180,15 +192,37 @@ if ($devices.Count -gt 0) {
         }
         $bugreportDirectory = Join-Path $OutputDirectory 'android-bugreport'
         New-Item -ItemType Directory -Force -Path $bugreportDirectory | Out-Null
-        Invoke-Capture (Join-Path $OutputDirectory 'android-bugreport-command.txt') {
-            adb -s $device bugreport $bugreportDirectory
+        $bugreportStatusPath = Join-Path $OutputDirectory 'android-bugreport-command.txt'
+        Write-LogStage 'Generating full Android bugreport; this commonly takes several minutes...'
+        $bugreportStartedAt = Get-Date
+        $bugreportProcess = Start-Process -FilePath (Get-Command adb).Source `
+            -ArgumentList @('-s', $device, 'bugreport', $bugreportDirectory) `
+            -NoNewWindow `
+            -PassThru
+        while (-not $bugreportProcess.WaitForExit(1000)) {
+            $elapsed = [int]((Get-Date) - $bugreportStartedAt).TotalSeconds
+            Write-Progress -Activity 'TorChat snapshot logs' `
+                -Status "Android bugreport: ${elapsed}s elapsed" `
+                -PercentComplete -1
+            if ($elapsed -gt 0 -and ($elapsed % 10) -eq 0) {
+                Write-Host "[torchat][logs] Android bugreport is still running (${elapsed}s)..."
+            }
         }
+        Write-Progress -Activity 'TorChat snapshot logs' -Completed
+        if ($bugreportProcess.ExitCode -ne 0) {
+            Write-TextFile -Path $bugreportStatusPath -Text "adb bugreport failed with exit code $($bugreportProcess.ExitCode)."
+            throw "adb bugreport failed with exit code $($bugreportProcess.ExitCode)."
+        }
+        $elapsed = [int]((Get-Date) - $bugreportStartedAt).TotalSeconds
+        Write-TextFile -Path $bugreportStatusPath -Text "adb bugreport completed in ${elapsed}s."
+        Write-LogStage "Android bugreport completed in ${elapsed}s."
     }
 } else {
     Write-TextFile -Path (Join-Path $OutputDirectory 'android.log') -Text 'No connected ADB device found.'
 }
 
 $desktopLogRoot = Join-Path $repoRoot '.torchat\logs'
+Write-LogStage 'Collecting desktop runtime and engine journals...'
 if (Test-Path -LiteralPath $desktopLogRoot) {
     $desktopLogs = @(Get-ChildItem -LiteralPath $desktopLogRoot -Recurse -Filter 'desktop*.log' -File -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTime -Descending)
@@ -210,6 +244,7 @@ if (Test-Path -LiteralPath $desktopEngineLogRoot) {
 }
 
 if ($Full) {
+    Write-LogStage 'Collecting Windows system, network and event diagnostics...'
     Invoke-Capture (Join-Path $OutputDirectory 'windows-system.txt') {
         Get-ComputerInfo
     }
@@ -262,4 +297,5 @@ Invoke-Capture (Join-Path $OutputDirectory 'startup-summary.txt') {
     }
 }
 
+Write-LogStage 'Log collection completed.'
 Write-Host "[torchat] Logs collected in $OutputDirectory"
