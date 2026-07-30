@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'core/runtime/serialized_client_runtime.dart';
 import 'windows_runtime.dart';
 export 'core/models/domain.dart';
 import 'core/models/domain.dart';
@@ -44,4 +47,10 @@ abstract interface class ClientRuntime {
   Future<void> updateAppVisibility(bool foreground);
 }
 
-ClientRuntime createClientRuntime() => createPlatformRuntime();
+ClientRuntime createClientRuntime() {
+  final runtime = createPlatformRuntime();
+  if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+    return SerializedClientRuntime(runtime);
+  }
+  return runtime;
+}
