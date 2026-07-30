@@ -14,7 +14,9 @@ param(
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $compose = Join-Path $repoRoot 'infra\docker\compose.dev.yml'
-$deployRunId = if ($env:TORCHAT_DEPLOY_RUN_ID) { $env:TORCHAT_DEPLOY_RUN_ID } else { [Guid]::NewGuid().ToString('N') }
+# A top-level redeploy always starts a new correlation scope. Child scripts
+# inherit this value through TORCHAT_DEPLOY_RUN_ID.
+$deployRunId = [Guid]::NewGuid().ToString('N')
 $env:TORCHAT_DEPLOY_RUN_ID = $deployRunId
 . (Join-Path $PSScriptRoot 'internal\environment.ps1')
 
