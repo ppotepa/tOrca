@@ -21,10 +21,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import org.torchat.generated.EngineContract
+
 class MainActivity : FlutterActivity() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val mainHandler = Handler(Looper.getMainLooper())
     private var eventSink: EventChannel.EventSink? = null
+    private var introPlayer: MediaPlayer? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -66,24 +68,42 @@ class MainActivity : FlutterActivity() {
                     result.notImplemented()
                     return@setMethodCallHandler
                 }
-                runCatching {
-                    val descriptor = assets.openFd("flutter_assets/assets/audio/intro.mp3")
-                    MediaPlayer().apply {
-                        descriptor.use {
-                            setDataSource(it.fileDescriptor, it.startOffset, it.length)
-                        }
-                        setOnCompletionListener(MediaPlayer::release)
-                        setOnErrorListener { player, _, _ ->
-                            player.release()
-                            true
-                        }
-                        prepare()
-                        start()
-                    }
-                }
+                runCatching { playIntro() }
                     .onSuccess { result.success(null) }
                     .onFailure { result.error("AUDIO", it.message, null) }
             }
+    }
+
+    private fun playIntro() {
+        introPlayer?.let { previous ->
+            runCatching { previous.stop() }
+            previous.release()
+        }
+        introPlayer = null
+
+        val descriptor = assets.openFd("flutter_assets/assets/audio/intro.mp3")
+        val player = MediaPlayer()
+        introPlayer = player
+        try {
+            descriptor.use {
+                player.setDataSource(it.fileDescriptor, it.startOffset, it.length)
+            }
+            player.setOnCompletionListener { completed ->
+                if (introPlayer === completed) introPlayer = null
+                completed.release()
+            }
+            player.setOnErrorListener { failed, _, _ ->
+                if (introPlayer === failed) introPlayer = null
+                failed.release()
+                true
+            }
+            player.prepare()
+            player.start()
+        } catch (error: Throwable) {
+            if (introPlayer === player) introPlayer = null
+            player.release()
+            throw error
+        }
     }
 
     private suspend fun readyEngineHost(): AndroidEngineHost {
@@ -373,6 +393,8 @@ class MainActivity : FlutterActivity() {
     private fun emit(value: Map<String, Any?>) = mainHandler.post { eventSink?.success(value) }
 
     override fun onDestroy() {
+        introPlayer?.release()
+        introPlayer = null
         TorChatForegroundService.eventListener = null
         scope.cancel()
         super.onDestroy()
