@@ -1,8 +1,43 @@
 import '../../client_runtime.dart';
+import 'refresh_coordinator.dart';
+
+final class RuntimeLocalSnapshot {
+  const RuntimeLocalSnapshot({
+    required this.contacts,
+    required this.conversations,
+    required this.peerEndpointAvailable,
+    required this.generation,
+  });
+
+  final List<ContactRecord> contacts;
+  final List<ConversationSummary> conversations;
+  final bool peerEndpointAvailable;
+  final int generation;
+}
+
+final class RuntimePairingSnapshot {
+  const RuntimePairingSnapshot({
+    required this.inbox,
+    required this.outbox,
+    required this.generation,
+  });
+
+  final List<PairingItem> inbox;
+  final List<PairingItem> outbox;
+  final int generation;
+}
+
+final class RuntimeRefreshSnapshot {
+  const RuntimeRefreshSnapshot({required this.local, this.pairing});
+
+  final RuntimeLocalSnapshot local;
+  final RuntimePairingSnapshot? pairing;
+}
 
 class RuntimeRepository {
   RuntimeRepository(this._runtime);
   final ClientRuntime _runtime;
+  final RefreshCoordinator _refreshCoordinator = RefreshCoordinator();
 
   Future<List<ContactRecord>>? _contactsInFlight;
   Future<List<ConversationSummary>>? _conversationsInFlight;
@@ -12,13 +47,14 @@ class RuntimeRepository {
   final Map<String, Future<List<ChatMessage>>> _messagesInFlight = {};
   final Map<String, bool> _lastTyping = {};
   bool? _lastPresence;
+  RuntimeLocalSnapshot? _latestLocalSnapshot;
+  RuntimePairingSnapshot? _latestPairingSnapshot;
+  DateTime? _pairingCacheTime;
 
   Stream<RuntimeEvent> get events => _runtime.events;
 
   Future<bool> connect() async {
     final connected = await _runtime.connect();
-    // A new transport generation must be allowed to publish the latest
-    // ephemeral state again even when the UI value did not change.
     _lastTyping.clear();
     _lastPresence = null;
     return connected;
@@ -30,19 +66,75 @@ class RuntimeRepository {
       await _runtime.profile() ?? const RuntimeProfile();
   Future<RuntimeProfile> setNickname(String value) async =>
       await _runtime.setNickname(value);
-  Future<InviteCode?> refreshInviteCode() async {
-    return _runtime.refreshPairingCode();
+  Future<InviteCode?> refreshInviteCode() => _runtime.refreshPairingCode();
+
+  Future<RuntimeRefreshSnapshot> refresh({bool includePairing = false}) async {
+    await _refreshCoordinator.schedule(
+      includeRemote: includePairing,
+      local: (generation) async {
+        final values = await Future.wait<Object>([
+          contacts(),
+          conversations(),
+          peerEndpointAvailable(),
+        ]);
+        _latestLocalSnapshot = RuntimeLocalSnapshot(
+          contacts: values[0] as List<ContactRecord>,
+          conversations: values[1] as List<ConversationSummary>,
+          peerEndpointAvailable: values[2] as bool,
+          generation: generation,
+        );
+      },
+      remote: (generation) async {
+        final values = await Future.wait<Object>([
+          inbox(force: true),
+          outbox(force: true),
+        ]);
+        _latestPairingSnapshot = RuntimePairingSnapshot(
+          inbox: values[0] as List<PairingItem>,
+          outbox: values[1] as List<PairingItem>,
+          generation: generation,
+        );
+        _pairingCacheTime = DateTime.now();
+      },
+    );
+    final local = _latestLocalSnapshot;
+    if (local == null) throw StateError('Local runtime refresh produced no snapshot');
+    return RuntimeRefreshSnapshot(
+      local: local,
+      pairing: includePairing ? _latestPairingSnapshot : null,
+    );
   }
 
-  Future<PairingItem> submitPairingCode(String code) async =>
-      await _runtime.submitPairingCode(code);
-  Future<void> acceptPairing(String id) => _runtime.acceptPairing(id);
+  Future<PairingItem> submitPairingCode(String code) async {
+    final item = await _runtime.submitPairingCode(code);
+    invalidatePairingCache();
+    return item;
+  }
 
-  Future<void> rejectPairing(String id) => _runtime.rejectPairing(id);
+  Future<void> acceptPairing(String id) async {
+    await _runtime.acceptPairing(id);
+    invalidatePairingCache();
+  }
 
-  Future<void> archiveInvite(String id) => _runtime.archivePairing(id);
+  Future<void> rejectPairing(String id) async {
+    await _runtime.rejectPairing(id);
+    invalidatePairingCache();
+  }
 
-  Future<void> cancelPairing(String id) => _runtime.cancelPairing(id);
+  Future<void> archiveInvite(String id) async {
+    await _runtime.archivePairing(id);
+    invalidatePairingCache();
+  }
+
+  Future<void> cancelPairing(String id) async {
+    await _runtime.cancelPairing(id);
+    invalidatePairingCache();
+  }
+
+  void invalidatePairingCache() {
+    _pairingCacheTime = null;
+    _latestPairingSnapshot = null;
+  }
 
   Future<void> verifyContact(String id) => _runtime.verifyContact(id);
   Future<ContactRecord> updateContactSettings(
@@ -93,7 +185,15 @@ class RuntimeRepository {
     });
   }
 
-  Future<List<PairingItem>> inbox() {
+  bool get _pairingCacheFresh {
+    final time = _pairingCacheTime;
+    return time != null && DateTime.now().difference(time) < const Duration(seconds: 5);
+  }
+
+  Future<List<PairingItem>> inbox({bool force = false}) {
+    if (!force && _pairingCacheFresh && _latestPairingSnapshot != null) {
+      return Future.value(_latestPairingSnapshot!.inbox);
+    }
     final current = _inboxInFlight;
     if (current != null) return current;
     final request = _runtime.pairingInbox();
@@ -103,7 +203,10 @@ class RuntimeRepository {
     });
   }
 
-  Future<List<PairingItem>> outbox() {
+  Future<List<PairingItem>> outbox({bool force = false}) {
+    if (!force && _pairingCacheFresh && _latestPairingSnapshot != null) {
+      return Future.value(_latestPairingSnapshot!.outbox);
+    }
     final current = _outboxInFlight;
     if (current != null) return current;
     final request = _runtime.pairingOutbox();
