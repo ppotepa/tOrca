@@ -6,7 +6,6 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
-use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -18,11 +17,6 @@ struct LockMetadata {
     runtime_generation: u64,
 }
 
-/// Owns an operating-system exclusive lock for one Tor data directory.
-///
-/// The JSON file is diagnostic only. Ownership is determined exclusively by
-/// the kernel file lock, so stale metadata from a crashed process is safe to
-/// recover while a live owner can never be deleted by another process.
 pub struct TorDataLock {
     file: File,
     path: PathBuf,
@@ -32,25 +26,20 @@ impl TorDataLock {
     pub fn acquire(data_directory: &Path, runtime_generation: u64) -> Result<Self> {
         fs::create_dir_all(data_directory).context("create Tor data directory")?;
         let path = data_directory.join("torchat.lock");
-        let mut file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .open(&path)
-            .with_context(|| format!("open Tor data directory lock {}", path.display()))?;
-
-        if let Err(error) = file.try_lock_exclusive() {
+        let mut file = open_lock_file(&path)?;
+        if let Err(error) = try_lock_exclusive(&file) {
             let mut details = String::new();
             let _ = file.seek(SeekFrom::Start(0));
             let _ = file.read_to_string(&mut details);
             bail!(
-                "Tor data directory is already in use; OS lock is held at {}{}",
+                "Tor data directory is already in use; OS lock is held at {}{}: {}",
                 path.display(),
                 if details.trim().is_empty() {
                     String::new()
                 } else {
                     format!(" ({})", details.replace('\n', " ").trim())
                 },
+                error,
             )
         }
 
@@ -79,10 +68,74 @@ impl TorDataLock {
     }
 }
 
+#[cfg(windows)]
+fn open_lock_file(path: &Path) -> Result<File> {
+    use std::os::windows::fs::OpenOptionsExt;
+    OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .share_mode(0)
+        .open(path)
+        .with_context(|| format!("open exclusive Tor lock {}", path.display()))
+}
+
+#[cfg(not(windows))]
+fn open_lock_file(path: &Path) -> Result<File> {
+    OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .open(path)
+        .with_context(|| format!("open Tor lock {}", path.display()))
+}
+
+#[cfg(windows)]
+fn try_lock_exclusive(_file: &File) -> std::io::Result<()> {
+    Ok(())
+}
+
+#[cfg(unix)]
+fn try_lock_exclusive(file: &File) -> std::io::Result<()> {
+    use std::os::fd::AsRawFd;
+    const LOCK_EX: i32 = 2;
+    const LOCK_NB: i32 = 4;
+    unsafe extern "C" {
+        fn flock(fd: i32, operation: i32) -> i32;
+    }
+    let result = unsafe { flock(file.as_raw_fd(), LOCK_EX | LOCK_NB) };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+#[cfg(not(any(windows, unix)))]
+fn try_lock_exclusive(_file: &File) -> std::io::Result<()> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "exclusive Tor data lock is unsupported on this platform",
+    ))
+}
+
+#[cfg(unix)]
+fn unlock(file: &File) {
+    use std::os::fd::AsRawFd;
+    const LOCK_UN: i32 = 8;
+    unsafe extern "C" {
+        fn flock(fd: i32, operation: i32) -> i32;
+    }
+    let _ = unsafe { flock(file.as_raw_fd(), LOCK_UN) };
+}
+
+#[cfg(not(unix))]
+fn unlock(_file: &File) {}
+
 impl Drop for TorDataLock {
     fn drop(&mut self) {
         let _ = self.file.sync_all();
-        let _ = self.file.unlock();
+        unlock(&self.file);
         let _ = fs::remove_file(&self.path);
     }
 }
