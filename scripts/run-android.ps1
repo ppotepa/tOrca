@@ -8,9 +8,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $clientData = if ($ResetDevState -or $Clean) { 'reset' } else { 'preserve' }
-$arguments = @(
-    'run', 'android',
-    '-ClientDataPolicy', $clientData
-)
-if ($DeviceAddress) { $arguments += @('-Device', $DeviceAddress) }
-& (Join-Path $PSScriptRoot 'torchat.ps1') @arguments
+$parameters = @{
+    Command = 'run'
+    Target = 'android'
+    ClientDataPolicy = $clientData
+}
+if ($DeviceAddress) { $parameters.Device = $DeviceAddress }
+& (Join-Path $PSScriptRoot 'torchat.ps1') @parameters
