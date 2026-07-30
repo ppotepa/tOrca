@@ -133,7 +133,7 @@ function Install-TorChatAndroidClient {
                 if ($pmExit -eq 0) { $exitCode = 0 } else { $details = (($output + $push + $install) -join ' ').Trim() }
             }
         }
-        if ($exitCode -ne 0) { throw "Android APK installation failed on $Device: $details" }
+        if ($exitCode -ne 0) { throw "Android APK installation failed on ${Device}: $details" }
     }
     [pscustomobject]@{ State = 'Ready'; Code = 'ANDROID_INSTALLED'; Message = "APK installed on $Device"; Device = $Device; Artifact = $Artifact }
 }

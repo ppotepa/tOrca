@@ -1,5 +1,16 @@
 [CmdletBinding()]
-param([ValidateSet('local')][string]$Environment = 'local')
+param(
+    [ValidateSet('local')][string]$Environment = 'local',
+    [ValidateSet('dashboard','plain','json')][string]$Ui = 'dashboard',
+    [ValidateSet('quiet','normal','detailed','trace')][string]$Verbosity = 'normal'
+)
 
 $ErrorActionPreference = 'Stop'
-& (Join-Path $PSScriptRoot 'torchat.ps1') stack stop -Environment $Environment
+$parameters = @{
+    Command = 'stack'
+    Target = 'stop'
+    Environment = $Environment
+    Ui = $Ui
+    Verbosity = $Verbosity
+}
+& (Join-Path $PSScriptRoot 'torchat.ps1') @parameters

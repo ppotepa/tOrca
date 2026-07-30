@@ -2,7 +2,9 @@
 param(
     [ValidateSet('local','staging','production')][string]$Environment = 'local',
     [switch]$Release,
-    [switch]$Incremental
+    [switch]$Incremental,
+    [ValidateSet('dashboard','plain','json')][string]$Ui = 'dashboard',
+    [ValidateSet('quiet','normal','detailed','trace')][string]$Verbosity = 'normal'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -12,6 +14,8 @@ $parameters = @{
     Target = 'windows'
     Environment = $Environment
     BuildPolicy = $buildPolicy
+    Ui = $Ui
+    Verbosity = $Verbosity
 }
 if ($Release) { $parameters.Release = $true }
 & (Join-Path $PSScriptRoot 'torchat.ps1') @parameters

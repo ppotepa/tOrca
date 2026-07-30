@@ -7,6 +7,20 @@ function Test-TorChatInteractiveHost {
     return $true
 }
 
+function Initialize-TorChatConsole {
+    param([Parameter(Mandatory = $true)]$Context)
+
+    # JSON is intended for automation. Every human-facing invocation begins
+    # with a fresh dashboard, while redirected output remains untouched.
+    if ($Context.UiMode -eq 'json' -or $env:CI -or [Console]::IsOutputRedirected) { return }
+    try { Clear-Host } catch { }
+}
+
+function Get-TorChatStageOrdinal {
+    param([Parameter(Mandatory = $true)]$Context)
+    return (@($Context.Results).Count + 1)
+}
+
 function Write-TorChatBanner {
     param([Parameter(Mandatory = $true)]$Context)
 
@@ -17,7 +31,8 @@ function Write-TorChatBanner {
     Write-Host ("│ Run           {0,-49} │" -f $Context.RunId.Substring(0, [Math]::Min(12, $Context.RunId.Length)))
     Write-Host ("│ Environment   {0,-49} │" -f $Context.Environment)
     Write-Host ("│ Configuration {0,-49} │" -f $Context.Configuration)
-    Write-Host ("│ UI            {0,-49} │" -f $Context.UiMode)
+    Write-Host ("│ Display       {0,-49} │" -f "$($Context.UiMode) / $($Context.Verbosity)")
+    Write-Host ("│ Full logs     {0,-49} │" -f ".torchat\runs\$($Context.RunId)\logs")
     Write-Host "╰$line╯" -ForegroundColor DarkCyan
     Write-Host ''
 }
@@ -46,7 +61,11 @@ function Write-TorChatStageStart {
     if (Test-TorChatInteractiveHost -Context $Context) {
         Write-Progress -Id 4101 -Activity "TorChat · $($Context.Command) $($Context.Target)" -Status $Name -PercentComplete -1
     }
-    Write-Host ("  ●  {0}" -f $Name) -ForegroundColor Cyan
+    $ordinal = Get-TorChatStageOrdinal -Context $Context
+    Write-Host ("  [{0,2}] ●  Running  {1}" -f $ordinal, $Name) -ForegroundColor Cyan
+    if ($Context.Verbosity -in @('normal','detailed','trace')) {
+        Write-Host '       active; output is being written to the run log' -ForegroundColor DarkGray
+    }
 }
 
 function Write-TorChatStageProgress {
@@ -59,8 +78,15 @@ function Write-TorChatStageProgress {
     if (Test-TorChatInteractiveHost -Context $Context) {
         $status = if ($Detail) { "$Name · $Detail" } else { $Name }
         Write-Progress -Id 4101 -Activity "TorChat · $($Context.Command) $($Context.Target)" -Status $status -PercentComplete $Percent
-    } elseif ($Context.Verbosity -in @('detailed', 'trace')) {
-        Write-Host ("     {0,3}%  {1} {2}" -f $Percent, $Name, $Detail) -ForegroundColor DarkCyan
+    }
+    if ($Context.Verbosity -in @('normal', 'detailed', 'trace')) {
+        $lastKey = "progress:$Name"
+        $lastPercent = if ($Context.Metadata.ContainsKey($lastKey)) { [int]$Context.Metadata[$lastKey] } else { -10 }
+        if ($Percent -ge 100 -or ($Percent - $lastPercent) -ge 10) {
+            $Context.Metadata[$lastKey] = $Percent
+            $suffix = if ($Detail) { " - $Detail" } else { '' }
+            Write-Host ("       {0,3}%  {1}{2}" -f $Percent, $Name, $suffix) -ForegroundColor DarkCyan
+        }
     }
 }
 
@@ -70,10 +96,10 @@ function Write-TorChatStageResult {
     $seconds = [Math]::Round(([double]$Result.DurationMs / 1000), 1)
     $duration = if ($seconds -gt 0) { " · ${seconds}s" } else { '' }
     switch ($Result.State) {
-        'Ready'   { Write-Host ("  ✓  {0}{1}" -f $Result.Name, $duration) -ForegroundColor Green }
-        'Skipped' { Write-Host ("  ◌  {0} · skipped" -f $Result.Name) -ForegroundColor DarkGray }
-        'Warning' { Write-Host ("  !  {0}{1} · {2}" -f $Result.Name, $duration, $Result.Message) -ForegroundColor Yellow }
-        'Failed'  { Write-Host ("  x  {0}{1} · {2}" -f $Result.Name, $duration, $Result.Message) -ForegroundColor Red }
+        'Ready'   { Write-Host ("  ✓  Ready    {0}{1}" -f $Result.Name, $duration) -ForegroundColor Green }
+        'Skipped' { Write-Host ("  ◌  Skipped  {0} · {1}" -f $Result.Name, $Result.Message) -ForegroundColor DarkGray }
+        'Warning' { Write-Host ("  !  Warning  {0}{1} · {2}" -f $Result.Name, $duration, $Result.Message) -ForegroundColor Yellow }
+        'Failed'  { Write-Host ("  x  Failed   {0}{1} · {2}" -f $Result.Name, $duration, $Result.Message) -ForegroundColor Red }
         default   { Write-Host ("  •  {0}{1}" -f $Result.Name, $duration) }
     }
 }
@@ -108,6 +134,7 @@ function Write-TorChatSummary {
 
 Export-ModuleMember -Function @(
     'Test-TorChatInteractiveHost',
+    'Initialize-TorChatConsole',
     'Write-TorChatBanner',
     'Write-TorChatInfo',
     'Write-TorChatWarning',

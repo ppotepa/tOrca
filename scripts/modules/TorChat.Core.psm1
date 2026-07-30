@@ -185,8 +185,11 @@ function Invoke-TorChatNative {
             $output | ForEach-Object { Write-Host "     $_" -ForegroundColor DarkGray }
         }
         if ($AllowedExitCodes -notcontains $exitCode) {
-            $tail = @($output | Select-Object -Last 12) -join [Environment]::NewLine
-            throw "$FilePath failed with exit code $exitCode. Log: $logPath$([Environment]::NewLine)$tail"
+            $summary = "$FilePath exited with code $exitCode."
+            if ($FilePath -eq 'docker' -and $text -match 'dockerDesktopLinuxEngine|request returned 500|Cannot connect to the Docker daemon') {
+                $summary = 'Docker Desktop Linux engine is unavailable. Start or restart Docker Desktop, wait for "Engine running", then retry.'
+            }
+            throw "$summary Full command output: $logPath"
         }
         [pscustomobject]@{
             ExitCode = $exitCode

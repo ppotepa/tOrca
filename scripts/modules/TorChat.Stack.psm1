@@ -11,6 +11,38 @@ function Invoke-TorChatCompose {
     Invoke-TorChatNative -Context $Context -FilePath 'docker' -ArgumentList @($ComposeContext.Arguments + $Arguments) -WorkingDirectory $Context.RepositoryRoot -LogName $LogName -AllowedExitCodes $AllowedExitCodes
 }
 
+function Assert-TorChatDockerEngine {
+    param([Parameter(Mandatory = $true)]$Context)
+
+    Assert-TorChatTool -Name docker
+    $logPath = Join-Path $Context.LogDirectory 'docker-engine-preflight.log'
+    $stdoutPath = Join-Path $Context.LogDirectory 'docker-engine-preflight.stdout.log'
+    $stderrPath = Join-Path $Context.LogDirectory 'docker-engine-preflight.stderr.log'
+    $process = $null
+    try {
+        $process = Start-Process -FilePath 'docker' -ArgumentList @('version','--format','{{.Server.Version}}') `
+            -NoNewWindow -PassThru -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+        if (-not $process.WaitForExit(10000)) {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            throw 'Docker Desktop Linux engine did not answer within 10 seconds.'
+        }
+        $output = @()
+        if (Test-Path -LiteralPath $stdoutPath) { $output += Get-Content -LiteralPath $stdoutPath -ErrorAction SilentlyContinue }
+        if (Test-Path -LiteralPath $stderrPath) { $output += Get-Content -LiteralPath $stderrPath -ErrorAction SilentlyContinue }
+        $text = ($output | Out-String).TrimEnd()
+        if ($text) { $text | Set-Content -LiteralPath $logPath -Encoding UTF8 }
+        if ($process.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($text)) {
+            throw 'Docker Desktop Linux engine returned an error.'
+        }
+        return ($text -split "`r?`n" | Select-Object -Last 1).Trim()
+    } catch {
+        $_ | Out-String | Add-Content -LiteralPath $logPath -Encoding UTF8
+        throw "Docker Desktop Linux engine is unavailable. Start or restart Docker Desktop, wait for 'Engine running', then retry. Diagnostics: $logPath"
+    } finally {
+        if ($process) { $process.Dispose() }
+    }
+}
+
 function Wait-TorChatHttpHealth {
     param(
         [Parameter(Mandatory = $true)]$Context,
@@ -296,6 +328,19 @@ function Get-TorChatStackStatus {
         [Parameter(Mandatory = $true)]$Context,
         [Parameter(Mandatory = $true)]$EnvironmentState
     )
+    try {
+        [void](Assert-TorChatDockerEngine -Context $Context)
+    } catch {
+        return [pscustomobject]@{
+            State = 'Warning'
+            Code = 'DOCKER_ENGINE_UNAVAILABLE'
+            Message = $_.Exception.Message
+            RelayHealthy = $false
+            TorBootstrap = $null
+            OnionUrl = [string]$EnvironmentState.Values['TORCHAT_ONION_URL']
+            ProcessOutput = @()
+        }
+    }
     $compose = Get-TorChatComposeContext -RepositoryRoot $Context.RepositoryRoot -EnvironmentState $EnvironmentState
     $ps = Invoke-TorChatCompose -Context $Context -ComposeContext $compose -Arguments @('ps') -LogName 'docker-status.log'
     $bootstrap = Get-TorChatBootstrapSnapshot -ComposeContext $compose
@@ -316,6 +361,7 @@ function Get-TorChatStackStatus {
 }
 
 Export-ModuleMember -Function @(
+    'Assert-TorChatDockerEngine',
     'Wait-TorChatHttpHealth',
     'Get-TorChatOnionHostname',
     'Get-TorChatBootstrapSnapshot',

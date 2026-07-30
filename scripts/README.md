@@ -47,7 +47,7 @@ Jest teraz odpowiednikiem inteligentnego `deploy all` i domyślnie zachowuje oni
 torchat
 ├── status  all | stack | android | windows
 ├── stack   start | stop | restart | status | reset | repair
-├── build   server | android | windows | clients | all
+├── build   server | desktop-runtime | android | windows | clients | all
 ├── deploy  android | windows | all
 ├── run     android | windows | all
 ├── stop    android | windows | all
@@ -70,6 +70,18 @@ torchat
 | `-Readiness` | `development`, `onion`, `strict` | `development` |
 | `-Ui` | `dashboard`, `plain`, `json` | `dashboard` |
 | `-Verbosity` | `quiet`, `normal`, `detailed`, `trace` | `normal` |
+
+`run` domyślnie zapewnia lokalny stack przed uruchomieniem klienta. Jeżeli
+relay już działa i ma być uruchomiony tylko klient, użyj
+`-SkipEnvironmentStart`.
+
+`status` oraz `logs collect/export` są diagnostyczne: awaria Docker Desktop
+jest raportowana jako stan częściowy i nie blokuje statusu Windows/Android ani
+zbierania dostępnych logów.
+
+`full-deploy -SkipMobileBuild` buduje nadal `desktop-runtime`, ale używa
+istniejących artefaktów Flutter Android/Windows. Gdy tych artefaktów nie ma,
+wywołanie kończy się jasnym błędem artefaktu.
 
 ### Znaczenie readiness
 

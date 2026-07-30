@@ -5,7 +5,9 @@ param(
     [switch]$Release,
     [switch]$Clean,
     [switch]$SkipEnvironmentStart,
-    [int]$ReadyAttempts = 40
+    [int]$ReadyAttempts = 40,
+    [ValidateSet('dashboard','plain','json')][string]$Ui = 'dashboard',
+    [ValidateSet('quiet','normal','detailed','trace')][string]$Verbosity = 'normal'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -15,6 +17,9 @@ $parameters = @{
     Target = 'windows'
     Environment = $Environment
     ClientDataPolicy = $clientData
+    ReadyAttempts = $ReadyAttempts
+    Ui = $Ui
+    Verbosity = $Verbosity
 }
 if ($Release) { $parameters.Release = $true }
 if ($SkipEnvironmentStart) { $parameters.SkipEnvironmentStart = $true }

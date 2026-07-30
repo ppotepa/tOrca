@@ -17,13 +17,22 @@ function Invoke-TorChatPreflight {
         [Parameter(Mandatory = $true)][string]$Target
     )
     Invoke-TorChatStage -Context $Context -Id 'preflight' -Name 'Preflight' -Action {
+        # Only commands that change or build the local stack require a healthy
+        # Docker engine. Status and diagnostics must remain usable precisely
+        # when Docker is broken, and local-only cleanup must work offline.
         $needsDocker = $Context.Environment -eq 'local' -and (
-            $Command -in @('stack','deploy','clean') -or
-            ($Command -eq 'status' -and $Target -in @('stack','all')) -or
-            ($Command -eq 'logs' -and $Target -in @('collect','export'))
+            ($Command -eq 'stack' -and $Target -ne 'status') -or
+            $Command -eq 'deploy' -or
+            ($Command -eq 'build' -and $Target -in @('server','all')) -or
+            ($Command -eq 'clean' -and $Target -in @('server-data','all')) -or
+            ($Command -eq 'run' -and $Context.Metadata['StackPolicy'] -eq 'ensure')
         )
-        if ($needsDocker) { Assert-TorChatTool -Name docker }
+        $dockerVersion = ''
+        if ($needsDocker) { $dockerVersion = Assert-TorChatDockerEngine -Context $Context }
 
+        if ($Command -eq 'build' -and $Target -eq 'desktop-runtime') {
+            Assert-TorChatTool -Name cargo
+        }
         if (($Command -in @('build','deploy')) -and $Target -in @('android','windows','clients','all')) {
             if ($Context.Metadata['BuildPolicy'] -ne 'skip') {
                 Assert-TorChatTool -Name cargo
@@ -39,7 +48,7 @@ function Invoke-TorChatPreflight {
         [pscustomobject]@{
             State = 'Ready'
             Code = 'PREFLIGHT_READY'
-            Message = 'Required tools are available'
+            Message = if ($dockerVersion) { "Required tools and Docker engine are ready (server $dockerVersion)" } else { 'Required tools are available' }
         }
     }
 }
@@ -144,11 +153,16 @@ function Invoke-TorChatBuildCommand {
         [Parameter(Mandatory = $true)][string]$BuildPolicy,
         [switch]$NoCache
     )
-    Assert-TorChatCommandTarget -Target $Target -Allowed @('server','android','windows','clients','all')
+    Assert-TorChatCommandTarget -Target $Target -Allowed @('server','desktop-runtime','android','windows','clients','all')
 
     if ($Target -in @('server','all')) {
         Invoke-TorChatStage -Context $Context -Id 'build.server' -Name 'Build relay server image' -Skip:($BuildPolicy -eq 'skip') -Action {
             Build-TorChatServerImage -Context $Context -EnvironmentState $EnvironmentState -NoCache:$NoCache
+        }
+    }
+    if ($Target -eq 'desktop-runtime') {
+        Invoke-TorChatStage -Context $Context -Id 'build.windows.engine' -Name 'Build Windows Rust engine' -Skip:($BuildPolicy -eq 'skip') -Action {
+            Build-TorChatDesktopEngine -Context $Context -EnvironmentState $EnvironmentState -Policy $BuildPolicy
         }
     }
     if ($Target -in @('windows','clients','all')) {
@@ -208,6 +222,15 @@ function Invoke-TorChatDeployCommand {
         throw 'Onion rotation requires -Confirm.'
     }
 
+    # Preflight is invoked by Invoke-TorChatCommand before this function. Keep
+    # the relay build here so a broken Docker engine fails immediately instead
+    # of wasting time in `docker compose build`.
+    if ($Target -eq 'all') {
+        Invoke-TorChatStage -Context $Context -Id 'build.server' -Name 'Build relay server image' -Skip:($BuildPolicy -eq 'skip') -Action {
+            Build-TorChatServerImage -Context $Context -EnvironmentState $EnvironmentState -NoCache:$NoCache
+        }
+    }
+
     if ($Context.Environment -eq 'local' -and $StackPolicy -eq 'ensure') {
         Invoke-TorChatStage -Context $Context -Id 'stack.ensure' -Name 'Ensure local stack' -Action {
             Start-TorChatStack -Context $Context -EnvironmentState $EnvironmentState -ImagePolicy 'use' -DatabasePolicy $DatabasePolicy -OnionPolicy $OnionPolicy -Readiness 'local'
@@ -226,6 +249,10 @@ function Invoke-TorChatDeployCommand {
     if ($Context.Environment -eq 'local' -and $StackPolicy -eq 'ensure') {
         Invoke-TorChatPostBuildTorChecks -Context $Context -EnvironmentState $EnvironmentState -Readiness $Readiness
     }
+
+    # All stages above deliberately become no-ops in a dry run. Do not try to
+    # consume their output afterwards: skipped stages have no device payload.
+    if ($Context.DryRun) { return }
 
     if ($Target -in @('android','all')) {
         $deviceStage = Invoke-TorChatStage -Context $Context -Id 'device.android.resolve' -Name 'Resolve Android device' -Action {
@@ -253,7 +280,7 @@ function Invoke-TorChatDeployCommand {
         }
 
         $skipRun = $RunPolicy -eq 'skip'
-        if ($RunPolicy -eq 'start' -and -not $skipRun) {
+        if ($RunPolicy -eq 'start' -and $ClientDataPolicy -eq 'preserve' -and -not $skipRun) {
             try {
                 $skipRun = (Get-TorChatAndroidStatus -Context $Context -Device $resolvedDevice).State -eq 'Ready'
             } catch {
@@ -267,7 +294,7 @@ function Invoke-TorChatDeployCommand {
 
     if ($Target -in @('windows','all')) {
         $skipWindowsRun = $RunPolicy -eq 'skip'
-        if ($RunPolicy -eq 'start' -and -not $skipWindowsRun) {
+        if ($RunPolicy -eq 'start' -and $ClientDataPolicy -eq 'preserve' -and -not $skipWindowsRun) {
             $skipWindowsRun = (Get-TorChatWindowsStatus -Context $Context).State -eq 'Ready'
         }
         Invoke-TorChatStage -Context $Context -Id 'runtime.windows' -Name 'Start Windows client' -Skip:$skipWindowsRun -Action {
@@ -282,19 +309,31 @@ function Invoke-TorChatRunCommand {
         [Parameter(Mandatory = $true)]$EnvironmentState,
         [Parameter(Mandatory = $true)][string]$Target,
         [Parameter(Mandatory = $true)][string]$ClientDataPolicy,
+        [Parameter(Mandatory = $true)][string]$StackPolicy,
+        [Parameter(Mandatory = $true)][string]$Readiness,
+        [int]$ReadyAttempts = 0,
         [string]$Device
     )
     Assert-TorChatCommandTarget -Target $Target -Allowed @('android','windows','all')
+    if ($Context.Environment -eq 'local' -and $StackPolicy -eq 'ensure') {
+        Invoke-TorChatStage -Context $Context -Id 'stack.ensure' -Name 'Ensure local stack' -Action {
+            Start-TorChatStack -Context $Context -EnvironmentState $EnvironmentState -ImagePolicy 'use' -DatabasePolicy 'preserve' -OnionPolicy 'preserve' -Readiness $Readiness
+        }
+    }
     Import-TorChatEnvironmentState -EnvironmentState $EnvironmentState -RequireOnion
     if ($Target -in @('android','all')) {
         $resolved = Resolve-TorChatAndroidDevice -Context $Context -Device $Device
         Invoke-TorChatStage -Context $Context -Id 'runtime.android' -Name 'Start Android client' -Action {
-            Start-TorChatAndroidClient -Context $Context -Device $resolved -ClientDataPolicy $ClientDataPolicy
+            $arguments = @{ Context = $Context; Device = $resolved; ClientDataPolicy = $ClientDataPolicy }
+            if ($ReadyAttempts -gt 0) { $arguments.ReadyAttempts = $ReadyAttempts }
+            Start-TorChatAndroidClient @arguments
         }
     }
     if ($Target -in @('windows','all')) {
         Invoke-TorChatStage -Context $Context -Id 'runtime.windows' -Name 'Start Windows client' -Action {
-            Start-TorChatWindowsClient -Context $Context -EnvironmentState $EnvironmentState -ClientDataPolicy $ClientDataPolicy
+            $arguments = @{ Context = $Context; EnvironmentState = $EnvironmentState; ClientDataPolicy = $ClientDataPolicy }
+            if ($ReadyAttempts -gt 0) { $arguments.ReadyAttempts = $ReadyAttempts }
+            Start-TorChatWindowsClient @arguments
         }
     }
 }
@@ -414,6 +453,7 @@ function Invoke-TorChatLogsCommand {
     $collectStage = Invoke-TorChatStage -Context $Context -Id 'logs.collect' -Name 'Collect diagnostics' -Action {
         Collect-TorChatDiagnostics -Context $Context -EnvironmentState $EnvironmentState -Device $Device
     }
+    if ($Context.DryRun) { return }
     if ($Action -eq 'export') {
         $sourceDirectory = [string]$collectStage.Data.Path
         Invoke-TorChatStage -Context $Context -Id 'logs.export' -Name 'Export diagnostics archive' -Action {
@@ -480,6 +520,7 @@ function Invoke-TorChatCommand {
         [Parameter(Mandatory = $true)][hashtable]$Options
     )
     $Context.Metadata['BuildPolicy'] = $Options.BuildPolicy
+    $Context.Metadata['StackPolicy'] = $Options.StackPolicy
     Invoke-TorChatPreflight -Context $Context -Command $Command -Target $Target
 
     switch ($Command) {
@@ -493,7 +534,7 @@ function Invoke-TorChatCommand {
             Invoke-TorChatDeployCommand -Context $Context -EnvironmentState $EnvironmentState -Target $Target -BuildPolicy $Options.BuildPolicy -OnionPolicy $Options.OnionPolicy -DatabasePolicy $Options.DatabasePolicy -ClientDataPolicy $Options.ClientDataPolicy -StackPolicy $Options.StackPolicy -InstallPolicy $Options.InstallPolicy -RunPolicy $Options.RunPolicy -Readiness $Options.Readiness -Device $Options.Device -NoCache:$Options.NoCache -Confirm:$Options.Confirm
         }
         'run' {
-            Invoke-TorChatRunCommand -Context $Context -EnvironmentState $EnvironmentState -Target $Target -ClientDataPolicy $Options.ClientDataPolicy -Device $Options.Device
+            Invoke-TorChatRunCommand -Context $Context -EnvironmentState $EnvironmentState -Target $Target -ClientDataPolicy $Options.ClientDataPolicy -StackPolicy $Options.StackPolicy -Readiness $Options.Readiness -ReadyAttempts $Options.ReadyAttempts -Device $Options.Device
         }
         'stop' {
             Invoke-TorChatStopCommand -Context $Context -Target $Target -Device $Options.Device

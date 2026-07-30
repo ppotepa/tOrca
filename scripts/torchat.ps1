@@ -25,6 +25,7 @@ param(
     [switch]$Incremental,
     [switch]$Clean,
     [switch]$SkipEnvironmentStart,
+    [ValidateRange(0, 600)][int]$ReadyAttempts = 0,
     [switch]$NoCache,
     [switch]$DryRun,
     [switch]$NoColor,
@@ -46,7 +47,7 @@ Usage:
 Commands:
   status  [all|stack|android|windows]
   stack   [start|stop|restart|status|reset|repair]
-  build   [server|android|windows|clients|all]
+  build   [server|desktop-runtime|android|windows|clients|all]
   deploy  [android|windows|all]
   run     [android|windows|all]
   stop    [android|windows|all]
@@ -133,7 +134,10 @@ $context = New-TorChatRunContext `
     -NoColor:$NoColor `
     -DryRun:$DryRun
 
-if ($Ui -ne 'json') { Write-TorChatBanner -Context $context }
+if ($Ui -ne 'json') {
+    Initialize-TorChatConsole -Context $context
+    Write-TorChatBanner -Context $context
+}
 
 $mutex = $null
 $mutexAcquired = $false
@@ -157,14 +161,6 @@ try {
     $environmentState = Get-TorChatEnvironmentState -RepositoryRoot $repositoryRoot -Environment $Environment
     Import-TorChatEnvironmentState -EnvironmentState $environmentState
 
-    # A complete deploy owns the relay image as well as both clients. Docker's
-    # layer cache keeps smart deploys fast while still applying server changes.
-    if ($Command -eq 'deploy' -and $Target -eq 'all' -and $BuildPolicy -ne 'skip') {
-        [void](Invoke-TorChatStage -Context $context -Id 'build.server' -Name 'Build relay server image' -Action {
-            Build-TorChatServerImage -Context $context -EnvironmentState $environmentState -NoCache:$NoCache
-        })
-    }
-
     $options = @{
         BuildPolicy = $BuildPolicy
         OnionPolicy = $OnionPolicy
@@ -174,6 +170,7 @@ try {
         InstallPolicy = $InstallPolicy
         RunPolicy = $RunPolicy
         Readiness = $Readiness
+        ReadyAttempts = $ReadyAttempts
         Device = $Device
         PairAddress = $PairAddress
         PairCode = $PairCode
@@ -183,13 +180,17 @@ try {
     [void](Invoke-TorChatCommand -Context $context -EnvironmentState $environmentState -Command $Command -Target $Target -Options $options)
 } catch {
     $failure = $_
-    if (@($context.Results | Where-Object State -eq 'Failed').Count -eq 0) {
+    $failurePath = Join-Path $context.RunDirectory 'failure.txt'
+    $_ | Out-String | Set-Content -LiteralPath $failurePath -Encoding UTF8
+    Write-TorChatEvent -Context $context -Stage 'command' -State 'failed' -Message $_.Exception.Message -Data @{ failurePath = $failurePath }
+    $hasRecordedFailure = @($context.Results | Where-Object State -eq 'Failed').Count -gt 0
+    if (-not $hasRecordedFailure) {
         $result = New-TorChatStageResult -Id 'command' -Name 'Command execution' -State 'Failed' -Code 'COMMAND_FAILED' -Message $_.Exception.Message
         [void]$context.Results.Add($result)
         Write-TorChatEvent -Context $context -Stage 'command' -State 'failed' -Message $_.Exception.Message
         Write-TorChatStageResult -Result $result
+        Write-TorChatFailure "Execution stopped. Full diagnostic: $failurePath"
     }
-    Write-TorChatFailure $_.Exception.Message
 } finally {
     try {
         [void](Complete-TorChatRun -Context $context)
@@ -202,4 +203,4 @@ try {
     }
 }
 
-if ($failure) { throw $failure }
+if ($failure) { throw "TorChat $Command $Target failed. Full diagnostic: $failurePath" }

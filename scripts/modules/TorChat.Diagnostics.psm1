@@ -25,11 +25,22 @@ function Collect-TorChatDiagnostics {
 
     if (Get-Command docker -ErrorAction SilentlyContinue) {
         $compose = Get-TorChatComposeContext -RepositoryRoot $Context.RepositoryRoot -EnvironmentState $EnvironmentState
-        Invoke-TorChatDiagnosticCapture -Path (Join-Path $root 'docker-ps.txt') -Action { docker @($compose.Arguments + @('ps','-a')) }
-        foreach ($service in @('postgres','server','tor')) {
-            Invoke-TorChatDiagnosticCapture -Path (Join-Path $root "docker-$service.log") -Action { docker @($compose.Arguments + @('logs','--timestamps','--no-color','--tail','2000',$service)) }
+        $dockerReady = $false
+        try {
+            [void](Assert-TorChatDockerEngine -Context $Context)
+            $dockerReady = $true
+        } catch {
+            $_ | Out-String | Set-Content -LiteralPath (Join-Path $root 'docker-unavailable.txt') -Encoding UTF8
         }
-        Invoke-TorChatDiagnosticCapture -Path (Join-Path $root 'docker-info.txt') -Action { docker info }
+        if ($dockerReady) {
+            Invoke-TorChatDiagnosticCapture -Path (Join-Path $root 'docker-ps.txt') -Action { docker @($compose.Arguments + @('ps','-a')) }
+            foreach ($service in @('postgres','server','tor')) {
+                Invoke-TorChatDiagnosticCapture -Path (Join-Path $root "docker-$service.log") -Action { docker @($compose.Arguments + @('logs','--timestamps','--no-color','--tail','2000',$service)) }
+            }
+            Invoke-TorChatDiagnosticCapture -Path (Join-Path $root 'docker-info.txt') -Action { docker info }
+        }
+    } else {
+        'docker executable is not installed or is not on PATH.' | Set-Content -LiteralPath (Join-Path $root 'docker-unavailable.txt') -Encoding UTF8
     }
 
     if ($env:OS -eq 'Windows_NT') {

@@ -6,7 +6,9 @@ param(
     [string]$OutputDirectory,
     [switch]$Full,
     [switch]$AllHistory,
-    [switch]$IncludeBugreport
+    [switch]$IncludeBugreport,
+    [ValidateSet('dashboard','plain','json')][string]$Ui = 'dashboard',
+    [ValidateSet('quiet','normal','detailed','trace')][string]$Verbosity = 'normal'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -21,6 +23,8 @@ $parameters = @{
     Command = 'logs'
     Target = $action
     Environment = $Environment
+    Ui = $Ui
+    Verbosity = $Verbosity
 }
 if ($DeviceAddress) { $parameters.Device = $DeviceAddress }
 & (Join-Path $PSScriptRoot 'torchat.ps1') @parameters
