@@ -156,7 +156,7 @@ where
         Ok(code)
     }
 
-    pub fn prepare_submit_pairing_code(&self, code: String) -> RuntimeResult<String> {
+    pub fn prepare_submit_pairing_code(&mut self, code: String) -> RuntimeResult<String> {
         let normalized = code
             .chars()
             .filter(|value| value.is_ascii_digit())
@@ -166,6 +166,7 @@ where
                 "pairing code must contain exactly eight digits".to_owned(),
             ));
         }
+        self.complete_outbox_pairings_for_existing_contacts()?;
         if self
             .storage
             .pairing_outbox()?
@@ -177,6 +178,36 @@ where
             ));
         }
         Ok(normalized)
+    }
+
+    /// A locally committed contact proves that the corresponding outgoing
+    /// pairing progressed beyond the point at which it can block another
+    /// request. This also repairs records created before the peer outcome was
+    /// persisted by the transport layer.
+    fn complete_outbox_pairings_for_existing_contacts(&mut self) -> RuntimeResult<()> {
+        let contact_ids = self
+            .storage
+            .contacts()?
+            .into_iter()
+            .map(|contact| contact.installation_id)
+            .collect::<std::collections::BTreeSet<_>>();
+        for mut item in self.storage.pairing_outbox()? {
+            let target_is_contact = item
+                .sender
+                .as_ref()
+                .is_some_and(|target| contact_ids.contains(&target.installation_id));
+            if !item.state.is_outstanding() || !target_is_contact {
+                continue;
+            }
+            item.state = crate::InviteState::Completed;
+            item = normalize_pairing_item(item);
+            self.storage.put_pairing_outbox(item.clone())?;
+            self.session.push_event(RuntimeEvent::InviteStateChanged {
+                pairing_id: Some(item.pairing_id),
+                state: Some(crate::InviteState::Completed),
+            });
+        }
+        Ok(())
     }
 
     pub fn submit_pairing_code(&mut self, code: String) -> RuntimeResult<PairingItem> {
@@ -1845,6 +1876,26 @@ mod tests {
             .submit_pairing_code("12345678".to_owned())
             .unwrap_err();
         assert!(matches!(error, RuntimeError::Conflict(_)));
+    }
+
+    #[test]
+    fn submitting_a_new_code_repairs_an_outbox_pairing_for_an_existing_contact() {
+        let mut runtime = runtime();
+        let mut stale = pairing("stale-pairing", InviteState::Pending);
+        stale.sender = Some(contact());
+        runtime.storage.put_contact(contact()).unwrap();
+        runtime.storage.put_pairing_outbox(stale).unwrap();
+
+        assert_eq!(
+            runtime
+                .prepare_submit_pairing_code("1234 5678".to_owned())
+                .unwrap(),
+            "12345678"
+        );
+        assert_eq!(
+            runtime.storage.pairing_outbox().unwrap()[0].state,
+            InviteState::Completed
+        );
     }
 
     #[test]

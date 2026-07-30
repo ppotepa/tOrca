@@ -138,11 +138,11 @@ impl SharedRelayActor {
         }
     }
 
-    fn build_client(&self) -> RuntimeResult<Client> {
+    fn build_client(connection: &super::RelayConnectionConfig) -> RuntimeResult<Client> {
         let mut builder = Client::builder()
-            .connect_timeout(self.connection.connect_timeout)
+            .connect_timeout(connection.connect_timeout)
             .timeout(RELAY_REQUEST_TIMEOUT);
-        if let Some(proxy) = &self.connection.socks5_url {
+        if let Some(proxy) = &connection.socks5_url {
             builder = builder.proxy(
                 reqwest::Proxy::all(proxy)
                     .map_err(|error| RuntimeError::Unavailable(error.to_string()))?,
@@ -151,6 +151,22 @@ impl SharedRelayActor {
         builder
             .build()
             .map_err(|error| RuntimeError::Unavailable(error.to_string()))
+    }
+
+    // reqwest::blocking::Client owns an internal Tokio runtime. The engine
+    // actor itself runs on Tokio, so creating and dropping that client on an
+    // actor worker panics (`Cannot drop a runtime ...`). Keep every blocking
+    // HTTP request, including the client drop, on a scoped OS thread instead.
+    fn run_http<T>(operation: impl FnOnce() -> RuntimeResult<T> + Send) -> RuntimeResult<T>
+    where
+        T: Send,
+    {
+        thread::scope(|scope| match scope.spawn(operation).join() {
+            Ok(result) => result,
+            Err(_) => Err(RuntimeError::Unavailable(
+                "relay HTTP worker panicked".to_owned(),
+            )),
+        })
     }
 
     fn base_url(&self) -> RuntimeResult<Url> {
@@ -164,32 +180,37 @@ impl SharedRelayActor {
         if let Some(token) = &self.session_token {
             return Ok(token.clone());
         }
-        let client = self.build_client()?;
         let base_url = self.base_url()?;
-        let challenge: ChallengeResponse = client
-            .post(
-                base_url
-                    .join("/v1/bootstrap/challenge")
-                    .map_err(http_error)?,
-            )
-            .json(&serde_json::json!({}))
-            .send()
-            .map_err(http_error)?
-            .relay_status()?
-            .json()
-            .map_err(http_error)?;
-        let session: SessionResponse = client
-            .post(base_url.join("/v1/installations").map_err(http_error)?)
-            .json(&RegisterRequest {
-                challenge_id: challenge.challenge_id,
-                public_key: self.identity.public_key(),
-                proof: self.identity.sign(challenge.challenge.as_bytes()),
-            })
-            .send()
-            .map_err(http_error)?
-            .relay_status()?
-            .json()
-            .map_err(http_error)?;
+        let public_key = self.identity.public_key();
+        let connection = self.connection.clone();
+        let identity = &self.identity;
+        let session: SessionResponse = Self::run_http(|| {
+            let client = Self::build_client(&connection)?;
+            let challenge: ChallengeResponse = client
+                .post(
+                    base_url
+                        .join("/v1/bootstrap/challenge")
+                        .map_err(http_error)?,
+                )
+                .json(&serde_json::json!({}))
+                .send()
+                .map_err(http_error)?
+                .relay_status()?
+                .json()
+                .map_err(http_error)?;
+            client
+                .post(base_url.join("/v1/installations").map_err(http_error)?)
+                .json(&RegisterRequest {
+                    challenge_id: challenge.challenge_id,
+                    public_key,
+                    proof: identity.sign(challenge.challenge.as_bytes()),
+                })
+                .send()
+                .map_err(http_error)?
+                .relay_status()?
+                .json()
+                .map_err(http_error)
+        })?;
         self.session_token = Some(session.session_token.clone());
         Ok(session.session_token)
     }
@@ -286,18 +307,19 @@ impl EngineRelay for SharedRelayActor {
 
     fn update_profile(&mut self, nickname: &str) -> RuntimeResult<()> {
         let token = self.ensure_session_token()?;
-        let client = self.build_client()?;
         let base_url = self.base_url()?;
-        client
-            .put(base_url.join("/v1/profile").map_err(http_error)?)
-            .bearer_auth(token)
-            .json(&UpdateProfileRequest {
-                nickname: nickname.to_owned(),
-            })
-            .send()
-            .map_err(http_error)?
-            .relay_status()?;
-        Ok(())
+        let connection = self.connection.clone();
+        let nickname = nickname.to_owned();
+        Self::run_http(|| {
+            Self::build_client(&connection)?
+                .put(base_url.join("/v1/profile").map_err(http_error)?)
+                .bearer_auth(token)
+                .json(&UpdateProfileRequest { nickname })
+                .send()
+                .map_err(http_error)?
+                .relay_status()?;
+            Ok(())
+        })
     }
 
     fn send_envelope(
@@ -328,20 +350,22 @@ impl EngineRelay for SharedRelayActor {
 
     fn refresh_pairing_code(&mut self) -> RuntimeResult<InviteCode> {
         let token = self.ensure_session_token()?;
-        let client = self.build_client()?;
         let base_url = self.base_url()?;
-        let response: PairingCodeResponse = client
-            .post(
-                base_url
-                    .join("/v1/pairing-codes/refresh")
-                    .map_err(http_error)?,
-            )
-            .bearer_auth(token)
-            .send()
-            .map_err(http_error)?
-            .relay_status()?
-            .json()
-            .map_err(http_error)?;
+        let connection = self.connection.clone();
+        let response: PairingCodeResponse = Self::run_http(|| {
+            Self::build_client(&connection)?
+                .post(
+                    base_url
+                        .join("/v1/pairing-codes/refresh")
+                        .map_err(http_error)?,
+                )
+                .bearer_auth(token)
+                .send()
+                .map_err(http_error)?
+                .relay_status()?
+                .json()
+                .map_err(http_error)
+        })?;
         Ok(InviteCode {
             code: response.code,
             expires_at: response.expires_at,
@@ -350,19 +374,20 @@ impl EngineRelay for SharedRelayActor {
 
     fn submit_pairing_code(&mut self, code: &str) -> RuntimeResult<PairingItem> {
         let token = self.ensure_session_token()?;
-        let client = self.build_client()?;
         let base_url = self.base_url()?;
-        let response: PairingRequestResponse = client
-            .post(base_url.join("/v1/pairing-requests").map_err(http_error)?)
-            .bearer_auth(token)
-            .json(&CreatePairingRequest {
-                code: code.to_owned(),
-            })
-            .send()
-            .map_err(http_error)?
-            .relay_status()?
-            .json()
-            .map_err(http_error)?;
+        let connection = self.connection.clone();
+        let code = code.to_owned();
+        let response: PairingRequestResponse = Self::run_http(|| {
+            Self::build_client(&connection)?
+                .post(base_url.join("/v1/pairing-requests").map_err(http_error)?)
+                .bearer_auth(token)
+                .json(&CreatePairingRequest { code })
+                .send()
+                .map_err(http_error)?
+                .relay_status()?
+                .json()
+                .map_err(http_error)
+        })?;
         Ok(PairingItem {
             pairing_id: response.pairing_id.to_string(),
             sender: None,
@@ -381,20 +406,22 @@ impl EngineRelay for SharedRelayActor {
 
     fn pairing_inbox(&mut self) -> RuntimeResult<Vec<PairingItem>> {
         let token = self.ensure_session_token()?;
-        let client = self.build_client()?;
         let base_url = self.base_url()?;
-        let response: Vec<PairingInboxItemResponse> = client
-            .get(
-                base_url
-                    .join("/v1/pairing-requests/inbox")
-                    .map_err(http_error)?,
-            )
-            .bearer_auth(token)
-            .send()
-            .map_err(http_error)?
-            .relay_status()?
-            .json()
-            .map_err(http_error)?;
+        let connection = self.connection.clone();
+        let response: Vec<PairingInboxItemResponse> = Self::run_http(|| {
+            Self::build_client(&connection)?
+                .get(
+                    base_url
+                        .join("/v1/pairing-requests/inbox")
+                        .map_err(http_error)?,
+                )
+                .bearer_auth(token)
+                .send()
+                .map_err(http_error)?
+                .relay_status()?
+                .json()
+                .map_err(http_error)
+        })?;
         Ok(response
             .into_iter()
             .map(|item| PairingItem {
@@ -431,39 +458,43 @@ impl EngineRelay for SharedRelayActor {
         let token = self.ensure_session_token()?;
         let pairing_id = Uuid::parse_str(pairing_id)
             .map_err(|error| RuntimeError::InvalidParams(error.to_string()))?;
-        let client = self.build_client()?;
         let base_url = self.base_url()?;
-        client
-            .post(
-                base_url
-                    .join(&format!("/v1/pairing-requests/{pairing_id}/ack"))
-                    .map_err(http_error)?,
-            )
-            .json(&serde_json::json!({}))
-            .bearer_auth(token)
-            .send()
-            .map_err(http_error)?
-            .relay_status()?;
-        Ok(())
+        let connection = self.connection.clone();
+        Self::run_http(|| {
+            Self::build_client(&connection)?
+                .post(
+                    base_url
+                        .join(&format!("/v1/pairing-requests/{pairing_id}/ack"))
+                        .map_err(http_error)?,
+                )
+                .json(&serde_json::json!({}))
+                .bearer_auth(token)
+                .send()
+                .map_err(http_error)?
+                .relay_status()?;
+            Ok(())
+        })
     }
 
     fn cancel_pairing(&mut self, pairing_id: &str) -> RuntimeResult<()> {
         let token = self.ensure_session_token()?;
         let pairing_id = Uuid::parse_str(pairing_id)
             .map_err(|error| RuntimeError::InvalidParams(error.to_string()))?;
-        let client = self.build_client()?;
         let base_url = self.base_url()?;
-        client
-            .delete(
-                base_url
-                    .join(&format!("/v1/pairing-requests/{pairing_id}"))
-                    .map_err(http_error)?,
-            )
-            .bearer_auth(token)
-            .send()
-            .map_err(http_error)?
-            .relay_status()?;
-        Ok(())
+        let connection = self.connection.clone();
+        Self::run_http(|| {
+            Self::build_client(&connection)?
+                .delete(
+                    base_url
+                        .join(&format!("/v1/pairing-requests/{pairing_id}"))
+                        .map_err(http_error)?,
+                )
+                .bearer_auth(token)
+                .send()
+                .map_err(http_error)?
+                .relay_status()?;
+            Ok(())
+        })
     }
 
     fn confirm_contact(
@@ -472,19 +503,23 @@ impl EngineRelay for SharedRelayActor {
         peer_installation_id: &str,
     ) -> RuntimeResult<()> {
         let token = self.ensure_session_token()?;
-        let client = self.build_client()?;
         let base_url = self.base_url()?;
-        client
-            .post(base_url.join("/v1/contacts/confirm").map_err(http_error)?)
-            .bearer_auth(token)
-            .json(&ConfirmContactRequest {
-                capability: capability.to_owned(),
-                peer_installation_id: peer_installation_id.to_owned(),
-            })
-            .send()
-            .map_err(http_error)?
-            .relay_status()?;
-        Ok(())
+        let connection = self.connection.clone();
+        let capability = capability.to_owned();
+        let peer_installation_id = peer_installation_id.to_owned();
+        Self::run_http(|| {
+            Self::build_client(&connection)?
+                .post(base_url.join("/v1/contacts/confirm").map_err(http_error)?)
+                .bearer_auth(token)
+                .json(&ConfirmContactRequest {
+                    capability,
+                    peer_installation_id,
+                })
+                .send()
+                .map_err(http_error)?
+                .relay_status()?;
+            Ok(())
+        })
     }
 }
 
@@ -896,5 +931,17 @@ mod tests {
             relay_status_error(StatusCode::TOO_MANY_REQUESTS, "try later".to_owned()),
             RuntimeError::Unavailable("try later".to_owned()),
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn blocking_http_client_is_dropped_outside_the_actor_runtime() {
+        let result = SharedRelayActor::run_http(|| {
+            let client = Client::builder()
+                .build()
+                .map_err(|error| RuntimeError::Unavailable(error.to_string()))?;
+            drop(client);
+            Ok(())
+        });
+        assert!(result.is_ok());
     }
 }

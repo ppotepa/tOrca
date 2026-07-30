@@ -1976,7 +1976,31 @@ impl ClientEngineActor {
             RelayPayloadV1::PairingOffer {
                 pairing_id, invite, ..
             } => {
-                let runtime_events = self.accept_invite(invite)?;
+                let mut runtime_events = self.accept_invite(invite)?;
+                // The contact and durable Welcome have now been committed by
+                // accept_invite. Finalize the originating local request as
+                // well; otherwise its PENDING record blocks every later code.
+                if let Ok(mut outcome_events) = self.apply_pairing_peer_outcome(
+                    pairing_id,
+                    PairingPeerOutcome::OfferReceived,
+                ) {
+                    runtime_events.append(&mut outcome_events);
+                    if let Ok(mut completion_events) = self.apply_pairing_peer_outcome(
+                        pairing_id,
+                        PairingPeerOutcome::WelcomePrepared,
+                    ) {
+                        runtime_events.append(&mut completion_events);
+                    }
+                } else {
+                    self.pending_engine_events.push(EngineEvent::Log {
+                        log: EngineLogEvent {
+                            level: "warn".to_owned(),
+                            message: format!(
+                                "pairing offer accepted without a local outbox record pairing_id={pairing_id}"
+                            ),
+                        },
+                    });
+                }
                 self.queue_notification(NotificationRequest {
                     id: pairing_id.clone(),
                     title: "Nowe zaproszenie".to_owned(),

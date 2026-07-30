@@ -200,6 +200,7 @@ class MainShell extends StatelessWidget {
                   TorStatusBar(
                     status: status,
                     phase: phase,
+                    peerStatus: peerServerStatus,
                     latencyMs: latencyMs,
                   ),
                   ActionStatusStrip(action: action),
@@ -298,10 +299,10 @@ class DesktopMainShell extends StatelessWidget {
         TorStatusBar(
           status: status,
           phase: phase,
+          peerStatus: peerServerStatus,
           desktop: true,
           latencyMs: latencyMs,
         ),
-        PeerStatusBar(status: peerServerStatus),
         ActionStatusStrip(action: action),
         Expanded(
           child: LayoutBuilder(

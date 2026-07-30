@@ -28,7 +28,7 @@ function Get-TorChatWindowsTorProcesses {
 }
 
 function Stop-TorChatWindowsProcessSet {
-    param([Parameter(Mandatory = $true)][object[]]$Processes)
+    param([AllowEmptyCollection()][object[]]$Processes = @())
     foreach ($process in @($Processes)) {
         Stop-Process -Id ([int]$process.ProcessId) -Force -ErrorAction SilentlyContinue
     }
