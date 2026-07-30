@@ -1,13 +1,14 @@
 <#
 .SYNOPSIS
-Creates a committed TorChat diagnostics snapshot, optionally with a repository copy.
+Creates a TorChat diagnostics archive, with a committed source snapshot by default.
 
 .DESCRIPTION
-Stages the entire Git worktree, creates an automatic checkpoint commit, gathers
-diagnostics for the latest recorded run from Docker, Tor, server, Android and
-desktop, writes manifests and SHA-256 inventories, and emits a verified ZIP
-plus a sidecar SHA-256 file. By default the ZIP contains the tracked source
-tree and diagnostics together. Android
+By default, stages the entire Git worktree, creates an automatic checkpoint
+commit, gathers diagnostics for the latest recorded run from Docker, Tor,
+server, Android and desktop, writes manifests and SHA-256 inventories, and
+emits a verified ZIP plus a sidecar SHA-256 file. The default ZIP contains the
+tracked source tree and diagnostics together. Use -LogsOnly to create a
+diagnostic-only archive without committing or copying source. Android
 bugreport and all historical logs are opt-in because they contain much more
 data than is normally needed to diagnose the last run.
 
@@ -21,6 +22,9 @@ Operational secrets, private keys and client databases are intentionally
 
 .EXAMPLE
 .\scripts\zip.ps1 -AllHistory -IncludeBugreport
+
+.EXAMPLE
+.\scripts\zip.ps1 -LogsOnly
 #>
 [CmdletBinding()]
 param(
@@ -33,6 +37,7 @@ param(
     [switch]$AllowMissingDesktop,
     [switch]$AllHistory,
     [switch]$IncludeBugreport,
+    [switch]$LogsOnly,
     [Alias('IncludeRepository')]
     [switch]$IncludeGit
 )
@@ -53,6 +58,10 @@ $stagedRepository = Join-Path $stagingRoot 'repository'
 $collectedLogs = Join-Path $stagingRoot 'logs\last-run'
 $metadataRoot = Join-Path $stagingRoot 'snapshot'
 $snapshotSucceeded = $false
+
+if ($LogsOnly -and $IncludeGit) {
+    throw '-LogsOnly cannot be combined with -IncludeGit. Logs-only archives do not include source or .git.'
+}
 
 function Assert-LastExitCode {
     param([Parameter(Mandatory = $true)][string]$Message)
@@ -284,10 +293,11 @@ function Write-RepositoryMetadata {
         commitMessage = Invoke-GitText @('log', '-1', '--pretty=%B')
         environment = $Environment
         deviceAddress = if ($DeviceAddress) { $DeviceAddress } else { $null }
-        includesGitDirectory = $IncludeGit
+        includesGitDirectory = (-not $LogsOnly -and $IncludeGit)
         logsMode = if ($AllHistory) { 'all-history' } else { 'latest-run' }
         includeBugreport = $IncludeBugreport
-        repositoryCopy = 'tracked source tree from the checkpoint commit'
+        logsOnly = $LogsOnly
+        repositoryCopy = if ($LogsOnly) { 'none' } else { 'tracked source tree from the checkpoint commit' }
         excludedOperationalData = @(
             '.torchat (logs are included separately; client keys, databases and runtime environment are excluded)',
             'secrets',
@@ -397,7 +407,9 @@ function New-RepositoryArchive {
 }
 
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) { throw 'Missing required tool: git' }
-if (-not (Get-Command robocopy -ErrorAction SilentlyContinue)) { throw 'Missing required tool: robocopy' }
+if ($IncludeGit -and -not (Get-Command robocopy -ErrorAction SilentlyContinue)) {
+    throw 'Missing required tool: robocopy'
+}
 
 New-Item -ItemType Directory -Force -Path $temporaryRoot, $snapshotRoot | Out-Null
 try {
@@ -412,25 +424,36 @@ try {
         Assert-LastExitCode 'Could not inspect the repository for unmerged files.'
         if ($unmerged) { throw "Resolve unmerged files before creating a snapshot:`n$unmerged" }
 
-        Write-SnapshotStage 2 8 'Creating or reusing the checkpoint commit...'
-        $pendingChanges = (& git status --porcelain=v1 --untracked-files=all 2>$null | Out-String).TrimEnd()
-        Assert-LastExitCode 'Could not inspect pending repository changes.'
-        if ($pendingChanges) {
-            & git add --all
-            Assert-LastExitCode 'git add --all failed.'
-            $message = if ($CommitMessage) {
-                $CommitMessage
-            } else {
-                "snapshot: $timestamp"
+        if ($LogsOnly) {
+            Write-SnapshotStage 2 8 'Logs-only mode; leaving the worktree unchanged...'
+            if ($CommitMessage) {
+                Write-Warning '-CommitMessage is ignored in -LogsOnly mode because no checkpoint commit is created.'
             }
-            & git commit -m $message
-            Assert-LastExitCode 'Automatic snapshot commit failed.'
         } else {
-            Write-Host '[torchat] Worktree is already clean; reusing the current checkpoint commit.'
+            Write-SnapshotStage 2 8 'Creating or reusing the checkpoint commit...'
+            $pendingChanges = (& git status --porcelain=v1 --untracked-files=all 2>$null | Out-String).TrimEnd()
+            Assert-LastExitCode 'Could not inspect pending repository changes.'
+            if ($pendingChanges) {
+                & git add --all
+                Assert-LastExitCode 'git add --all failed.'
+                $message = if ($CommitMessage) {
+                    $CommitMessage
+                } else {
+                    "snapshot: $timestamp"
+                }
+                & git commit -m $message
+                Assert-LastExitCode 'Automatic snapshot commit failed.'
+            } else {
+                Write-Host '[torchat] Worktree is already clean; reusing the current checkpoint commit.'
+            }
         }
         $shortCommit = Invoke-GitText @('rev-parse', '--short=12', 'HEAD')
-        Assert-RepositoryClean 'immediately after the checkpoint commit'
-        Write-Host "[torchat] Snapshot commit created: $shortCommit"
+        if (-not $LogsOnly) {
+            Assert-RepositoryClean 'immediately after the checkpoint commit'
+            Write-Host "[torchat] Snapshot commit created: $shortCommit"
+        } else {
+            Write-Host "[torchat] Logs-only archive will reference current commit: $shortCommit"
+        }
 
         Write-SnapshotStage 3 8 'Collecting uncapped Docker, Android and desktop diagnostics...'
         New-Item -ItemType Directory -Force -Path $collectedLogs | Out-Null
@@ -460,16 +483,21 @@ try {
             throw 'The latest desktop log is missing. Run the desktop app or use -AllowMissingDesktop explicitly.'
         }
 
-        Assert-RepositoryClean 'while diagnostics were being collected'
-        Write-SnapshotStage 5 8 $(if ($IncludeGit) { 'Copying tracked source and .git...' } else { 'Copying tracked source tree...' })
-        Copy-RepositorySnapshot
-        Assert-RepositoryClean 'while the source tree was being copied'
+        if ($LogsOnly) {
+            Write-SnapshotStage 5 8 'Skipping source copy for logs-only archive...'
+        } else {
+            Assert-RepositoryClean 'while diagnostics were being collected'
+            Write-SnapshotStage 5 8 $(if ($IncludeGit) { 'Copying tracked source and .git...' } else { 'Copying tracked source tree...' })
+            Copy-RepositorySnapshot
+            Assert-RepositoryClean 'while the source tree was being copied'
+        }
         Write-SnapshotStage 6 8 'Writing snapshot metadata and SHA-256 inventory...'
         Write-RepositoryMetadata
         Write-FileInventory
 
-        Write-SnapshotStage 7 8 'Compressing source and diagnostics...'
-        $archiveName = "torchat-snapshot-$timestamp-$shortCommit.zip"
+        Write-SnapshotStage 7 8 $(if ($LogsOnly) { 'Compressing diagnostics...' } else { 'Compressing source and diagnostics...' })
+        $archivePrefix = if ($LogsOnly) { 'torchat-logs' } else { 'torchat-snapshot' }
+        $archiveName = "$archivePrefix-$timestamp-$shortCommit.zip"
         $archivePath = Join-Path $snapshotRoot $archiveName
         New-RepositoryArchive -SourceDirectory $stagingRoot -ArchivePath $archivePath
 
@@ -485,7 +513,9 @@ try {
             if ($IncludeGit) {
                 $requiredEntries += 'repository/.git/HEAD'
             }
-            $requiredEntries += 'repository/Cargo.toml'
+            if (-not $LogsOnly) {
+                $requiredEntries += 'repository/Cargo.toml'
+            }
             if (-not $AllowMissingAndroid) {
                 $requiredEntries += 'logs/last-run/android-app.log'
             }
