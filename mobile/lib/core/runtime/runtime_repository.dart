@@ -39,17 +39,16 @@ class RuntimeRepository {
   final ClientRuntime _runtime;
   final RefreshCoordinator _refreshCoordinator = RefreshCoordinator();
 
-  Future<List<ContactRecord>>? _contactsInFlight;
-  Future<List<ConversationSummary>>? _conversationsInFlight;
-  Future<List<PairingItem>>? _inboxInFlight;
-  Future<List<PairingItem>>? _outboxInFlight;
-  Future<bool>? _peerEndpointAvailableInFlight;
+  Future<RuntimeLocalSnapshot>? _localBatchInFlight;
+  Future<RuntimePairingSnapshot>? _pairingBatchInFlight;
+  RuntimeLocalSnapshot? _latestLocalSnapshot;
+  RuntimePairingSnapshot? _latestPairingSnapshot;
+  DateTime? _localCacheTime;
+  DateTime? _pairingCacheTime;
+  int _snapshotGeneration = 0;
   final Map<String, Future<List<ChatMessage>>> _messagesInFlight = {};
   final Map<String, bool> _lastTyping = {};
   bool? _lastPresence;
-  RuntimeLocalSnapshot? _latestLocalSnapshot;
-  RuntimePairingSnapshot? _latestPairingSnapshot;
-  DateTime? _pairingCacheTime;
 
   Stream<RuntimeEvent> get events => _runtime.events;
 
@@ -57,6 +56,7 @@ class RuntimeRepository {
     final connected = await _runtime.connect();
     _lastTyping.clear();
     _lastPresence = null;
+    invalidateLocalCache();
     return connected;
   }
 
@@ -71,30 +71,11 @@ class RuntimeRepository {
   Future<RuntimeRefreshSnapshot> refresh({bool includePairing = false}) async {
     await _refreshCoordinator.schedule(
       includeRemote: includePairing,
-      local: (generation) async {
-        final values = await Future.wait<Object>([
-          contacts(),
-          conversations(),
-          peerEndpointAvailable(),
-        ]);
-        _latestLocalSnapshot = RuntimeLocalSnapshot(
-          contacts: values[0] as List<ContactRecord>,
-          conversations: values[1] as List<ConversationSummary>,
-          peerEndpointAvailable: values[2] as bool,
-          generation: generation,
-        );
+      local: (_) async {
+        await _loadLocalBatch(force: true);
       },
-      remote: (generation) async {
-        final values = await Future.wait<Object>([
-          inbox(force: true),
-          outbox(force: true),
-        ]);
-        _latestPairingSnapshot = RuntimePairingSnapshot(
-          inbox: values[0] as List<PairingItem>,
-          outbox: values[1] as List<PairingItem>,
-          generation: generation,
-        );
-        _pairingCacheTime = DateTime.now();
+      remote: (_) async {
+        await _loadPairingBatch(force: true);
       },
     );
     final local = _latestLocalSnapshot;
@@ -103,6 +84,84 @@ class RuntimeRepository {
       local: local,
       pairing: includePairing ? _latestPairingSnapshot : null,
     );
+  }
+
+  bool get _localCacheFresh {
+    final time = _localCacheTime;
+    return time != null &&
+        DateTime.now().difference(time) < const Duration(milliseconds: 350);
+  }
+
+  bool get _pairingCacheFresh {
+    final time = _pairingCacheTime;
+    return time != null &&
+        DateTime.now().difference(time) < const Duration(seconds: 5);
+  }
+
+  Future<RuntimeLocalSnapshot> _loadLocalBatch({bool force = false}) {
+    if (!force && _localCacheFresh && _latestLocalSnapshot != null) {
+      return Future.value(_latestLocalSnapshot!);
+    }
+    final current = _localBatchInFlight;
+    if (current != null) return current;
+    final generation = ++_snapshotGeneration;
+    final request = Future.wait<Object>([
+      _runtime.contacts(),
+      _runtime.conversations(),
+      _runtime.peerEndpointAvailable(),
+    ]).then((values) {
+      final snapshot = RuntimeLocalSnapshot(
+        contacts: values[0] as List<ContactRecord>,
+        conversations: values[1] as List<ConversationSummary>,
+        peerEndpointAvailable: values[2] as bool,
+        generation: generation,
+      );
+      _latestLocalSnapshot = snapshot;
+      _localCacheTime = DateTime.now();
+      return snapshot;
+    });
+    _localBatchInFlight = request;
+    return request.whenComplete(() {
+      if (identical(_localBatchInFlight, request)) _localBatchInFlight = null;
+    });
+  }
+
+  Future<RuntimePairingSnapshot> _loadPairingBatch({bool force = false}) {
+    if (!force && _pairingCacheFresh && _latestPairingSnapshot != null) {
+      return Future.value(_latestPairingSnapshot!);
+    }
+    final current = _pairingBatchInFlight;
+    if (current != null) return current;
+    final generation = ++_snapshotGeneration;
+    final request = Future.wait<Object>([
+      _runtime.pairingInbox(),
+      _runtime.pairingOutbox(),
+    ]).then((values) {
+      final snapshot = RuntimePairingSnapshot(
+        inbox: values[0] as List<PairingItem>,
+        outbox: values[1] as List<PairingItem>,
+        generation: generation,
+      );
+      _latestPairingSnapshot = snapshot;
+      _pairingCacheTime = DateTime.now();
+      return snapshot;
+    });
+    _pairingBatchInFlight = request;
+    return request.whenComplete(() {
+      if (identical(_pairingBatchInFlight, request)) {
+        _pairingBatchInFlight = null;
+      }
+    });
+  }
+
+  void invalidateLocalCache() {
+    _localCacheTime = null;
+    _latestLocalSnapshot = null;
+  }
+
+  void invalidatePairingCache() {
+    _pairingCacheTime = null;
+    _latestPairingSnapshot = null;
   }
 
   Future<PairingItem> submitPairingCode(String code) async {
@@ -114,6 +173,7 @@ class RuntimeRepository {
   Future<void> acceptPairing(String id) async {
     await _runtime.acceptPairing(id);
     invalidatePairingCache();
+    invalidateLocalCache();
   }
 
   Future<void> rejectPairing(String id) async {
@@ -131,47 +191,34 @@ class RuntimeRepository {
     invalidatePairingCache();
   }
 
-  void invalidatePairingCache() {
-    _pairingCacheTime = null;
-    _latestPairingSnapshot = null;
+  Future<void> verifyContact(String id) async {
+    await _runtime.verifyContact(id);
+    invalidateLocalCache();
   }
 
-  Future<void> verifyContact(String id) => _runtime.verifyContact(id);
   Future<ContactRecord> updateContactSettings(
     String id, {
     String? localAlias,
     required bool muted,
     required bool blocked,
     ContactTransportPolicy? transportPolicy,
-  }) => _runtime.updateContactSettings(
-    id,
-    localAlias: localAlias,
-    muted: muted,
-    blocked: blocked,
-    transportPolicy: transportPolicy,
-  );
-
-  Future<List<ContactRecord>> contacts() {
-    final current = _contactsInFlight;
-    if (current != null) return current;
-    final request = _runtime.contacts();
-    _contactsInFlight = request;
-    return request.whenComplete(() {
-      if (identical(_contactsInFlight, request)) _contactsInFlight = null;
-    });
+  }) async {
+    final contact = await _runtime.updateContactSettings(
+      id,
+      localAlias: localAlias,
+      muted: muted,
+      blocked: blocked,
+      transportPolicy: transportPolicy,
+    );
+    invalidateLocalCache();
+    return contact;
   }
 
-  Future<List<ConversationSummary>> conversations() {
-    final current = _conversationsInFlight;
-    if (current != null) return current;
-    final request = _runtime.conversations();
-    _conversationsInFlight = request;
-    return request.whenComplete(() {
-      if (identical(_conversationsInFlight, request)) {
-        _conversationsInFlight = null;
-      }
-    });
-  }
+  Future<List<ContactRecord>> contacts() async =>
+      (await _loadLocalBatch()).contacts;
+
+  Future<List<ConversationSummary>> conversations() async =>
+      (await _loadLocalBatch()).conversations;
 
   Future<List<ChatMessage>> messages(String id) {
     final current = _messagesInFlight[id];
@@ -185,68 +232,53 @@ class RuntimeRepository {
     });
   }
 
-  bool get _pairingCacheFresh {
-    final time = _pairingCacheTime;
-    return time != null && DateTime.now().difference(time) < const Duration(seconds: 5);
-  }
+  Future<List<PairingItem>> inbox({bool force = false}) async =>
+      (await _loadPairingBatch(force: force)).inbox;
 
-  Future<List<PairingItem>> inbox({bool force = false}) {
-    if (!force && _pairingCacheFresh && _latestPairingSnapshot != null) {
-      return Future.value(_latestPairingSnapshot!.inbox);
-    }
-    final current = _inboxInFlight;
-    if (current != null) return current;
-    final request = _runtime.pairingInbox();
-    _inboxInFlight = request;
-    return request.whenComplete(() {
-      if (identical(_inboxInFlight, request)) _inboxInFlight = null;
-    });
-  }
-
-  Future<List<PairingItem>> outbox({bool force = false}) {
-    if (!force && _pairingCacheFresh && _latestPairingSnapshot != null) {
-      return Future.value(_latestPairingSnapshot!.outbox);
-    }
-    final current = _outboxInFlight;
-    if (current != null) return current;
-    final request = _runtime.pairingOutbox();
-    _outboxInFlight = request;
-    return request.whenComplete(() {
-      if (identical(_outboxInFlight, request)) _outboxInFlight = null;
-    });
-  }
+  Future<List<PairingItem>> outbox({bool force = false}) async =>
+      (await _loadPairingBatch(force: force)).outbox;
 
   Future<PeerEndpoint?> peerEndpoint() => _runtime.peerEndpoint();
 
-  Future<bool> peerEndpointAvailable() {
-    final current = _peerEndpointAvailableInFlight;
-    if (current != null) return current;
-    final request = _runtime.peerEndpointAvailable();
-    _peerEndpointAvailableInFlight = request;
-    return request.whenComplete(() {
-      if (identical(_peerEndpointAvailableInFlight, request)) {
-        _peerEndpointAvailableInFlight = null;
-      }
-    });
+  Future<bool> peerEndpointAvailable() async =>
+      (await _loadLocalBatch()).peerEndpointAvailable;
+
+  Future<void> retryPeerConnection(String installationId) async {
+    await _runtime.retryPeerConnection(installationId);
+    invalidateLocalCache();
   }
 
-  Future<void> retryPeerConnection(String installationId) =>
-      _runtime.retryPeerConnection(installationId);
-  Future<void> rotatePeerEndpoint() => _runtime.rotatePeerEndpoint();
+  Future<void> rotatePeerEndpoint() async {
+    await _runtime.rotatePeerEndpoint();
+    invalidateLocalCache();
+  }
+
   Future<void> openConversation(String id) => _runtime.openConversation(id);
   Future<void> closeConversation() => _runtime.closeConversation();
-  Future<void> startConversation(String id) => _runtime.startConversation(id);
+
+  Future<void> startConversation(String id) async {
+    await _runtime.startConversation(id);
+    invalidateLocalCache();
+  }
+
   Future<void> sendMessage(
     String id,
     String text, {
     String? replyToMessageId,
-  }) => _runtime.sendMessage(id, text, replyToMessageId: replyToMessageId);
+  }) async {
+    await _runtime.sendMessage(id, text, replyToMessageId: replyToMessageId);
+    invalidateLocalCache();
+  }
 
-  Future<void> retryMessage(String messageId) =>
-      _runtime.retryMessage(messageId);
+  Future<void> retryMessage(String messageId) async {
+    await _runtime.retryMessage(messageId);
+    invalidateLocalCache();
+  }
 
-  Future<void> deleteMessageLocal(String messageId) =>
-      _runtime.deleteMessageLocal(messageId);
+  Future<void> deleteMessageLocal(String messageId) async {
+    await _runtime.deleteMessageLocal(messageId);
+    invalidateLocalCache();
+  }
 
   Future<void> setTyping(String conversationId, bool typing) async {
     if (_lastTyping[conversationId] == typing) return;
