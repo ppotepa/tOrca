@@ -68,12 +68,22 @@ class _TorStatusBarState extends State<TorStatusBar>
     final color = _phaseTone(context, widget.phase, widget.status);
     final connected = widget.phase.isConnected;
     final connecting = isConnecting;
+    final visibleStatus = widget.status.isEmpty
+        ? 'Łączenie z relayem…'
+        : widget.status;
+    final trailing = connected && widget.latencyMs != null
+        ? '${widget.latencyMs} ms'
+        : connecting
+        ? 'łączenie'
+        : widget.phase.isError
+        ? 'błąd'
+        : 'offline';
 
     return Semantics(
-      label: 'Status Tor: ${widget.status}',
+      label: 'Status Tor: $visibleStatus',
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 420),
-        height: widget.desktop ? 30 : 10,
+        height: widget.desktop ? 30 : 44,
         decoration: BoxDecoration(
           color: color.withValues(alpha: .10),
           border: Border(
@@ -109,13 +119,15 @@ class _TorStatusBarState extends State<TorStatusBar>
                 ),
               ),
             ),
-            if (widget.desktop)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Row(
-                  children: [
-                    Icon(Icons.eco_outlined, size: 15, color: color),
-                    const SizedBox(width: 7),
+            Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: widget.desktop ? 12 : 16,
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.eco_outlined, size: 15, color: color),
+                  const SizedBox(width: 7),
+                  if (widget.desktop)
                     Text(
                       'Tor relay · ',
                       style: TextStyle(
@@ -124,40 +136,38 @@ class _TorStatusBarState extends State<TorStatusBar>
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                    Text(
-                      widget.status.isEmpty
-                          ? 'Łączenie z relayem…'
-                          : widget.status,
+                  Expanded(
+                    child: Text(
+                      visibleStatus,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: color,
-                        fontSize: 12,
+                        fontSize: widget.desktop ? 12 : 13,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                    const Spacer(),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      decoration: BoxDecoration(
-                        border: Border(
-                          left: BorderSide(color: color.withValues(alpha: .55)),
-                        ),
-                      ),
-                      child: Text(
-                        connected && widget.latencyMs != null
-                            ? '${widget.latencyMs} ms'
-                            : connecting
-                            ? 'reconnecting'
-                            : 'offline',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontFamily: 'monospace',
-                          color: color.withValues(alpha: .92),
-                        ),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    decoration: BoxDecoration(
+                      border: Border(
+                        left: BorderSide(color: color.withValues(alpha: .55)),
                       ),
                     ),
-                  ],
-                ),
+                    child: Text(
+                      trailing,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontFamily: 'monospace',
+                        color: color.withValues(alpha: .92),
+                      ),
+                    ),
+                  ),
+                ],
               ),
+            ),
           ],
         ),
       ),
