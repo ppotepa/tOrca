@@ -7,10 +7,11 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $buildPolicy = if ($Incremental) { 'smart' } else { 'rebuild' }
-$arguments = @(
-    'build', 'windows',
-    '-Environment', $Environment,
-    '-BuildPolicy', $buildPolicy
-)
-if ($Release) { $arguments += '-Release' }
-& (Join-Path $PSScriptRoot 'torchat.ps1') @arguments
+$parameters = @{
+    Command = 'build'
+    Target = 'windows'
+    Environment = $Environment
+    BuildPolicy = $buildPolicy
+}
+if ($Release) { $parameters.Release = $true }
+& (Join-Path $PSScriptRoot 'torchat.ps1') @parameters
