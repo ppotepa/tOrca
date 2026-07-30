@@ -109,6 +109,16 @@ function Get-SnapshotRelativePath {
     $resolvedPath.Substring($resolvedBase.Length)
 }
 
+function Get-SnapshotFileBytes {
+    param([Parameter(Mandatory = $true)][string]$Root)
+    if (-not (Test-Path -LiteralPath $Root)) { return [double]0 }
+    $files = @(Get-ChildItem -LiteralPath $Root -Recurse -File -Force -ErrorAction SilentlyContinue)
+    if ($files.Count -eq 0) { return [double]0 }
+    $measure = @( $files | Measure-Object -Property Length -Sum )
+    if ($measure.Count -eq 0 -or $null -eq $measure[0].Sum) { return [double]0 }
+    [double]$measure[0].Sum
+}
+
 function Copy-RepositorySnapshot {
     $excludedDirectories = @(
         (Join-Path $repoRoot '.torchat'),
@@ -171,12 +181,7 @@ function Copy-RepositorySnapshot {
         while ($copyJob.State -in @('NotStarted', 'Running')) {
             $elapsed = [int]((Get-Date) - $copyStartedAt).TotalSeconds
             if ($elapsed -ge $nextSizeRefresh) {
-                $copiedBytes = if (Test-Path -LiteralPath $stagedRepository) {
-                    (Get-ChildItem -LiteralPath $stagedRepository -Recurse -File -Force -ErrorAction SilentlyContinue |
-                        Measure-Object Length -Sum).Sum
-                } else {
-                    0
-                }
+                $copiedBytes = Get-SnapshotFileBytes $stagedRepository
                 $nextSizeRefresh = $elapsed + 10
             }
             $copiedGiB = [Math]::Round(([double]$copiedBytes / 1GB), 2)
@@ -256,7 +261,11 @@ function Write-FileInventory {
         Where-Object { $_.FullName -ne $inventoryPath } |
         Sort-Object FullName)
     $entries = [Collections.Generic.List[string]]::new()
-    $totalBytes = [double](($files | Measure-Object Length -Sum).Sum)
+    $totalBytes = if ($files.Count -gt 0) {
+        [double]((@($files | Measure-Object -Property Length -Sum))[0].Sum)
+    } else {
+        [double]0
+    }
     [double]$processedBytes = 0
     for ($index = 0; $index -lt $files.Count; $index++) {
         $file = $files[$index]
@@ -302,7 +311,11 @@ function New-RepositoryArchive {
         try {
             $files = @(Get-ChildItem -LiteralPath $SourceDirectory -Recurse -File -Force |
                 Sort-Object FullName)
-            $totalBytes = [double](($files | Measure-Object Length -Sum).Sum)
+            $totalBytes = if ($files.Count -gt 0) {
+                [double]((@($files | Measure-Object -Property Length -Sum))[0].Sum)
+            } else {
+                [double]0
+            }
             [double]$processedBytes = 0
             for ($index = 0; $index -lt $files.Count; $index++) {
                     $file = $files[$index]
