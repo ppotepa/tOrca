@@ -51,6 +51,11 @@ function Build-WindowsFlutterOnNtfs([string]$Variant) {
         throw "Windows Flutter staging must use a different filesystem from the repository ($repoDrive)."
     }
 
+    Stop-TorChatFlutterWindows
+    if (Test-Path -LiteralPath $stagingMobile) {
+        Write-Host "[torchat] Removing stale Windows Flutter staging directory: $stagingMobile"
+        Remove-Item -LiteralPath $stagingMobile -Recurse -Force
+    }
     New-Item -ItemType Directory -Force -Path $stagingMobile | Out-Null
     & robocopy $mobileRoot $stagingMobile /E /NFL /NDL /NJH /NJS /NP `
         /XD (Join-Path $mobileRoot 'build') `
@@ -69,6 +74,10 @@ function Build-WindowsFlutterOnNtfs([string]$Variant) {
     }
 
     Stop-TorChatFlutterWindows
+    if (Test-Path -LiteralPath $destinationBuild) {
+        Write-Host "[torchat] Removing stale Windows Flutter output directory: $destinationBuild"
+        Remove-Item -LiteralPath $destinationBuild -Recurse -Force
+    }
     New-Item -ItemType Directory -Force -Path $destinationBuild | Out-Null
     & robocopy $stagingBuild $destinationBuild /E /NFL /NDL /NJH /NJS /NP | Out-Null
     if ($LASTEXITCODE -gt 7) { throw "Could not copy Flutter Windows build (robocopy exit $LASTEXITCODE)." }
