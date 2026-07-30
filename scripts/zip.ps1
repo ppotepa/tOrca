@@ -4,9 +4,11 @@ Creates a committed, portable TorChat repository and diagnostics snapshot.
 
 .DESCRIPTION
 Stages the entire Git worktree, creates an automatic checkpoint commit, gathers
-uncapped diagnostics for Docker, Tor, server, Android and desktop, copies the
-repository including .git, writes manifests and SHA-256 inventories, and emits
-a verified ZIP plus a sidecar SHA-256 file.
+diagnostics for the latest recorded run from Docker, Tor, server, Android and
+desktop, copies the repository including .git, writes manifests and SHA-256
+inventories, and emits a verified ZIP plus a sidecar SHA-256 file. Android
+bugreport and all historical logs are opt-in because they contain much more
+data than is normally needed to diagnose the last run.
 
 Operational secrets, private keys and client databases are intentionally
 excluded. The complete .git directory is included as explicitly requested.
@@ -16,6 +18,9 @@ excluded. The complete .git directory is included as explicitly requested.
 
 .EXAMPLE
 .\scripts\zip.ps1 -DeviceAddress emulator-5554 -CommitMessage "snapshot: P2P investigation"
+
+.EXAMPLE
+.\scripts\zip.ps1 -AllHistory -IncludeBugreport
 #>
 [CmdletBinding()]
 param(
@@ -25,7 +30,9 @@ param(
     [string]$CommitMessage,
     [string]$OutputDirectory,
     [switch]$AllowMissingAndroid,
-    [switch]$AllowMissingDesktop
+    [switch]$AllowMissingDesktop,
+    [switch]$AllHistory,
+    [switch]$IncludeBugreport
 )
 
 $ErrorActionPreference = 'Stop'
@@ -43,6 +50,7 @@ $stagingRoot = Join-Path $temporaryRoot 'package'
 $stagedRepository = Join-Path $stagingRoot 'repository'
 $collectedLogs = Join-Path $stagingRoot 'logs\last-run'
 $metadataRoot = Join-Path $stagingRoot 'snapshot'
+$snapshotSucceeded = $false
 
 function Assert-LastExitCode {
     param([Parameter(Mandatory = $true)][string]$Message)
@@ -225,7 +233,8 @@ function Write-RepositoryMetadata {
         environment = $Environment
         deviceAddress = if ($DeviceAddress) { $DeviceAddress } else { $null }
         includesGitDirectory = $true
-        logsMode = 'full'
+        logsMode = if ($AllHistory) { 'all-history' } else { 'latest-run' }
+        includeBugreport = $IncludeBugreport
         repositoryCopy = 'working tree immediately after automatic snapshot commit'
         excludedOperationalData = @(
             '.torchat (logs are included separately; client keys, databases and runtime environment are excluded)',
@@ -371,11 +380,13 @@ try {
             Full = $true
         }
         if ($DeviceAddress) { $collectorArguments.DeviceAddress = $DeviceAddress }
+        if ($AllHistory) { $collectorArguments.AllHistory = $true }
+        if ($IncludeBugreport) { $collectorArguments.IncludeBugreport = $true }
         & (Join-Path $PSScriptRoot 'collect-logs.ps1') @collectorArguments
         if (-not $?) { throw 'Full log collection failed.' }
 
         Write-SnapshotStage 4 8 'Validating required diagnostic sources...'
-        $androidLog = Join-Path $collectedLogs 'android-full.log'
+        $androidLog = Join-Path $collectedLogs 'android-app.log'
         if (-not $AllowMissingAndroid) {
             if (-not (Test-Path -LiteralPath $androidLog)) {
                 throw 'Android logs are missing. Connect a device or use -AllowMissingAndroid explicitly.'
@@ -413,7 +424,7 @@ try {
                 'logs/last-run/startup-summary.txt'
             )
             if (-not $AllowMissingAndroid) {
-                $requiredEntries += 'logs/last-run/android-full.log'
+                $requiredEntries += 'logs/last-run/android-app.log'
             }
             foreach ($requiredEntry in $requiredEntries) {
                 if ($entryNames -notcontains $requiredEntry) {
@@ -426,12 +437,26 @@ try {
 
         $archiveHash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToLowerInvariant()
         Write-Utf8 "$archivePath.sha256" "$archiveHash  $archiveName"
+        $snapshotSucceeded = $true
         Write-Host "[torchat] Snapshot ready: $archivePath"
         Write-Host "[torchat] SHA256: $archiveHash"
     } finally {
         Pop-Location
     }
 } finally {
+    if (-not $snapshotSucceeded) {
+        $failedLogs = Join-Path $stagingRoot 'logs\last-run'
+        if (Test-Path -LiteralPath $failedLogs) {
+            $failedLogsRoot = Join-Path $repoRoot ".torchat\logs\snapshot-failed-$timestamp"
+            try {
+                New-Item -ItemType Directory -Force -Path $failedLogsRoot | Out-Null
+                Copy-Item -LiteralPath $failedLogs -Destination $failedLogsRoot -Recurse -Force
+                Write-Host "[torchat] Failed snapshot logs preserved in: $failedLogsRoot" -ForegroundColor Yellow
+            } catch {
+                Write-Warning "Could not preserve failed snapshot logs: $($_.Exception.Message)"
+            }
+        }
+    }
     if (Test-Path -LiteralPath $temporaryRoot) {
         $resolvedTemporary = [IO.Path]::GetFullPath($temporaryRoot)
         $systemTemporary = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
