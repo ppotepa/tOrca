@@ -1,5 +1,6 @@
 mod cli;
 mod identity_store;
+mod process_lock;
 mod runtime_engine_stdio;
 mod tor_runtime;
 
