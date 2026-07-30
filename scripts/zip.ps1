@@ -141,11 +141,10 @@ function Copy-RepositorySnapshot {
     # Export only committed source files. This excludes ignored build output,
     # caches and local diagnostics that previously caused huge snapshots.
     New-Item -ItemType Directory -Force -Path $stagedRepository | Out-Null
-    $sourceArchive = Join-Path $temporaryRoot 'source.tar'
-    & git archive --format=tar --output=$sourceArchive HEAD
+    $sourceArchive = Join-Path $temporaryRoot 'source.zip'
+    & git archive --format=zip --output=$sourceArchive HEAD
     Assert-LastExitCode 'git archive failed.'
-    & tar -xf $sourceArchive -C $stagedRepository
-    Assert-LastExitCode 'Extracting the tracked source archive failed.'
+    Expand-Archive -LiteralPath $sourceArchive -DestinationPath $stagedRepository -Force
     Remove-Item -LiteralPath $sourceArchive -Force -ErrorAction SilentlyContinue
 
     if (-not $IncludeGit) { return }
