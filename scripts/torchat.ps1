@@ -140,10 +140,10 @@ $mutexAcquired = $false
 $mutating = $Command -in @('stack','build','deploy','run','stop','clean')
 if ($mutating) {
     $mutexName = if ($env:OS -eq 'Windows_NT') { 'Global\TorChat-Cli' } else { 'TorChat-Cli' }
-    $mutex = New-Object Threading.Mutex($false, $mutexName)
+    $mutex = New-Object System.Threading.Mutex($false, $mutexName)
     try {
         $mutexAcquired = $mutex.WaitOne(0)
-    } catch [Threading.AbandonedMutexException] {
+    } catch [System.Threading.AbandonedMutexException] {
         $mutexAcquired = $true
     }
     if (-not $mutexAcquired) {
