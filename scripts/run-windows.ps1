@@ -10,11 +10,12 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $clientData = if ($Clean -or $ClientState -eq 'clean') { 'reset' } else { 'preserve' }
-$arguments = @(
-    'run', 'windows',
-    '-Environment', $Environment,
-    '-ClientDataPolicy', $clientData
-)
-if ($Release) { $arguments += '-Release' }
-if ($SkipEnvironmentStart) { $arguments += '-SkipEnvironmentStart' }
-& (Join-Path $PSScriptRoot 'torchat.ps1') @arguments
+$parameters = @{
+    Command = 'run'
+    Target = 'windows'
+    Environment = $Environment
+    ClientDataPolicy = $clientData
+}
+if ($Release) { $parameters.Release = $true }
+if ($SkipEnvironmentStart) { $parameters.SkipEnvironmentStart = $true }
+& (Join-Path $PSScriptRoot 'torchat.ps1') @parameters
