@@ -171,22 +171,19 @@ try {
     $onionLabel = if ($Incremental -or $PreserveTor) { 'Current onion selected for this build' } else { 'Fresh onion selected for this build' }
     Write-Host "[torchat] $onionLabel`: $($env:TORCHAT_ONION_URL)"
 
-    Invoke-Step 'Build Android APK and Windows desktop' {
-        $buildArgs = @{
+    Invoke-Step 'Deploy Windows client build' {
+        $windowsArgs = @{
             Environment = 'local'
-            Target = 'all'
         }
-        if ($Release) { $buildArgs.Release = $true }
-        if ($Incremental) { $buildArgs.Smart = $true }
-        & (Join-Path $PSScriptRoot 'internal\build-clients.ps1') @buildArgs
+        if ($Release) { $windowsArgs.Release = $true }
+        if ($Incremental) { $windowsArgs.Incremental = $true }
+        & (Join-Path $PSScriptRoot 'deploy-windows.ps1') @windowsArgs
     }
 
-    Invoke-Step 'Install and launch Android app' {
+    Invoke-Step 'Deploy and run Android app' {
         $deployArgs = @{
             Environment = 'local'
             SkipServer = $true
-            SkipCoreBuild = $true
-            SkipApkBuild = $true
             Clean = ($ClientState -eq 'clean')
         }
         if ($Release) { $deployArgs.Release = $true }
@@ -197,14 +194,13 @@ try {
     Invoke-Step 'Start Windows desktop app' {
         Stop-DesktopRuntimeTree
         $runArgs = @{
-            Command = 'run-desktop'
             Environment = 'local'
             ClientState = $ClientState
             Clean = ($ClientState -eq 'clean')
             SkipEnvironmentStart = $true
         }
         if ($Release) { $runArgs.Release = $true }
-        & (Join-Path $PSScriptRoot 'torchat.ps1') @runArgs
+        & (Join-Path $PSScriptRoot 'run-windows.ps1') @runArgs
 
         $desktopProcesses = @()
         $sidecarProcesses = @()

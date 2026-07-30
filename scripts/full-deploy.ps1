@@ -56,22 +56,6 @@ if (-not $SkipMobileBuild) {
     }
 }
 
-if ($cleanClientState) {
-    $desktopStateRoot = Join-Path $repoRoot '.torchat\clients\desktop'
-    foreach ($path in @(
-        (Join-Path $desktopStateRoot 'identity.key'),
-        (Join-Path $desktopStateRoot 'torchat-client-v1.db'),
-        (Join-Path $desktopStateRoot 'torchat-client-v1.db-wal'),
-        (Join-Path $desktopStateRoot 'torchat-client-v1.db-shm'),
-        (Join-Path $desktopStateRoot 'torchat-client-v1.db-journal')
-    )) {
-        if (Test-Path -LiteralPath $path) {
-            Remove-Item -LiteralPath $path -Force
-        }
-    }
-    Write-Host '[torchat] Cleared desktop client local state.'
-}
-
 $deployArgs = @{
     Environment = $Environment
     SkipServer = $true
@@ -86,12 +70,11 @@ Invoke-Step 'Deploy Android' {
 }
 
 $runArgs = @{
-    Command = 'run-desktop'
     Environment = $Environment
-    Target = 'windows'
+    ClientState = if ($cleanClientState) { 'clean' } else { 'preserve' }
 }
 if ($Release) { $runArgs.Release = $true }
 if ($cleanClientState) { $runArgs.Clean = $true }
 Invoke-Step 'Run desktop' {
-    & (Join-Path $PSScriptRoot 'torchat.ps1') @runArgs
+    & (Join-Path $PSScriptRoot 'run-windows.ps1') @runArgs
 }

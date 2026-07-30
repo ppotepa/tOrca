@@ -3,7 +3,11 @@ param(
     [Parameter(Position = 0)]
     [ValidateSet(
         'build-clients',
+        'deploy-android',
+        'deploy-windows',
         'deploy-mobile',
+        'run-android',
+        'run-windows',
         'run-desktop',
         'full-deploy',
         'redeploy',
@@ -182,7 +186,11 @@ $operationScope = $Scope
 switch ($Command) {
     'start-dev' { $operation = 'env'; $operationAction = 'up' }
     'stop-dev' { $operation = 'env'; $operationAction = 'down' }
+    'deploy-android' { $operation = 'deploy'; $operationTarget = 'android' }
+    'deploy-windows' { $operation = 'deploy'; $operationTarget = 'windows' }
     'deploy-mobile' { $operation = 'deploy'; $operationTarget = 'android' }
+    'run-android' { $operation = 'run'; $operationTarget = 'android' }
+    'run-windows' { $operation = 'run'; $operationTarget = 'windows' }
     'run-desktop' { $operation = 'run'; $operationTarget = 'windows' }
     'build-clients' { $operation = 'build' }
     'reset-client-state' { $operation = 'reset'; $operationScope = 'client' }
@@ -219,42 +227,35 @@ switch ($operation) {
         Invoke-TorChat 'internal\build-clients.ps1' $arguments
     }
     'deploy' {
-        if ($operationTarget -ne 'android') { throw 'deploy currently supports only Android; use run --target windows for desktop.' }
-        if ($Environment -eq 'local') { Invoke-TorChat 'start-dev.ps1' @{ Environment = 'local'; SkipOnionHealth = $true } }
-        $arguments = @{ SkipServer = $true; Environment = $Environment; Release = ($Release -or $Environment -ne 'local'); Clean = $Clean }
-        if ($DeviceAddress) { $arguments.DeviceAddress = $DeviceAddress }
-        Invoke-TorChat 'deploy-android.ps1' $arguments
+        if ($operationTarget -eq 'android') {
+            if ($Environment -eq 'local') { Invoke-TorChat 'start-dev.ps1' @{ Environment = 'local'; SkipOnionHealth = $true } }
+            $arguments = @{ SkipServer = $true; Environment = $Environment; Release = ($Release -or $Environment -ne 'local'); Clean = $Clean }
+            if ($DeviceAddress) { $arguments.DeviceAddress = $DeviceAddress }
+            Invoke-TorChat 'deploy-android.ps1' $arguments
+        } elseif ($operationTarget -eq 'windows') {
+            $arguments = @{ Environment = $Environment; Release = $Release; Incremental = $Incremental }
+            Invoke-TorChat 'deploy-windows.ps1' $arguments
+        } else {
+            throw "Unsupported deploy target: $operationTarget"
+        }
     }
     'run' {
-        if ($operationTarget -ne 'windows') { throw 'run currently supports the Windows Flutter target.' }
-        if ($Environment -eq 'local' -and -not $SkipEnvironmentStart) {
-            Invoke-TorChat 'start-dev.ps1' @{ Environment = 'local'; SkipOnionHealth = $true }
-        }
-        Stop-TorChatDesktopHost
-        Stop-TorChatFlutterWindows
-        if ($Clean) { Clear-TorChatDesktopState }
-        Import-TorChatEnvironment $state -RequireOnion
-        Invoke-TorChat 'internal\build-desktop-runtime.ps1' @{ Release = $true }
-        $tor = & (Join-Path $PSScriptRoot 'internal\ensure-desktop-tor.ps1') $repoRoot
-        $env:TORCHAT_TOR_BINARY = $tor.Binary
-        $env:TORCHAT_TOR_DATA_DIR = $tor.DataDirectory
-        $env:TORCHAT_DESKTOP_PATH = Join-Path $repoRoot 'target\release\torchat-desktop.exe'
-        $env:TORCHAT_IDENTITY_FILE = Join-Path $repoRoot '.torchat\clients\desktop\identity.key'
-        $env:TORCHAT_LOG_DIR = Join-Path $repoRoot '.torchat\logs'
-        $variant = if ($Release) { 'Release' } else { 'Debug' }
-        $desktopClient = Join-Path $repoRoot "mobile\build\windows\x64\runner\$variant\torchat_mobile.exe"
-        if (-not (Test-Path -LiteralPath $desktopClient)) {
-            Invoke-TorChat 'internal\build-clients.ps1' @{
+        if ($operationTarget -eq 'android') {
+            $arguments = @{ Clean = $Clean }
+            if ($DeviceAddress) { $arguments.DeviceAddress = $DeviceAddress }
+            Invoke-TorChat 'run-android.ps1' $arguments
+        } elseif ($operationTarget -eq 'windows') {
+            $arguments = @{
                 Environment = $Environment
-                Target = 'windows'
+                ClientState = $ClientState
                 Release = $Release
+                Clean = $Clean
+                SkipEnvironmentStart = $SkipEnvironmentStart
             }
+            Invoke-TorChat 'run-windows.ps1' $arguments
+        } else {
+            throw "Unsupported run target: $operationTarget"
         }
-        if (-not (Test-Path -LiteralPath $desktopClient)) {
-            throw "Flutter Windows executable was not produced: $desktopClient"
-        }
-        Start-Process -FilePath $desktopClient -WorkingDirectory (Split-Path -Parent $desktopClient)
-        Write-Host "[torchat] Windows desktop started: $desktopClient"
     }
     'full' {
         $arguments = @{

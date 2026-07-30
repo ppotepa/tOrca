@@ -29,6 +29,45 @@ function Stop-TorChatFlutterWindows {
     if ($running.Count -gt 0) { Start-Sleep -Milliseconds 1000 }
 }
 
+function Remove-TorChatDirectoryRobust {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Description
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+
+    $resolvedPath = [IO.Path]::GetFullPath($Path)
+    for ($attempt = 1; $attempt -le 4; $attempt++) {
+        try {
+            Remove-Item -LiteralPath $resolvedPath -Recurse -Force -ErrorAction Stop
+            return
+        } catch {
+            if ($attempt -eq 4) { break }
+            Write-Warning "$Description removal attempt $attempt failed: $($_.Exception.Message)"
+            Start-Sleep -Milliseconds (250 * $attempt)
+        }
+    }
+
+    if ($env:OS -ne 'Windows_NT' -or -not (Get-Command robocopy -ErrorAction SilentlyContinue)) {
+        Remove-Item -LiteralPath $resolvedPath -Recurse -Force -ErrorAction Stop
+        return
+    }
+
+    $emptyRoot = Join-Path ([IO.Path]::GetTempPath()) "torchat-empty-$PID-$([Guid]::NewGuid().ToString('N'))"
+    New-Item -ItemType Directory -Force -Path $emptyRoot | Out-Null
+    try {
+        & robocopy $emptyRoot $resolvedPath /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
+        if ($LASTEXITCODE -gt 7) {
+            throw "$Description cleanup mirror failed (robocopy exit $LASTEXITCODE)."
+        }
+    } finally {
+        Remove-Item -LiteralPath $emptyRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    Remove-Item -LiteralPath $resolvedPath -Recurse -Force -ErrorAction Stop
+}
+
 function Build-WindowsFlutterOnNtfs([string]$Variant) {
     $stagingParent = $env:LOCALAPPDATA
     if ([string]::IsNullOrWhiteSpace($stagingParent)) {
@@ -54,7 +93,7 @@ function Build-WindowsFlutterOnNtfs([string]$Variant) {
     Stop-TorChatFlutterWindows
     if (Test-Path -LiteralPath $stagingMobile) {
         Write-Host "[torchat] Removing stale Windows Flutter staging directory: $stagingMobile"
-        Remove-Item -LiteralPath $stagingMobile -Recurse -Force
+        Remove-TorChatDirectoryRobust -Path $stagingMobile -Description 'Windows Flutter staging directory'
     }
     New-Item -ItemType Directory -Force -Path $stagingMobile | Out-Null
     & robocopy $mobileRoot $stagingMobile /E /NFL /NDL /NJH /NJS /NP `
@@ -76,7 +115,7 @@ function Build-WindowsFlutterOnNtfs([string]$Variant) {
     Stop-TorChatFlutterWindows
     if (Test-Path -LiteralPath $destinationBuild) {
         Write-Host "[torchat] Removing stale Windows Flutter output directory: $destinationBuild"
-        Remove-Item -LiteralPath $destinationBuild -Recurse -Force
+        Remove-TorChatDirectoryRobust -Path $destinationBuild -Description 'Windows Flutter output directory'
     }
     New-Item -ItemType Directory -Force -Path $destinationBuild | Out-Null
     & robocopy $stagingBuild $destinationBuild /E /NFL /NDL /NJH /NJS /NP | Out-Null
