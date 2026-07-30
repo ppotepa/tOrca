@@ -43,11 +43,10 @@ where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     let mut latest_endpoint_sequence = None;
-    for update in command
-        .endpoint_updates
-        .iter()
-        .filter(|update| update.endpoint.sequence > *sent_endpoint_sequence)
-    {
+    for update in &command.endpoint_updates {
+        if update.endpoint.sequence <= *sent_endpoint_sequence {
+            continue;
+        }
         sink.send(Message::Binary(
             torchat_core::peer_protocol::encode_frame(&PeerFrame::EndpointUpdate {
                 update: update.clone(),
