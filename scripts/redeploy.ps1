@@ -6,6 +6,7 @@ param(
     [string]$ClientState = 'clean',
     [switch]$Release,
     [switch]$Incremental,
+    [switch]$PreserveTor,
     [switch]$NoCache,
     [string]$DeviceAddress
 )
@@ -25,6 +26,24 @@ function Invoke-Step {
     if (-not $?) { throw "$Name failed." }
 }
 
+function Test-DesktopClientRunning {
+    $windowsRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot 'mobile\build\windows'))
+    return @(
+        Get-CimInstance Win32_Process -Filter "Name='torchat_mobile.exe'" -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.ExecutablePath -and
+                [IO.Path]::GetFullPath($_.ExecutablePath).StartsWith(
+                    $windowsRoot,
+                    [StringComparison]::OrdinalIgnoreCase
+                )
+            }
+    ).Count -gt 0
+}
+
+if ($Incremental -and $PreserveTor) {
+    throw 'Use either -Incremental or -PreserveTor, not both.'
+}
+
 $environmentState = Ensure-TorChatEnvironment $repoRoot $Environment
 $composeArgs = @(
     'compose',
@@ -38,6 +57,24 @@ try {
     if ($Incremental) {
         Invoke-Step 'Reuse local Docker/Tor stack' {
             & (Join-Path $PSScriptRoot 'start-dev.ps1') -Environment local -SkipOnionHealth
+        }
+    } elseif ($PreserveTor) {
+        Invoke-Step 'Keep the current Tor instance and onion' {
+            & docker @($composeArgs + @('up', '-d', 'postgres', 'tor'))
+            if ($LASTEXITCODE -ne 0) { throw 'Could not keep the PostgreSQL and Tor services running.' }
+        }
+
+        Invoke-Step 'Rebuild and recreate only the local server' {
+            $serverBuild = $composeArgs + @('build', 'server')
+            if ($NoCache) { $serverBuild += '--no-cache' }
+            & docker @serverBuild
+            if ($LASTEXITCODE -ne 0) { throw 'Local server image rebuild failed.' }
+            & docker @($composeArgs + @('up', '-d', '--force-recreate', 'server'))
+            if ($LASTEXITCODE -ne 0) { throw 'Local server recreation failed.' }
+        }
+
+        Invoke-Step 'Verify the preserved Tor/onion stack' {
+            & (Join-Path $PSScriptRoot 'start-dev.ps1') -Environment local
         }
     } else {
         Invoke-Step 'Destroy local Docker stack, database volume and Tor volume' {
@@ -61,15 +98,17 @@ try {
     }
 
     if ($Incremental) {
-        Write-Host '[torchat] Incremental redeploy keeps the current onion and local server volumes.'
+        Write-Host '[torchat] Incremental redeploy keeps the current onion, server and local volumes.'
+    } elseif ($PreserveTor) {
+        Write-Host '[torchat] PreserveTor redeploy keeps the current Tor process, onion and Tor volume while rebuilding the server and clients.'
     }
 
     $environmentState = Ensure-TorChatEnvironment $repoRoot $Environment
     Import-TorChatEnvironment $environmentState -RequireOnion
-    $onionLabel = if ($Incremental) { 'Current onion selected for this build' } else { 'Fresh onion selected for this build' }
+    $onionLabel = if ($Incremental -or $PreserveTor) { 'Current onion selected for this build' } else { 'Fresh onion selected for this build' }
     Write-Host "[torchat] $onionLabel`: $($env:TORCHAT_ONION_URL)"
 
-    Invoke-Step 'Build Android APK and Windows desktop with the fresh onion' {
+    Invoke-Step 'Build Android APK and Windows desktop' {
         $buildArgs = @{
             Environment = 'local'
             Target = 'all'
@@ -102,6 +141,23 @@ try {
         }
         if ($Release) { $runArgs.Release = $true }
         & (Join-Path $PSScriptRoot 'torchat.ps1') @runArgs
+
+        Start-Sleep -Seconds 2
+        if (-not (Test-DesktopClientRunning)) {
+            $variant = if ($Release) { 'Release' } else { 'Debug' }
+            $desktopClient = Join-Path $repoRoot "mobile\build\windows\x64\runner\$variant\torchat_mobile.exe"
+            if (-not (Test-Path -LiteralPath $desktopClient)) {
+                throw "Windows desktop executable is missing after build: $desktopClient"
+            }
+            Write-Warning '[torchat] Desktop process was not detected after the normal launcher; retrying once directly.'
+            Start-Process -FilePath $desktopClient -WorkingDirectory (Split-Path -Parent $desktopClient)
+            Start-Sleep -Seconds 2
+        }
+
+        if (-not (Test-DesktopClientRunning)) {
+            throw 'Windows desktop process exited immediately after launch. Inspect .torchat\command-logs and .torchat\logs.'
+        }
+        Write-Host '[torchat] Windows desktop process is running.'
     }
 } finally {
     Pop-Location
