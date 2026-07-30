@@ -24,10 +24,17 @@ function Wait-TorChatHttpHealth {
         try {
             $health = Invoke-RestMethod -Uri $Url -TimeoutSec 3
             if ($health.status -eq 'ok') {
-                return [pscustomobject]@{ State = 'Ready'; Code = 'HTTP_HEALTH_READY'; Message = "$Url is healthy"; Attempts = $attempt }
+                return [pscustomobject]@{
+                    State = 'Ready'
+                    Code = 'HTTP_HEALTH_READY'
+                    Message = "$Url is healthy"
+                    Attempts = $attempt
+                }
             }
         } catch {
-            if ($Context.Verbosity -eq 'trace') { Write-TorChatInfo "Health attempt $attempt failed: $($_.Exception.Message)" }
+            if ($Context.Verbosity -eq 'trace') {
+                Write-TorChatInfo "Health attempt $attempt failed: $($_.Exception.Message)"
+            }
         }
         $elapsed = $TimeoutSeconds - [Math]::Max(0, [Math]::Ceiling(($deadline - [DateTimeOffset]::UtcNow).TotalSeconds))
         $percent = [Math]::Min(99, [Math]::Max(0, [int](100 * $elapsed / [Math]::Max(1, $TimeoutSeconds))))
@@ -59,7 +66,12 @@ function Get-TorChatBootstrapSnapshot {
     $text = $logs | Out-String
     $matches = [regex]::Matches($text, 'Bootstrapped ([0-9]{1,3})% \(([^)]+)\): ([^\r\n]+)')
     if ($matches.Count -eq 0) {
-        return [pscustomobject]@{ Progress = 0; Phase = 'starting'; Detail = 'Waiting for Tor bootstrap output'; Ready = $false }
+        return [pscustomobject]@{
+            Progress = 0
+            Phase = 'starting'
+            Detail = 'Waiting for Tor bootstrap output'
+            Ready = $false
+        }
     }
     $latest = $matches[$matches.Count - 1]
     $progress = [int]$latest.Groups[1].Value
@@ -84,7 +96,12 @@ function Wait-TorChatBootstrap {
         $snapshot = Get-TorChatBootstrapSnapshot -ComposeContext $ComposeContext
         Write-TorChatStageProgress -Context $Context -Name 'Tor bootstrap' -Percent ([Math]::Min(100, $snapshot.Progress)) -Detail "$($snapshot.Phase) · $($snapshot.Detail)"
         if ($snapshot.Ready) {
-            return [pscustomobject]@{ State = 'Ready'; Code = 'TOR_BOOTSTRAP_READY'; Message = 'Tor reached 100%'; Snapshot = $snapshot }
+            return [pscustomobject]@{
+                State = 'Ready'
+                Code = 'TOR_BOOTSTRAP_READY'
+                Message = 'Tor reached 100%'
+                Snapshot = $snapshot
+            }
         }
         $last = $snapshot
         Start-Sleep -Seconds 2
@@ -92,7 +109,12 @@ function Wait-TorChatBootstrap {
 
     $message = "Tor bootstrap did not reach 100% within ${TimeoutSeconds}s. Last state: $($last.Progress)% $($last.Phase) $($last.Detail)"
     if ($Required) { throw $message }
-    return [pscustomobject]@{ State = 'Warning'; Code = 'TOR_BOOTSTRAP_WARMING'; Message = $message; Snapshot = $last }
+    [pscustomobject]@{
+        State = 'Warning'
+        Code = 'TOR_BOOTSTRAP_WARMING'
+        Message = $message
+        Snapshot = $last
+    }
 }
 
 function Test-TorChatOnionReachability {
@@ -103,7 +125,14 @@ function Test-TorChatOnionReachability {
         [int]$TimeoutSeconds = 45,
         [switch]$Required
     )
-    $curl = if (Get-Command curl.exe -ErrorAction SilentlyContinue) { 'curl.exe' } elseif (Get-Command curl -ErrorAction SilentlyContinue) { 'curl' } else { throw 'Missing required tool: curl' }
+    $curl = if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
+        'curl.exe'
+    } elseif (Get-Command curl -ErrorAction SilentlyContinue) {
+        'curl'
+    } else {
+        throw 'Missing required tool: curl'
+    }
+
     $deadline = [DateTimeOffset]::UtcNow.AddSeconds($TimeoutSeconds)
     $attempt = 0
     $lastFailure = 'no response'
@@ -118,7 +147,12 @@ function Test-TorChatOnionReachability {
             try {
                 $payload = $text | ConvertFrom-Json
                 if ($payload.status -eq 'ok') {
-                    return [pscustomobject]@{ State = 'Ready'; Code = 'ONION_REACHABLE'; Message = "Onion relay is reachable after $attempt attempt(s)"; Attempts = $attempt }
+                    return [pscustomobject]@{
+                        State = 'Ready'
+                        Code = 'ONION_REACHABLE'
+                        Message = "Onion relay is reachable after $attempt attempt(s)"
+                        Attempts = $attempt
+                    }
                 }
                 $lastFailure = "unexpected status '$($payload.status)'"
             } catch {
@@ -141,7 +175,12 @@ function Test-TorChatOnionReachability {
 
     $message = "Onion is still warming after ${TimeoutSeconds}s: $lastFailure"
     if ($Required) { throw $message }
-    return [pscustomobject]@{ State = 'Warning'; Code = 'ONION_WARMING'; Message = $message; Attempts = $attempt }
+    [pscustomobject]@{
+        State = 'Warning'
+        Code = 'ONION_WARMING'
+        Message = $message
+        Attempts = $attempt
+    }
 }
 
 function Reset-TorChatStackState {
@@ -202,11 +241,12 @@ function Start-TorChatStack {
         [void](Wait-TorChatBootstrap -Context $Context -ComposeContext $compose -TimeoutSeconds 300 -Required:($Readiness -eq 'strict'))
     }
     if ($Readiness -in @('onion','strict')) {
-        $probe = Test-TorChatOnionReachability -Context $Context -OnionUrl $onionUrl -SocksPort ([int]$EnvironmentState.Values['TORCHAT_SOCKS_PORT']) -TimeoutSeconds (if ($Readiness -eq 'strict') { 240 } else { 60 }) -Required:($Readiness -eq 'strict')
+        $probeTimeoutSeconds = if ($Readiness -eq 'strict') { 240 } else { 60 }
+        $probe = Test-TorChatOnionReachability -Context $Context -OnionUrl $onionUrl -SocksPort ([int]$EnvironmentState.Values['TORCHAT_SOCKS_PORT']) -TimeoutSeconds $probeTimeoutSeconds -Required:($Readiness -eq 'strict')
         if ($probe.State -eq 'Warning') { return $probe }
     }
 
-    return [pscustomobject]@{
+    [pscustomobject]@{
         State = 'Ready'
         Code = 'STACK_READY'
         Message = "Local stack is running with onion $hostname"
@@ -216,20 +256,34 @@ function Start-TorChatStack {
 }
 
 function Stop-TorChatStack {
-    param([Parameter(Mandatory = $true)]$Context, [Parameter(Mandatory = $true)]$EnvironmentState)
+    param(
+        [Parameter(Mandatory = $true)]$Context,
+        [Parameter(Mandatory = $true)]$EnvironmentState
+    )
     $compose = Get-TorChatComposeContext -RepositoryRoot $Context.RepositoryRoot -EnvironmentState $EnvironmentState
     [void](Invoke-TorChatCompose -Context $Context -ComposeContext $compose -Arguments @('down','--remove-orphans') -LogName 'docker-down.log')
-    [pscustomobject]@{ State = 'Ready'; Code = 'STACK_STOPPED'; Message = 'Stack stopped; volumes preserved' }
+    [pscustomobject]@{
+        State = 'Ready'
+        Code = 'STACK_STOPPED'
+        Message = 'Stack stopped; volumes preserved'
+    }
 }
 
 function Restart-TorChatStack {
-    param([Parameter(Mandatory = $true)]$Context, [Parameter(Mandatory = $true)]$EnvironmentState, [ValidateSet('local','bootstrap','onion','strict')][string]$Readiness = 'local')
+    param(
+        [Parameter(Mandatory = $true)]$Context,
+        [Parameter(Mandatory = $true)]$EnvironmentState,
+        [ValidateSet('local','bootstrap','onion','strict')][string]$Readiness = 'local'
+    )
     [void](Stop-TorChatStack -Context $Context -EnvironmentState $EnvironmentState)
     Start-TorChatStack -Context $Context -EnvironmentState $EnvironmentState -Readiness $Readiness
 }
 
 function Repair-TorChatOnion {
-    param([Parameter(Mandatory = $true)]$Context, [Parameter(Mandatory = $true)]$EnvironmentState)
+    param(
+        [Parameter(Mandatory = $true)]$Context,
+        [Parameter(Mandatory = $true)]$EnvironmentState
+    )
     $compose = Get-TorChatComposeContext -RepositoryRoot $Context.RepositoryRoot -EnvironmentState $EnvironmentState
     [void](Invoke-TorChatCompose -Context $Context -ComposeContext $compose -Arguments @('restart','tor') -LogName 'docker-tor-repair.log')
     $bootstrap = Wait-TorChatBootstrap -Context $Context -ComposeContext $compose -TimeoutSeconds 300
@@ -238,7 +292,10 @@ function Repair-TorChatOnion {
 }
 
 function Get-TorChatStackStatus {
-    param([Parameter(Mandatory = $true)]$Context, [Parameter(Mandatory = $true)]$EnvironmentState)
+    param(
+        [Parameter(Mandatory = $true)]$Context,
+        [Parameter(Mandatory = $true)]$EnvironmentState
+    )
     $compose = Get-TorChatComposeContext -RepositoryRoot $Context.RepositoryRoot -EnvironmentState $EnvironmentState
     $ps = Invoke-TorChatCompose -Context $Context -ComposeContext $compose -Arguments @('ps') -LogName 'docker-status.log'
     $bootstrap = Get-TorChatBootstrapSnapshot -ComposeContext $compose
