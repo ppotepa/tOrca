@@ -8,6 +8,7 @@ import 'app/app_theme.dart';
 import 'client_runtime.dart';
 import 'features/account/account_view.dart';
 import 'features/account/settings_view.dart';
+import 'features/connection/connection_center_sheet.dart';
 import 'features/invites/invite_scanner.dart';
 import 'features/shell/main_shell.dart';
 import 'features/onboarding/onboarding_views.dart';
@@ -176,54 +177,8 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
   Future<void> _showTransportStatus() => showModalBottomSheet<void>(
     context: context,
     showDragHandle: true,
-    builder: (sheetContext) {
-      final state = ref.read(appControllerProvider);
-      return SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Status transportu', style: Theme.of(context).textTheme.titleLarge),
-              const SizedBox(height: 12),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.eco_outlined),
-                title: Text(state.transport.label),
-                subtitle: Text(state.transport.detail),
-              ),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.cell_tower),
-                title: Text(state.peerServerStatus.label),
-                subtitle: const Text('Lokalny endpoint P2P'),
-              ),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(sheetContext),
-                    child: const Text('Zamknij'),
-                  ),
-                  const SizedBox(width: 8),
-                  FilledButton.icon(
-                    onPressed: () {
-                      Navigator.pop(sheetContext);
-                      unawaited(
-                        ref.read(appControllerProvider.notifier).retryTor(),
-                      );
-                    },
-                    icon: const Icon(Icons.refresh),
-                    label: const Text('Ponów relay'),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      );
-    },
+    isScrollControlled: true,
+    builder: (_) => const ConnectionCenterSheet(),
   );
 
   Future<void> _scanInvite() async {
@@ -297,7 +252,7 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
           },
           onOpenTor: () {
             Navigator.pop(context);
-            ref.read(appControllerProvider.notifier).retryTor();
+            _showTransportStatus();
           },
           onEditProfile: () {
             Navigator.pop(context);
