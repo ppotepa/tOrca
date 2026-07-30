@@ -1,80 +1,28 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('local','staging','production')]
-    [string]$Environment = 'local',
+    [ValidateSet('local','staging','production')][string]$Environment = 'local',
     [switch]$Release,
     [switch]$Incremental,
     [switch]$Clean,
-    [ValidateSet('preserve','clean')]
-    [string]$ClientState = 'preserve',
+    [ValidateSet('preserve','clean')][string]$ClientState = 'preserve',
     [switch]$NoCache,
     [switch]$SkipMobileBuild,
     [string]$DeviceAddress
 )
 
 $ErrorActionPreference = 'Stop'
-$repoRoot = Split-Path -Parent $PSScriptRoot
-$cleanClientState = $Clean -or $ClientState -eq 'clean'
-
-function Invoke-Step {
-    param(
-        [string]$Name,
-        [scriptblock]$Command
-    )
-    Write-Host "[torchat] $Name"
-    & $Command
-    if (-not $?) { throw "$Name failed." }
-}
-
-if ($Environment -eq 'local') {
-    $serverArgs = @{ Environment = 'local'; SkipOnionHealth = $true }
-    if (-not $Incremental) {
-        $serverArgs.Rebuild = $true
-        $serverArgs.ForceRecreate = $true
-        if ($NoCache) { $serverArgs.NoCache = $true }
-    } else {
-        Write-Host '[torchat] Reusing the running local Docker/Tor stack.'
-    }
-    Invoke-Step 'Start local environment' {
-        & (Join-Path $PSScriptRoot 'start-dev.ps1') @serverArgs
-    }
-}
-
-$buildArgs = @{
-    Environment = $Environment
-    Target = 'all'
-}
-if ($Release -or $Environment -ne 'local') { $buildArgs.Release = $true }
-if ($Incremental) { $buildArgs.Smart = $true }
-if (-not $SkipMobileBuild) {
-    Invoke-Step 'Build clients' {
-        & (Join-Path $PSScriptRoot 'internal\build-clients.ps1') @buildArgs
-    }
-} else {
-    Invoke-Step 'Build desktop runtime' {
-        & (Join-Path $PSScriptRoot 'internal\build-desktop-runtime.ps1') -Release:($Release -or $Environment -ne 'local')
-    }
-}
-
-$deployArgs = @{
-    Environment = $Environment
-    SkipServer = $true
-    SkipCoreBuild = $true
-    SkipApkBuild = $true
-    Clean = $cleanClientState
-}
-if ($Release -or $Environment -ne 'local') { $deployArgs.Release = $true }
-if ($DeviceAddress) { $deployArgs.DeviceAddress = $DeviceAddress }
-Invoke-Step 'Deploy Android' {
-    & (Join-Path $PSScriptRoot 'deploy-android.ps1') @deployArgs
-}
-
-$runArgs = @{
-    Environment = $Environment
-    ClientState = if ($cleanClientState) { 'clean' } else { 'preserve' }
-}
-if ($Release) { $runArgs.Release = $true }
-if ($cleanClientState) { $runArgs.Clean = $true }
-Invoke-Step 'Run desktop' {
-    & (Join-Path $PSScriptRoot 'run-windows.ps1') @runArgs
-}
+$clientData = if ($Clean -or $ClientState -eq 'clean') { 'reset' } else { 'preserve' }
+$buildPolicy = if ($SkipMobileBuild) { 'skip' } elseif ($Incremental) { 'smart' } else { 'rebuild' }
+$arguments = @(
+    'deploy', 'all',
+    '-Environment', $Environment,
+    '-BuildPolicy', $buildPolicy,
+    '-OnionPolicy', 'preserve',
+    '-DatabasePolicy', 'preserve',
+    '-ClientDataPolicy', $clientData,
+    '-Readiness', 'development'
+)
+if ($Release) { $arguments += '-Release' }
+if ($NoCache) { $arguments += '-NoCache' }
+if ($DeviceAddress) { $arguments += @('-Device', $DeviceAddress) }
+& (Join-Path $PSScriptRoot 'torchat.ps1') @arguments
