@@ -6,18 +6,12 @@ Creates a committed TorChat diagnostics snapshot, optionally with a repository c
 Stages the entire Git worktree, creates an automatic checkpoint commit, gathers
 diagnostics for the latest recorded run from Docker, Tor, server, Android and
 desktop, writes manifests and SHA-256 inventories, and emits a verified ZIP
-plus a sidecar SHA-256 file. By default the ZIP contains diagnostics only;
-source is recoverable from the recorded Git commit and remote. Android
+plus a sidecar SHA-256 file. By default the ZIP contains the tracked source
+tree and diagnostics together. Android
 bugreport and all historical logs are opt-in because they contain much more
 data than is normally needed to diagnose the last run.
 
-The default archive is log-only: source code is identified by the checkpoint
-commit and Git remote in the manifest. Use -IncludeRepository only when a
-portable local copy including .git is explicitly required.
-
 Operational secrets, private keys and client databases are intentionally
-excluded. Use -IncludeRepository to add a portable working-tree copy including
-.git when a self-contained archive is needed.
 
 .EXAMPLE
 .\scripts\zip.ps1
@@ -39,7 +33,8 @@ param(
     [switch]$AllowMissingDesktop,
     [switch]$AllHistory,
     [switch]$IncludeBugreport,
-    [switch]$IncludeRepository
+    [Alias('IncludeRepository')]
+    [switch]$IncludeGit
 )
 
 $ErrorActionPreference = 'Stop'
@@ -143,6 +138,19 @@ function Get-SnapshotFileBytes {
 }
 
 function Copy-RepositorySnapshot {
+    # Export only committed source files. This excludes ignored build output,
+    # caches and local diagnostics that previously caused huge snapshots.
+    New-Item -ItemType Directory -Force -Path $stagedRepository | Out-Null
+    $sourceArchive = Join-Path $temporaryRoot 'source.tar'
+    & git archive --format=tar --output=$sourceArchive HEAD
+    Assert-LastExitCode 'git archive failed.'
+    & tar -xf $sourceArchive -C $stagedRepository
+    Assert-LastExitCode 'Extracting the tracked source archive failed.'
+    Remove-Item -LiteralPath $sourceArchive -Force -ErrorAction SilentlyContinue
+
+    if (-not $IncludeGit) { return }
+
+    # .git is optional and copied separately because git archive excludes it.
     $excludedDirectories = @(
         (Join-Path $repoRoot '.torchat'),
         (Join-Path $repoRoot 'secrets')
@@ -176,8 +184,8 @@ function Copy-RepositorySnapshot {
 
     New-Item -ItemType Directory -Force -Path $stagedRepository | Out-Null
     $arguments = @(
-        $repoRoot,
-        $stagedRepository,
+        (Join-Path $repoRoot '.git'),
+        (Join-Path $stagedRepository '.git'),
         '/E',
         '/COPY:DAT',
         '/DCOPY:DAT',
@@ -209,10 +217,10 @@ function Copy-RepositorySnapshot {
             }
             $copiedGiB = [Math]::Round(([double]$copiedBytes / 1GB), 2)
             Write-Progress -Activity 'TorChat snapshot' `
-                -Status "Copying repository including .git: ${copiedGiB} GiB copied, ${elapsed}s elapsed" `
+                -Status "Copying .git metadata: ${copiedGiB} GiB copied, ${elapsed}s elapsed" `
                 -PercentComplete -1
             if ($elapsed -gt 0 -and ($elapsed % 10) -eq 0) {
-                Write-Host "[torchat][snapshot] Repository copy is running: ${copiedGiB} GiB, ${elapsed}s."
+                Write-Host "[torchat][snapshot] .git copy is running: ${copiedGiB} GiB, ${elapsed}s."
             }
             Wait-Job -Job $copyJob -Timeout 2 | Out-Null
         }
@@ -277,14 +285,10 @@ function Write-RepositoryMetadata {
         commitMessage = Invoke-GitText @('log', '-1', '--pretty=%B')
         environment = $Environment
         deviceAddress = if ($DeviceAddress) { $DeviceAddress } else { $null }
-        includesGitDirectory = $IncludeRepository
+        includesGitDirectory = $IncludeGit
         logsMode = if ($AllHistory) { 'all-history' } else { 'latest-run' }
         includeBugreport = $IncludeBugreport
-        repositoryCopy = if ($IncludeRepository) {
-            'working tree immediately after automatic snapshot commit'
-        } else {
-            'not included; restore source from the recorded Git commit'
-        }
+        repositoryCopy = 'tracked source tree from the checkpoint commit'
         excludedOperationalData = @(
             '.torchat (logs are included separately; client keys, databases and runtime environment are excluded)',
             'secrets',
@@ -458,18 +462,16 @@ try {
         }
 
         Assert-RepositoryClean 'while diagnostics were being collected'
-        if ($IncludeRepository) {
-            Write-SnapshotStage 5 8 'Copying the complete repository, including .git...'
-            Copy-RepositorySnapshot
+        Write-SnapshotStage 5 8 $(if ($IncludeGit) { 'Copying tracked source and .git...' } else { 'Copying tracked source tree...' })
+        Copy-RepositorySnapshot
+        if ($IncludeGit) {
             Assert-RepositoryClean 'while the repository was being copied'
-        } else {
-            Write-SnapshotStage 5 8 'Preparing the log-only archive; source is identified by Git commit...'
         }
         Write-SnapshotStage 6 8 'Writing snapshot metadata and SHA-256 inventory...'
         Write-RepositoryMetadata
         Write-FileInventory
 
-        Write-SnapshotStage 7 8 $(if ($IncludeRepository) { 'Compressing the repository and logs...' } else { 'Compressing diagnostics and logs...' })
+        Write-SnapshotStage 7 8 'Compressing source and diagnostics...'
         $archiveName = "torchat-snapshot-$timestamp-$shortCommit.zip"
         $archivePath = Join-Path $snapshotRoot $archiveName
         New-RepositoryArchive -SourceDirectory $stagingRoot -ArchivePath $archivePath
@@ -483,9 +485,10 @@ try {
                 'snapshot/files.sha256',
                 'logs/last-run/startup-summary.txt'
             )
-            if ($IncludeRepository) {
+            if ($IncludeGit) {
                 $requiredEntries += 'repository/.git/HEAD'
             }
+            $requiredEntries += 'repository/Cargo.toml'
             if (-not $AllowMissingAndroid) {
                 $requiredEntries += 'logs/last-run/android-app.log'
             }
