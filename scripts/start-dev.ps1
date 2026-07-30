@@ -38,13 +38,22 @@ function Wait-Health([string]$url) {
 }
 
 function Wait-OnionHealth([string]$url, [int]$socksPort) {
-    $attempts = 3
-    $timeoutSeconds = 12
+    $warmupTimeoutSeconds = 180
+    $probeTimeoutSeconds = 20
+    $retryDelaySeconds = 5
+    $deadline = [DateTimeOffset]::UtcNow.AddSeconds($warmupTimeoutSeconds)
+    $attempt = 0
     $lastFailure = 'no probe result'
 
-    for ($attempt = 1; $attempt -le $attempts; $attempt++) {
+    while ([DateTimeOffset]::UtcNow -lt $deadline) {
+        $attempt++
+        $remainingSeconds = [Math]::Max(
+            1,
+            [Math]::Ceiling(($deadline - [DateTimeOffset]::UtcNow).TotalSeconds)
+        )
+        $timeoutSeconds = [Math]::Min($probeTimeoutSeconds, $remainingSeconds)
         $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-        Write-Host "[torchat] Onion probe $attempt/${attempts}: SOCKS=127.0.0.1:$socksPort timeout=${timeoutSeconds}s url=$url/health"
+        Write-Host "[torchat] Onion probe $attempt`: SOCKS=127.0.0.1:$socksPort timeout=${timeoutSeconds}s remaining=${remainingSeconds}s url=$url/health"
         $probeOutput = & curl.exe --silent --show-error --fail-with-body --max-time $timeoutSeconds `
             --socks5-hostname "127.0.0.1:$socksPort" "$url/health" 2>&1
         $exitCode = $LASTEXITCODE
@@ -64,19 +73,33 @@ function Wait-OnionHealth([string]$url, [int]$socksPort) {
             }
         } else {
             $detail = if ($probeText) { $probeText } else { 'curl returned no diagnostic output' }
-            $lastFailure = "curl exit=$exitCode after $($stopwatch.ElapsedMilliseconds) ms: $detail"
+            $classification = switch ($exitCode) {
+                7 { 'local SOCKS endpoint is not accepting connections' }
+                28 { 'Tor circuit or onion descriptor is not ready yet' }
+                97 { 'SOCKS handshake failed' }
+                default { 'onion probe failed' }
+            }
+            $lastFailure = "$classification; curl exit=$exitCode after $($stopwatch.ElapsedMilliseconds) ms: $detail"
         }
 
-        Write-Warning "[torchat] Onion probe $attempt/$attempts not ready: $lastFailure"
-        if ($attempt -lt $attempts) { Start-Sleep -Seconds 3 }
+        Write-Warning "[torchat] Onion probe $attempt not ready: $lastFailure"
+        $remainingAfterProbe = ($deadline - [DateTimeOffset]::UtcNow).TotalSeconds
+        if ($remainingAfterProbe -gt 0) {
+            Start-Sleep -Seconds ([Math]::Min($retryDelaySeconds, [Math]::Floor($remainingAfterProbe)))
+        }
     }
 
     if ($AllowOnionWarmup) {
-        Write-Warning "[torchat] Fresh onion is still warming up after short probes. Continuing redeploy; Android and desktop reconnect actors will retry. Last result: $lastFailure"
+        Write-Warning "[torchat] Onion is still unavailable after ${warmupTimeoutSeconds}s. Continuing only because -AllowOnionWarmup was explicitly supplied. Last result: $lastFailure"
         return $false
     }
 
-    throw "Tor onion healthcheck failed through SOCKS. Last result: $lastFailure"
+    $torLogs = & docker @($composeArgs + @('logs', '--tail', '30', 'tor')) 2>&1
+    $torLogText = ($torLogs | Out-String).Trim()
+    if ($torLogText) {
+        Write-Warning "[torchat] Last Tor log lines:`n$torLogText"
+    }
+    throw "Tor onion healthcheck failed through SOCKS after ${warmupTimeoutSeconds}s. Clients were not built or launched. Last result: $lastFailure"
 }
 
 function Get-OnionHostname {

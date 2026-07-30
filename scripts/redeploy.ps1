@@ -54,7 +54,6 @@ try {
                 Environment = 'local'
                 Rebuild = $true
                 ForceRecreate = $true
-                AllowOnionWarmup = $true
             }
             if ($NoCache) { $startArgs.NoCache = $true }
             & (Join-Path $PSScriptRoot 'start-dev.ps1') @startArgs
