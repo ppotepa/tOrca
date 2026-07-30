@@ -5,6 +5,7 @@ import '../../core/models/domain.dart';
 import '../../shared/formatters/invite_code.dart';
 import '../../shared/widgets/contact_list_section.dart';
 import '../../shared/widgets/feature_header.dart';
+import '../../shared/widgets/list_items.dart';
 import '../../shared/widgets/status_banner.dart';
 import '../../shared/widgets/themed_switch_list_tile.dart';
 
