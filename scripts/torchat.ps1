@@ -90,8 +90,8 @@ foreach ($module in @(
     Import-Module $path -Force -DisableNameChecking
 }
 
-# Compatibility aliases remain accepted while external documentation and CI are
-# migrated to the domain/action command tree.
+# Compatibility aliases remain accepted while documentation and CI migrate to
+# the domain/action command tree.
 switch ($Command) {
     'start-dev' { $Command = 'stack'; $Target = 'start' }
     'stop-dev' { $Command = 'stack'; $Target = 'stop' }
@@ -140,8 +140,12 @@ $mutexAcquired = $false
 $mutating = $Command -in @('stack','build','deploy','run','stop','clean')
 if ($mutating) {
     $mutexName = if ($env:OS -eq 'Windows_NT') { 'Global\TorChat-Cli' } else { 'TorChat-Cli' }
-    $mutex = [Threading.Mutex]::new($false, $mutexName)
-    try { $mutexAcquired = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $mutexAcquired = $true }
+    $mutex = New-Object Threading.Mutex($false, $mutexName)
+    try {
+        $mutexAcquired = $mutex.WaitOne(0)
+    } catch [Threading.AbandonedMutexException] {
+        $mutexAcquired = $true
+    }
     if (-not $mutexAcquired) {
         $mutex.Dispose()
         throw 'Another mutating TorChat command is already running.'
@@ -152,6 +156,15 @@ $failure = $null
 try {
     $environmentState = Get-TorChatEnvironmentState -RepositoryRoot $repositoryRoot -Environment $Environment
     Import-TorChatEnvironmentState -EnvironmentState $environmentState
+
+    # A complete deploy owns the relay image as well as both clients. Docker's
+    # layer cache keeps smart deploys fast while still applying server changes.
+    if ($Command -eq 'deploy' -and $Target -eq 'all' -and $BuildPolicy -ne 'skip') {
+        [void](Invoke-TorChatStage -Context $context -Id 'build.server' -Name 'Build relay server image' -Action {
+            Build-TorChatServerImage -Context $context -EnvironmentState $environmentState -NoCache:$NoCache
+        })
+    }
+
     $options = @{
         BuildPolicy = $BuildPolicy
         OnionPolicy = $OnionPolicy
@@ -167,7 +180,7 @@ try {
         NoCache = [bool]$NoCache
         Confirm = [bool]$Confirm
     }
-    Invoke-TorChatCommand -Context $context -EnvironmentState $environmentState -Command $Command -Target $Target -Options $options
+    [void](Invoke-TorChatCommand -Context $context -EnvironmentState $environmentState -Command $Command -Target $Target -Options $options)
 } catch {
     $failure = $_
     if (@($context.Results | Where-Object State -eq 'Failed').Count -eq 0) {
@@ -178,7 +191,11 @@ try {
     }
     Write-TorChatFailure $_.Exception.Message
 } finally {
-    try { [void](Complete-TorChatRun -Context $context) } catch { Write-Warning "Unable to finalize TorChat run: $($_.Exception.Message)" }
+    try {
+        [void](Complete-TorChatRun -Context $context)
+    } catch {
+        Write-Warning "Unable to finalize TorChat run: $($_.Exception.Message)"
+    }
     if ($mutex) {
         if ($mutexAcquired) { try { $mutex.ReleaseMutex() } catch { } }
         $mutex.Dispose()
