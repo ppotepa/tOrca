@@ -37,6 +37,15 @@ use super::{EngineRelay, RelayEvent};
 
 type RelayStream = WebSocketStream<RelaySocket>;
 
+// Relay HTTP calls currently run on the engine actor. Keep their failure
+// budget short so an unavailable or warming onion cannot starve local
+// commands (profile, contacts, conversations, and P2P state) for minutes.
+// The actor owns retry/backoff, so availability is recovered by a later
+// attempt rather than by one long blocking request.
+const RELAY_CONNECT_TIMEOUT: Duration = Duration::from_secs(12);
+const RELAY_REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
+const RELAY_READY_TIMEOUT: Duration = Duration::from_secs(20);
+
 enum RelaySocket {
     Direct(TcpStream),
     Socks(Socks5Stream<TcpStream>),
@@ -109,8 +118,8 @@ impl SharedRelayActor {
     pub fn new(relay_onion_url: Url, socks5_url: Option<String>, identity: Identity) -> Self {
         Self {
             connection: super::RelayConnectionConfig {
-                connect_timeout: Duration::from_secs(60),
-                ready_timeout: Duration::from_secs(60),
+                connect_timeout: RELAY_CONNECT_TIMEOUT,
+                ready_timeout: RELAY_READY_TIMEOUT,
                 socks5_url,
                 relay_onion_url: relay_onion_url.to_string(),
             },
@@ -132,7 +141,7 @@ impl SharedRelayActor {
     fn build_client(&self) -> RuntimeResult<Client> {
         let mut builder = Client::builder()
             .connect_timeout(self.connection.connect_timeout)
-            .timeout(self.connection.connect_timeout + Duration::from_secs(15));
+            .timeout(RELAY_REQUEST_TIMEOUT);
         if let Some(proxy) = &self.connection.socks5_url {
             builder = builder.proxy(
                 reqwest::Proxy::all(proxy)
