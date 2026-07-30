@@ -228,15 +228,13 @@ Win32Window::MessageHandler(HWND hwnd,
       break;
 
     case WM_DESTROY:
-      if (tray_icon_.cbSize != 0) {
-        Shell_NotifyIcon(NIM_DELETE, &tray_icon_);
-        tray_icon_.cbSize = 0;
-      }
+      // WM_CLOSE is intercepted above and only hides the window. Therefore an
+      // actual destruction means that no visible window or tray entry remains.
+      // Always terminate the message loop instead of leaving a headless process
+      // that keeps the single-instance mutex forever.
       window_handle_ = nullptr;
       Destroy();
-      if (quit_on_close_ || exit_requested_) {
-        PostQuitMessage(0);
-      }
+      PostQuitMessage(0);
       return 0;
 
     case WM_DPICHANGED: {
