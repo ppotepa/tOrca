@@ -13,16 +13,17 @@ param(
 $ErrorActionPreference = 'Stop'
 $clientData = if ($Clean -or $ClientState -eq 'clean') { 'reset' } else { 'preserve' }
 $buildPolicy = if ($SkipMobileBuild) { 'skip' } elseif ($Incremental) { 'smart' } else { 'rebuild' }
-$arguments = @(
-    'deploy', 'all',
-    '-Environment', $Environment,
-    '-BuildPolicy', $buildPolicy,
-    '-OnionPolicy', 'preserve',
-    '-DatabasePolicy', 'preserve',
-    '-ClientDataPolicy', $clientData,
-    '-Readiness', 'development'
-)
-if ($Release) { $arguments += '-Release' }
-if ($NoCache) { $arguments += '-NoCache' }
-if ($DeviceAddress) { $arguments += @('-Device', $DeviceAddress) }
-& (Join-Path $PSScriptRoot 'torchat.ps1') @arguments
+$parameters = @{
+    Command = 'deploy'
+    Target = 'all'
+    Environment = $Environment
+    BuildPolicy = $buildPolicy
+    OnionPolicy = 'preserve'
+    DatabasePolicy = 'preserve'
+    ClientDataPolicy = $clientData
+    Readiness = 'development'
+}
+if ($Release) { $parameters.Release = $true }
+if ($NoCache) { $parameters.NoCache = $true }
+if ($DeviceAddress) { $parameters.Device = $DeviceAddress }
+& (Join-Path $PSScriptRoot 'torchat.ps1') @parameters
