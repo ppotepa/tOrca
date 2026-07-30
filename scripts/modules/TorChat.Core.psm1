@@ -35,7 +35,7 @@ function New-TorChatRunContext {
         LogDirectory = $logDirectory
         EventsPath = Join-Path $runDirectory 'events.jsonl'
         SummaryPath = Join-Path $runDirectory 'summary.json'
-        Results = [System.Collections.ArrayList]::new()
+        Results = New-Object System.Collections.ArrayList
         Metadata = @{}
     }
 
@@ -52,7 +52,7 @@ function New-TorChatRunContext {
         startedAt = $context.StartedAt.ToUniversalTime().ToString('o')
     } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $runDirectory 'run.json') -Encoding UTF8
 
-    return $context
+    $context
 }
 
 function Write-TorChatEvent {
@@ -74,8 +74,8 @@ function Write-TorChatEvent {
         state = $State
         message = $Message
     }
-    if ($Progress -ge 0) { $event.progress = $Progress }
-    if ($Data.Count -gt 0) { $event.data = $Data }
+    if ($Progress -ge 0) { $event['progress'] = $Progress }
+    if ($Data.Count -gt 0) { $event['data'] = $Data }
     ($event | ConvertTo-Json -Depth 8 -Compress) | Add-Content -LiteralPath $Context.EventsPath -Encoding UTF8
 
     if ($Context.UiMode -eq 'json') {
@@ -125,7 +125,8 @@ function Invoke-TorChatStage {
 
     Write-TorChatEvent -Context $Context -Stage $Id -State 'running'
     Write-TorChatStageStart -Context $Context -Id $Id -Name $Name
-    $stopwatch = [Diagnostics.Stopwatch]::StartNew()
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    $recorded = $false
     try {
         $data = & $Action
         $stopwatch.Stop()
@@ -139,12 +140,17 @@ function Invoke-TorChatStage {
         }
         $result = New-TorChatStageResult -Id $Id -Name $Name -State $state -Code $code -Message $message -DurationMs $stopwatch.ElapsedMilliseconds -Data $data
         [void]$Context.Results.Add($result)
+        $recorded = $true
         Write-TorChatEvent -Context $Context -Stage $Id -State $state.ToLowerInvariant() -Message $message -Data @{ durationMs = $stopwatch.ElapsedMilliseconds; code = $code }
         Write-TorChatStageResult -Result $result
-        if ($state -eq 'Failed' -and $Required) { throw ($message | ForEach-Object { if ($_){$_}else{"Required stage '$Name' failed."} }) }
+        if ($state -eq 'Failed' -and $Required) {
+            $failureMessage = if ([string]::IsNullOrWhiteSpace($message)) { "Required stage '$Name' failed." } else { $message }
+            throw (New-Object System.InvalidOperationException($failureMessage))
+        }
         return $result
     } catch {
         $stopwatch.Stop()
+        if ($recorded) { throw }
         $message = $_.Exception.Message
         $state = if ($Required) { 'Failed' } else { 'Warning' }
         $code = if ($Required) { 'STAGE_FAILED' } else { 'OPTIONAL_STAGE_FAILED' }
@@ -182,7 +188,11 @@ function Invoke-TorChatNative {
             $tail = @($output | Select-Object -Last 12) -join [Environment]::NewLine
             throw "$FilePath failed with exit code $exitCode. Log: $logPath$([Environment]::NewLine)$tail"
         }
-        return [pscustomobject]@{ ExitCode = $exitCode; Output = $output; LogPath = $logPath }
+        [pscustomobject]@{
+            ExitCode = $exitCode
+            Output = $output
+            LogPath = $logPath
+        }
     } finally {
         Set-Location -LiteralPath $previousLocation
     }
@@ -215,7 +225,7 @@ function Complete-TorChatRun {
     $summary | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $Context.SummaryPath -Encoding UTF8
     Write-TorChatEvent -Context $Context -Stage 'run' -State $state.ToLowerInvariant()
     Write-TorChatSummary -Context $Context -State $state
-    return $state
+    $state
 }
 
 Export-ModuleMember -Function @(
