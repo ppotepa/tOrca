@@ -12,7 +12,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$deployRunId = [Guid]::NewGuid().ToString('N')
+$deployRunId = if ($env:TORCHAT_DEPLOY_RUN_ID) { $env:TORCHAT_DEPLOY_RUN_ID } else { [Guid]::NewGuid().ToString('N') }
+$env:TORCHAT_DEPLOY_RUN_ID = $deployRunId
 . (Join-Path $PSScriptRoot 'internal\environment.ps1')
 
 function Get-RepoProcesses {
@@ -38,7 +39,7 @@ function Get-FlutterProcesses {
 function Stop-ProcessSet {
     param([array]$Processes, [string]$Label)
     foreach ($process in $Processes) {
-        Write-Host "[torchat] Stopping $Label PID $($process.ProcessId)."
+        Write-Host "[torchat] deployRunId=$deployRunId state=stopping role=$Label pid=$($process.ProcessId)"
         Stop-Process -Id ([int]$process.ProcessId) -Force -ErrorAction SilentlyContinue
     }
     foreach ($process in $Processes) {
@@ -47,15 +48,15 @@ function Stop-ProcessSet {
 }
 
 function Stop-TorChatRuntimeTree {
-    Stop-ProcessSet -Processes @(Get-FlutterProcesses) -Label 'Flutter Windows client'
-    Stop-ProcessSet -Processes @(Get-RepoProcesses -Name 'torchat-desktop.exe') -Label 'desktop engine host'
+    Stop-ProcessSet -Processes @(Get-FlutterProcesses) -Label 'windows-runner'
+    Stop-ProcessSet -Processes @(Get-RepoProcesses -Name 'torchat-desktop.exe') -Label 'desktop-engine'
 
     $torDataRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot '.torchat\clients\desktop\tor'))
     $torProcesses = @(Get-CimInstance Win32_Process -Filter "Name='tor.exe'" -ErrorAction SilentlyContinue |
         Where-Object {
             $_.CommandLine -and $_.CommandLine.IndexOf($torDataRoot, [StringComparison]::OrdinalIgnoreCase) -ge 0
         })
-    Stop-ProcessSet -Processes $torProcesses -Label 'desktop Tor process'
+    Stop-ProcessSet -Processes $torProcesses -Label 'desktop-tor'
 
     for ($attempt = 1; $attempt -le 20; $attempt++) {
         if (@(Get-FlutterProcesses).Count -eq 0 -and @(Get-RepoProcesses -Name 'torchat-desktop.exe').Count -eq 0) {
@@ -167,7 +168,7 @@ try {
         throw 'Desktop sidecar was not stable for five seconds after launch.'
     }
 
-    Write-Host "[torchat] Windows APP_READY run=$deployRunId runnerPid=$runnerPid sidecarPid=$sidecarPid"
+    Write-Host "[torchat] Windows APP_READY deployRunId=$deployRunId runnerPid=$runnerPid sidecarPid=$sidecarPid"
     Write-Host '[torchat] Windows engine process is stable; Tor and relay readiness remain visible in the application status center.'
 } catch {
     Save-WindowsLaunchDiagnostics -RunId $deployRunId
