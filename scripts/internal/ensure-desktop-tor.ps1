@@ -52,6 +52,6 @@ if ($isLinuxPlatform) { chmod +x $binary }
 
 [pscustomobject]@{
     Binary = (Resolve-Path -LiteralPath $binary).Path
-    DataDirectory = (Join-Path $RepoRoot "tmp\desktop-tor-data")
+    DataDirectory = (Join-Path $RepoRoot ".torchat\clients\desktop\tor\data")
     Version = $manifest.tor_version
 }

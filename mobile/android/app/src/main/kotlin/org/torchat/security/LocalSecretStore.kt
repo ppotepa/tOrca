@@ -48,6 +48,36 @@ class LocalSecretStore(private val context: Context) {
         return decrypt(key, android.util.Base64.decode(encoded, android.util.Base64.NO_WRAP))
     }
 
+    fun onionPrivateKey(generation: Long): String? =
+        encryptedString("onion-private-key-$generation")
+
+    fun storeOnionPrivateKey(generation: Long, value: String) {
+        putEncryptedString("onion-private-key-$generation", value)
+    }
+
+    fun onionServiceId(generation: Long): String? =
+        prefs.getString("onion-service-id-$generation", null)
+
+    fun storeOnionServiceId(generation: Long, value: String) {
+        prefs.edit().putString("onion-service-id-$generation", value).commit()
+    }
+
+    private fun encryptedString(name: String): String? {
+        val encoded = prefs.getString(name, null) ?: return null
+        val encrypted = android.util.Base64.decode(encoded, android.util.Base64.NO_WRAP)
+        return decrypt(key(), encrypted).toString(Charsets.UTF_8)
+    }
+
+    private fun putEncryptedString(name: String, value: String) {
+        val encrypted = encrypt(key(), value.toByteArray(Charsets.UTF_8))
+        prefs.edit()
+            .putString(
+                name,
+                android.util.Base64.encodeToString(encrypted, android.util.Base64.NO_WRAP),
+            )
+            .commit()
+    }
+
 
     fun clearLocalSecrets() {
         prefs.edit().clear().commit()

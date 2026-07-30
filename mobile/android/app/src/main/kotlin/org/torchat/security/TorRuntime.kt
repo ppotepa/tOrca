@@ -9,7 +9,6 @@ import android.util.Log
 import java.io.File
 import java.net.InetSocketAddress
 import java.net.Socket
-import java.net.URI
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import org.torproject.jni.TorService
@@ -30,6 +29,9 @@ class TorRuntime(private val context: Context) {
     private var service: TorService? = null
     private var connection: ServiceConnection? = null
     private var config: TorRuntimeConfig? = null
+    private var activeServiceId: String? = null
+    private var activeLocalPort: Int? = null
+    private var activeVirtualPort: Int? = null
 
     fun prepare(): TorRuntimeConfig {
         val torrc = TorService.getTorrc(context)
@@ -53,13 +55,7 @@ class TorRuntime(private val context: Context) {
     ): TorRuntimeConfig {
         check(service == null) { "Tor runtime is already running" }
         val prepared = config ?: prepare()
-        val relayUri = URI(relayOnionUrl)
-        val relayHost = relayUri.host?.lowercase().orEmpty()
-        require(relayHost.matches(Regex("^[a-z2-7]{56}\\.onion$"))) {
-            "Relay URL must contain a Tor v3 onion host"
-        }
-        val relayPort = relayUri.port.takeIf { it > 0 }
-            ?: if (relayUri.scheme.equals("https", ignoreCase = true)) 443 else 80
+        require(relayOnionUrl.isNotBlank()) { "Control-plane onion URL is required" }
         val ready = CountDownLatch(1)
         var failure: Throwable? = null
 
@@ -103,30 +99,8 @@ class TorRuntime(private val context: Context) {
             Log.i("TorChat-Tor", "Native Tor SOCKS port detected: $socksPort")
             check(socksPort > 0) { "Native Tor did not publish a SOCKS port" }
 
-            val bootstrapStartedAt = System.nanoTime()
-            val bootstrapTimeoutNanos = TimeUnit.MINUTES.toNanos(3)
-            var onionReady = false
-            var attempt = 0
-            while (System.nanoTime() - bootstrapStartedAt < bootstrapTimeoutNanos) {
-                attempt += 1
-                onionReady = probeOnion(socksPort, relayHost, relayPort)
-                if (onionReady) break
-                val elapsedSeconds = TimeUnit.NANOSECONDS.toSeconds(
-                    System.nanoTime() - bootstrapStartedAt,
-                )
-                val progress = (5 + elapsedSeconds * 90 / 180).toInt().coerceIn(5, 95)
-                val summary = "Budowanie obwodu do $relayHost (próba $attempt)"
-                onBootstrapProgress(progress, summary)
-                if (attempt == 1 || attempt % 10 == 0) {
-                    Log.i("TorChat-Tor", "$summary progress=$progress%")
-                }
-                Thread.sleep(1_000)
-            }
-            check(onionReady) {
-                "Tor nie zbudował obwodu do $relayHost w ciągu 3 minut"
-            }
-            Log.i("TorChat-Tor", "Onion circuit ready through SOCKS5 port $socksPort: $relayHost:$relayPort")
-            onBootstrapProgress(100, "Tor gotowy · obwód onion działa")
+            Log.i("TorChat-Tor", "Tor SOCKS ready on port $socksPort; onion circuits are on demand")
+            onBootstrapProgress(100, "Tor gotowy · połączenia onion na żądanie")
             return prepared.copy(socksPort = socksPort)
         } catch (error: Throwable) {
             failure = error
@@ -135,42 +109,65 @@ class TorRuntime(private val context: Context) {
         }
     }
 
-    private fun probeOnion(port: Int, host: String, targetPort: Int): Boolean = runCatching {
-        val domain = host.toByteArray(Charsets.US_ASCII)
-        require(domain.size in 1..255) { "Invalid SOCKS5 domain length" }
-        Socket().use { socket ->
-            socket.connect(InetSocketAddress("127.0.0.1", port), 5_000)
-            socket.soTimeout = 5_000
-            val output = socket.getOutputStream()
-            val input = socket.getInputStream()
-            output.write(byteArrayOf(0x05, 0x01, 0x00))
-            output.flush()
-            val greeting = input.readNBytes(2)
-            check(greeting.size == 2 && greeting[0] == 0x05.toByte() && greeting[1] == 0x00.toByte())
-
-            val request = ByteArray(7 + domain.size)
-            request[0] = 0x05
-            request[1] = 0x01
-            request[2] = 0x00
-            request[3] = 0x03
-            request[4] = domain.size.toByte()
-            domain.copyInto(request, destinationOffset = 5)
-            request[request.lastIndex - 1] = (targetPort ushr 8).toByte()
-            request[request.lastIndex] = targetPort.toByte()
-            output.write(request)
-            output.flush()
-
-            val response = input.readNBytes(4)
-            response.size == 4 &&
-                response[0] == 0x05.toByte() &&
-                response[1] == 0x00.toByte()
-        }
-    }.getOrDefault(false)
-
     private fun isListening(port: Int): Boolean = runCatching {
         Socket().use { it.connect(InetSocketAddress("127.0.0.1", port), 500) }
         true
     }.getOrDefault(false)
+
+    @Synchronized
+    fun configureOnionService(
+        localPort: Int,
+        virtualPort: Int,
+        generation: Long,
+        secrets: LocalSecretStore,
+    ): String {
+        require(localPort in 1..65535) { "Invalid peer listener port" }
+        require(virtualPort in 1..65535) { "Invalid onion virtual port" }
+        val control = service?.torControlConnection
+            ?: error("Tor control connection is not available")
+        val previousServiceId = activeServiceId ?: secrets.onionServiceId(generation)
+        if (!previousServiceId.isNullOrBlank()) {
+            runCatching { control.delOnion(previousServiceId) }
+        }
+        val key = secrets.onionPrivateKey(generation) ?: "NEW:ED25519-V3"
+        val result = control.addOnion(
+            key,
+            mapOf(virtualPort to "127.0.0.1:$localPort"),
+        )
+        val serviceId = result.entries
+            .firstOrNull {
+                it.key.equals("ServiceID", ignoreCase = true) ||
+                    it.key.equals("onionAddress", ignoreCase = true)
+            }
+            ?.value
+            ?.trim()
+            ?.lowercase()
+            ?.removeSuffix(".onion")
+            ?: error("Tor ADD_ONION did not return ServiceID (keys=${result.keys})")
+        require(serviceId.matches(Regex("^[a-z2-7]{56}$"))) {
+            "Tor ADD_ONION returned an invalid service ID"
+        }
+        result.entries
+            .firstOrNull {
+                it.key.equals("PrivateKey", ignoreCase = true) ||
+                    it.key.equals("onionPrivKey", ignoreCase = true)
+            }
+            ?.value
+            ?.takeIf { it.isNotBlank() }
+            ?.let { secrets.storeOnionPrivateKey(generation, it) }
+        secrets.storeOnionServiceId(generation, serviceId)
+        activeServiceId = serviceId
+        activeLocalPort = localPort
+        activeVirtualPort = virtualPort
+        return "$serviceId.onion"
+    }
+
+    @Synchronized
+    fun rotateOnionService(generation: Long, secrets: LocalSecretStore): Pair<String, Int> {
+        val localPort = activeLocalPort ?: error("Peer listener has not been configured")
+        val virtualPort = activeVirtualPort ?: error("Onion virtual port has not been configured")
+        return configureOnionService(localPort, virtualPort, generation, secrets) to virtualPort
+    }
 
     fun stop() {
         release()
@@ -186,6 +183,9 @@ class TorRuntime(private val context: Context) {
         }
         connection = null
         service = null
+        activeServiceId = null
+        activeLocalPort = null
+        activeVirtualPort = null
         Log.i("TorChat-Tor", "Native Tor service released")
     }
 }

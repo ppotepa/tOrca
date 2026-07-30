@@ -1,8 +1,9 @@
 use rusqlite::{OptionalExtension, Transaction, params};
 use torchat_client_runtime::{
     ChatMessage, ContactRecord, ConversationState, ConversationSummary, InviteCode, InviteState,
-    MessageState, PairingItem, ReceiptSendEffect, RuntimeError, RuntimeIdentity, RuntimeProfile,
-    RuntimeResult, RuntimeStorage, VerificationState,
+    MessageState, PairingItem, PeerConnectionStatus, PeerEndpointStatus, ReceiptSendEffect,
+    RuntimeError, RuntimeIdentity, RuntimeProfile, RuntimeResult, RuntimeStorage,
+    VerificationState,
 };
 
 use super::{
@@ -409,6 +410,10 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                     muted: false,
                     blocked: false,
                     verification: VerificationState::Unverified,
+                    peer_endpoint_status: PeerEndpointStatus::Missing,
+                    peer_connection_status: PeerConnectionStatus::Offline,
+                    last_peer_connected_at: None,
+                    transport_policy: Default::default(),
                     dev: None,
                 }),
                 capability: Some(capability),
@@ -526,6 +531,10 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                     blocked: false,
                     installation_id,
                     verification: VerificationState::Unverified,
+                    peer_endpoint_status: PeerEndpointStatus::Missing,
+                    peer_connection_status: PeerConnectionStatus::Offline,
+                    last_peer_connected_at: None,
+                    transport_policy: Default::default(),
                     dev: None,
                 }),
                 capability,
@@ -574,10 +583,39 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
         let mut statement = self
             .tx()
             .prepare(
-                "SELECT installation_id, nickname, public_key, fingerprint, verification,
-                        local_alias, muted, blocked
-                 FROM contacts
-                 ORDER BY updated_at DESC, installation_id ASC;",
+                "SELECT c.installation_id, c.nickname, c.public_key, c.fingerprint,
+                        c.verification, c.local_alias, c.muted, c.blocked,
+                        c.transport_policy,
+                        CASE WHEN p.contact_installation_id IS NULL THEN 0 ELSE 1 END
+                            AS has_peer_endpoint,
+                        CASE
+                            WHEN EXISTS (
+                                SELECT 1
+                                FROM peer_endpoint_bootstrap_outbox b
+                                WHERE b.contact_installation_id = c.installation_id
+                            ) THEN 1
+                            WHEN EXISTS (
+                                SELECT 1
+                                FROM pending_contact_confirmations cc
+                                WHERE cc.peer_installation_id = c.installation_id
+                            ) THEN 1
+                            ELSE 0
+                        END AS has_pending_peer_exchange,
+                        CASE
+                            WHEN EXISTS (
+                                SELECT 1
+                                FROM outbound_deliveries od
+                                WHERE od.contact_installation_id = c.installation_id
+                                  AND UPPER(od.state) = 'QUEUED'
+                                  AND od.attempt_count > 0
+                            ) THEN 1
+                            ELSE 0
+                        END AS has_peer_retry,
+                        p.last_connected_at
+                 FROM contacts c
+                 LEFT JOIN contact_peer_endpoints p
+                   ON p.contact_installation_id = c.installation_id
+                 ORDER BY c.updated_at DESC, c.installation_id ASC;",
             )
             .map_err(storage_error)?;
         let rows = statement
@@ -591,6 +629,11 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                     row.get::<_, Option<String>>("local_alias")?,
                     row.get::<_, i64>("muted")?,
                     row.get::<_, i64>("blocked")?,
+                    row.get::<_, String>("transport_policy")?,
+                    row.get::<_, i64>("has_peer_endpoint")?,
+                    row.get::<_, i64>("has_pending_peer_exchange")?,
+                    row.get::<_, i64>("has_peer_retry")?,
+                    row.get::<_, Option<i64>>("last_connected_at")?,
                 ))
             })
             .map_err(storage_error)?;
@@ -604,6 +647,11 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                 local_alias,
                 muted,
                 blocked,
+                transport_policy,
+                has_peer_endpoint,
+                has_pending_peer_exchange,
+                has_peer_retry,
+                last_peer_connected_at,
             ) = row.map_err(storage_error)?;
             Ok(ContactRecord {
                 installation_id,
@@ -614,6 +662,20 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                 muted: muted != 0,
                 blocked: blocked != 0,
                 verification: Self::decode_verification(verification)?,
+                peer_endpoint_status: if has_peer_endpoint != 0 {
+                    PeerEndpointStatus::Verified
+                } else if has_pending_peer_exchange != 0 {
+                    PeerEndpointStatus::PendingExchange
+                } else {
+                    PeerEndpointStatus::Missing
+                },
+                peer_connection_status: if has_peer_retry != 0 {
+                    PeerConnectionStatus::Backoff
+                } else {
+                    PeerConnectionStatus::Offline
+                },
+                transport_policy: serde_json::from_str(&format!("\"{transport_policy}\"")).unwrap_or_default(),
+                last_peer_connected_at,
                 dev: None,
             })
         })
@@ -625,9 +687,9 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
             .execute(
                 "INSERT INTO contacts (
                     installation_id, nickname, public_key, fingerprint, key_package,
-                    verification, source, local_alias, muted, blocked, created_at, updated_at
+                    verification, source, local_alias, muted, blocked, transport_policy, created_at, updated_at
                  ) VALUES (
-                    ?1, ?2, ?3, ?4, NULL, ?5, 'runtime', ?6, ?7, ?8, unixepoch(), unixepoch()
+                    ?1, ?2, ?3, ?4, NULL, ?5, 'runtime', ?6, ?7, ?8, ?9, unixepoch(), unixepoch()
                  )
                  ON CONFLICT(installation_id) DO UPDATE SET
                     nickname = excluded.nickname,
@@ -637,6 +699,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                     local_alias = excluded.local_alias,
                     muted = excluded.muted,
                     blocked = excluded.blocked,
+                    transport_policy = excluded.transport_policy,
                     updated_at = unixepoch();",
                 params![
                     contact.installation_id,
@@ -647,6 +710,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                     contact.local_alias,
                     if contact.muted { 1 } else { 0 },
                     if contact.blocked { 1 } else { 0 },
+                    serde_json::to_string(&contact.transport_policy).unwrap_or_else(|_| "\"PEER_ONLY\"".to_owned()).trim_matches('"'),
                 ],
             )
             .map_err(storage_error)?;
@@ -986,6 +1050,27 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
         self.tx()
             .execute(
                 "UPDATE pending_welcomes
+                 SET next_attempt_at = 0;",
+                [],
+            )
+            .map_err(storage_error)?;
+        self.tx()
+            .execute(
+                "UPDATE peer_endpoint_bootstrap_outbox
+                 SET next_attempt_at = 0;",
+                [],
+            )
+            .map_err(storage_error)?;
+        self.tx()
+            .execute(
+                "UPDATE pending_contact_confirmations
+                 SET next_attempt_at = 0;",
+                [],
+            )
+            .map_err(storage_error)?;
+        self.tx()
+            .execute(
+                "UPDATE pending_pairing_acknowledgements
                  SET next_attempt_at = 0;",
                 [],
             )

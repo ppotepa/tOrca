@@ -26,6 +26,7 @@ class MainShell extends StatelessWidget {
     required this.status,
     required this.phase,
     required this.latencyMs,
+    required this.peerServerStatus,
     required this.contacts,
     required this.conversations,
     required this.messages,
@@ -58,6 +59,7 @@ class MainShell extends StatelessWidget {
   final MobileTab tab;
   final String nickname, fingerprint, ownInvite, status, error, notice, action;
   final TransportPhase phase;
+  final PeerServerStatus peerServerStatus;
   final int? latencyMs;
   final List<ContactRecord> contacts;
   final List<ConversationSummary> conversations;
@@ -141,6 +143,7 @@ class MainShell extends StatelessWidget {
             status: status,
             phase: phase,
             latencyMs: latencyMs,
+            peerServerStatus: peerServerStatus,
             contacts: contacts,
             conversations: conversations,
             selectedConversation: selectedConversation,
@@ -167,6 +170,11 @@ class MainShell extends StatelessWidget {
                 ],
               ),
               actions: [
+                IconButton(
+                  tooltip: peerServerStatus.label,
+                  onPressed: onRetryTor,
+                  icon: PeerServerIndicator(status: peerServerStatus),
+                ),
                 IconButton(
                   tooltip: 'Konto',
                   onPressed: onOpenAccount,
@@ -231,6 +239,7 @@ class DesktopMainShell extends StatelessWidget {
     required this.status,
     required this.phase,
     required this.latencyMs,
+    required this.peerServerStatus,
     required this.contacts,
     required this.conversations,
     required this.selectedConversation,
@@ -248,6 +257,7 @@ class DesktopMainShell extends StatelessWidget {
   final MobileTab tab;
   final String nickname, status;
   final TransportPhase phase;
+  final PeerServerStatus peerServerStatus;
   final int? latencyMs;
   final List<ContactRecord> contacts;
   final List<ConversationSummary> conversations;
@@ -284,6 +294,7 @@ class DesktopMainShell extends StatelessWidget {
           desktop: true,
           latencyMs: latencyMs,
         ),
+        PeerStatusBar(status: peerServerStatus),
         ActionStatusStrip(action: action),
         Expanded(
           child: LayoutBuilder(
@@ -298,6 +309,7 @@ class DesktopMainShell extends StatelessWidget {
                     child: DesktopRail(
                       tab: tab,
                       nickname: nickname,
+                      peerServerStatus: peerServerStatus,
                       unreadTotal: unreadTotal,
                       onTab: onTab,
                       onAccount: onAccount,
@@ -342,11 +354,32 @@ class DesktopMainShell extends StatelessWidget {
   );
 }
 
+class PeerServerIndicator extends StatelessWidget {
+  const PeerServerIndicator({super.key, required this.status});
+
+  final PeerServerStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = switch (status) {
+      PeerServerStatus.ready => Colors.green,
+      PeerServerStatus.starting => Colors.orange,
+      PeerServerStatus.offline => Theme.of(context).colorScheme.outline,
+      PeerServerStatus.error => Theme.of(context).colorScheme.error,
+    };
+    return Tooltip(
+      message: status.label,
+      child: Icon(Icons.settings_input_antenna, color: color, size: 20),
+    );
+  }
+}
+
 class DesktopRail extends StatelessWidget {
   const DesktopRail({
     super.key,
     required this.tab,
     required this.nickname,
+    required this.peerServerStatus,
     required this.unreadTotal,
     required this.onTab,
     required this.onAccount,
@@ -354,6 +387,7 @@ class DesktopRail extends StatelessWidget {
   });
   final MobileTab tab;
   final String nickname;
+  final PeerServerStatus peerServerStatus;
   final int unreadTotal;
   final ValueChanged<MobileTab> onTab;
   final VoidCallback onAccount;
@@ -378,6 +412,16 @@ class DesktopRail extends StatelessWidget {
                 ThemedIcon(Icons.eco_outlined, size: 18),
                 SizedBox(width: 8),
                 Text('TorChat'),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Row(
+              children: [
+                PeerServerIndicator(status: peerServerStatus),
+                const SizedBox(width: 8),
+                Text(peerServerStatus.label),
               ],
             ),
           ),

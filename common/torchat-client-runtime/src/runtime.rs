@@ -203,11 +203,13 @@ where
         self.expire_pairing_items(&mut local, true)?;
         let mut acknowledgements = Vec::new();
         for remote_item in remote {
+            let pairing_id = remote_item.pairing_id.clone();
             let local_item = local
                 .iter()
                 .position(|item| item.pairing_id == remote_item.pairing_id)
                 .map(|index| local.remove(index));
             let merge = merge_pairing_item(local_item, remote_item.clone());
+            acknowledgements.push(crate::PairingAcknowledgeEffect { pairing_id });
             if merge.inserted {
                 self.session.push_event(RuntimeEvent::InviteReceived {
                     pairing_id: Some(merge.item.pairing_id.clone()),
@@ -216,9 +218,6 @@ where
                         .sender
                         .as_ref()
                         .map(|sender| sender.nickname.clone()),
-                });
-                acknowledgements.push(crate::PairingAcknowledgeEffect {
-                    pairing_id: merge.item.pairing_id.clone(),
                 });
                 let item = merge.item.clone();
                 self.storage.put_pairing_inbox(item.clone())?;
@@ -478,6 +477,7 @@ where
                 InviteState::Pending | InviteState::Accepted | InviteState::Rejected => {
                     InviteState::Rejected
                 }
+                InviteState::Completed => InviteState::Completed,
                 _ => {
                     return Err(RuntimeError::Conflict(
                         "pairing peer outcome is invalid for the current state".to_owned(),
@@ -527,11 +527,6 @@ where
         open_conversation: bool,
         invite_id: Option<String>,
     ) -> RuntimeResult<crate::WelcomeAcceptedResult> {
-        let conversation = self.promote_contact_with_status(
-            contact.clone(),
-            crate::ConversationState::Verifying,
-            open_conversation,
-        )?;
         let mut confirm_contact = None;
 
         if let Some(invite_id) = invite_id {
@@ -545,12 +540,20 @@ where
                 })?;
             match item.state {
                 InviteState::Accepted => {
+                    let capability = item.capability.clone().ok_or_else(|| {
+                        RuntimeError::Conflict("pairing capability does not exist".to_owned())
+                    })?;
                     item.state = InviteState::Completed;
                     item = normalize_pairing_item(item);
                     self.storage.put_pairing_inbox(item.clone())?;
                     self.session.push_event(RuntimeEvent::InviteStateChanged {
                         pairing_id: Some(item.pairing_id.clone()),
                         state: Some(InviteState::Completed),
+                    });
+                    confirm_contact = Some(crate::PairingConfirmContactEffect {
+                        pairing_id: item.pairing_id.clone(),
+                        capability,
+                        peer_installation_id: contact.installation_id.clone(),
                     });
                 }
                 InviteState::Completed => {}
@@ -560,12 +563,23 @@ where
                     ));
                 }
             }
-            confirm_contact = Some(crate::PairingConfirmContactEffect {
-                pairing_id: item.pairing_id,
-                capability: item.capability.unwrap_or_default(),
-                peer_installation_id: contact.installation_id,
-            });
+            if matches!(item.state, InviteState::Completed) && confirm_contact.is_none() {
+                let capability = item.capability.clone().ok_or_else(|| {
+                    RuntimeError::Conflict("pairing capability does not exist".to_owned())
+                })?;
+                confirm_contact = Some(crate::PairingConfirmContactEffect {
+                    pairing_id: item.pairing_id.clone(),
+                    capability,
+                    peer_installation_id: contact.installation_id.clone(),
+                });
+            }
         }
+
+        let conversation = self.promote_contact_with_status(
+            contact.clone(),
+            crate::ConversationState::Verifying,
+            open_conversation,
+        )?;
 
         Ok(crate::WelcomeAcceptedResult {
             conversation,
@@ -638,6 +652,25 @@ where
         }
         contact.muted = muted;
         contact.blocked = blocked;
+        self.storage.put_contact(contact.clone())?;
+        self.session.push_event(RuntimeEvent::Changed {
+            kind: Some("contacts".to_owned()),
+        });
+        Ok(contact)
+    }
+
+    pub fn set_contact_transport_policy(
+        &mut self,
+        installation_id: &str,
+        policy: crate::ContactTransportPolicy,
+    ) -> RuntimeResult<ContactRecord> {
+        let mut contact = self
+            .storage
+            .contacts()?
+            .into_iter()
+            .find(|contact| contact.installation_id == installation_id)
+            .ok_or_else(|| RuntimeError::NotFound("contact does not exist".to_owned()))?;
+        contact.transport_policy = policy;
         self.storage.put_contact(contact.clone())?;
         self.session.push_event(RuntimeEvent::Changed {
             kind: Some("contacts".to_owned()),
@@ -1683,7 +1716,11 @@ mod tests {
             local_alias: None,
             muted: false,
             blocked: false,
+            peer_endpoint_status: crate::PeerEndpointStatus::Missing,
+            peer_connection_status: crate::PeerConnectionStatus::Offline,
+            last_peer_connected_at: None,
             verification: VerificationState::Verified,
+            transport_policy: Default::default(),
             dev: None,
         }
     }
@@ -1860,6 +1897,32 @@ mod tests {
     }
 
     #[test]
+    fn merge_pairing_inbox_retries_ack_for_existing_remote_invite() {
+        let mut runtime = runtime();
+        let mut local = pairing("pairing-1", InviteState::Pending);
+        local.sender = Some(contact());
+        local.received = true;
+        runtime.storage.put_pairing_inbox(local).unwrap();
+
+        let mut remote = pairing("pairing-1", InviteState::Pending);
+        remote.sender = Some(contact());
+        remote.received = true;
+
+        let result = runtime.merge_pairing_inbox(vec![remote]).unwrap();
+
+        assert_eq!(result.items.len(), 1);
+        assert_eq!(result.acknowledgements.len(), 1);
+        assert_eq!(result.acknowledgements[0].pairing_id, "pairing-1");
+        assert!(
+            !runtime.drain_events().into_iter().any(|event| matches!(
+                event,
+                RuntimeEvent::InviteReceived { pairing_id, .. }
+                    if pairing_id.as_deref() == Some("pairing-1")
+            ))
+        );
+    }
+
+    #[test]
     fn open_conversation_marks_unread_as_read() {
         let mut runtime = runtime();
         runtime
@@ -1989,6 +2052,31 @@ mod tests {
     }
 
     #[test]
+    fn completed_pairing_ignores_late_rejection_outcome() {
+        let mut runtime = runtime();
+        runtime
+            .storage
+            .put_pairing_outbox(pairing("pairing-1", InviteState::Completed))
+            .unwrap();
+
+        runtime
+            .apply_pairing_peer_outcome("pairing-1", crate::PairingPeerOutcome::RejectionReceived)
+            .unwrap();
+
+        assert_eq!(
+            runtime.storage.pairing_outbox().unwrap()[0].state,
+            InviteState::Completed
+        );
+        assert!(
+            !runtime.drain_events().iter().any(|event| matches!(
+                event,
+                RuntimeEvent::InviteStateChanged { pairing_id, .. }
+                    if pairing_id.as_deref() == Some("pairing-1")
+            ))
+        );
+    }
+
+    #[test]
     fn welcome_accepted_promotes_contact_and_completes_matching_inbox_offer() {
         let mut runtime = runtime();
         let mut pairing = pairing("pairing-1", InviteState::Accepted);
@@ -2009,6 +2097,71 @@ mod tests {
         assert_eq!(
             runtime.storage.pairing_inbox().unwrap()[0].state,
             InviteState::Completed
+        );
+    }
+
+    #[test]
+    fn merge_pairing_outbox_keeps_local_completed_over_older_remote_state() {
+        let mut runtime = runtime();
+        runtime
+            .storage
+            .put_pairing_outbox(pairing("pairing-1", InviteState::Completed))
+            .unwrap();
+
+        let result = runtime
+            .merge_pairing_outbox(vec![pairing("pairing-1", InviteState::Accepted)])
+            .unwrap();
+
+        assert_eq!(result.items.len(), 1);
+        assert_eq!(result.items[0].state, InviteState::Completed);
+        assert_eq!(
+            runtime.storage.pairing_outbox().unwrap()[0].state,
+            InviteState::Completed
+        );
+    }
+
+    #[test]
+    fn welcome_accepted_requires_pairing_capability_before_promoting_contact() {
+        let mut runtime = runtime();
+        let mut pairing = pairing("pairing-1", InviteState::Accepted);
+        pairing.sender = Some(contact());
+        pairing.capability = None;
+        pairing.offer_invite_id = Some("invite-1".to_owned());
+        pairing.offer_payload = Some("payload-json".to_owned());
+        runtime.storage.put_pairing_inbox(pairing).unwrap();
+
+        let error = runtime
+            .welcome_accepted(contact(), true, Some("invite-1".to_owned()))
+            .unwrap_err();
+
+        assert!(matches!(error, RuntimeError::Conflict(_)));
+        assert!(runtime.contacts().unwrap().is_empty());
+        assert!(runtime.conversations().unwrap().is_empty());
+        assert_eq!(
+            runtime.storage.pairing_inbox().unwrap()[0].state,
+            InviteState::Accepted
+        );
+    }
+
+    #[test]
+    fn welcome_accepted_does_not_promote_contact_for_unknown_invite() {
+        let mut runtime = runtime();
+        let mut pairing = pairing("pairing-1", InviteState::Accepted);
+        pairing.sender = Some(contact());
+        pairing.offer_invite_id = Some("invite-1".to_owned());
+        pairing.offer_payload = Some("payload-json".to_owned());
+        runtime.storage.put_pairing_inbox(pairing).unwrap();
+
+        let error = runtime
+            .welcome_accepted(contact(), true, Some("invite-2".to_owned()))
+            .unwrap_err();
+
+        assert!(matches!(error, RuntimeError::NotFound(_)));
+        assert!(runtime.contacts().unwrap().is_empty());
+        assert!(runtime.conversations().unwrap().is_empty());
+        assert_eq!(
+            runtime.storage.pairing_inbox().unwrap()[0].state,
+            InviteState::Accepted
         );
     }
 

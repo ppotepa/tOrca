@@ -47,6 +47,10 @@ pub fn contact_record_from_card(card: &ContactCard, verified: bool) -> ContactRe
         } else {
             VerificationState::Unverified
         },
+        peer_endpoint_status: crate::PeerEndpointStatus::Missing,
+        peer_connection_status: crate::PeerConnectionStatus::Offline,
+        last_peer_connected_at: None,
+        transport_policy: Default::default(),
         dev: None,
     }
 }

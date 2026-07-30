@@ -316,16 +316,18 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
             ? 'Uruchamianie Tor…'
             : state.transport.label,
         detail: state.transport.detail,
-        progress: state.transport.progress,
         error: state.error,
         retry: controller.retryTor,
         connecting: !state.transport.failed,
+        steps: state.startupSteps,
       );
     }
     if (state.screen == ControllerScreen.nickname) {
       return NicknameScreen(
         controller: _nickname,
         transport: state.transport,
+        ready: state.startupSteps.isNotEmpty &&
+            state.startupSteps.every((step) => step.state == StartupStepState.ready),
         error: state.error,
         onSave: () async {
           await controller.setNickname(_nickname.text);
@@ -351,6 +353,7 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
       status: state.transport.label,
       phase: state.transport.phase,
       latencyMs: state.transport.latencyMs,
+      peerServerStatus: state.peerServerStatus,
       contacts: contacts,
       conversations: conversations,
       messages: state.messages,

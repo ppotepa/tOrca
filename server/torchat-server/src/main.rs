@@ -1173,7 +1173,12 @@ async fn route_envelope(
         || envelope.sender != sender_id
         || envelope.recipient.is_empty()
         || envelope.ciphertext.len() > 128 * 1024
-        || URL_SAFE_NO_PAD.decode(&envelope.ciphertext).is_err()
+        || !matches!(
+            torchat_core::relay::RelayPayloadV1::decode(&envelope.ciphertext),
+            Ok(torchat_core::relay::RelayPayloadV1::PairingOffer { .. })
+                | Ok(torchat_core::relay::RelayPayloadV1::PairingRejected { .. })
+                | Ok(torchat_core::relay::RelayPayloadV1::Welcome { .. })
+        )
     {
         tracing::warn!(
             sender = %sender_id,
@@ -1464,7 +1469,11 @@ mod tests {
             message_id,
             sender: "sender".to_owned(),
             recipient: "recipient".to_owned(),
-            ciphertext: URL_SAFE_NO_PAD.encode(b"ciphertext"),
+            ciphertext: torchat_core::relay::RelayPayloadV1::pairing_rejected(
+                message_id.to_string(),
+            )
+            .encode()
+            .expect("control-plane payload encodes"),
         }
     }
 

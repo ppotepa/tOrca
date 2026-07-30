@@ -5,6 +5,7 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     ClientEngineActor, EngineCommand, EngineCommandEnvelope, EngineConfig, EngineError,
     EngineEvent, EngineFatalError, EngineResult, PlatformFact, event::EngineEventReceiver,
+    logging::StartupJournal,
 };
 
 pub struct ClientEngine {
@@ -16,13 +17,34 @@ pub struct ClientEngine {
 impl ClientEngine {
     pub fn new(config: EngineConfig) -> EngineResult<Self> {
         let (command_tx, command_rx) = mpsc::channel(64);
+        let (actor_event_tx, mut actor_event_rx) = mpsc::channel(256);
         let (event_tx, event_rx) = mpsc::channel(256);
         let shutdown = CancellationToken::new();
-        let actor = ClientEngineActor::new(config)?;
-        let fatal_events = event_tx.clone();
+        let mut journal =
+            StartupJournal::open(config.log_directory.as_deref(), &config.platform);
+        let actor = match ClientEngineActor::new(config) {
+            Ok(actor) => actor,
+            Err(error) => {
+                journal.record_engine_creation_failure(&error.to_string());
+                return Err(error);
+            }
+        };
+        let public_events = event_tx.clone();
+        tokio::spawn(async move {
+            while let Some(event) = actor_event_rx.recv().await {
+                journal.record(&event);
+                if public_events.send(event).await.is_err() {
+                    break;
+                }
+            }
+        });
+        let fatal_events = actor_event_tx.clone();
         let actor_shutdown = shutdown.clone();
         tokio::spawn(async move {
-            if let Err(error) = actor.run(command_rx, event_tx, actor_shutdown).await {
+            if let Err(error) = actor
+                .run(command_rx, actor_event_tx, actor_shutdown)
+                .await
+            {
                 let _ = fatal_events
                     .send(EngineEvent::Fatal {
                         error: EngineFatalError {

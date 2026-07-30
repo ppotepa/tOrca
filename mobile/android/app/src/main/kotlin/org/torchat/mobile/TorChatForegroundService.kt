@@ -4,10 +4,17 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.ActivityManager
 import android.media.AudioAttributes
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Intent
 import android.content.Context
+import android.content.IntentFilter
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.os.PowerManager
 import android.os.IBinder
 import android.util.Base64
 import android.util.Log
@@ -26,18 +33,41 @@ import org.torchat.security.LocalSecretStore
 import org.torchat.security.TorRuntime
 import org.torchat.generated.EngineContract
 import java.io.File
+import java.util.UUID
 
 /** Owns Tor, engine lifecycle and notifications outside the Flutter UI. */
 class TorChatForegroundService : Service() {
+    private lateinit var startupLogger: StartupPlatformLogger
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var runtime: TorRuntime? = null
+    private var secretStore: LocalSecretStore? = null
     private var engineHost: AndroidEngineHost? = null
     private var engineEventPump: AndroidEngineEventPump? = null
     @Volatile private var starting = false
+    @Volatile private var networkOnline = false
     private val pendingTorStatuses = ArrayDeque<JSONObject>()
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) = publishNetworkState()
+        override fun onLost(network: Network) = publishNetworkState()
+        override fun onCapabilitiesChanged(
+            network: Network,
+            networkCapabilities: NetworkCapabilities,
+        ) = publishNetworkState()
+    }
+    private val powerModeReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) = publishPowerFacts()
+    }
 
     override fun onCreate() {
         super.onCreate()
+        startupLogger = StartupPlatformLogger(applicationContext)
+        startupLogger.write(
+            "info",
+            "service",
+            "startup_started",
+            "ENGINE",
+            "Foreground service startup initiated",
+        )
         // A service can be stopped and started again in the same process. Do not
         // let a completed deferred from the previous runtime make the new UI
         // skip the bootstrap step.
@@ -46,6 +76,16 @@ class TorChatForegroundService : Service() {
         }
         if (localReady.isCompleted) localReady = kotlinx.coroutines.CompletableDeferred()
         createNotificationChannel()
+        getSystemService(ConnectivityManager::class.java)
+            .registerDefaultNetworkCallback(networkCallback)
+        registerReceiver(
+            powerModeReceiver,
+            IntentFilter().apply {
+                addAction(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED)
+                addAction(PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED)
+            },
+        )
+        publishNetworkState()
         startForeground(NOTIFICATION_ID, notification("Uruchamianie Tor…"))
         publish(
             mapOf(
@@ -68,6 +108,13 @@ class TorChatForegroundService : Service() {
                     val config = withContext(Dispatchers.IO) {
                         tor.prepare()
                         tor.start(BuildConfig.TORCHAT_SERVER_URL) { progress, summary ->
+                            startupLogger.write(
+                                "info",
+                                "tor",
+                                "tor_bootstrap",
+                                "TOR",
+                                summary,
+                            )
                             // Native Tor reaching 100% completes the first
                             // phase, not the whole application connection.
                             val snapshot = torStatusSnapshot(
@@ -89,7 +136,7 @@ class TorChatForegroundService : Service() {
                             updateNotification("Tor bootstrap: $progress%")
                         }
                     }
-                    val secrets = LocalSecretStore(applicationContext)
+                    val secrets = LocalSecretStore(applicationContext).also { secretStore = it }
                     val databasePassphrase = secrets.databasePassphrase()
                     val identitySeed = if (BuildConfig.DEBUG && BuildConfig.TORCHAT_DEV_IDENTITY_KEY.isNotBlank()) {
                         Base64.decode(
@@ -123,7 +170,10 @@ class TorChatForegroundService : Service() {
                     ).also { it.start() }
                     publishEngineFact(engineAppVisibilityChangedFactJson(foreground = true))
                     publishEngineFact(engineTorEndpointAvailableFactJson(socks5Url))
+                    publishPowerFacts()
+                    publishBackgroundRestrictionFact()
                     pendingTorStatuses.forEach(::publishTorStatusFact)
+                    publishEngineFact(engineNetworkChangedFactJson(networkOnline))
 
                     val debugNickname = BuildConfig.TORCHAT_DEV_PROFILE
                         .takeIf { BuildConfig.DEBUG }
@@ -142,6 +192,13 @@ class TorChatForegroundService : Service() {
                         "TorChat-Engine",
                         "Foreground service client engine initialized connected=false",
                     )
+                    startupLogger.write(
+                        "info",
+                        "engine",
+                        "engine_initialized",
+                        "ENGINE",
+                        "Foreground service client engine initialized",
+                    )
                     connectEngine(host)
                     config
                 }.onSuccess {
@@ -150,6 +207,13 @@ class TorChatForegroundService : Service() {
                 }.onFailure { error ->
                     starting = false
                     Log.e("TorChat-Engine", "Mobile engine initialization failed", error)
+                    startupLogger.write(
+                        "error",
+                        "engine",
+                        "engine_initialization_failed",
+                        "ENGINE",
+                        error.stackTraceToString(),
+                    )
                     // Reset the native service before retrying. The SOCKS
                     // listener can remain bound after a failed bootstrap on
                     // some OEM builds, so a simple Activity retry is unsafe.
@@ -181,11 +245,17 @@ class TorChatForegroundService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        runCatching {
+            getSystemService(ConnectivityManager::class.java)
+                .unregisterNetworkCallback(networkCallback)
+        }
+        runCatching { unregisterReceiver(powerModeReceiver) }
         publishEngineFact(engineAppVisibilityChangedFactJson(foreground = false))
         publishEngineFact(engineTorEndpointLostFactJson("TorChat service stopped"))
         shutdownEngineHost()
         runtime?.release()
         runtime = null
+        secretStore = null
         starting = false
         activeEngineHost = null
         if (!ready.isCompleted) {
@@ -210,7 +280,10 @@ class TorChatForegroundService : Service() {
         while (true) {
             attempt += 1
             val result = runCatching {
-                host.submitCommandAndAwait(engineCommand(EngineContract.COMMAND_CONNECT))
+                host.submitCommandAndAwait(
+                    engineCommand(EngineContract.COMMAND_CONNECT),
+                    timeoutMs = 60_000L,
+                )
             }
             if (result.isSuccess) return
 
@@ -219,6 +292,14 @@ class TorChatForegroundService : Service() {
                 "TorChat-Engine",
                 "Relay connect attempt $attempt failed; retrying in ${retryDelayMs}ms",
                 result.exceptionOrNull(),
+            )
+            startupLogger.write(
+                "warn",
+                "relay",
+                "relay_connect_retry",
+                "RELAY",
+                result.exceptionOrNull()?.message ?: "Relay connection failed",
+                attempt,
             )
             updateNotification("Łączenie z relayem · próba $attempt")
             delay(retryDelayMs)
@@ -235,6 +316,40 @@ class TorChatForegroundService : Service() {
     private fun publishEngineFact(fact: JSONObject) {
         runCatching { engineHost?.publishPlatformFact(fact) }
             .onFailure { error -> Log.w("TorChat-Engine", "Unable to publish engine fact ${fact.optString(EngineContract.TYPE)}", error) }
+    }
+
+    private fun publishNetworkState() {
+        val manager = getSystemService(ConnectivityManager::class.java)
+        val capabilities = manager.getNetworkCapabilities(manager.activeNetwork)
+        val previous = networkOnline
+        networkOnline = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+        if (previous == networkOnline) return
+        publishEngineFact(engineNetworkChangedFactJson(networkOnline))
+        if (networkOnline && localReady.isCompleted) {
+            engineHost?.submitCommand(
+                UUID.randomUUID().toString(),
+                engineCommand(EngineContract.COMMAND_CONNECT),
+            )
+        }
+    }
+
+    private fun publishPowerFacts() {
+        val power = getSystemService(PowerManager::class.java)
+        publishEngineFact(
+            enginePowerModeChangedFactJson(
+                batterySaver = power.isPowerSaveMode,
+                deviceIdle = power.isDeviceIdleMode,
+            ),
+        )
+    }
+
+    private fun publishBackgroundRestrictionFact() {
+        val activityManager = getSystemService(ActivityManager::class.java)
+        publishEngineFact(
+            engineBackgroundExecutionRestrictedFactJson(
+                restricted = activityManager.isBackgroundRestricted,
+            ),
+        )
     }
 
     private fun publishProfileReady(profile: Any?) {
@@ -277,6 +392,13 @@ class TorChatForegroundService : Service() {
     }
 
     private fun handleEngineEvent(event: JSONObject) {
+        if (event.optString(EngineContract.TYPE) == EngineContract.EVENT_PLATFORM_ACTION) {
+            handlePlatformAction(
+                event.optJSONObject(EngineContract.ACTION)
+                    ?: error("Platform action event is missing action"),
+            )
+            return
+        }
         val publishedEvents = mapEngineEventToPublishedEvents(event)
         publishedEvents.forEach(::publish)
         when (event.optString(EngineContract.TYPE)) {
@@ -303,6 +425,13 @@ class TorChatForegroundService : Service() {
                 val message = error?.optString(EngineContract.MESSAGE)
                     .ifNullOrBlank { "Client engine failed" }
                 Log.e("TorChat-Engine", message)
+                startupLogger.write(
+                    "error",
+                    "engine",
+                    "engine_fatal",
+                    null,
+                    message,
+                )
                 if (!ready.isCompleted) {
                     ready.completeExceptionally(IllegalStateException(message))
                 }
@@ -315,6 +444,46 @@ class TorChatForegroundService : Service() {
                     id = notification.optString(EngineContract.ID).hashCode(),
                 )
             }
+        }
+    }
+
+    private fun handlePlatformAction(action: JSONObject) {
+        val tor = runtime ?: error("Tor runtime is not running")
+        val secrets = secretStore ?: error("Local secret store is not initialized")
+        val generation = action.getLong(EngineContract.GENERATION)
+        runCatching {
+            when (action.getString(EngineContract.TYPE)) {
+                EngineContract.PLATFORM_ACTION_CONFIGURE_ONION_SERVICE -> {
+                    val localPort = action.getInt(EngineContract.LOCAL_PORT)
+                    val virtualPort = action.getInt(EngineContract.VIRTUAL_PORT)
+                    val onionAddress = tor.configureOnionService(
+                        localPort = localPort,
+                        virtualPort = virtualPort,
+                        generation = generation,
+                        secrets = secrets,
+                    )
+                    onionAddress to virtualPort
+                }
+                EngineContract.PLATFORM_ACTION_ROTATE_ONION_SERVICE ->
+                    tor.rotateOnionService(generation, secrets)
+                else -> error("Unsupported platform action: ${action.optString(EngineContract.TYPE)}")
+            }
+        }.onSuccess { (onionAddress, virtualPort) ->
+            publishEngineFact(
+                engineOnionServiceAvailableFactJson(
+                    onionAddress = onionAddress,
+                    virtualPort = virtualPort,
+                    generation = generation,
+                ),
+            )
+            Log.i("TorChat-Tor", "Peer onion service ready generation=$generation")
+        }.onFailure { error ->
+            publishEngineFact(
+                engineOnionServiceLostFactJson(
+                    error.message ?: "Unable to configure peer onion service",
+                ),
+            )
+            Log.e("TorChat-Tor", "Peer onion service configuration failed", error)
         }
     }
 

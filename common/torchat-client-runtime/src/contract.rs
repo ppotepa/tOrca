@@ -13,6 +13,8 @@ pub enum RuntimeType {
     ConversationReadChanged,
     TypingChanged,
     PresenceChanged,
+    PeerEndpointChanged,
+    PeerConnectionChanged,
     Changed,
     RuntimeError,
     RuntimeLog,
@@ -81,6 +83,18 @@ pub enum RuntimeEvent {
         online: bool,
         #[serde(rename = "observedAt")]
         observed_at: i64,
+    },
+    PeerEndpointChanged {
+        #[serde(rename = "contactId")]
+        contact_id: String,
+        status: crate::models::PeerEndpointStatus,
+    },
+    PeerConnectionChanged {
+        #[serde(rename = "contactId")]
+        contact_id: String,
+        status: crate::models::PeerConnectionStatus,
+        #[serde(default, rename = "retryInMs")]
+        retry_in_ms: Option<u64>,
     },
     Changed {
         #[serde(default)]

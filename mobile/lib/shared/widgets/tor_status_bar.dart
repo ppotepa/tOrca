@@ -117,6 +117,14 @@ class _TorStatusBarState extends State<TorStatusBar>
                     Icon(Icons.eco_outlined, size: 15, color: color),
                     const SizedBox(width: 7),
                     Text(
+                      'Tor relay · ',
+                      style: TextStyle(
+                        color: color,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    Text(
                       widget.status.isEmpty
                           ? 'Łączenie z relayem…'
                           : widget.status,
@@ -150,6 +158,89 @@ class _TorStatusBarState extends State<TorStatusBar>
                   ],
                 ),
               ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class PeerStatusBar extends StatelessWidget {
+  const PeerStatusBar({super.key, required this.status});
+
+  final PeerServerStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = context.statusTheme;
+    final color = switch (status) {
+      PeerServerStatus.ready => theme.success,
+      PeerServerStatus.starting => theme.warning,
+      PeerServerStatus.offline => Theme.of(context).colorScheme.outline,
+      PeerServerStatus.error => theme.danger,
+    };
+    final trailing = switch (status) {
+      PeerServerStatus.ready => 'online',
+      PeerServerStatus.starting => 'starting',
+      PeerServerStatus.offline => 'offline',
+      PeerServerStatus.error => 'error',
+    };
+
+    return Semantics(
+      label: 'Status Tor P2P: ${status.label}',
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 420),
+        height: 30,
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: .10),
+          border: Border(
+            bottom: BorderSide(color: color.withValues(alpha: .40)),
+          ),
+        ),
+        child: Stack(
+          children: [
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 420),
+                height: 3,
+                color: color,
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Row(
+                children: [
+                  Icon(Icons.settings_input_antenna, size: 15, color: color),
+                  const SizedBox(width: 7),
+                  Text(
+                    'Tor P2P · ${status.label}',
+                    style: TextStyle(
+                      color: color,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const Spacer(),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    decoration: BoxDecoration(
+                      border: Border(
+                        left: BorderSide(color: color.withValues(alpha: .55)),
+                      ),
+                    ),
+                    child: Text(
+                      trailing,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontFamily: 'monospace',
+                        color: color.withValues(alpha: .92),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),

@@ -34,10 +34,34 @@ pub enum PlatformFact {
     TorEndpointLost {
         reason: String,
     },
+    OnionServiceAvailable {
+        onion_address: String,
+        virtual_port: u16,
+        generation: u64,
+    },
+    OnionServiceLost {
+        reason: String,
+    },
     AppVisibilityChanged {
         foreground: bool,
     },
-    NetworkChanged,
+    NetworkChanged {
+        #[serde(default = "default_true")]
+        online: bool,
+    },
+    PowerModeChanged {
+        #[serde(default)]
+        battery_saver: bool,
+        #[serde(default)]
+        device_idle: bool,
+    },
+    BackgroundExecutionRestricted {
+        restricted: bool,
+    },
+}
+
+const fn default_true() -> bool {
+    true
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -54,6 +78,11 @@ pub enum EngineCommand {
     ListMessages {
         conversation_id: String,
     },
+    GetPeerEndpoint,
+    RetryPeerConnection {
+        installation_id: String,
+    },
+    RotatePeerEndpoint,
     SetNickname {
         nickname: String,
     },
@@ -84,6 +113,8 @@ pub enum EngineCommand {
         muted: bool,
         #[serde(default)]
         blocked: bool,
+        #[serde(default)]
+        transport_policy: Option<torchat_client_runtime::ContactTransportPolicy>,
     },
     StartConversation {
         contact_id: String,

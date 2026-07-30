@@ -6,9 +6,10 @@ use rand_core::OsRng;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-pub mod c_api;
 pub mod application;
+pub mod c_api;
 pub mod mls;
+pub mod peer_protocol;
 pub mod relay;
 
 pub const PROTOCOL_VERSION: u16 = 1;
@@ -51,6 +52,8 @@ pub struct ContactInvite {
     pub key_package: String,
     pub invite_id: String,
     pub expires_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peer_endpoint: Option<peer_protocol::PeerEndpointBundle>,
     pub signature: Option<String>,
 }
 
@@ -73,6 +76,7 @@ impl ContactInvite {
             key_package,
             invite_id,
             expires_at,
+            peer_endpoint: None,
             signature: None,
         }
     }
@@ -144,6 +148,14 @@ impl ContactInvite {
             .is_some_and(|value| value.trim().is_empty() || value.chars().count() > 32)
         {
             return Err("invite nickname is invalid".into());
+        }
+        if let Some(endpoint) = &invite.peer_endpoint {
+            endpoint.validate(now as i64)?;
+            if endpoint.installation_id != invite.installation_id
+                || endpoint.identity_public_key != invite.public_key
+            {
+                return Err("invite peer endpoint does not match invite identity".into());
+            }
         }
         Ok(invite)
     }

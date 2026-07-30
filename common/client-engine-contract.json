@@ -11,6 +11,9 @@
       "listContacts",
       "listConversations",
       "listMessages",
+      "getPeerEndpoint",
+      "retryPeerConnection",
+      "rotatePeerEndpoint",
       "setNickname",
       "refreshPairingCode",
       "submitPairingCode",
@@ -43,6 +46,9 @@
     "list_contacts",
     "list_conversations",
     "list_messages",
+    "get_peer_endpoint",
+    "retry_peer_connection",
+    "rotate_peer_endpoint",
     "set_nickname",
     "refresh_pairing_code",
     "submit_pairing_code",
@@ -68,6 +74,7 @@
     "response",
     "runtime",
     "connection",
+    "platform_action",
     "notification_requested",
     "log",
     "fatal"
@@ -84,8 +91,12 @@
     "tor_status",
     "tor_endpoint_available",
     "tor_endpoint_lost",
+    "onion_service_available",
+    "onion_service_lost",
     "app_visibility_changed",
-    "network_changed"
+    "network_changed",
+    "power_mode_changed",
+    "background_execution_restricted"
   ],
   "torPhases": [
     "starting",
@@ -104,6 +115,8 @@
     "conversation_read_changed",
     "typing_changed",
     "presence_changed",
+    "peer_endpoint_changed",
+    "peer_connection_changed",
     "changed",
     "runtime_error",
     "runtime_log"
@@ -136,8 +149,18 @@
     "FORWARDED",
     "DELIVERED",
     "RECIPIENT_OFFLINE",
+    "PEER_PERSISTED",
+    "PEER_DELIVERED",
+    "PEER_UNAVAILABLE",
+    "PEER_AUTHENTICATION_FAILED",
+    "PEER_REJECTED",
     "RETRYABLE_FAILURE",
     "PERMANENT_FAILURE"
+  ],
+  "contactTransportPolicies": [
+    "PEER_ONLY",
+    "PEER_WITH_RELAY_FALLBACK",
+    "RELAY_ONLY"
   ],
   "pairingPeerOutcomes": [
     "OFFER_RECEIVED",
@@ -169,5 +192,22 @@
     "reconnecting",
     "offline",
     "error"
+  ],
+  "peerEndpointStatuses": [
+    "MISSING",
+    "PENDING_EXCHANGE",
+    "VERIFIED",
+    "INVALID"
+  ],
+  "peerConnectionStatuses": [
+    "OFFLINE",
+    "CONNECTING",
+    "AUTHENTICATING",
+    "CONNECTED",
+    "BACKOFF"
+  ],
+  "platformActionTypes": [
+    "configure_onion_service",
+    "rotate_onion_service"
   ]
 }

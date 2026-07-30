@@ -198,7 +198,29 @@ class MainActivity : FlutterActivity() {
                     .put(
                         EngineContract.BLOCKED,
                         call.argument<Boolean>(EngineContract.BLOCKED) ?: false,
+                    )
+                    .apply {
+                        call.argument<String>(EngineContract.TRANSPORT_POLICY)?.let {
+                            put(EngineContract.TRANSPORT_POLICY, it)
+                        }
+                    },
+            )
+            EngineContract.GET_PEER_ENDPOINT -> submitQueryResult(
+                result,
+                EngineContract.COMMAND_GET_PEER_ENDPOINT,
+            )
+            EngineContract.RETRY_PEER_CONNECTION -> submitCommandResult(
+                result,
+                engineCommand(EngineContract.COMMAND_RETRY_PEER_CONNECTION)
+                    .put(
+                        EngineContract.COMMAND_INSTALLATION_ID,
+                        call.argument<String>(EngineContract.ARG_INSTALLATION_ID).orEmpty(),
                     ),
+            )
+            EngineContract.ROTATE_PEER_ENDPOINT -> submitCommandResult(
+                result,
+                engineCommand(EngineContract.COMMAND_ROTATE_PEER_ENDPOINT),
+                discardPayload = true,
             )
             EngineContract.LIST_CONTACTS -> submitQueryResult(
                 result,

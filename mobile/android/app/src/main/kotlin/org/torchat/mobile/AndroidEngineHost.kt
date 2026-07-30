@@ -138,12 +138,37 @@ fun engineTorEndpointLostFactJson(reason: String): JSONObject =
     engineCommand(EngineContract.FACT_TOR_ENDPOINT_LOST)
         .put(EngineContract.REASON, reason)
 
+fun engineOnionServiceAvailableFactJson(
+    onionAddress: String,
+    virtualPort: Int,
+    generation: Long,
+): JSONObject = engineCommand(EngineContract.FACT_ONION_SERVICE_AVAILABLE)
+    .put(EngineContract.FACT_ONION_ADDRESS, onionAddress)
+    .put(EngineContract.FACT_VIRTUAL_PORT, virtualPort)
+    .put(EngineContract.GENERATION, generation)
+
+fun engineOnionServiceLostFactJson(reason: String): JSONObject =
+    engineCommand(EngineContract.FACT_ONION_SERVICE_LOST)
+        .put(EngineContract.REASON, reason)
+
 fun engineAppVisibilityChangedFactJson(foreground: Boolean): JSONObject =
     engineCommand(EngineContract.FACT_APP_VISIBILITY_CHANGED)
         .put(EngineContract.FOREGROUND, foreground)
 
-fun engineNetworkChangedFactJson(): JSONObject =
+fun engineNetworkChangedFactJson(online: Boolean): JSONObject =
     engineCommand(EngineContract.FACT_NETWORK_CHANGED)
+        .put(EngineContract.ONLINE, online)
+
+fun enginePowerModeChangedFactJson(
+    batterySaver: Boolean,
+    deviceIdle: Boolean,
+): JSONObject = engineCommand(EngineContract.FACT_POWER_MODE_CHANGED)
+    .put(EngineContract.FACT_BATTERY_SAVER, batterySaver)
+    .put(EngineContract.FACT_DEVICE_IDLE, deviceIdle)
+
+fun engineBackgroundExecutionRestrictedFactJson(restricted: Boolean): JSONObject =
+    engineCommand(EngineContract.FACT_BACKGROUND_EXECUTION_RESTRICTED)
+        .put(EngineContract.RESTRICTED, restricted)
 
 private fun bytesJson(value: ByteArray): JSONArray = JSONArray().apply {
     value.forEach { put(it.toInt() and 0xff) }

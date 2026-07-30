@@ -17,6 +17,25 @@ function Test-TorChatFileExists([string]$Path) {
     }
 }
 
+function Get-TorChatSha256([string]$Path) {
+    $stream = [IO.File]::Open(
+        $Path,
+        [IO.FileMode]::Open,
+        [IO.FileAccess]::Read,
+        [IO.FileShare]::ReadWrite
+    )
+    try {
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try {
+            return ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-', '')
+        } finally {
+            $sha.Dispose()
+        }
+    } finally {
+        $stream.Dispose()
+    }
+}
+
 $msysPerl = "C:\msys64\usr\bin"
 $gitPerl = "C:\Program Files\Git\usr\bin"
 $strawberryPerl = "C:\Strawberry\perl\bin"
@@ -106,8 +125,8 @@ if (-not (Test-Path -LiteralPath $sourceLibraryPath)) {
 $copyRequired = $true
 if (Test-TorChatFileExists $libraryPath) {
     try {
-        $copyRequired = (Get-FileHash -LiteralPath $sourceLibraryPath -Algorithm SHA256).Hash -ne
-            (Get-FileHash -LiteralPath $libraryPath -Algorithm SHA256).Hash
+        $copyRequired = (Get-TorChatSha256 $sourceLibraryPath) -ne
+            (Get-TorChatSha256 $libraryPath)
     } catch {
         throw "Android engine library exists but cannot be read: $libraryPath. Stop Android Studio/Gradle/ADB users of the project or remove the locked file, then rerun."
     }
@@ -117,8 +136,8 @@ if ($copyRequired) {
         Copy-Item $sourceLibraryPath $libraryPath -Force -ErrorAction Stop
     } catch [System.UnauthorizedAccessException] {
         if (-not (Test-TorChatFileExists $libraryPath)) { throw }
-        $sourceHash = (Get-FileHash -LiteralPath $sourceLibraryPath -Algorithm SHA256).Hash
-        $targetHash = (Get-FileHash -LiteralPath $libraryPath -Algorithm SHA256).Hash
+        $sourceHash = Get-TorChatSha256 $sourceLibraryPath
+        $targetHash = Get-TorChatSha256 $libraryPath
         if ($sourceHash -ne $targetHash) { throw }
         Write-Host "[torchat] Android engine library is already current but locked: $libraryPath"
     }

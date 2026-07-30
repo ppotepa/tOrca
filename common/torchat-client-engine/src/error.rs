@@ -9,6 +9,7 @@ pub enum EngineError {
     InvalidCommand(String),
     Serialization(String),
     Storage(String),
+    Transport(String),
 }
 
 impl fmt::Display for EngineError {
@@ -18,7 +19,8 @@ impl fmt::Display for EngineError {
             Self::InvalidConfig(message)
             | Self::InvalidCommand(message)
             | Self::Serialization(message)
-            | Self::Storage(message) => f.write_str(message),
+            | Self::Storage(message)
+            | Self::Transport(message) => f.write_str(message),
         }
     }
 }

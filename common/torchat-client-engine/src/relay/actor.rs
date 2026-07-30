@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use tokio::{
     io::{AsyncRead, AsyncWrite, ReadBuf},
     net::TcpStream,
-    sync::mpsc::{self, UnboundedSender},
+    sync::mpsc::{self, Sender},
     time::{Instant, sleep, timeout},
 };
 use tokio_socks::tcp::Socks5Stream;
@@ -101,7 +101,7 @@ pub struct SharedRelayActor {
     pub heartbeat: super::RelayHeartbeatConfig,
     session_token: Option<String>,
     identity: Identity,
-    writer_commands: Option<UnboundedSender<WriterCommand>>,
+    writer_commands: Option<Sender<WriterCommand>>,
     event_receiver: Option<StdReceiver<RelayEvent>>,
 }
 
@@ -186,10 +186,21 @@ impl SharedRelayActor {
     }
 
     fn ensure_writer(&mut self, token: &str) -> RuntimeResult<()> {
-        if self.writer_commands.is_some() {
+        if self
+            .writer_commands
+            .as_ref()
+            .is_some_and(|commands| !commands.is_closed())
+        {
             return Ok(());
         }
-        let (command_tx, command_rx) = mpsc::unbounded_channel();
+        self.writer_commands = None;
+        self.event_receiver = None;
+        let command_capacity = self
+            .writer
+            .control_channel_capacity
+            .saturating_add(self.writer.data_channel_capacity)
+            .max(1);
+        let (command_tx, command_rx) = mpsc::channel(command_capacity);
         let (event_tx, event_rx) = std_mpsc::channel();
         let connection = self.connection.clone();
         let heartbeat = self.heartbeat.clone();
@@ -222,7 +233,7 @@ impl SharedRelayActor {
 
     fn shutdown_writer(&mut self) {
         if let Some(commands) = self.writer_commands.take() {
-            let _ = commands.send(WriterCommand::Shutdown);
+            let _ = commands.try_send(WriterCommand::Shutdown);
         }
         self.event_receiver = None;
     }
@@ -231,7 +242,7 @@ impl SharedRelayActor {
         let token = self.ensure_session_token()?;
         self.ensure_writer(&token)?;
         if let Some(commands) = &self.writer_commands
-            && commands.send(command.clone()).is_ok()
+            && commands.try_send(command.clone()).is_ok()
         {
             return Ok(());
         }
@@ -240,8 +251,10 @@ impl SharedRelayActor {
         self.writer_commands
             .as_ref()
             .ok_or_else(|| RuntimeError::Unavailable("relay writer is unavailable".to_owned()))?
-            .send(command)
-            .map_err(|_| RuntimeError::Unavailable("relay writer is unavailable".to_owned()))
+            .try_send(command)
+            .map_err(|error| {
+                RuntimeError::Unavailable(format!("relay writer queue is unavailable: {error}"))
+            })
     }
 }
 
@@ -295,7 +308,12 @@ impl EngineRelay for SharedRelayActor {
         let receiver = self.event_receiver.as_ref()?;
         match receiver.try_recv() {
             Ok(event) => Some(event),
-            Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => None,
+            Err(TryRecvError::Empty) => None,
+            Err(TryRecvError::Disconnected) => {
+                self.writer_commands = None;
+                self.event_receiver = None;
+                None
+            }
         }
     }
 
@@ -381,6 +399,10 @@ impl EngineRelay for SharedRelayActor {
                     muted: false,
                     blocked: false,
                     verification: VerificationState::Unverified,
+                    peer_endpoint_status: torchat_client_runtime::PeerEndpointStatus::Missing,
+                    peer_connection_status: torchat_client_runtime::PeerConnectionStatus::Offline,
+                    last_peer_connected_at: None,
+                    transport_policy: Default::default(),
                     dev: None,
                 }),
                 capability: Some(item.capability),
@@ -462,10 +484,9 @@ async fn run_writer_loop(
     heartbeat: super::RelayHeartbeatConfig,
     installation_id: String,
     token: String,
-    mut commands: mpsc::UnboundedReceiver<WriterCommand>,
+    mut commands: mpsc::Receiver<WriterCommand>,
     event_tx: StdSender<RelayEvent>,
 ) {
-    const RECONNECT_DELAY: Duration = Duration::from_secs(1);
     let mut pending = None;
     let mut reconnect_attempt = 0_u32;
     loop {
@@ -473,19 +494,20 @@ async fn run_writer_loop(
             Ok(value) => value,
             Err(error) => {
                 reconnect_attempt = reconnect_attempt.saturating_add(1);
+                let reconnect_delay = relay_reconnect_delay(reconnect_attempt);
                 let _ = event_tx.send(RelayEvent::Disconnected {
                     detail: error.to_string(),
                 });
                 let _ = event_tx.send(RelayEvent::Backoff {
                     attempt: reconnect_attempt,
-                    retry_in_ms: RECONNECT_DELAY.as_millis() as u64,
+                    retry_in_ms: reconnect_delay.as_millis() as u64,
                     detail: error.to_string(),
                 });
                 eprintln!("[TorChat-Engine] relay connect failed: {error}");
                 if matches!(commands.try_recv(), Ok(WriterCommand::Shutdown)) {
                     return;
                 }
-                sleep(RECONNECT_DELAY).await;
+                sleep(reconnect_delay).await;
                 continue;
             }
         };
@@ -582,13 +604,19 @@ async fn run_writer_loop(
             detail: disconnected_detail.clone(),
         });
         reconnect_attempt = reconnect_attempt.saturating_add(1);
+        let reconnect_delay = relay_reconnect_delay(reconnect_attempt);
         let _ = event_tx.send(RelayEvent::Backoff {
             attempt: reconnect_attempt,
-            retry_in_ms: RECONNECT_DELAY.as_millis() as u64,
+            retry_in_ms: reconnect_delay.as_millis() as u64,
             detail: disconnected_detail,
         });
-        sleep(RECONNECT_DELAY).await;
+        sleep(reconnect_delay).await;
     }
+}
+
+fn relay_reconnect_delay(attempt: u32) -> Duration {
+    let seconds = 2_u64.saturating_pow(attempt.saturating_sub(1).min(5));
+    Duration::from_secs(seconds.min(60))
 }
 
 async fn send_writer_command(

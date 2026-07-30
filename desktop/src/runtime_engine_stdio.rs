@@ -4,7 +4,7 @@ use sha2::{Digest, Sha256};
 use std::io::{BufRead, Write};
 use torchat_client_engine::{
     ClientEngine, EngineCommand, EngineCommandEnvelope, EngineConfig, EngineEvent,
-    EngineFatalError, PlatformFact, PlatformKind, config::SecretBytes,
+    EngineFatalError, PlatformAction, PlatformFact, PlatformKind, config::SecretBytes,
 };
 use url::Url;
 
@@ -94,14 +94,6 @@ pub fn run_stdio_engine(cli: Cli) -> Result<()> {
         };
         let mut engine = ClientEngine::new(config)?;
         engine.start().await?;
-        engine
-            .submit_platform_fact(
-                "desktop-tor-endpoint",
-                PlatformFact::TorEndpointAvailable {
-                    socks5_url: tor_runtime.socks_url().to_owned(),
-                },
-            )
-            .await?;
 
         let (request_tx, request_rx) = std::sync::mpsc::channel::<String>();
         std::thread::spawn(move || {
@@ -114,9 +106,24 @@ pub fn run_stdio_engine(cli: Cli) -> Result<()> {
         });
 
         let mut tor_status_seq = 0_u64;
+        let mut tor_endpoint_published = false;
+        let mut pending_platform_action: Option<PlatformAction> = None;
         loop {
-            drain_tor_statuses(&engine, &status_rx, &mut tor_status_seq).await?;
-            pump_engine_events(&mut engine).await?;
+            drain_tor_statuses(
+                &engine,
+                &tor_runtime,
+                &status_rx,
+                &mut tor_status_seq,
+                &mut tor_endpoint_published,
+            )
+            .await?;
+            flush_pending_platform_action(
+                &engine,
+                &tor_runtime,
+                &mut pending_platform_action,
+            )
+            .await?;
+            pump_engine_events(&mut engine, &tor_runtime, &mut pending_platform_action).await?;
 
             let line = match request_rx.recv_timeout(std::time::Duration::from_millis(50)) {
                 Ok(value) => value,
@@ -146,7 +153,16 @@ pub fn run_stdio_engine(cli: Cli) -> Result<()> {
                 })?;
                 continue;
             }
-            wait_for_response(&mut engine, &status_rx, &mut tor_status_seq, &request_id).await?;
+            wait_for_response(
+                &mut engine,
+                &tor_runtime,
+                &status_rx,
+                &mut tor_status_seq,
+                &mut tor_endpoint_published,
+                &mut pending_platform_action,
+                &request_id,
+            )
+            .await?;
             if shutdown {
                 break;
             }
@@ -157,10 +173,13 @@ pub fn run_stdio_engine(cli: Cli) -> Result<()> {
 
 pub(crate) async fn drain_tor_statuses(
     engine: &ClientEngine,
+    tor_runtime: &TorRuntime,
     status_rx: &std::sync::mpsc::Receiver<crate::tor_runtime::TorStatus>,
     tor_status_seq: &mut u64,
+    tor_endpoint_published: &mut bool,
 ) -> Result<()> {
     while let Ok(status) = status_rx.try_recv() {
+        let is_ready_status = matches!(status.phase, torchat_client_engine::TorPhase::Ready);
         *tor_status_seq = tor_status_seq.saturating_add(1);
         engine
             .submit_platform_fact(
@@ -176,28 +195,153 @@ pub(crate) async fn drain_tor_statuses(
                 },
             )
             .await?;
+        if !*tor_endpoint_published && is_ready_status && tor_runtime.is_ready() {
+            engine
+                .submit_platform_fact(
+                    "desktop-tor-endpoint",
+                    PlatformFact::TorEndpointAvailable {
+                        socks5_url: tor_runtime.socks_url().to_owned(),
+                    },
+                )
+                .await?;
+            *tor_endpoint_published = true;
+        }
+    }
+    if !*tor_endpoint_published && tor_runtime.is_ready() {
+        engine
+            .submit_platform_fact(
+                "desktop-tor-endpoint",
+                PlatformFact::TorEndpointAvailable {
+                    socks5_url: tor_runtime.socks_url().to_owned(),
+                },
+            )
+            .await?;
+        *tor_endpoint_published = true;
     }
     Ok(())
 }
 
-async fn pump_engine_events(engine: &mut ClientEngine) -> Result<()> {
+async fn pump_engine_events(
+    engine: &mut ClientEngine,
+    tor_runtime: &TorRuntime,
+    pending_platform_action: &mut Option<PlatformAction>,
+) -> Result<()> {
     while let Some(event) = engine
         .poll_timeout(std::time::Duration::from_millis(5))
         .await
     {
-        write_json_line(event)?;
+        handle_engine_event(engine, tor_runtime, pending_platform_action, event).await?;
     }
     Ok(())
 }
 
+async fn flush_pending_platform_action(
+    engine: &ClientEngine,
+    tor_runtime: &TorRuntime,
+    pending_platform_action: &mut Option<PlatformAction>,
+) -> Result<()> {
+    let Some(action) = pending_platform_action.clone() else {
+        return Ok(());
+    };
+    if !tor_runtime.is_ready() {
+        return Ok(());
+    }
+    *pending_platform_action = None;
+    apply_platform_action(engine, tor_runtime, action).await
+}
+
+async fn handle_engine_event(
+    engine: &ClientEngine,
+    tor_runtime: &TorRuntime,
+    pending_platform_action: &mut Option<PlatformAction>,
+    event: EngineEvent,
+) -> Result<()> {
+    let action = match event {
+        EngineEvent::PlatformAction { action } => action,
+        event => return write_json_line(event),
+    };
+    if !tor_runtime.is_ready() {
+        *pending_platform_action = Some(action);
+        return Ok(());
+    }
+    apply_platform_action(engine, tor_runtime, action).await
+}
+
+async fn apply_platform_action(
+    engine: &ClientEngine,
+    tor_runtime: &TorRuntime,
+    action: PlatformAction,
+) -> Result<()> {
+    let result = match action {
+        PlatformAction::ConfigureOnionService {
+            local_port,
+            virtual_port,
+            generation,
+        } => tor_runtime
+            .configure_onion_service(local_port, virtual_port, generation)
+            .map(|hostname| (hostname, local_port, virtual_port, generation)),
+        PlatformAction::RotateOnionService { generation } => tor_runtime
+            .rotate_onion_service(generation)
+            .map(|(hostname, local_port, virtual_port)| {
+                (hostname, local_port, virtual_port, generation)
+            }),
+    };
+    match result {
+        Ok((onion_address, _local_port, virtual_port, generation)) => {
+            engine
+                .submit_platform_fact(
+                    format!("desktop-onion-service-{generation}"),
+                    PlatformFact::OnionServiceAvailable {
+                        onion_address,
+                        virtual_port,
+                        generation,
+                    },
+                )
+                .await?;
+            Ok(())
+        }
+        Err(error) => {
+            engine
+                .submit_platform_fact(
+                    "desktop-onion-service-lost",
+                    PlatformFact::OnionServiceLost {
+                        reason: error.to_string(),
+                    },
+                )
+                .await?;
+            // A transient Tor/control-plane failure must not tear down the
+            // shared runtime. The engine keeps its queue and will retry when
+            // the platform reports Tor/onion availability again.
+            let _ = write_json_line(EngineEvent::Log {
+                log: torchat_client_engine::EngineLogEvent {
+                    level: "warn".into(),
+                    message: format!("onion service configuration failed: {error:#}"),
+                },
+            });
+            Ok(())
+        }
+    }
+}
+
 pub(crate) async fn wait_for_response(
     engine: &mut ClientEngine,
+    tor_runtime: &TorRuntime,
     status_rx: &std::sync::mpsc::Receiver<crate::tor_runtime::TorStatus>,
     tor_status_seq: &mut u64,
+    tor_endpoint_published: &mut bool,
+    pending_platform_action: &mut Option<PlatformAction>,
     request_id: &str,
 ) -> Result<()> {
     loop {
-        drain_tor_statuses(engine, status_rx, tor_status_seq).await?;
+        drain_tor_statuses(
+            engine,
+            tor_runtime,
+            status_rx,
+            tor_status_seq,
+            tor_endpoint_published,
+        )
+        .await?;
+        flush_pending_platform_action(engine, tor_runtime, pending_platform_action).await?;
         let Some(event) = engine
             .poll_timeout(std::time::Duration::from_millis(50))
             .await
@@ -211,7 +355,11 @@ pub(crate) async fn wait_for_response(
                 ..
             } if value == request_id
         );
-        write_json_line(event)?;
+        let is_platform_action = matches!(&event, EngineEvent::PlatformAction { .. });
+        handle_engine_event(engine, tor_runtime, pending_platform_action, event).await?;
+        if is_platform_action {
+            continue;
+        }
         if is_response {
             return Ok(());
         }

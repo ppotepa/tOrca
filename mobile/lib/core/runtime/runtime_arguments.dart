@@ -26,11 +26,13 @@ class RuntimeArguments {
     String? localAlias,
     required bool muted,
     required bool blocked,
+    String? transportPolicy,
   }) => RuntimeArguments._({
     EngineContract.argInstallationId: installationId,
     EngineContract.localAlias: ?localAlias,
     EngineContract.muted: muted,
     EngineContract.blocked: blocked,
+    EngineContract.transportPolicy: ?transportPolicy,
   });
 
   factory RuntimeArguments.id(String id) =>

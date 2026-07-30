@@ -249,6 +249,18 @@ class WindowsRuntime extends Object
         EngineContract.type: EngineContract.commandListMessages,
         EngineContract.commandConversationId: text(EngineContract.argId),
       },
+      EngineContract.getPeerEndpoint => {
+        EngineContract.type: EngineContract.commandGetPeerEndpoint,
+      },
+      EngineContract.retryPeerConnection => {
+        EngineContract.type: EngineContract.commandRetryPeerConnection,
+        EngineContract.commandInstallationId: text(
+          EngineContract.argInstallationId,
+        ),
+      },
+      EngineContract.rotatePeerEndpoint => {
+        EngineContract.type: EngineContract.commandRotatePeerEndpoint,
+      },
       EngineContract.setNickname => {
         EngineContract.type: EngineContract.commandSetNickname,
         EngineContract.nickname: text(EngineContract.nickname),
@@ -291,6 +303,8 @@ class WindowsRuntime extends Object
           EngineContract.localAlias: text(EngineContract.localAlias),
         EngineContract.muted: params[EngineContract.muted] == true,
         EngineContract.blocked: params[EngineContract.blocked] == true,
+        if (params[EngineContract.transportPolicy] != null)
+          EngineContract.transportPolicy: text(EngineContract.transportPolicy),
       },
       EngineContract.startConversation => {
         EngineContract.type: EngineContract.commandStartConversation,

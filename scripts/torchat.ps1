@@ -27,11 +27,31 @@ param(
     [switch]$Clean,
     [switch]$SkipEnvironmentStart,
     [ValidateSet('preserve','clean')][string]$ClientState = 'preserve',
-    [string]$DeviceAddress
+    [string]$DeviceAddress,
+    [int]$Tail = 5000
 )
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
+$commandLogRoot = Join-Path $repoRoot '.torchat\command-logs'
+$commandLogTimestamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
+$commandLogName = '{0}-{1}-{2}.log' -f $commandLogTimestamp, $Command, $PID
+$commandLogPath = Join-Path $commandLogRoot $commandLogName
+$transcriptStarted = $false
+New-Item -ItemType Directory -Force -Path $commandLogRoot | Out-Null
+try {
+    Start-Transcript -LiteralPath $commandLogPath -IncludeInvocationHeader | Out-Null
+    $transcriptStarted = $true
+} catch {
+    Write-Warning "[torchat] Could not start command transcript: $($_.Exception.Message)"
+}
+trap {
+    if ($transcriptStarted) {
+        try { Stop-Transcript | Out-Null } catch { }
+        $transcriptStarted = $false
+    }
+    throw
+}
 . (Join-Path $PSScriptRoot 'internal\environment.ps1')
 
 function Invoke-TorChat {
@@ -136,6 +156,24 @@ function Stop-TorChatFlutterWindows {
     if ($running.Count -gt 0) { Start-Sleep -Milliseconds 300 }
 }
 
+function Stop-TorChatDesktopHost {
+    $repoPath = [IO.Path]::GetFullPath($repoRoot).TrimEnd([IO.Path]::DirectorySeparatorChar) +
+        [IO.Path]::DirectorySeparatorChar
+    $running = @(Get-CimInstance Win32_Process -Filter "Name='torchat-desktop.exe'" |
+        Where-Object {
+            $_.ExecutablePath -and
+            ([IO.Path]::GetFullPath($_.ExecutablePath)).StartsWith(
+                $repoPath,
+                [StringComparison]::OrdinalIgnoreCase
+            )
+        })
+    foreach ($process in $running) {
+        Write-Host "[torchat] Stopping desktop engine host PID $($process.ProcessId) before build/run."
+        Stop-Process -Id ([int]$process.ProcessId) -Force -ErrorAction SilentlyContinue
+    }
+    if ($running.Count -gt 0) { Start-Sleep -Milliseconds 300 }
+}
+
 $operation = $Command
 $operationAction = $Action
 $operationTarget = $Target
@@ -192,6 +230,7 @@ switch ($operation) {
         if ($Environment -eq 'local' -and -not $SkipEnvironmentStart) {
             Invoke-TorChat 'start-dev.ps1' @{ Environment = 'local'; SkipOnionHealth = $true }
         }
+        Stop-TorChatDesktopHost
         Stop-TorChatFlutterWindows
         if ($Clean) { Clear-TorChatDesktopState }
         Import-TorChatEnvironment $state -RequireOnion
@@ -247,7 +286,7 @@ switch ($operation) {
         Invoke-TorChat 'redeploy.ps1' $arguments
     }
     'logs' {
-        $arguments = @{ Environment = $Environment }
+        $arguments = @{ Environment = $Environment; Tail = $Tail }
         if ($DeviceAddress) { $arguments.DeviceAddress = $DeviceAddress }
         Invoke-TorChat 'collect-logs.ps1' $arguments
     }
@@ -284,4 +323,10 @@ switch ($operation) {
             Write-Host '[torchat] Android app identity and encrypted local state were removed.'
         }
     }
+}
+
+if ($transcriptStarted) {
+    Stop-Transcript | Out-Null
+    $transcriptStarted = $false
+    Write-Host "[torchat] Command transcript: $commandLogPath"
 }

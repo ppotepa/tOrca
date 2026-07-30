@@ -13,12 +13,17 @@ abstract interface class ClientRuntime {
   Future<PairingItem> submitPairingCode(String code);
   Future<List<PairingItem>> pairingInbox();
   Future<List<PairingItem>> pairingOutbox();
+  Future<PeerEndpoint?> peerEndpoint();
+  Future<bool> peerEndpointAvailable();
+  Future<void> retryPeerConnection(String installationId);
+  Future<void> rotatePeerEndpoint();
   Future<void> verifyContact(String installationId);
   Future<ContactRecord> updateContactSettings(
     String installationId, {
     String? localAlias,
     required bool muted,
     required bool blocked,
+    ContactTransportPolicy? transportPolicy,
   });
   Future<List<ContactRecord>> contacts();
   Future<List<ConversationSummary>> conversations();

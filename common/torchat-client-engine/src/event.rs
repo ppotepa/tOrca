@@ -46,6 +46,23 @@ pub struct EngineFatalError {
     pub message: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(
+    tag = "type",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum PlatformAction {
+    ConfigureOnionService {
+        local_port: u16,
+        virtual_port: u16,
+        generation: u64,
+    },
+    RotateOnionService {
+        generation: u64,
+    },
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(
     tag = "type",
@@ -89,6 +106,9 @@ pub enum EngineEvent {
     },
     Connection {
         snapshot: ConnectionSnapshot,
+    },
+    PlatformAction {
+        action: PlatformAction,
     },
     NotificationRequested {
         notification: NotificationRequest,

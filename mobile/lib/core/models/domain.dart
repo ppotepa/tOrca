@@ -51,6 +51,131 @@ enum TransportPhase {
 
 enum MobileTab { chats, contacts }
 
+enum PeerServerStatus { starting, ready, offline, error }
+
+class PeerEndpoint {
+  const PeerEndpoint({
+    required this.installationId,
+    required this.onionAddress,
+    required this.virtualPort,
+    required this.sequence,
+    required this.issuedAt,
+    this.expiresAt,
+    this.capabilities = const [],
+  });
+
+  final String installationId;
+  final String onionAddress;
+  final int virtualPort;
+  final int sequence;
+  final int issuedAt;
+  final int? expiresAt;
+  final List<String> capabilities;
+
+  factory PeerEndpoint.fromMap(Map<String, dynamic> map) => PeerEndpoint(
+    installationId: map[EngineContract.installationId]?.toString() ?? '',
+    onionAddress: map[EngineContract.onionAddress]?.toString() ?? '',
+    virtualPort: _intFrom(map[EngineContract.virtualPort]),
+    sequence: _intFrom(map[EngineContract.sequence]),
+    issuedAt: _intFrom(map[EngineContract.issuedAt]),
+    expiresAt: map[EngineContract.expiresAt] == null
+        ? null
+        : _intFrom(map[EngineContract.expiresAt]),
+    capabilities:
+        (map[EngineContract.capabilities] as List<dynamic>? ?? const [])
+        .map((value) => value.toString())
+        .toList(growable: false),
+  );
+}
+
+enum StartupStepKind {
+  engine,
+  tor,
+  peerListener,
+  onionService,
+  relay,
+  communication,
+}
+
+enum StartupStepState { pending, running, ready, warning, error }
+
+class StartupStep {
+  const StartupStep({
+    required this.kind,
+    this.state = StartupStepState.pending,
+    this.detail = '',
+  });
+
+  final StartupStepKind kind;
+  final StartupStepState state;
+  final String detail;
+
+  String get title => switch (kind) {
+    StartupStepKind.engine => 'Silnik i pamięć lokalna',
+    StartupStepKind.tor => 'Sieć Tor',
+    StartupStepKind.peerListener => 'Lokalny serwer P2P',
+    StartupStepKind.onionService => 'Usługa onion P2P',
+    StartupStepKind.relay => 'Tor relay',
+    StartupStepKind.communication => 'Gotowość komunikacji',
+  };
+
+  String get description => switch (kind) {
+    StartupStepKind.engine => 'Otwieranie zaszyfrowanej bazy i tożsamości',
+    StartupStepKind.tor => 'Uruchamianie procesu Tor i przygotowanie SOCKS',
+    StartupStepKind.peerListener => 'Nasłuchiwanie lokalnego serwera peer',
+    StartupStepKind.onionService => 'Publikowanie adresu urządzenia w Tor',
+    StartupStepKind.relay => 'Połączenie z serwerem sterującym',
+    StartupStepKind.communication => 'Kolejki i odbieranie wiadomości',
+  };
+
+  StartupStep copyWith({StartupStepState? state, String? detail}) => StartupStep(
+    kind: kind,
+    state: state ?? this.state,
+    detail: detail ?? this.detail,
+  );
+}
+
+List<StartupStep> initialStartupSteps() => [
+  for (final kind in StartupStepKind.values) StartupStep(kind: kind),
+];
+
+List<StartupStep> transitionStartupStep(
+  List<StartupStep> current,
+  StartupStepKind kind,
+  StartupStepState nextState,
+  String detail,
+) {
+  final steps = current.isEmpty ? initialStartupSteps() : current;
+  final target = steps.indexWhere((step) => step.kind == kind);
+  if (target < 0) return steps;
+  final failed = steps.indexWhere(
+    (step) => step.state == StartupStepState.error,
+  );
+  if (failed >= 0 && failed != target) return steps;
+  if (steps[target].state == StartupStepState.ready &&
+      nextState != StartupStepState.error) {
+    return steps;
+  }
+  return [
+    for (var index = 0; index < steps.length; index += 1)
+      if (index == target)
+        steps[index].copyWith(state: nextState, detail: detail)
+      else if (nextState == StartupStepState.running && index > target)
+        steps[index].copyWith(state: StartupStepState.pending, detail: '')
+      else
+        steps[index],
+  ];
+}
+
+extension PeerServerStatusDisplay on PeerServerStatus {
+  String get label => switch (this) {
+    PeerServerStatus.starting => 'Serwer P2P uruchamia siÄ™',
+    PeerServerStatus.ready => 'Serwer P2P aktywny',
+    PeerServerStatus.offline => 'Serwer P2P niedostÄ™pny',
+    PeerServerStatus.error => 'BÅ‚Ä…d serwera P2P',
+  };
+}
+
 enum ConversationState { pending, verifying, active, failed, offline }
 
 extension ConversationStateDisplay on ConversationState {
@@ -283,6 +408,10 @@ class ContactRecord {
     this.localAlias,
     this.muted = false,
     this.blocked = false,
+    this.peerEndpointStatus = PeerEndpointStatus.missing,
+    this.peerConnectionStatus = PeerConnectionStatus.offline,
+    this.lastPeerConnectedAt,
+    this.transportPolicy = ContactTransportPolicy.peerOnly,
   });
   final String id;
   final String nickname;
@@ -293,6 +422,10 @@ class ContactRecord {
   final String? localAlias;
   final bool muted;
   final bool blocked;
+  final PeerEndpointStatus peerEndpointStatus;
+  final PeerConnectionStatus peerConnectionStatus;
+  final String? lastPeerConnectedAt;
+  final ContactTransportPolicy transportPolicy;
 
   String get displayName =>
       localAlias?.trim().isNotEmpty == true ? localAlias!.trim() : nickname;
@@ -307,7 +440,114 @@ class ContactRecord {
     localAlias: _optionalString(map, EngineContract.localAlias),
     muted: map[EngineContract.muted] as bool? ?? false,
     blocked: map[EngineContract.blocked] as bool? ?? false,
+    peerEndpointStatus: PeerEndpointStatus.fromValue(
+      map[EngineContract.peerEndpointStatus]?.toString(),
+    ),
+    peerConnectionStatus: PeerConnectionStatus.fromValue(
+      map[EngineContract.peerConnectionStatus]?.toString(),
+    ),
+    lastPeerConnectedAt: _optionalString(
+      map,
+      EngineContract.lastPeerConnectedAt,
+    ),
+    transportPolicy: ContactTransportPolicy.fromValue(
+      map[EngineContract.transportPolicy]?.toString(),
+    ),
   );
+
+  ContactRecord copyWith({
+    String? id,
+    String? nickname,
+    String? fingerprint,
+    String? publicKey,
+    bool? verified,
+    Object? devFixture = _contactRecordSentinel,
+    Object? localAlias = _contactRecordSentinel,
+    bool? muted,
+    bool? blocked,
+    PeerEndpointStatus? peerEndpointStatus,
+    PeerConnectionStatus? peerConnectionStatus,
+    Object? lastPeerConnectedAt = _contactRecordSentinel,
+    ContactTransportPolicy? transportPolicy,
+  }) => ContactRecord(
+    id: id ?? this.id,
+    nickname: nickname ?? this.nickname,
+    fingerprint: fingerprint ?? this.fingerprint,
+    publicKey: publicKey ?? this.publicKey,
+    verified: verified ?? this.verified,
+    devFixture: identical(devFixture, _contactRecordSentinel)
+        ? this.devFixture
+        : devFixture as String?,
+    localAlias: identical(localAlias, _contactRecordSentinel)
+        ? this.localAlias
+        : localAlias as String?,
+    muted: muted ?? this.muted,
+    blocked: blocked ?? this.blocked,
+    peerEndpointStatus: peerEndpointStatus ?? this.peerEndpointStatus,
+    peerConnectionStatus: peerConnectionStatus ?? this.peerConnectionStatus,
+    lastPeerConnectedAt: identical(lastPeerConnectedAt, _contactRecordSentinel)
+        ? this.lastPeerConnectedAt
+        : lastPeerConnectedAt as String?,
+    transportPolicy: transportPolicy ?? this.transportPolicy,
+  );
+}
+
+const Object _contactRecordSentinel = Object();
+
+int _intFrom(Object? value) {
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  return int.tryParse(value?.toString() ?? '') ?? 0;
+}
+
+enum ContactTransportPolicy {
+  peerOnly,
+  peerWithRelayFallback,
+  relayOnly;
+
+  factory ContactTransportPolicy.fromValue(String? value) => switch (value) {
+    EngineContract.contactTransportPolicyPeerWithRelayFallback =>
+      peerWithRelayFallback,
+    EngineContract.contactTransportPolicyRelayOnly => relayOnly,
+    _ => peerOnly,
+  };
+
+  String get wireValue => switch (this) {
+    peerOnly => EngineContract.contactTransportPolicyPeerOnly,
+    peerWithRelayFallback =>
+      EngineContract.contactTransportPolicyPeerWithRelayFallback,
+    relayOnly => EngineContract.contactTransportPolicyRelayOnly,
+  };
+}
+
+enum PeerEndpointStatus {
+  missing,
+  pendingExchange,
+  verified,
+  invalid;
+
+  factory PeerEndpointStatus.fromValue(String? value) => switch (value) {
+    EngineContract.peerEndpointStatusPendingExchange => pendingExchange,
+    EngineContract.peerEndpointStatusVerified => verified,
+    EngineContract.peerEndpointStatusInvalid => invalid,
+    _ => missing,
+  };
+}
+
+enum PeerConnectionStatus {
+  offline,
+  connecting,
+  authenticating,
+  connected,
+  backoff;
+
+  factory PeerConnectionStatus.fromValue(String? value) => switch (value) {
+    EngineContract.peerConnectionStatusConnecting => connecting,
+    EngineContract.peerConnectionStatusAuthenticating => authenticating,
+    EngineContract.peerConnectionStatusConnected => connected,
+    EngineContract.peerConnectionStatusBackoff => backoff,
+    _ => offline,
+  };
 }
 
 class ConversationSummary {
@@ -582,6 +822,28 @@ class RuntimeReadyEvent extends RuntimeEvent {
 class ProfileReadyEvent extends RuntimeEvent {
   const ProfileReadyEvent(this.profile);
   final RuntimeProfile profile;
+}
+
+class PeerEndpointChangedEvent extends RuntimeEvent {
+  const PeerEndpointChangedEvent({
+    required this.contactId,
+    required this.status,
+  });
+
+  final String contactId;
+  final PeerEndpointStatus status;
+}
+
+class PeerConnectionChangedEvent extends RuntimeEvent {
+  const PeerConnectionChangedEvent({
+    required this.contactId,
+    required this.status,
+    this.retryInMs,
+  });
+
+  final String contactId;
+  final PeerConnectionStatus status;
+  final int? retryInMs;
 }
 
 class DataChangedEvent extends RuntimeEvent {

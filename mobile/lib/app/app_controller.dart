@@ -36,6 +36,8 @@ class AppState {
     this.outbox = const [],
     this.ownInvite,
     this.transport = const RuntimeTorStatus(),
+    this.peerServerStatus = PeerServerStatus.starting,
+    this.startupSteps = const [],
     this.selectedConversationId,
     this.isLoading = false,
     this.action = '',
@@ -55,6 +57,8 @@ class AppState {
   final List<PairingItem> outbox;
   final InviteCode? ownInvite;
   final RuntimeTorStatus transport;
+  final PeerServerStatus peerServerStatus;
+  final List<StartupStep> startupSteps;
   final String? selectedConversationId;
   final bool isLoading;
   final String action;
@@ -105,6 +109,8 @@ class AppState {
     List<PairingItem>? outbox,
     InviteCode? ownInvite,
     RuntimeTorStatus? transport,
+    PeerServerStatus? peerServerStatus,
+    List<StartupStep>? startupSteps,
     String? selectedConversationId,
     bool clearSelection = false,
     bool? isLoading,
@@ -125,6 +131,8 @@ class AppState {
     outbox: outbox ?? this.outbox,
     ownInvite: ownInvite ?? this.ownInvite,
     transport: transport ?? this.transport,
+    peerServerStatus: peerServerStatus ?? this.peerServerStatus,
+    startupSteps: startupSteps ?? this.startupSteps,
     selectedConversationId: clearSelection
         ? null
         : selectedConversationId ?? this.selectedConversationId,
@@ -163,6 +171,12 @@ class AppController extends Notifier<AppState> {
     state = state.copyWith(
       screen: ControllerScreen.boot,
       isLoading: true,
+      startupSteps: _startupSteps(
+        initialStartupSteps(),
+        StartupStepKind.engine,
+        StartupStepState.running,
+        'Uruchamianie wspólnego engine',
+      ),
       action: OperationAction.connect,
       error: '',
       notice: '',
@@ -175,7 +189,11 @@ class AppController extends Notifier<AppState> {
       await refreshData();
       state = state.copyWith(
         identity: identity,
-        screen: _screenAfterConnect(profile, state.transport),
+        screen: _screenAfterConnect(
+          profile,
+          state.transport,
+          startupSteps: state.startupSteps,
+        ),
         profile: profile,
         isLoading: false,
         action: '',
@@ -185,21 +203,49 @@ class AppController extends Notifier<AppState> {
         isLoading: false,
         action: '',
         error: _message(error),
+        startupSteps: _startupSteps(
+          state.startupSteps,
+          StartupStepKind.engine,
+          StartupStepState.error,
+          _message(error),
+        ),
       );
     }
   }
 
   Future<void> refreshData() async {
-    final contacts = await _repository.contacts();
+    final contacts = _mergeRefreshedContacts(await _repository.contacts());
     final conversations = await _repository.conversations();
     final inbox = await _repository.inbox();
     final outbox = await _repository.outbox();
+    final peerEndpointAvailable = await _repository.peerEndpointAvailable();
+    final peerServerStatus = _peerServerStatusForRefresh(
+      state.transport,
+      peerEndpointAvailable,
+      current: state.peerServerStatus,
+    );
     state = state.copyWith(
       contacts: contacts,
       conversations: conversations,
       inbox: inbox,
       outbox: outbox,
+      peerServerStatus: peerServerStatus,
+      startupSteps: _startupStepsForEndpoint(
+        state.startupSteps,
+        peerEndpointAvailable,
+        torReady: state.transport.usable,
+        peerServerStatus: peerServerStatus,
+      ),
     );
+    if (state.transport.connected) {
+      state = state.copyWith(
+        screen: _screenAfterConnect(
+          state.profile,
+          state.transport,
+          startupSteps: state.startupSteps,
+        ),
+      );
+    }
   }
 
   Future<void> retryTor() => initialize();
@@ -209,9 +255,11 @@ class AppController extends Notifier<AppState> {
       final profile = await _repository.setNickname(nickname.trim());
       state = state.copyWith(
         profile: profile,
-        screen: state.transport.connected
-            ? ControllerScreen.main
-            : ControllerScreen.boot,
+        screen: _screenAfterConnect(
+          profile,
+          state.transport,
+          startupSteps: state.startupSteps,
+        ),
         error: '',
       );
     } catch (error) {
@@ -525,14 +573,41 @@ class AppController extends Notifier<AppState> {
   void _handleEvent(RuntimeEvent event) {
     switch (event) {
       case RuntimeReadyEvent():
-        break;
+        state = state.copyWith(
+          peerServerStatus: PeerServerStatus.starting,
+          startupSteps: _startupSteps(
+            _startupSteps(
+              state.startupSteps,
+              StartupStepKind.engine,
+              StartupStepState.ready,
+              'Engine działa',
+            ),
+            StartupStepKind.tor,
+            StartupStepState.running,
+            'Oczekiwanie na gotowość Tor',
+          ),
+        );
       case TorStatusEvent(:final snapshot):
         final becameConnected =
             !state.transport.connected && snapshot.connected;
+        final startupSteps = _startupStepsForTor(
+          state.startupSteps,
+          snapshot,
+        );
         state = state.copyWith(
           transport: snapshot,
-          screen: _screenAfterConnect(state.profile, snapshot),
+          error: snapshot.phase.isError ? state.error : '',
+          screen: _screenAfterConnect(
+            state.profile,
+            snapshot,
+            startupSteps: startupSteps,
+          ),
+          startupSteps: startupSteps,
         );
+        if (snapshot.phase == TransportPhase.connecting ||
+            snapshot.phase == TransportPhase.connected) {
+          unawaited(_refreshAfterEvent());
+        }
         if (becameConnected && !_introPlayed) {
           _introPlayed = true;
           unawaited(_playIntro());
@@ -545,7 +620,18 @@ class AppController extends Notifier<AppState> {
             : profile;
         state = state.copyWith(
           profile: nextProfile,
-          screen: _screenAfterConnect(nextProfile, state.transport),
+          error: '',
+          screen: _screenAfterConnect(
+            nextProfile,
+            state.transport,
+            startupSteps: state.startupSteps,
+          ),
+          startupSteps: _startupSteps(
+            state.startupSteps,
+            StartupStepKind.engine,
+            StartupStepState.ready,
+            'Tożsamość i profil są gotowe',
+          ),
         );
       case DataChangedEvent(:final type, :final payload):
         if (type == EngineContract.typingChanged) {
@@ -563,15 +649,254 @@ class AppController extends Notifier<AppState> {
         } else {
           unawaited(_refreshAfterEvent());
         }
+      case PeerEndpointChangedEvent(:final contactId, :final status):
+        if (contactId == state.identity.installationId && contactId.isNotEmpty) {
+          final peerReady = status == PeerEndpointStatus.verified;
+          final peerServerStatus = peerReady
+              ? PeerServerStatus.ready
+              : PeerServerStatus.offline;
+          state = state.copyWith(
+            peerServerStatus: peerServerStatus,
+            error: peerReady ? '' : state.error,
+            startupSteps: _startupStepsForEndpoint(
+              state.startupSteps,
+              peerReady,
+              torReady: state.transport.usable,
+              peerServerStatus: peerServerStatus,
+            ),
+          );
+        }
+        unawaited(_refreshAfterEvent());
+      case PeerConnectionChangedEvent(:final contactId, :final status):
+        final updatedContacts = [
+          for (final contact in state.contacts)
+            if (contact.id == contactId)
+              contact.copyWith(peerConnectionStatus: status)
+            else
+              contact,
+        ];
+        state = state.copyWith(contacts: updatedContacts);
+        break;
       case RuntimeErrorEvent(:final message):
-        state = state.copyWith(error: message);
-      case RuntimeLogEvent():
+        state = state.copyWith(
+          error: message,
+          startupSteps: _markStartupError(state.startupSteps, message),
+        );
+      case RuntimeLogEvent(:final message):
+        if (message.toLowerCase().contains('onion service unavailable')) {
+          final startupSteps = _startupSteps(
+            _startupSteps(
+              _startupSteps(
+                state.startupSteps,
+                StartupStepKind.communication,
+                StartupStepState.warning,
+                'Relay może działać bez P2P',
+              ),
+              StartupStepKind.peerListener,
+              StartupStepState.ready,
+              'Lokalny listener działa',
+            ),
+            StartupStepKind.onionService,
+            StartupStepState.error,
+            message,
+          );
+          state = state.copyWith(
+            peerServerStatus: PeerServerStatus.offline,
+            error: message,
+            screen: _screenAfterConnect(
+              state.profile,
+              state.transport,
+              startupSteps: startupSteps,
+            ),
+            startupSteps: startupSteps,
+          );
+        }
         // Diagnostics are not a data mutation and must not trigger network
         // refreshes while the onion connection is warming up.
         break;
       case NotificationRequestedEvent():
         unawaited(_pagerBeep());
     }
+  }
+
+  List<StartupStep> _startupSteps(
+    List<StartupStep> current,
+    StartupStepKind kind,
+    StartupStepState stepState,
+    String detail,
+  ) {
+    return transitionStartupStep(current, kind, stepState, detail);
+  }
+
+  List<StartupStep> _startupStepsForTor(
+    List<StartupStep> current,
+    RuntimeTorStatus snapshot,
+  ) {
+    final torState = switch (snapshot.phase) {
+      TransportPhase.starting || TransportPhase.bootstrapping =>
+        StartupStepState.running,
+      TransportPhase.connecting || TransportPhase.connected =>
+        StartupStepState.ready,
+      TransportPhase.reconnecting || TransportPhase.degraded =>
+        StartupStepState.warning,
+      TransportPhase.offline => StartupStepState.warning,
+      TransportPhase.error => StartupStepState.error,
+    };
+    var steps = _startupSteps(
+      current,
+      StartupStepKind.tor,
+      torState,
+      snapshot.detail.isEmpty ? snapshot.label : snapshot.detail,
+    );
+    if (snapshot.phase.isConnected) {
+      steps = _startupSteps(
+        steps,
+        StartupStepKind.peerListener,
+        StartupStepState.running,
+        'Sprawdzanie lokalnego listenera',
+      );
+      steps = _startupSteps(
+        steps,
+        StartupStepKind.onionService,
+        StartupStepState.running,
+        'Oczekiwanie na adres onion',
+      );
+      steps = _startupSteps(
+        steps,
+        StartupStepKind.relay,
+        StartupStepState.ready,
+        snapshot.detail.isEmpty ? 'Relay połączony' : snapshot.detail,
+      );
+      steps = _startupSteps(
+        steps,
+        StartupStepKind.communication,
+        StartupStepState.running,
+        'Można wysyłać i odbierać wiadomości',
+      );
+    } else if (snapshot.phase.isConnecting || snapshot.phase.isWarning) {
+      steps = _startupSteps(
+        steps,
+        StartupStepKind.peerListener,
+        StartupStepState.running,
+        'Uruchamianie lokalnego listenera',
+      );
+      steps = _startupSteps(
+        steps,
+        StartupStepKind.onionService,
+        StartupStepState.running,
+        'Publikowanie usługi onion',
+      );
+      steps = _startupSteps(
+        steps,
+        StartupStepKind.relay,
+        StartupStepState.running,
+        snapshot.detail.isEmpty ? 'Łączenie z relayem' : snapshot.detail,
+      );
+      steps = _startupSteps(
+        steps,
+        StartupStepKind.communication,
+        StartupStepState.pending,
+        'Oczekiwanie na gotowość relay',
+      );
+    } else if (snapshot.phase.isError) {
+      steps = _startupSteps(
+        steps,
+        StartupStepKind.relay,
+        StartupStepState.error,
+        snapshot.detail,
+      );
+    }
+    if (!snapshot.phase.isConnected) {
+      steps = _startupSteps(
+        steps,
+        StartupStepKind.peerListener,
+        StartupStepState.pending,
+        'Oczekiwanie na gotowość Tor',
+      );
+      steps = _startupSteps(
+        steps,
+        StartupStepKind.onionService,
+        StartupStepState.pending,
+        'Oczekiwanie na gotowość Tor',
+      );
+    }
+    return steps;
+  }
+
+  List<StartupStep> _startupStepsForEndpoint(
+    List<StartupStep> current,
+    bool available, {
+    required bool torReady,
+    required PeerServerStatus peerServerStatus,
+  }) {
+    if (!torReady) return current;
+    if (!available) {
+      final failed =
+          peerServerStatus == PeerServerStatus.offline ||
+          peerServerStatus == PeerServerStatus.error;
+      var waiting = _startupSteps(
+        current,
+        StartupStepKind.peerListener,
+        failed ? StartupStepState.error : StartupStepState.running,
+        failed
+            ? 'Lokalny listener P2P nie jest gotowy'
+            : 'Oczekiwanie na lokalny endpoint P2P',
+      );
+      waiting = _startupSteps(
+        waiting,
+        StartupStepKind.onionService,
+        failed ? StartupStepState.error : StartupStepState.running,
+        failed
+            ? 'Usługa onion P2P nie jest dostępna'
+            : 'Oczekiwanie na adres onion P2P',
+      );
+      return _startupSteps(
+        waiting,
+        StartupStepKind.communication,
+        failed ? StartupStepState.error : StartupStepState.pending,
+        failed
+            ? 'Komunikacja nie jest gotowa bez endpointu P2P'
+            : 'Oczekiwanie na endpoint P2P',
+      );
+    }
+    var steps = _startupSteps(
+      current,
+      StartupStepKind.peerListener,
+      StartupStepState.ready,
+      'Lokalny listener działa',
+    );
+    steps = _startupSteps(
+      steps,
+      StartupStepKind.onionService,
+      StartupStepState.ready,
+      'Adres onion jest dostępny',
+    );
+    steps = _startupSteps(
+      steps,
+      StartupStepKind.communication,
+      StartupStepState.ready,
+      'Komunikacja jest gotowa',
+    );
+    return steps;
+  }
+
+  List<StartupStep> _markStartupError(
+    List<StartupStep> current,
+    String message,
+  ) {
+    final steps = current.isEmpty ? initialStartupSteps() : current;
+    final active = steps.indexWhere(
+      (step) =>
+          step.state == StartupStepState.running ||
+          step.state == StartupStepState.warning,
+    );
+    if (active < 0) return steps;
+    return [
+      for (var index = 0; index < steps.length; index += 1)
+        index == active
+            ? steps[index].copyWith(state: StartupStepState.error, detail: message)
+            : steps[index],
+    ];
   }
 
   Future<void> _refreshAfterEvent() async {
@@ -607,11 +932,73 @@ class AppController extends Notifier<AppState> {
 
   ControllerScreen _screenAfterConnect(
     RuntimeProfile profile,
-    RuntimeTorStatus transport,
-  ) {
+    RuntimeTorStatus transport, {
+    List<StartupStep>? startupSteps,
+  }) {
     if (!transport.connected) return ControllerScreen.boot;
+    if (startupSteps != null && !_startupAllowsContinue(startupSteps)) {
+      return ControllerScreen.boot;
+    }
     if (profile.nickname.trim().isNotEmpty) return ControllerScreen.main;
     return ControllerScreen.nickname;
+  }
+
+  bool _startupAllowsContinue(List<StartupStep> steps) {
+    return StartupStepKind.values.every(
+      (kind) => steps.any(
+        (step) =>
+            step.kind == kind && step.state == StartupStepState.ready,
+      ),
+    );
+  }
+
+  PeerServerStatus _peerServerStatusForRefresh(
+    RuntimeTorStatus transport,
+    bool peerEndpointAvailable, {
+    required PeerServerStatus current,
+  }) {
+    if (transport.failed) {
+      return PeerServerStatus.error;
+    }
+    if (!transport.usable) {
+      return PeerServerStatus.starting;
+    }
+    if (peerEndpointAvailable) {
+      return PeerServerStatus.ready;
+    }
+    if (current == PeerServerStatus.offline || current == PeerServerStatus.error) {
+      return current;
+    }
+    return PeerServerStatus.starting;
+  }
+
+  List<ContactRecord> _mergeRefreshedContacts(List<ContactRecord> refreshed) {
+    if (state.contacts.isEmpty) return refreshed;
+    final currentById = {
+      for (final contact in state.contacts) contact.id: contact,
+    };
+    return [
+      for (final contact in refreshed)
+        _mergeRefreshedContact(contact, currentById[contact.id]),
+    ];
+  }
+
+  ContactRecord _mergeRefreshedContact(
+    ContactRecord refreshed,
+    ContactRecord? current,
+  ) {
+    if (current == null) return refreshed;
+    final preserveTransientPeerStatus =
+        refreshed.peerConnectionStatus == PeerConnectionStatus.offline &&
+        current.peerConnectionStatus != PeerConnectionStatus.offline;
+    final lastPeerConnectedAt =
+        refreshed.lastPeerConnectedAt ?? current.lastPeerConnectedAt;
+    return refreshed.copyWith(
+      peerConnectionStatus: preserveTransientPeerStatus
+          ? current.peerConnectionStatus
+          : refreshed.peerConnectionStatus,
+      lastPeerConnectedAt: lastPeerConnectedAt,
+    );
   }
 
   Future<void> _pagerBeep() async {

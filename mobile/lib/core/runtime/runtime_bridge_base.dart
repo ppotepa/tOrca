@@ -67,6 +67,27 @@ mixin RuntimeBridgeMethods implements ClientRuntime {
       ).map((payload) => payload.pairingItem()).toList();
 
   @override
+  Future<PeerEndpoint?> peerEndpoint() async =>
+      RuntimePayload.fromDynamicOrNull(
+        await callRuntime(EngineContract.getPeerEndpoint),
+      )?.peerEndpoint();
+
+  @override
+  Future<bool> peerEndpointAvailable() async {
+    try {
+      return (await peerEndpoint()) != null;
+    } catch (error) {
+      final message = error.toString().toLowerCase();
+      if (message.contains('peer endpoint') ||
+          message.contains('endpoint not found') ||
+          message.contains('not found')) {
+        return false;
+      }
+      rethrow;
+    }
+  }
+
+  @override
   Future<void> acceptPairing(String pairingId) => callRuntime(
     EngineContract.acceptPairing,
     RuntimeArguments.pairingId(pairingId),
@@ -91,6 +112,16 @@ mixin RuntimeBridgeMethods implements ClientRuntime {
   );
 
   @override
+  Future<void> retryPeerConnection(String installationId) => callRuntime(
+    EngineContract.retryPeerConnection,
+    RuntimeArguments.installationId(installationId),
+  );
+
+  @override
+  Future<void> rotatePeerEndpoint() =>
+      callRuntime(EngineContract.rotatePeerEndpoint);
+
+  @override
   Future<void> verifyContact(String installationId) => callRuntime(
     EngineContract.verifyContact,
     RuntimeArguments.installationId(installationId),
@@ -102,6 +133,7 @@ mixin RuntimeBridgeMethods implements ClientRuntime {
     String? localAlias,
     required bool muted,
     required bool blocked,
+    ContactTransportPolicy? transportPolicy,
   }) async => RuntimePayload.fromDynamic(
     await callRuntime(
       EngineContract.updateContactSettings,
@@ -110,6 +142,7 @@ mixin RuntimeBridgeMethods implements ClientRuntime {
         localAlias: localAlias,
         muted: muted,
         blocked: blocked,
+        transportPolicy: transportPolicy?.wireValue,
       ),
     ),
   ).contact();

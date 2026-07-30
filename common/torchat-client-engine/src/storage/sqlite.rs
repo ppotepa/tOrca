@@ -2,6 +2,7 @@ use std::{path::Path, time::Duration};
 
 use rusqlite::{Connection, OptionalExtension, params};
 use sha2::Digest;
+use torchat_core::peer_protocol::{PeerEndpointBundle, PeerEndpointUpdate, PeerMessageEnvelope};
 
 use crate::{EngineError, EngineResult, config::SecretBytes};
 
@@ -47,6 +48,31 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 6,
         name: "006_contact_preferences.sql",
         sql: include_str!("../../sql/migrations/006_contact_preferences.sql"),
+    },
+    Migration {
+        version: 7,
+        name: "007_peer_p2p.sql",
+        sql: include_str!("../../sql/migrations/007_peer_p2p.sql"),
+    },
+    Migration {
+        version: 8,
+        name: "008_contact_transport_policy.sql",
+        sql: include_str!("../../sql/migrations/008_contact_transport_policy.sql"),
+    },
+    Migration {
+        version: 9,
+        name: "009_peer_endpoint_bootstrap_outbox.sql",
+        sql: include_str!("../../sql/migrations/009_peer_endpoint_bootstrap_outbox.sql"),
+    },
+    Migration {
+        version: 10,
+        name: "010_pending_contact_confirmations.sql",
+        sql: include_str!("../../sql/migrations/010_pending_contact_confirmations.sql"),
+    },
+    Migration {
+        version: 11,
+        name: "011_pending_pairing_acknowledgements.sql",
+        sql: include_str!("../../sql/migrations/011_pending_pairing_acknowledgements.sql"),
     },
 ];
 
@@ -98,13 +124,44 @@ pub struct StoredMessageRecord {
     pub body: String,
     pub state: String,
     pub created_at: i64,
-    pub relay_payload: Option<Vec<u8>>,
+    pub wire_ciphertext: Option<Vec<u8>>,
     pub ciphertext_hash: Option<Vec<u8>>,
     pub attempt_count: u32,
     pub last_attempt_at: Option<i64>,
     pub next_attempt_at: i64,
     pub ack_deadline: Option<i64>,
     pub last_transport_error: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OutboundDeliveryRecord {
+    pub message_id: String,
+    pub contact_installation_id: String,
+    pub sequence: u64,
+    pub state: String,
+    pub attempt_count: u32,
+    pub next_attempt_at: i64,
+    pub ack_deadline: Option<i64>,
+    pub last_error: Option<String>,
+    pub created_at: i64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InboundPeerEnvelopeRecord {
+    pub sender_installation_id: String,
+    pub message_id: String,
+    pub conversation_id: String,
+    pub sequence: u64,
+    pub ciphertext: Vec<u8>,
+    pub ciphertext_hash: Vec<u8>,
+    pub state: String,
+    pub received_at: i64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum InboundEnvelopeStoreResult {
+    Stored,
+    Duplicate { delivered: bool },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -119,6 +176,26 @@ pub struct PairingResponseRecord {
     pub expires_at: i64,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PeerEndpointBootstrapRecord {
+    pub contact_installation_id: String,
+    pub payload: Vec<u8>,
+    pub endpoint_sequence: u64,
+    pub attempt_count: u32,
+    pub next_attempt_at: i64,
+    pub last_error: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PendingContactConfirmationRecord {
+    pub pairing_id: String,
+    pub peer_installation_id: String,
+    pub capability: String,
+    pub attempt_count: u32,
+    pub next_attempt_at: i64,
+    pub last_error: Option<String>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RetryKind {
     MessageSend,
@@ -126,6 +203,9 @@ pub enum RetryKind {
     Receipt,
     PendingWelcome,
     PairingResponse,
+    PeerEndpointBootstrap,
+    ContactConfirmation,
+    PairingAcknowledgement,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -188,6 +268,827 @@ impl ClientDatabase {
     pub fn transaction(&mut self) -> EngineResult<SqliteTransaction<'_>> {
         let transaction = self.connection.transaction().map_err(sqlite_error)?;
         Ok(SqliteTransaction::new(transaction))
+    }
+
+    pub fn local_peer_endpoint(&self) -> EngineResult<Option<(PeerEndpointBundle, u64)>> {
+        let stored = self
+            .connection
+            .query_row(
+                "SELECT bundle_json, generation
+                 FROM local_peer_endpoint
+                 WHERE singleton = 1;",
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, Vec<u8>>("bundle_json")?,
+                        row.get::<_, i64>("generation")?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(sqlite_error)?;
+        stored
+            .map(|(json, generation)| {
+                serde_json::from_slice(&json)
+                    .map(|endpoint| (endpoint, generation as u64))
+                    .map_err(|error| {
+                        EngineError::Storage(format!("decode local peer endpoint: {error}"))
+                    })
+            })
+            .transpose()
+    }
+
+    pub fn put_local_peer_endpoint(
+        &self,
+        endpoint: &PeerEndpointBundle,
+        generation: u64,
+    ) -> EngineResult<()> {
+        let json = serde_json::to_vec(endpoint).map_err(|error| {
+            EngineError::Storage(format!("encode local peer endpoint: {error}"))
+        })?;
+        self.connection
+            .execute(
+                "INSERT INTO local_peer_endpoint (
+                    singleton, bundle_json, sequence, generation, updated_at
+                 ) VALUES (1, ?1, ?2, ?3, unixepoch())
+                 ON CONFLICT(singleton) DO UPDATE SET
+                    bundle_json = excluded.bundle_json,
+                    sequence = excluded.sequence,
+                    generation = excluded.generation,
+                    updated_at = unixepoch();",
+                params![json, endpoint.sequence as i64, generation as i64],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
+    pub fn delete_local_peer_endpoint(&self) -> EngineResult<()> {
+        self.connection
+            .execute("DELETE FROM local_peer_endpoint WHERE singleton = 1;", [])
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
+    pub fn contact_peer_endpoint(
+        &self,
+        installation_id: &str,
+    ) -> EngineResult<Option<PeerEndpointBundle>> {
+        let json = self
+            .connection
+            .query_row(
+                "SELECT bundle_json
+                 FROM contact_peer_endpoints
+                 WHERE contact_installation_id = ?1;",
+                [installation_id],
+                |row| row.get::<_, Vec<u8>>("bundle_json"),
+            )
+            .optional()
+            .map_err(sqlite_error)?;
+        json.map(|value| {
+            serde_json::from_slice(&value).map_err(|error| {
+                EngineError::Storage(format!("decode contact peer endpoint: {error}"))
+            })
+        })
+        .transpose()
+    }
+
+    pub fn put_contact_peer_endpoint(&self, endpoint: &PeerEndpointBundle) -> EngineResult<()> {
+        let json = serde_json::to_vec(endpoint).map_err(|error| {
+            EngineError::Storage(format!("encode contact peer endpoint: {error}"))
+        })?;
+        self.connection
+            .execute(
+                "INSERT INTO contact_peer_endpoints (
+                    contact_installation_id, bundle_json, sequence, updated_at
+                 ) VALUES (?1, ?2, ?3, unixepoch())
+                 ON CONFLICT(contact_installation_id) DO UPDATE SET
+                    bundle_json = excluded.bundle_json,
+                    sequence = excluded.sequence,
+                    updated_at = unixepoch()
+                 WHERE excluded.sequence > contact_peer_endpoints.sequence;",
+                params![endpoint.installation_id, json, endpoint.sequence as i64,],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
+    pub fn mark_peer_connected(
+        &self,
+        installation_id: &str,
+        connected_at: i64,
+    ) -> EngineResult<()> {
+        self.connection
+            .execute(
+                "UPDATE contact_peer_endpoints
+                 SET last_connected_at = ?2, updated_at = unixepoch()
+                 WHERE contact_installation_id = ?1;",
+                params![installation_id, connected_at],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
+    pub fn enqueue_endpoint_update_for_contacts(
+        &self,
+        update: &PeerEndpointUpdate,
+    ) -> EngineResult<()> {
+        let payload = serde_json::to_vec(update).map_err(|error| {
+            EngineError::Storage(format!("encode peer endpoint update: {error}"))
+        })?;
+        self.connection
+            .execute(
+                "INSERT OR IGNORE INTO endpoint_update_outbox (
+                    contact_installation_id, payload, sequence, attempt_count,
+                    next_attempt_at, last_error, updated_at
+                 )
+                 SELECT installation_id, ?1, ?2, 0, 0, NULL, unixepoch()
+                 FROM contacts;",
+                params![payload, update.endpoint.sequence as i64],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
+    pub fn pending_endpoint_updates(
+        &self,
+        contact_installation_id: &str,
+    ) -> EngineResult<Vec<PeerEndpointUpdate>> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT payload
+                 FROM endpoint_update_outbox
+                 WHERE contact_installation_id = ?1
+                 ORDER BY sequence ASC;",
+            )
+            .map_err(sqlite_error)?;
+        let rows = statement
+            .query_map([contact_installation_id], |row| row.get::<_, Vec<u8>>(0))
+            .map_err(sqlite_error)?;
+        rows.map(|row| {
+            let payload = row.map_err(sqlite_error)?;
+            serde_json::from_slice(&payload).map_err(|error| {
+                EngineError::Storage(format!("decode peer endpoint update: {error}"))
+            })
+        })
+        .collect()
+    }
+
+    pub fn complete_endpoint_updates(
+        &self,
+        contact_installation_id: &str,
+        through_sequence: u64,
+    ) -> EngineResult<()> {
+        self.connection
+            .execute(
+                "DELETE FROM endpoint_update_outbox
+                 WHERE contact_installation_id = ?1 AND sequence <= ?2;",
+                params![contact_installation_id, through_sequence as i64],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
+    pub fn put_peer_endpoint_bootstrap(
+        &self,
+        contact_installation_id: &str,
+        payload: &[u8],
+        endpoint_sequence: u64,
+    ) -> EngineResult<()> {
+        self.connection
+            .execute(
+                "INSERT INTO peer_endpoint_bootstrap_outbox (
+                    contact_installation_id, payload, endpoint_sequence, attempt_count,
+                    next_attempt_at, last_error, updated_at
+                 ) VALUES (?1, ?2, ?3, 0, 0, NULL, unixepoch())
+                 ON CONFLICT(contact_installation_id) DO UPDATE SET
+                    payload = excluded.payload,
+                    endpoint_sequence = excluded.endpoint_sequence,
+                    attempt_count = 0,
+                    next_attempt_at = 0,
+                    last_error = NULL,
+                    updated_at = unixepoch()
+                 WHERE excluded.endpoint_sequence >= peer_endpoint_bootstrap_outbox.endpoint_sequence;",
+                params![contact_installation_id, payload, endpoint_sequence as i64],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
+    pub fn due_peer_endpoint_bootstraps(
+        &self,
+        now_ms: i64,
+    ) -> EngineResult<Vec<PeerEndpointBootstrapRecord>> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT contact_installation_id, payload, endpoint_sequence, attempt_count,
+                        next_attempt_at, last_error
+                 FROM peer_endpoint_bootstrap_outbox
+                 WHERE next_attempt_at <= ?1
+                 ORDER BY next_attempt_at ASC, contact_installation_id ASC;",
+            )
+            .map_err(sqlite_error)?;
+        let rows = statement
+            .query_map([now_ms], |row| {
+                Ok(PeerEndpointBootstrapRecord {
+                    contact_installation_id: row.get("contact_installation_id")?,
+                    payload: row.get("payload")?,
+                    endpoint_sequence: row.get::<_, i64>("endpoint_sequence")? as u64,
+                    attempt_count: row.get::<_, i64>("attempt_count")? as u32,
+                    next_attempt_at: row.get("next_attempt_at")?,
+                    last_error: row.get("last_error")?,
+                })
+            })
+            .map_err(sqlite_error)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)
+    }
+
+    pub fn claim_peer_endpoint_bootstrap_attempt(
+        &self,
+        contact_installation_id: &str,
+        endpoint_sequence: u64,
+        next_attempt_at: i64,
+        last_error: Option<&str>,
+    ) -> EngineResult<bool> {
+        let changed = self
+            .connection
+            .execute(
+                "UPDATE peer_endpoint_bootstrap_outbox
+                 SET attempt_count = attempt_count + 1,
+                     next_attempt_at = ?1,
+                     last_error = ?2,
+                     updated_at = unixepoch()
+                 WHERE contact_installation_id = ?3
+                   AND endpoint_sequence = ?4
+                   AND next_attempt_at <= ?5;",
+                params![
+                    next_attempt_at,
+                    last_error,
+                    contact_installation_id,
+                    endpoint_sequence as i64,
+                    unix_ms()
+                ],
+            )
+            .map_err(sqlite_error)?;
+        Ok(changed == 1)
+    }
+
+    pub fn complete_peer_endpoint_bootstrap(
+        &self,
+        contact_installation_id: &str,
+        endpoint_sequence: u64,
+    ) -> EngineResult<()> {
+        self.connection
+            .execute(
+                "DELETE FROM peer_endpoint_bootstrap_outbox
+                 WHERE contact_installation_id = ?1
+                   AND endpoint_sequence <= ?2;",
+                params![contact_installation_id, endpoint_sequence as i64],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
+    pub fn next_peer_endpoint_bootstrap_retry_deadline_ms(&self) -> EngineResult<Option<i64>> {
+        self.connection
+            .query_row(
+                "SELECT MIN(next_attempt_at) AS next_attempt_at
+                 FROM peer_endpoint_bootstrap_outbox;",
+                [],
+                |row| row.get("next_attempt_at"),
+            )
+            .map_err(sqlite_error)
+    }
+
+    pub fn put_pending_contact_confirmation(
+        &self,
+        pairing_id: &str,
+        peer_installation_id: &str,
+        capability: &str,
+    ) -> EngineResult<()> {
+        self.connection
+            .execute(
+                "INSERT INTO pending_contact_confirmations (
+                    pairing_id, peer_installation_id, capability, attempt_count,
+                    next_attempt_at, last_error, created_at, updated_at
+                 ) VALUES (?1, ?2, ?3, 0, 0, NULL, unixepoch(), unixepoch())
+                 ON CONFLICT(pairing_id) DO UPDATE SET
+                    peer_installation_id = excluded.peer_installation_id,
+                    capability = excluded.capability,
+                    attempt_count = 0,
+                    next_attempt_at = 0,
+                    last_error = NULL,
+                    updated_at = unixepoch();",
+                params![pairing_id, peer_installation_id, capability],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
+    pub fn put_pending_pairing_acknowledgement(
+        &self,
+        pairing_id: &str,
+        last_error: Option<&str>,
+    ) -> EngineResult<()> {
+        self.connection
+            .execute(
+                "INSERT INTO pending_pairing_acknowledgements (
+                    pairing_id, attempt_count, next_attempt_at, last_error
+                 ) VALUES (?1, 0, 0, ?2)
+                 ON CONFLICT(pairing_id) DO UPDATE SET
+                    next_attempt_at = 0,
+                    last_error = excluded.last_error;",
+                params![pairing_id, last_error],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
+    pub fn due_pending_pairing_acknowledgements(
+        &self,
+        now_ms: i64,
+    ) -> EngineResult<Vec<(String, u32)>> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT pairing_id, attempt_count
+                 FROM pending_pairing_acknowledgements
+                 WHERE next_attempt_at <= ?1
+                 ORDER BY next_attempt_at ASC, pairing_id ASC;",
+            )
+            .map_err(sqlite_error)?;
+        let rows = statement
+            .query_map([now_ms], |row| {
+                Ok((
+                    row.get::<_, String>("pairing_id")?,
+                    row.get::<_, i64>("attempt_count")? as u32,
+                ))
+            })
+            .map_err(sqlite_error)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)
+    }
+
+    pub fn claim_pending_pairing_acknowledgement_attempt(
+        &self,
+        pairing_id: &str,
+        next_attempt_at: i64,
+        last_error: Option<&str>,
+    ) -> EngineResult<bool> {
+        let now_ms = unix_ms();
+        let changed = self
+            .connection
+            .execute(
+                "UPDATE pending_pairing_acknowledgements
+                 SET attempt_count = attempt_count + 1,
+                     next_attempt_at = ?1,
+                     last_error = ?2
+                 WHERE pairing_id = ?3
+                   AND next_attempt_at <= ?4;",
+                params![next_attempt_at, last_error, pairing_id, now_ms],
+            )
+            .map_err(sqlite_error)?;
+        Ok(changed > 0)
+    }
+
+    pub fn complete_pending_pairing_acknowledgement(
+        &self,
+        pairing_id: &str,
+    ) -> EngineResult<()> {
+        self.connection
+            .execute(
+                "DELETE FROM pending_pairing_acknowledgements
+                 WHERE pairing_id = ?1;",
+                [pairing_id],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
+    pub fn next_pending_pairing_acknowledgement_retry_deadline_ms(
+        &self,
+    ) -> EngineResult<Option<i64>> {
+        self.connection
+            .query_row(
+                "SELECT MIN(next_attempt_at)
+                 FROM pending_pairing_acknowledgements;",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .map(|value| value.flatten())
+            .map_err(sqlite_error)
+    }
+
+    pub fn due_pending_contact_confirmations(
+        &self,
+        now_ms: i64,
+    ) -> EngineResult<Vec<PendingContactConfirmationRecord>> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT pairing_id, peer_installation_id, capability, attempt_count,
+                        next_attempt_at, last_error
+                 FROM pending_contact_confirmations
+                 WHERE next_attempt_at <= ?1
+                 ORDER BY next_attempt_at ASC, pairing_id ASC;",
+            )
+            .map_err(sqlite_error)?;
+        let rows = statement
+            .query_map([now_ms], |row| {
+                Ok(PendingContactConfirmationRecord {
+                    pairing_id: row.get("pairing_id")?,
+                    peer_installation_id: row.get("peer_installation_id")?,
+                    capability: row.get("capability")?,
+                    attempt_count: row.get::<_, i64>("attempt_count")? as u32,
+                    next_attempt_at: row.get("next_attempt_at")?,
+                    last_error: row.get("last_error")?,
+                })
+            })
+            .map_err(sqlite_error)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)
+    }
+
+    pub fn claim_pending_contact_confirmation_attempt(
+        &self,
+        pairing_id: &str,
+        next_attempt_at: i64,
+        last_error: Option<&str>,
+    ) -> EngineResult<bool> {
+        let changed = self
+            .connection
+            .execute(
+                "UPDATE pending_contact_confirmations
+                 SET attempt_count = attempt_count + 1,
+                     next_attempt_at = ?1,
+                     last_error = ?2,
+                     updated_at = unixepoch()
+                 WHERE pairing_id = ?3
+                   AND next_attempt_at <= ?4;",
+                params![next_attempt_at, last_error, pairing_id, unix_ms()],
+            )
+            .map_err(sqlite_error)?;
+        Ok(changed == 1)
+    }
+
+    pub fn complete_pending_contact_confirmation(&self, pairing_id: &str) -> EngineResult<()> {
+        self.connection
+            .execute(
+                "DELETE FROM pending_contact_confirmations
+                 WHERE pairing_id = ?1;",
+                [pairing_id],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
+    pub fn next_pending_contact_confirmation_retry_deadline_ms(
+        &self,
+    ) -> EngineResult<Option<i64>> {
+        self.connection
+            .query_row(
+                "SELECT MIN(next_attempt_at) AS next_attempt_at
+                 FROM pending_contact_confirmations;",
+                [],
+                |row| row.get("next_attempt_at"),
+            )
+            .map_err(sqlite_error)
+    }
+
+    pub fn enqueue_outbound_delivery(
+        &self,
+        message_id: &str,
+        contact_installation_id: &str,
+        sequence: u64,
+        created_at: i64,
+    ) -> EngineResult<()> {
+        self.connection
+            .execute(
+                "INSERT INTO outbound_deliveries (
+                    message_id, contact_installation_id, sequence, state,
+                    attempt_count, next_attempt_at, created_at, updated_at
+                 ) VALUES (?1, ?2, ?3, 'QUEUED', 0, 0, ?4, unixepoch())
+                 ON CONFLICT(message_id) DO NOTHING;",
+                params![
+                    message_id,
+                    contact_installation_id,
+                    sequence as i64,
+                    created_at,
+                ],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
+    pub fn due_outbound_deliveries(
+        &self,
+        now_ms: i64,
+        limit: usize,
+    ) -> EngineResult<Vec<OutboundDeliveryRecord>> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT message_id, contact_installation_id, sequence, state,
+                        attempt_count, next_attempt_at, ack_deadline, last_error, created_at
+                 FROM outbound_deliveries
+                 WHERE UPPER(state) IN ('QUEUED', 'IN_FLIGHT')
+                   AND next_attempt_at <= ?1
+                 ORDER BY created_at ASC, message_id ASC
+                 LIMIT ?2;",
+            )
+            .map_err(sqlite_error)?;
+        let rows = statement
+            .query_map(params![now_ms, limit as i64], |row| {
+                Ok(OutboundDeliveryRecord {
+                    message_id: row.get("message_id")?,
+                    contact_installation_id: row.get("contact_installation_id")?,
+                    sequence: row.get::<_, i64>("sequence")? as u64,
+                    state: row.get("state")?,
+                    attempt_count: row.get::<_, i64>("attempt_count")? as u32,
+                    next_attempt_at: row.get("next_attempt_at")?,
+                    ack_deadline: row.get("ack_deadline")?,
+                    last_error: row.get("last_error")?,
+                    created_at: row.get("created_at")?,
+                })
+            })
+            .map_err(sqlite_error)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(sqlite_error)
+    }
+
+    pub fn outbound_delivery(
+        &self,
+        message_id: &str,
+    ) -> EngineResult<Option<OutboundDeliveryRecord>> {
+        self.connection
+            .query_row(
+                "SELECT message_id, contact_installation_id, sequence, state,
+                        attempt_count, next_attempt_at, ack_deadline, last_error, created_at
+                 FROM outbound_deliveries
+                 WHERE message_id = ?1;",
+                [message_id],
+                |row| {
+                    Ok(OutboundDeliveryRecord {
+                        message_id: row.get("message_id")?,
+                        contact_installation_id: row.get("contact_installation_id")?,
+                        sequence: row.get::<_, i64>("sequence")? as u64,
+                        state: row.get("state")?,
+                        attempt_count: row.get::<_, i64>("attempt_count")? as u32,
+                        next_attempt_at: row.get("next_attempt_at")?,
+                        ack_deadline: row.get("ack_deadline")?,
+                        last_error: row.get("last_error")?,
+                        created_at: row.get("created_at")?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(sqlite_error)
+    }
+
+    pub fn next_contact_peer_retry_deadline_ms(
+        &self,
+        installation_id: &str,
+    ) -> EngineResult<Option<i64>> {
+        self.connection
+            .query_row(
+                "SELECT MIN(next_attempt_at)
+                 FROM outbound_deliveries
+                 WHERE recipient_installation_id = ?1
+                   AND UPPER(state) = 'QUEUED';",
+                [installation_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map(|value| value.flatten())
+            .map_err(sqlite_error)
+    }
+
+    pub fn next_contact_receipt_retry_deadline_ms(
+        &self,
+        installation_id: &str,
+    ) -> EngineResult<Option<i64>> {
+        self.connection
+            .query_row(
+                "SELECT MIN(next_attempt_at)
+                 FROM delivery_receipts
+                 WHERE original_sender = ?1
+                   AND UPPER(state) = 'PENDING';",
+                [installation_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map(|value| value.flatten())
+            .map_err(sqlite_error)
+    }
+
+    pub fn claim_outbound_delivery(
+        &self,
+        message_id: &str,
+        next_attempt_at: i64,
+        ack_deadline: i64,
+    ) -> EngineResult<bool> {
+        self.connection
+            .execute(
+                "UPDATE outbound_deliveries
+                 SET state = 'IN_FLIGHT',
+                     attempt_count = attempt_count + 1,
+                     next_attempt_at = ?2,
+                     ack_deadline = ?3,
+                     last_error = NULL,
+                     updated_at = unixepoch()
+                 WHERE message_id = ?1
+                   AND UPPER(state) IN ('QUEUED', 'IN_FLIGHT');",
+                params![message_id, next_attempt_at, ack_deadline],
+            )
+            .map(|changed| changed > 0)
+            .map_err(sqlite_error)
+    }
+
+    pub fn requeue_outbound_delivery(
+        &self,
+        message_id: &str,
+        next_attempt_at: i64,
+        error: &str,
+    ) -> EngineResult<()> {
+        self.connection
+            .execute(
+                "UPDATE outbound_deliveries
+                 SET state = 'QUEUED', next_attempt_at = ?2, ack_deadline = NULL,
+                     last_error = ?3, updated_at = unixepoch()
+                 WHERE message_id = ?1;",
+                params![message_id, next_attempt_at, error],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
+    pub fn complete_outbound_delivery(&self, message_id: &str) -> EngineResult<()> {
+        self.connection
+            .execute(
+                "DELETE FROM outbound_deliveries WHERE message_id = ?1;",
+                [message_id],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
+    pub fn expedite_peer_deliveries(&self, installation_id: &str) -> EngineResult<()> {
+        self.connection
+            .execute(
+                "UPDATE outbound_deliveries
+                 SET state = 'QUEUED', next_attempt_at = 0, ack_deadline = NULL,
+                     updated_at = unixepoch()
+                 WHERE contact_installation_id = ?1;",
+                [installation_id],
+            )
+            .map_err(sqlite_error)?;
+        self.connection
+            .execute(
+                "UPDATE messages
+                 SET state = CASE
+                         WHEN UPPER(state) = 'SENDING' THEN 'QUEUED'
+                         ELSE state
+                     END,
+                     next_attempt_at = 0,
+                     ack_deadline = NULL
+                 WHERE conversation_id = ?1
+                   AND outgoing = 1
+                   AND UPPER(state) IN ('QUEUED', 'SENDING');",
+                [installation_id],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
+    pub fn requeue_peer_deliveries(&self, now_ms: i64) -> EngineResult<()> {
+        let transaction = self.connection.unchecked_transaction().map_err(sqlite_error)?;
+        transaction
+            .execute(
+                "UPDATE outbound_deliveries
+                 SET state = 'QUEUED', next_attempt_at = ?1, ack_deadline = NULL,
+                     updated_at = unixepoch()
+                 WHERE UPPER(state) = 'IN_FLIGHT';",
+                [now_ms],
+            )
+            .map_err(sqlite_error)?;
+        transaction
+            .execute(
+                "UPDATE messages
+                 SET state = 'QUEUED',
+                     next_attempt_at = ?1,
+                     ack_deadline = NULL
+                 WHERE outgoing = 1
+                   AND UPPER(state) = 'SENDING'
+                   AND id IN (
+                        SELECT message_id
+                        FROM outbound_deliveries
+                        WHERE UPPER(state) = 'QUEUED'
+                   );",
+                [now_ms],
+            )
+            .map_err(sqlite_error)?;
+        transaction.commit().map_err(sqlite_error)?;
+        Ok(())
+    }
+
+    pub fn store_inbound_peer_envelope(
+        &self,
+        envelope: &PeerMessageEnvelope,
+        received_at: i64,
+    ) -> EngineResult<InboundEnvelopeStoreResult> {
+        let hash = envelope.ciphertext_hash().to_vec();
+        if let Some((existing_hash, state)) = self
+            .connection
+            .query_row(
+                "SELECT ciphertext_hash, state
+                 FROM inbound_peer_envelopes
+                 WHERE sender_installation_id = ?1 AND message_id = ?2;",
+                params![
+                    envelope.sender_installation_id,
+                    envelope.message_id.to_string(),
+                ],
+                |row| {
+                    Ok((
+                        row.get::<_, Vec<u8>>("ciphertext_hash")?,
+                        row.get::<_, String>("state")?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(sqlite_error)?
+        {
+            if existing_hash != hash {
+                return Err(EngineError::InvalidCommand(
+                    "duplicate peer envelope has different ciphertext".to_owned(),
+                ));
+            }
+            return Ok(InboundEnvelopeStoreResult::Duplicate {
+                delivered: state.eq_ignore_ascii_case("DELIVERED"),
+            });
+        }
+        self.connection
+            .execute(
+                "INSERT INTO inbound_peer_envelopes (
+                    sender_installation_id, message_id, conversation_id, sequence,
+                    ciphertext, ciphertext_hash, state, received_at, updated_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'PERSISTED', ?7, unixepoch());",
+                params![
+                    envelope.sender_installation_id,
+                    envelope.message_id.to_string(),
+                    envelope.conversation_id,
+                    envelope.sequence as i64,
+                    envelope.ciphertext,
+                    hash,
+                    received_at,
+                ],
+            )
+            .map_err(sqlite_error)?;
+        Ok(InboundEnvelopeStoreResult::Stored)
+    }
+
+    pub fn pending_inbound_peer_envelopes(&self) -> EngineResult<Vec<InboundPeerEnvelopeRecord>> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT sender_installation_id, message_id, conversation_id, sequence,
+                        ciphertext, ciphertext_hash, state, received_at
+                 FROM inbound_peer_envelopes
+                 WHERE UPPER(state) = 'PERSISTED'
+                 ORDER BY received_at ASC, message_id ASC;",
+            )
+            .map_err(sqlite_error)?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok(InboundPeerEnvelopeRecord {
+                    sender_installation_id: row.get("sender_installation_id")?,
+                    message_id: row.get("message_id")?,
+                    conversation_id: row.get("conversation_id")?,
+                    sequence: row.get::<_, i64>("sequence")? as u64,
+                    ciphertext: row.get("ciphertext")?,
+                    ciphertext_hash: row.get("ciphertext_hash")?,
+                    state: row.get("state")?,
+                    received_at: row.get("received_at")?,
+                })
+            })
+            .map_err(sqlite_error)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(sqlite_error)
+    }
+
+    pub fn complete_inbound_peer_envelope(
+        &self,
+        sender_installation_id: &str,
+        message_id: &str,
+    ) -> EngineResult<()> {
+        self.connection
+            .execute(
+                "UPDATE inbound_peer_envelopes
+                 SET state = 'DELIVERED', updated_at = unixepoch()
+                 WHERE sender_installation_id = ?1 AND message_id = ?2;",
+                params![sender_installation_id, message_id],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
     }
 
     pub fn mls_inbox_snapshot(&self) -> EngineResult<Option<Vec<u8>>> {
@@ -285,6 +1186,30 @@ impl ClientDatabase {
             })
             .map_err(sqlite_error)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)
+    }
+
+    pub fn pending_welcome(&self, invite_id: &str) -> EngineResult<Option<PendingWelcomeRecord>> {
+        self.connection
+            .query_row(
+                "SELECT invite_id, recipient_installation_id, payload, expires_at,
+                        attempt_count, next_attempt_at, last_error
+                 FROM pending_welcomes
+                 WHERE invite_id = ?1;",
+                [invite_id],
+                |row| {
+                    Ok(PendingWelcomeRecord {
+                        invite_id: row.get("invite_id")?,
+                        recipient_installation_id: row.get("recipient_installation_id")?,
+                        payload: row.get("payload")?,
+                        expires_at: row.get("expires_at")?,
+                        attempt_count: row.get::<_, i64>("attempt_count")? as u32,
+                        next_attempt_at: row.get("next_attempt_at")?,
+                        last_error: row.get("last_error")?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(sqlite_error)
     }
 
     pub fn put_pending_welcome(&self, record: &PendingWelcomeRecord) -> EngineResult<()> {
@@ -493,6 +1418,14 @@ impl ClientDatabase {
                 params![conversation_id, snapshot],
             )
             .map_err(sqlite_error)?;
+        transaction
+            .execute(
+                "UPDATE received_envelopes
+                 SET receipt_state = 'SENT'
+                 WHERE message_id = ?1;",
+                [message_id],
+            )
+            .map_err(sqlite_error)?;
         transaction.commit().map_err(sqlite_error)?;
         Ok(true)
     }
@@ -501,7 +1434,8 @@ impl ClientDatabase {
         self.connection
             .query_row(
                 "SELECT id, conversation_id, outgoing, body, state, created_at,
-                        relay_payload, ciphertext_hash, attempt_count, last_attempt_at,
+                        COALESCE(wire_ciphertext, relay_payload) AS wire_ciphertext,
+                        ciphertext_hash, attempt_count, last_attempt_at,
                         next_attempt_at, ack_deadline, last_transport_error
                  FROM messages
                  WHERE id = ?1;",
@@ -514,7 +1448,7 @@ impl ClientDatabase {
                         body: row.get("body")?,
                         state: row.get("state")?,
                         created_at: row.get("created_at")?,
-                        relay_payload: row.get("relay_payload")?,
+                        wire_ciphertext: row.get("wire_ciphertext")?,
                         ciphertext_hash: row.get("ciphertext_hash")?,
                         attempt_count: row.get::<_, i64>("attempt_count")? as u32,
                         last_attempt_at: row.get("last_attempt_at")?,
@@ -531,21 +1465,21 @@ impl ClientDatabase {
     pub fn persist_outbound_encryption_and_claim(
         &mut self,
         message_id: &str,
-        relay_payload: &[u8],
+        wire_ciphertext: &[u8],
         conversation_id: &str,
         snapshot: &[u8],
         next_attempt_at: i64,
         ack_deadline: Option<i64>,
     ) -> EngineResult<bool> {
-        let ciphertext_hash = sha2::Sha256::digest(relay_payload).to_vec();
+        let ciphertext_hash = sha2::Sha256::digest(wire_ciphertext).to_vec();
         let now_ms = unix_ms();
         let transaction = self.connection.transaction().map_err(sqlite_error)?;
         let changed = transaction
             .execute(
-                "UPDATE messages\n                 SET relay_payload = ?2,\n                     ciphertext_hash = ?3,\n                     attempt_count = attempt_count + 1,\n                     last_attempt_at = ?4,\n                     next_attempt_at = ?5,\n                     ack_deadline = ?6,\n                     last_transport_error = NULL\n                 WHERE id = ?1\n                   AND outgoing = 1\n                   AND UPPER(state) IN ('SENDING', 'QUEUED')\n                   AND next_attempt_at <= ?4;",
+                "UPDATE messages\n                 SET wire_ciphertext = ?2,\n                     ciphertext_hash = ?3,\n                     attempt_count = attempt_count + 1,\n                     last_attempt_at = ?4,\n                     next_attempt_at = ?5,\n                     ack_deadline = ?6,\n                     last_transport_error = NULL\n                 WHERE id = ?1\n                   AND outgoing = 1\n                   AND UPPER(state) IN ('SENDING', 'QUEUED')\n                   AND next_attempt_at <= ?4;",
                 params![
                     message_id,
-                    relay_payload,
+                    wire_ciphertext,
                     ciphertext_hash,
                     now_ms,
                     next_attempt_at,
@@ -601,14 +1535,14 @@ impl ClientDatabase {
     }
 
     pub fn claim_receipt_attempt(
-        &self,
+        &mut self,
         message_id: &str,
         next_attempt_at: i64,
         last_error: Option<&str>,
     ) -> EngineResult<bool> {
         let now_ms = unix_ms();
-        let changed = self
-            .connection
+        let transaction = self.connection.transaction().map_err(sqlite_error)?;
+        let changed = transaction
             .execute(
                 "UPDATE delivery_receipts
                  SET state = 'SENT',
@@ -621,6 +1555,17 @@ impl ClientDatabase {
                 params![next_attempt_at, last_error, message_id, now_ms],
             )
             .map_err(sqlite_error)?;
+        if changed > 0 {
+            transaction
+                .execute(
+                    "UPDATE received_envelopes
+                     SET receipt_state = 'SENT'
+                     WHERE message_id = ?1;",
+                    [message_id],
+                )
+                .map_err(sqlite_error)?;
+        }
+        transaction.commit().map_err(sqlite_error)?;
         Ok(changed > 0)
     }
 
@@ -647,12 +1592,13 @@ impl ClientDatabase {
     }
 
     pub fn requeue_delivery_receipt(
-        &self,
+        &mut self,
         message_id: &str,
         next_attempt_at: i64,
         last_error: &str,
     ) -> EngineResult<()> {
-        self.connection
+        let transaction = self.connection.transaction().map_err(sqlite_error)?;
+        transaction
             .execute(
                 "UPDATE delivery_receipts
                  SET state = 'PENDING', next_attempt_at = ?1, last_error = ?2
@@ -660,6 +1606,15 @@ impl ClientDatabase {
                 params![next_attempt_at, last_error, message_id],
             )
             .map_err(sqlite_error)?;
+        transaction
+            .execute(
+                "UPDATE received_envelopes
+                 SET receipt_state = 'PENDING'
+                 WHERE message_id = ?1;",
+                [message_id],
+            )
+            .map_err(sqlite_error)?;
+        transaction.commit().map_err(sqlite_error)?;
         Ok(())
     }
 
@@ -802,6 +1757,24 @@ impl ClientDatabase {
         if let Some(deadline) = self.next_pairing_response_retry_deadline_ms(now_secs)? {
             deadlines.push(RetryDeadline {
                 kind: RetryKind::PairingResponse,
+                at_ms: deadline,
+            });
+        }
+        if let Some(deadline) = self.next_peer_endpoint_bootstrap_retry_deadline_ms()? {
+            deadlines.push(RetryDeadline {
+                kind: RetryKind::PeerEndpointBootstrap,
+                at_ms: deadline,
+            });
+        }
+        if let Some(deadline) = self.next_pending_contact_confirmation_retry_deadline_ms()? {
+            deadlines.push(RetryDeadline {
+                kind: RetryKind::ContactConfirmation,
+                at_ms: deadline,
+            });
+        }
+        if let Some(deadline) = self.next_pending_pairing_acknowledgement_retry_deadline_ms()? {
+            deadlines.push(RetryDeadline {
+                kind: RetryKind::PairingAcknowledgement,
                 at_ms: deadline,
             });
         }
@@ -1090,9 +2063,58 @@ mod tests {
             })
             .expect("schema_migrations version is readable");
 
-        assert_eq!(latest_version, 6);
+        assert_eq!(latest_version, 11);
         assert_eq!(database.migration_runner().checksum().len(), 64);
 
+        drop(database);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn opening_version_7_database_applies_contact_transport_policy_migration() {
+        let path = temp_database_path("migration-7-to-8");
+        let database_key = key(17);
+        let connection = Connection::open(&path).expect("database file opens");
+        connection
+            .execute_batch(&sqlcipher_key_pragma(database_key.expose()))
+            .expect("database key applies");
+        connection
+            .execute_batch(CONNECTION_PRAGMAS)
+            .expect("connection pragmas apply");
+        MigrationRunner::new(&MIGRATIONS[..8])
+            .run(&connection)
+            .expect("version 7 migrations apply");
+        connection
+            .execute(
+                "INSERT INTO contacts (
+                    installation_id, nickname, public_key, fingerprint,
+                    verification, source, created_at, updated_at
+                 ) VALUES (
+                    'contact-1', 'Alice', 'pk', 'fp',
+                    'VERIFIED', 'PAIRING', 1, 1
+                 );",
+                [],
+            )
+            .expect("legacy contact inserts");
+        drop(connection);
+
+        let database =
+            ClientDatabase::open(&path, &database_key).expect("version 8 database opens");
+        let policy: String = database
+            .connection()
+            .query_row(
+                "SELECT transport_policy FROM contacts WHERE installation_id = 'contact-1';",
+                [],
+                |row| row.get(0),
+            )
+            .expect("transport policy is readable");
+        let latest_version: i64 = database
+            .connection()
+            .query_row("SELECT MAX(version) FROM schema_migrations;", [], |row| row.get(0))
+            .expect("latest migration is readable");
+
+        assert_eq!(policy, "RELAY_ONLY");
+        assert_eq!(latest_version, 11);
         drop(database);
         let _ = std::fs::remove_file(path);
     }
@@ -1106,6 +2128,93 @@ mod tests {
         let result = ClientDatabase::open(&path, &key(12));
 
         assert!(matches!(result, Err(EngineError::Storage(_))));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn refreshing_peer_endpoint_bootstrap_resets_retry_metadata() {
+        let path = temp_database_path("peer-endpoint-bootstrap-reset");
+        let database = ClientDatabase::open(&path, &key(21)).expect("database opens");
+        database
+            .connection()
+            .execute(
+                "INSERT INTO contacts (
+                    installation_id, nickname, public_key, fingerprint,
+                    verification, source, created_at, updated_at, transport_policy
+                 ) VALUES (
+                    'contact-1', 'Alice', 'pk', 'fp',
+                    'VERIFIED', 'PAIRING', 1, 1, 'PEER_ONLY'
+                 );",
+                [],
+            )
+            .expect("contact inserts");
+
+        database
+            .put_peer_endpoint_bootstrap("contact-1", b"payload-a", 1)
+            .expect("bootstrap inserts");
+        assert!(
+            database
+                .claim_peer_endpoint_bootstrap_attempt("contact-1", 1, 12345, Some("timeout"))
+                .expect("claim works")
+        );
+
+        database
+            .put_peer_endpoint_bootstrap("contact-1", b"payload-b", 2)
+            .expect("bootstrap refreshes");
+
+        let record = database
+            .due_peer_endpoint_bootstraps(0)
+            .expect("bootstrap rows are readable")
+            .into_iter()
+            .find(|row| row.contact_installation_id == "contact-1")
+            .expect("bootstrap row exists");
+
+        assert_eq!(record.endpoint_sequence, 2);
+        assert_eq!(record.attempt_count, 0);
+        assert_eq!(record.next_attempt_at, 0);
+        assert_eq!(record.last_error, None);
+        assert_eq!(record.payload, b"payload-b");
+
+        drop(database);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn refreshing_pending_contact_confirmation_resets_retry_metadata() {
+        let path = temp_database_path("contact-confirmation-reset");
+        let database = ClientDatabase::open(&path, &key(22)).expect("database opens");
+
+        database
+            .put_pending_contact_confirmation("pairing-1", "peer-1", "cap-a")
+            .expect("confirmation inserts");
+        assert!(
+            database
+                .claim_pending_contact_confirmation_attempt(
+                    "pairing-1",
+                    12345,
+                    Some("relay unavailable"),
+                )
+                .expect("claim works")
+        );
+
+        database
+            .put_pending_contact_confirmation("pairing-1", "peer-1", "cap-b")
+            .expect("confirmation refreshes");
+
+        let record = database
+            .due_pending_contact_confirmations(0)
+            .expect("confirmation rows are readable")
+            .into_iter()
+            .find(|row| row.pairing_id == "pairing-1")
+            .expect("confirmation row exists");
+
+        assert_eq!(record.peer_installation_id, "peer-1");
+        assert_eq!(record.capability, "cap-b");
+        assert_eq!(record.attempt_count, 0);
+        assert_eq!(record.next_attempt_at, 0);
+        assert_eq!(record.last_error, None);
+
+        drop(database);
         let _ = std::fs::remove_file(path);
     }
 }

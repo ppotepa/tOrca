@@ -148,6 +148,14 @@ class ContactsView extends StatelessWidget {
               Text(
                 contact.verified ? 'Kontakt zweryfikowany' : 'Brak weryfikacji',
               ),
+              const SizedBox(height: 6),
+              Text(
+                'P2P przez Tor: ${_peerEndpointLabel(contact.peerEndpointStatus)}',
+              ),
+              Text(
+                'Połączenie bezpośrednie: '
+                '${_peerConnectionLabel(contact.peerConnectionStatus)}',
+              ),
               const SizedBox(height: 12),
               TextField(
                 controller: alias,
@@ -209,3 +217,18 @@ class ContactsView extends StatelessWidget {
     ).whenComplete(alias.dispose);
   }
 }
+
+String _peerEndpointLabel(PeerEndpointStatus status) => switch (status) {
+  PeerEndpointStatus.verified => 'endpoint zweryfikowany',
+  PeerEndpointStatus.pendingExchange => 'oczekuje na wymianę endpointu',
+  PeerEndpointStatus.invalid => 'endpoint nieprawidłowy',
+  PeerEndpointStatus.missing => 'endpoint niedostępny',
+};
+
+String _peerConnectionLabel(PeerConnectionStatus status) => switch (status) {
+  PeerConnectionStatus.connected => 'połączono',
+  PeerConnectionStatus.connecting => 'łączenie',
+  PeerConnectionStatus.authenticating => 'uwierzytelnianie',
+  PeerConnectionStatus.backoff => 'oczekiwanie na ponowienie',
+  PeerConnectionStatus.offline => 'offline',
+};

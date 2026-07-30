@@ -33,11 +33,13 @@ class RuntimeRepository {
     String? localAlias,
     required bool muted,
     required bool blocked,
+    ContactTransportPolicy? transportPolicy,
   }) => _runtime.updateContactSettings(
     id,
     localAlias: localAlias,
     muted: muted,
     blocked: blocked,
+    transportPolicy: transportPolicy,
   );
   Future<List<ContactRecord>> contacts() async => await _runtime.contacts();
   Future<List<ConversationSummary>> conversations() async =>
@@ -46,6 +48,11 @@ class RuntimeRepository {
       await _runtime.messages(id);
   Future<List<PairingItem>> inbox() async => await _runtime.pairingInbox();
   Future<List<PairingItem>> outbox() async => await _runtime.pairingOutbox();
+  Future<PeerEndpoint?> peerEndpoint() => _runtime.peerEndpoint();
+  Future<bool> peerEndpointAvailable() => _runtime.peerEndpointAvailable();
+  Future<void> retryPeerConnection(String installationId) =>
+      _runtime.retryPeerConnection(installationId);
+  Future<void> rotatePeerEndpoint() => _runtime.rotatePeerEndpoint();
   Future<void> openConversation(String id) => _runtime.openConversation(id);
   Future<void> closeConversation() => _runtime.closeConversation();
   Future<void> startConversation(String id) => _runtime.startConversation(id);

@@ -25,10 +25,7 @@ class GeneratedRuntimePayload {
     if (value is! List) return const [];
     return value
         .whereType<Map>()
-        .map(
-          (item) =>
-              GeneratedRuntimePayload.fromMap(Map<String, dynamic>.from(item)),
-        )
+        .map((item) => GeneratedRuntimePayload.fromMap(Map<String, dynamic>.from(item)))
         .toList();
   }
 
@@ -63,6 +60,7 @@ class GeneratedEngineEvent {
       EngineContract.eventResponse,
       EngineContract.eventRuntime,
       EngineContract.eventConnection,
+      EngineContract.eventPlatformAction,
       EngineContract.eventNotificationRequested,
       EngineContract.eventLog,
       EngineContract.eventFatal,
@@ -80,6 +78,9 @@ class GeneratedEngineEvent {
         break;
       case EngineContract.eventConnection:
         _requireGeneratedEventObject(envelope, EngineContract.snapshot);
+        break;
+      case EngineContract.eventPlatformAction:
+        _requireGeneratedEventObject(envelope, EngineContract.action);
         break;
       case EngineContract.eventNotificationRequested:
         _requireGeneratedEventObject(envelope, EngineContract.notification);
@@ -137,18 +138,14 @@ class GeneratedEngineResponse {
     if (rawResult is! Map) {
       throw FormatException('engine response is missing result envelope');
     }
-    final resultEnvelope = GeneratedRuntimePayload.fromMap(
-      Map<String, dynamic>.from(rawResult),
-    );
+    final resultEnvelope = GeneratedRuntimePayload.fromMap(Map<String, dynamic>.from(rawResult));
     final status = resultEnvelope.string(EngineContract.status);
     if (status == EngineContract.responseStatusOk) {
       final rawPayload = resultEnvelope[EngineContract.payload];
       if (rawPayload is! Map) {
         throw FormatException('engine response is missing payload envelope');
       }
-      final payload = GeneratedRuntimePayload.fromMap(
-        Map<String, dynamic>.from(rawPayload),
-      );
+      final payload = GeneratedRuntimePayload.fromMap(Map<String, dynamic>.from(rawPayload));
       final payloadType = payload.string(EngineContract.type);
       final Object? decodedResult;
       if (payloadType == EngineContract.responsePayloadEmpty) {
@@ -246,6 +243,11 @@ const generatedMessageTransportOutcomes = <String>[
   'FORWARDED',
   'DELIVERED',
   'RECIPIENT_OFFLINE',
+  'PEER_PERSISTED',
+  'PEER_DELIVERED',
+  'PEER_UNAVAILABLE',
+  'PEER_AUTHENTICATION_FAILED',
+  'PEER_REJECTED',
   'RETRYABLE_FAILURE',
   'PERMANENT_FAILURE',
 ];
@@ -255,3 +257,19 @@ const generatedPairingPeerOutcomes = <String>[
   'REJECTION_RECEIVED',
   'WELCOME_PREPARED',
 ];
+
+const generatedPeerEndpointStatuses = <String>[
+  'MISSING',
+  'PENDING_EXCHANGE',
+  'VERIFIED',
+  'INVALID',
+];
+
+const generatedPeerConnectionStatuses = <String>[
+  'OFFLINE',
+  'CONNECTING',
+  'AUTHENTICATING',
+  'CONNECTED',
+  'BACKOFF',
+];
+

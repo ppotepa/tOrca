@@ -15,6 +15,7 @@ abstract final class EngineContract {
   static const log = 'log';
   static const error = 'error';
   static const fact = 'fact';
+  static const action = 'action';
   static const nickname = 'nickname';
   static const commandPairingId = 'pairing_id';
   static const commandConversationId = 'conversation_id';
@@ -22,6 +23,21 @@ abstract final class EngineContract {
   static const commandContactId = 'contact_id';
   static const commandReplyToMessageId = 'reply_to_message_id';
   static const factSocks5Url = 'socks5_url';
+  static const factOnionAddress = 'onion_address';
+  static const factVirtualPort = 'virtual_port';
+  static const factBatterySaver = 'battery_saver';
+  static const factDeviceIdle = 'device_idle';
+  static const onionAddress = 'onionAddress';
+  static const virtualPort = 'virtualPort';
+  static const sequence = 'sequence';
+  static const issuedAt = 'issuedAt';
+  static const capabilities = 'capabilities';
+  static const localPort = 'localPort';
+  static const generation = 'generation';
+  static const online = 'online';
+  static const batterySaver = 'batterySaver';
+  static const deviceIdle = 'deviceIdle';
+  static const restricted = 'restricted';
   static const pairingId = 'pairingId';
   static const conversationId = 'conversationId';
   static const installationId = 'installationId';
@@ -34,6 +50,10 @@ abstract final class EngineContract {
   static const localAlias = 'localAlias';
   static const muted = 'muted';
   static const blocked = 'blocked';
+  static const peerEndpointStatus = 'peerEndpointStatus';
+  static const peerConnectionStatus = 'peerConnectionStatus';
+  static const lastPeerConnectedAt = 'lastPeerConnectedAt';
+  static const transportPolicy = 'transportPolicy';
   static const contactInstallationId = 'contactInstallationId';
   static const lastMessagePreview = 'lastMessagePreview';
   static const lastMessageAt = 'lastMessageAt';
@@ -62,7 +82,6 @@ abstract final class EngineContract {
   static const level = 'level';
   static const body = 'body';
   static const typing = 'typing';
-  static const online = 'online';
   static const observedAt = 'observedAt';
   static const phase = 'phase';
   static const progress = 'progress';
@@ -73,9 +92,8 @@ abstract final class EngineContract {
   static const id = 'id';
   static const state = 'state';
   static const backoff = 'backoff';
-  static const generation = 'generation';
   static const attempt = 'attempt';
-  static const retryInMs = 'retry_in_ms';
+  static const retryInMs = 'retryInMs';
   static const label = 'label';
   static const retryAttempt = 'retryAttempt';
   static const latencyMs = 'latencyMs';
@@ -102,6 +120,9 @@ abstract final class EngineContract {
   static const listContacts = 'listContacts';
   static const listConversations = 'listConversations';
   static const listMessages = 'listMessages';
+  static const getPeerEndpoint = 'getPeerEndpoint';
+  static const retryPeerConnection = 'retryPeerConnection';
+  static const rotatePeerEndpoint = 'rotatePeerEndpoint';
   static const setNickname = 'setNickname';
   static const refreshPairingCode = 'refreshPairingCode';
   static const submitPairingCode = 'submitPairingCode';
@@ -132,6 +153,9 @@ abstract final class EngineContract {
   static const commandListContacts = 'list_contacts';
   static const commandListConversations = 'list_conversations';
   static const commandListMessages = 'list_messages';
+  static const commandGetPeerEndpoint = 'get_peer_endpoint';
+  static const commandRetryPeerConnection = 'retry_peer_connection';
+  static const commandRotatePeerEndpoint = 'rotate_peer_endpoint';
   static const commandSetNickname = 'set_nickname';
   static const commandRefreshPairingCode = 'refresh_pairing_code';
   static const commandSubmitPairingCode = 'submit_pairing_code';
@@ -156,6 +180,7 @@ abstract final class EngineContract {
   static const eventResponse = 'response';
   static const eventRuntime = 'runtime';
   static const eventConnection = 'connection';
+  static const eventPlatformAction = 'platform_action';
   static const eventNotificationRequested = 'notification_requested';
   static const eventLog = 'log';
   static const eventFatal = 'fatal';
@@ -169,8 +194,12 @@ abstract final class EngineContract {
   static const factTorStatus = 'tor_status';
   static const factTorEndpointAvailable = 'tor_endpoint_available';
   static const factTorEndpointLost = 'tor_endpoint_lost';
+  static const factOnionServiceAvailable = 'onion_service_available';
+  static const factOnionServiceLost = 'onion_service_lost';
   static const factAppVisibilityChanged = 'app_visibility_changed';
   static const factNetworkChanged = 'network_changed';
+  static const factPowerModeChanged = 'power_mode_changed';
+  static const factBackgroundExecutionRestricted = 'background_execution_restricted';
 
   static const torPhaseStarting = 'starting';
   static const torPhaseBootstrapping = 'bootstrapping';
@@ -187,6 +216,8 @@ abstract final class EngineContract {
   static const conversationReadChanged = 'conversation_read_changed';
   static const typingChanged = 'typing_changed';
   static const presenceChanged = 'presence_changed';
+  static const peerEndpointChanged = 'peer_endpoint_changed';
+  static const peerConnectionChanged = 'peer_connection_changed';
   static const changed = 'changed';
   static const runtimeError = 'runtime_error';
   static const runtimeLog = 'runtime_log';
@@ -238,10 +269,33 @@ abstract final class EngineContract {
   static const outcomeForwarded = 'FORWARDED';
   static const outcomeDelivered = 'DELIVERED';
   static const outcomeRecipientOffline = 'RECIPIENT_OFFLINE';
+  static const outcomePeerPersisted = 'PEER_PERSISTED';
+  static const outcomePeerDelivered = 'PEER_DELIVERED';
+  static const outcomePeerUnavailable = 'PEER_UNAVAILABLE';
+  static const outcomePeerAuthenticationFailed = 'PEER_AUTHENTICATION_FAILED';
+  static const outcomePeerRejected = 'PEER_REJECTED';
   static const outcomeRetryableFailure = 'RETRYABLE_FAILURE';
   static const outcomePermanentFailure = 'PERMANENT_FAILURE';
+
+  static const contactTransportPolicyPeerOnly = 'PEER_ONLY';
+  static const contactTransportPolicyPeerWithRelayFallback = 'PEER_WITH_RELAY_FALLBACK';
+  static const contactTransportPolicyRelayOnly = 'RELAY_ONLY';
 
   static const pairingOutcomeOfferReceived = 'OFFER_RECEIVED';
   static const pairingOutcomeRejectionReceived = 'REJECTION_RECEIVED';
   static const pairingOutcomeWelcomePrepared = 'WELCOME_PREPARED';
+
+  static const peerEndpointStatusMissing = 'MISSING';
+  static const peerEndpointStatusPendingExchange = 'PENDING_EXCHANGE';
+  static const peerEndpointStatusVerified = 'VERIFIED';
+  static const peerEndpointStatusInvalid = 'INVALID';
+
+  static const peerConnectionStatusOffline = 'OFFLINE';
+  static const peerConnectionStatusConnecting = 'CONNECTING';
+  static const peerConnectionStatusAuthenticating = 'AUTHENTICATING';
+  static const peerConnectionStatusConnected = 'CONNECTED';
+  static const peerConnectionStatusBackoff = 'BACKOFF';
+
+  static const platformActionConfigureOnionService = 'configure_onion_service';
+  static const platformActionRotateOnionService = 'rotate_onion_service';
 }

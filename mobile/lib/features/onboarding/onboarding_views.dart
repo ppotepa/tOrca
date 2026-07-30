@@ -385,16 +385,16 @@ class BootScreen extends StatelessWidget {
     required this.phase,
     required this.status,
     required this.detail,
-    required this.progress,
     required this.error,
     required this.retry,
     required this.connecting,
+    required this.steps,
   });
   final TransportPhase phase;
   final String status, detail, error;
-  final int? progress;
   final VoidCallback retry;
   final bool connecting;
+  final List<StartupStep> steps;
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -433,21 +433,10 @@ class BootScreen extends StatelessWidget {
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 14),
-                Row(
-                  children: [
-                    const ThemedIcon(Icons.eco_outlined, size: 18),
-                    const SizedBox(width: 8),
-                    Expanded(child: Text(status, textAlign: TextAlign.left)),
-                  ],
-                ),
-                if (progress != null) ...[
-                  const SizedBox(height: 12),
-                  LinearProgressIndicator(value: progress! / 100),
-                  const SizedBox(height: 6),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: Text('$progress%'),
-                  ),
+                StartupTimeline(steps: steps),
+                if (status.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  Text(status, textAlign: TextAlign.center),
                 ],
                 if (detail.isNotEmpty) ...[
                   const SizedBox(height: 8),
@@ -466,12 +455,6 @@ class BootScreen extends StatelessWidget {
                     icon: const ThemedIcon(Icons.refresh),
                     label: const Text('Spróbuj ponownie'),
                   ),
-                ] else if (connecting) ...[
-                  const SizedBox(height: 22),
-                  const SizedBox.square(
-                    dimension: 24,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
                 ],
               ],
             ),
@@ -480,6 +463,181 @@ class BootScreen extends StatelessWidget {
       ),
     ),
   );
+}
+
+class StartupTimeline extends StatelessWidget {
+  const StartupTimeline({super.key, required this.steps});
+
+  final List<StartupStep> steps;
+
+  @override
+  Widget build(BuildContext context) {
+    final visible = steps.isEmpty ? initialStartupSteps() : steps;
+    return Column(
+      children: [
+        for (var index = 0; index < visible.length; index += 1)
+          _StartupTimelineRow(
+            step: visible[index],
+            last: index == visible.length - 1,
+          ),
+      ],
+    );
+  }
+}
+
+class _StartupTimelineRow extends StatefulWidget {
+  const _StartupTimelineRow({required this.step, required this.last});
+
+  final StartupStep step;
+  final bool last;
+
+  @override
+  State<_StartupTimelineRow> createState() => _StartupTimelineRowState();
+}
+
+class _StartupTimelineRowState extends State<_StartupTimelineRow>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  );
+
+  bool get busy => widget.step.state == StartupStepState.running;
+
+  @override
+  void initState() {
+    super.initState();
+    _syncPulse();
+  }
+
+  @override
+  void didUpdateWidget(covariant _StartupTimelineRow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _syncPulse();
+  }
+
+  void _syncPulse() {
+    if (busy) {
+      _pulse.repeat(reverse: true);
+    } else {
+      _pulse.stop();
+      _pulse.value = 1;
+    }
+  }
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final step = widget.step;
+    final theme = context.statusTheme;
+    final color = switch (step.state) {
+      StartupStepState.pending => Theme.of(context).colorScheme.outline,
+      StartupStepState.running => theme.warning,
+      StartupStepState.ready => theme.success,
+      StartupStepState.warning => theme.warning,
+      StartupStepState.error => theme.danger,
+    };
+    final icon = switch (step.state) {
+      StartupStepState.pending => Icons.circle_outlined,
+      StartupStepState.running => Icons.more_horiz,
+      StartupStepState.ready => Icons.check,
+      StartupStepState.warning => Icons.priority_high,
+      StartupStepState.error => Icons.close,
+    };
+    return SizedBox(
+      height: widget.last ? 58 : 68,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 28,
+            child: Column(
+              children: [
+                AnimatedBuilder(
+                  animation: _pulse,
+                  builder: (context, child) => Transform.scale(
+                    scale: busy ? .92 + (_pulse.value * .12) : 1,
+                    child: Opacity(
+                      opacity: busy ? .55 + (_pulse.value * .45) : 1,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          boxShadow: busy
+                              ? [
+                                  BoxShadow(
+                                    color: color.withValues(
+                                      alpha: .12 + (_pulse.value * .28),
+                                    ),
+                                    blurRadius: 5 + (_pulse.value * 9),
+                                    spreadRadius: _pulse.value * 2,
+                                  ),
+                                ]
+                              : const [],
+                        ),
+                        child: child,
+                      ),
+                    ),
+                  ),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 220),
+                    width: 22,
+                    height: 22,
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: .16),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: color.withValues(alpha: .75)),
+                    ),
+                    child: Icon(icon, size: 14, color: color),
+                  ),
+                ),
+                if (!widget.last)
+                  Expanded(
+                    child: Container(
+                      width: 1,
+                      color:
+                          (step.state == StartupStepState.ready
+                                  ? theme.success
+                                  : Theme.of(context).colorScheme.outline)
+                              .withValues(alpha: .42),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.only(top: 1),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    step.title,
+                    style: TextStyle(
+                      color: color,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    step.detail.isEmpty ? step.description : step.detail,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class TorScreen extends StatelessWidget {
@@ -557,12 +715,14 @@ class NicknameScreen extends StatelessWidget {
     super.key,
     required this.controller,
     required this.transport,
+    required this.ready,
     required this.error,
     required this.onSave,
   });
   final TextEditingController controller;
   final String error;
   final RuntimeTorStatus transport;
+  final bool ready;
   final VoidCallback onSave;
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -593,16 +753,18 @@ class NicknameScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    transport.connected
-                        ? 'Połączono z relayem. Konto lokalne jest gotowe.'
-                        : 'Łączenie z relayem przez Tor…',
+                    ready
+                        ? 'Środowisko komunikacyjne jest gotowe. Możesz zapisać konto lokalne.'
+                        : 'Oczekiwanie na pełną gotowość relay i P2P…',
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                   const SizedBox(height: 12),
                   TextField(
                     controller: controller,
-                    onSubmitted: (_) => onSave(),
+                    onSubmitted: (_) {
+                      if (ready) onSave();
+                    },
                     decoration: const InputDecoration(
                       labelText: 'Nick',
                       border: OutlineInputBorder(),
@@ -618,7 +780,7 @@ class NicknameScreen extends StatelessWidget {
                     ),
                   const SizedBox(height: 18),
                   FilledButton(
-                    onPressed: transport.connected ? onSave : null,
+                    onPressed: ready ? onSave : null,
                     child: const Text('Zapisz nick'),
                   ),
                 ],

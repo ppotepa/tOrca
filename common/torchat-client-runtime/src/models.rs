@@ -66,6 +66,36 @@ fn default_verification_state() -> VerificationState {
     VerificationState::Unverified
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum PeerEndpointStatus {
+    #[default]
+    Missing,
+    PendingExchange,
+    Verified,
+    Invalid,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum PeerConnectionStatus {
+    #[default]
+    Offline,
+    Connecting,
+    Authenticating,
+    Connected,
+    Backoff,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ContactTransportPolicy {
+    #[default]
+    PeerOnly,
+    PeerWithRelayFallback,
+    RelayOnly,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ContactRecord {
@@ -81,6 +111,14 @@ pub struct ContactRecord {
     pub blocked: bool,
     #[serde(default = "default_verification_state")]
     pub verification: VerificationState,
+    #[serde(default)]
+    pub peer_endpoint_status: PeerEndpointStatus,
+    #[serde(default)]
+    pub peer_connection_status: PeerConnectionStatus,
+    #[serde(default)]
+    pub transport_policy: ContactTransportPolicy,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_peer_connected_at: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dev: Option<String>,
 }
@@ -262,6 +300,11 @@ pub enum MessageTransportOutcome {
     Forwarded,
     Delivered,
     RecipientOffline,
+    PeerPersisted,
+    PeerDelivered,
+    PeerUnavailable,
+    PeerAuthenticationFailed,
+    PeerRejected,
     RetryableFailure,
     PermanentFailure,
 }
@@ -386,6 +429,11 @@ pub enum RuntimeTransportFact {
     Forwarded,
     Delivered,
     RecipientOffline,
+    PeerPersisted,
+    PeerDelivered,
+    PeerUnavailable,
+    PeerAuthenticationFailed,
+    PeerRejected,
     RetryableFailure,
     PermanentFailure,
 }
@@ -397,6 +445,13 @@ impl From<RuntimeTransportFact> for MessageTransportOutcome {
             RuntimeTransportFact::Forwarded => MessageTransportOutcome::Forwarded,
             RuntimeTransportFact::Delivered => MessageTransportOutcome::Delivered,
             RuntimeTransportFact::RecipientOffline => MessageTransportOutcome::RecipientOffline,
+            RuntimeTransportFact::PeerPersisted => MessageTransportOutcome::PeerPersisted,
+            RuntimeTransportFact::PeerDelivered => MessageTransportOutcome::PeerDelivered,
+            RuntimeTransportFact::PeerUnavailable => MessageTransportOutcome::PeerUnavailable,
+            RuntimeTransportFact::PeerAuthenticationFailed => {
+                MessageTransportOutcome::PeerAuthenticationFailed
+            }
+            RuntimeTransportFact::PeerRejected => MessageTransportOutcome::PeerRejected,
             RuntimeTransportFact::RetryableFailure => MessageTransportOutcome::RetryableFailure,
             RuntimeTransportFact::PermanentFailure => MessageTransportOutcome::PermanentFailure,
         }

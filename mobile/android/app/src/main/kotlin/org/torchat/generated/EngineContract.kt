@@ -20,6 +20,7 @@ object EngineContract {
     const val LOG = "log"
     const val ERROR = "error"
     const val FACT = "fact"
+    const val ACTION = "action"
     const val NICKNAME = "nickname"
     const val COMMAND_PAIRING_ID = "pairing_id"
     const val COMMAND_CONVERSATION_ID = "conversation_id"
@@ -27,6 +28,21 @@ object EngineContract {
     const val COMMAND_CONTACT_ID = "contact_id"
     const val COMMAND_REPLY_TO_MESSAGE_ID = "reply_to_message_id"
     const val FACT_SOCKS5_URL = "socks5_url"
+    const val FACT_ONION_ADDRESS = "onion_address"
+    const val FACT_VIRTUAL_PORT = "virtual_port"
+    const val FACT_BATTERY_SAVER = "battery_saver"
+    const val FACT_DEVICE_IDLE = "device_idle"
+    const val ONION_ADDRESS = "onionAddress"
+    const val VIRTUAL_PORT = "virtualPort"
+    const val SEQUENCE = "sequence"
+    const val ISSUED_AT = "issuedAt"
+    const val CAPABILITIES = "capabilities"
+    const val LOCAL_PORT = "localPort"
+    const val GENERATION = "generation"
+    const val ONLINE = "online"
+    const val BATTERY_SAVER = "batterySaver"
+    const val DEVICE_IDLE = "deviceIdle"
+    const val RESTRICTED = "restricted"
     const val PAIRING_ID = "pairingId"
     const val CONVERSATION_ID = "conversationId"
     const val INSTALLATION_ID = "installationId"
@@ -39,6 +55,10 @@ object EngineContract {
     const val LOCAL_ALIAS = "localAlias"
     const val MUTED = "muted"
     const val BLOCKED = "blocked"
+    const val PEER_ENDPOINT_STATUS = "peerEndpointStatus"
+    const val PEER_CONNECTION_STATUS = "peerConnectionStatus"
+    const val LAST_PEER_CONNECTED_AT = "lastPeerConnectedAt"
+    const val TRANSPORT_POLICY = "transportPolicy"
     const val CONTACT_INSTALLATION_ID = "contactInstallationId"
     const val LAST_MESSAGE_PREVIEW = "lastMessagePreview"
     const val LAST_MESSAGE_AT = "lastMessageAt"
@@ -67,7 +87,6 @@ object EngineContract {
     const val LEVEL = "level"
     const val BODY = "body"
     const val TYPING = "typing"
-    const val ONLINE = "online"
     const val OBSERVED_AT = "observedAt"
     const val PHASE = "phase"
     const val PROGRESS = "progress"
@@ -78,9 +97,8 @@ object EngineContract {
     const val ID = "id"
     const val STATE = "state"
     const val BACKOFF = "backoff"
-    const val GENERATION = "generation"
     const val ATTEMPT = "attempt"
-    const val RETRY_IN_MS = "retry_in_ms"
+    const val RETRY_IN_MS = "retryInMs"
     const val LABEL = "label"
     const val RETRY_ATTEMPT = "retryAttempt"
     const val LATENCY_MS = "latencyMs"
@@ -107,6 +125,9 @@ object EngineContract {
     const val LIST_CONTACTS = "listContacts"
     const val LIST_CONVERSATIONS = "listConversations"
     const val LIST_MESSAGES = "listMessages"
+    const val GET_PEER_ENDPOINT = "getPeerEndpoint"
+    const val RETRY_PEER_CONNECTION = "retryPeerConnection"
+    const val ROTATE_PEER_ENDPOINT = "rotatePeerEndpoint"
     const val SET_NICKNAME = "setNickname"
     const val REFRESH_PAIRING_CODE = "refreshPairingCode"
     const val SUBMIT_PAIRING_CODE = "submitPairingCode"
@@ -137,6 +158,9 @@ object EngineContract {
     const val COMMAND_LIST_CONTACTS = "list_contacts"
     const val COMMAND_LIST_CONVERSATIONS = "list_conversations"
     const val COMMAND_LIST_MESSAGES = "list_messages"
+    const val COMMAND_GET_PEER_ENDPOINT = "get_peer_endpoint"
+    const val COMMAND_RETRY_PEER_CONNECTION = "retry_peer_connection"
+    const val COMMAND_ROTATE_PEER_ENDPOINT = "rotate_peer_endpoint"
     const val COMMAND_SET_NICKNAME = "set_nickname"
     const val COMMAND_REFRESH_PAIRING_CODE = "refresh_pairing_code"
     const val COMMAND_SUBMIT_PAIRING_CODE = "submit_pairing_code"
@@ -161,6 +185,7 @@ object EngineContract {
     const val EVENT_RESPONSE = "response"
     const val EVENT_RUNTIME = "runtime"
     const val EVENT_CONNECTION = "connection"
+    const val EVENT_PLATFORM_ACTION = "platform_action"
     const val EVENT_NOTIFICATION_REQUESTED = "notification_requested"
     const val EVENT_LOG = "log"
     const val EVENT_FATAL = "fatal"
@@ -174,8 +199,12 @@ object EngineContract {
     const val FACT_TOR_STATUS = "tor_status"
     const val FACT_TOR_ENDPOINT_AVAILABLE = "tor_endpoint_available"
     const val FACT_TOR_ENDPOINT_LOST = "tor_endpoint_lost"
+    const val FACT_ONION_SERVICE_AVAILABLE = "onion_service_available"
+    const val FACT_ONION_SERVICE_LOST = "onion_service_lost"
     const val FACT_APP_VISIBILITY_CHANGED = "app_visibility_changed"
     const val FACT_NETWORK_CHANGED = "network_changed"
+    const val FACT_POWER_MODE_CHANGED = "power_mode_changed"
+    const val FACT_BACKGROUND_EXECUTION_RESTRICTED = "background_execution_restricted"
 
     const val TOR_PHASE_STARTING = "starting"
     const val TOR_PHASE_BOOTSTRAPPING = "bootstrapping"
@@ -192,6 +221,8 @@ object EngineContract {
     const val CONVERSATION_READ_CHANGED = "conversation_read_changed"
     const val TYPING_CHANGED = "typing_changed"
     const val PRESENCE_CHANGED = "presence_changed"
+    const val PEER_ENDPOINT_CHANGED = "peer_endpoint_changed"
+    const val PEER_CONNECTION_CHANGED = "peer_connection_changed"
     const val CHANGED = "changed"
     const val RUNTIME_ERROR = "runtime_error"
     const val RUNTIME_LOG = "runtime_log"
@@ -243,12 +274,35 @@ object EngineContract {
     const val OUTCOME_FORWARDED = "FORWARDED"
     const val OUTCOME_DELIVERED = "DELIVERED"
     const val OUTCOME_RECIPIENT_OFFLINE = "RECIPIENT_OFFLINE"
+    const val OUTCOME_PEER_PERSISTED = "PEER_PERSISTED"
+    const val OUTCOME_PEER_DELIVERED = "PEER_DELIVERED"
+    const val OUTCOME_PEER_UNAVAILABLE = "PEER_UNAVAILABLE"
+    const val OUTCOME_PEER_AUTHENTICATION_FAILED = "PEER_AUTHENTICATION_FAILED"
+    const val OUTCOME_PEER_REJECTED = "PEER_REJECTED"
     const val OUTCOME_RETRYABLE_FAILURE = "RETRYABLE_FAILURE"
     const val OUTCOME_PERMANENT_FAILURE = "PERMANENT_FAILURE"
+
+    const val CONTACT_TRANSPORT_POLICY_PEER_ONLY = "PEER_ONLY"
+    const val CONTACT_TRANSPORT_POLICY_PEER_WITH_RELAY_FALLBACK = "PEER_WITH_RELAY_FALLBACK"
+    const val CONTACT_TRANSPORT_POLICY_RELAY_ONLY = "RELAY_ONLY"
 
     const val PAIRING_OUTCOME_OFFER_RECEIVED = "OFFER_RECEIVED"
     const val PAIRING_OUTCOME_REJECTION_RECEIVED = "REJECTION_RECEIVED"
     const val PAIRING_OUTCOME_WELCOME_PREPARED = "WELCOME_PREPARED"
+
+    const val PEER_ENDPOINT_STATUS_MISSING = "MISSING"
+    const val PEER_ENDPOINT_STATUS_PENDING_EXCHANGE = "PENDING_EXCHANGE"
+    const val PEER_ENDPOINT_STATUS_VERIFIED = "VERIFIED"
+    const val PEER_ENDPOINT_STATUS_INVALID = "INVALID"
+
+    const val PEER_CONNECTION_STATUS_OFFLINE = "OFFLINE"
+    const val PEER_CONNECTION_STATUS_CONNECTING = "CONNECTING"
+    const val PEER_CONNECTION_STATUS_AUTHENTICATING = "AUTHENTICATING"
+    const val PEER_CONNECTION_STATUS_CONNECTED = "CONNECTED"
+    const val PEER_CONNECTION_STATUS_BACKOFF = "BACKOFF"
+
+    const val PLATFORM_ACTION_CONFIGURE_ONION_SERVICE = "configure_onion_service"
+    const val PLATFORM_ACTION_ROTATE_ONION_SERVICE = "rotate_onion_service"
 }
 
 data class GeneratedEngineResponse(
@@ -321,6 +375,7 @@ data class GeneratedEngineEvent(
             EngineContract.EVENT_RESPONSE,
             EngineContract.EVENT_RUNTIME,
             EngineContract.EVENT_CONNECTION,
+            EngineContract.EVENT_PLATFORM_ACTION,
             EngineContract.EVENT_NOTIFICATION_REQUESTED,
             EngineContract.EVENT_LOG,
             EngineContract.EVENT_FATAL,
@@ -333,6 +388,7 @@ data class GeneratedEngineEvent(
                 EngineContract.EVENT_RESPONSE -> GeneratedEngineResponse.fromJson(envelope)
                 EngineContract.EVENT_RUNTIME -> requireObject(envelope, EngineContract.EVENT)
                 EngineContract.EVENT_CONNECTION -> requireObject(envelope, EngineContract.SNAPSHOT)
+                EngineContract.EVENT_PLATFORM_ACTION -> requireObject(envelope, EngineContract.ACTION)
                 EngineContract.EVENT_NOTIFICATION_REQUESTED -> requireObject(envelope, EngineContract.NOTIFICATION)
                 EngineContract.EVENT_LOG -> requireObject(envelope, EngineContract.LOG)
                 EngineContract.EVENT_FATAL -> requireObject(envelope, EngineContract.ERROR)

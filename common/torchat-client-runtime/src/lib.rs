@@ -32,13 +32,14 @@ pub use logic::{
 };
 pub use message_rules::{message_state_after_transport_outcome, message_state_on_send_prepare};
 pub use models::{
-    ChatMessage, ContactRecord, ConversationState, ConversationSummary, InviteCode, InviteState,
-    MessageReply, MessageSendEffect, MessageState, MessageTransportOutcome, PairingAcknowledgeEffect,
-    PairingAvailableAction, PairingCancelEffect, PairingConfirmContactEffect, PairingItem,
-    PairingPeerOutcome, PairingPreparation, PairingSendEffect, PairingSendKind, PairingSyncResult,
-    ReceiptSendEffect, RuntimeBootstrap, RuntimeEnvelope, RuntimeFixture, RuntimeIdentity,
-    RuntimeProfile, RuntimeSendEffect, RuntimeTorStatus, RuntimeTransportFact, VerificationState,
-    WelcomeAcceptedResult, pairing_available_actions,
+    ChatMessage, ContactRecord, ContactTransportPolicy, ConversationState, ConversationSummary, InviteCode, InviteState,
+    MessageReply, MessageSendEffect, MessageState, MessageTransportOutcome,
+    PairingAcknowledgeEffect, PairingAvailableAction, PairingCancelEffect,
+    PairingConfirmContactEffect, PairingItem, PairingPeerOutcome, PairingPreparation,
+    PairingSendEffect, PairingSendKind, PairingSyncResult, PeerConnectionStatus,
+    PeerEndpointStatus, ReceiptSendEffect, RuntimeBootstrap, RuntimeEnvelope, RuntimeFixture,
+    RuntimeIdentity, RuntimeProfile, RuntimeSendEffect, RuntimeTorStatus, RuntimeTransportFact,
+    VerificationState, WelcomeAcceptedResult, pairing_available_actions,
 };
 pub use pairing_rules::{
     PairingAction, RuntimePairingExpiryLike, RuntimePairingIdLike, RuntimePairingStateLike,

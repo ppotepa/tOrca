@@ -2,7 +2,10 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{Identity, PROTOCOL_VERSION, fingerprint_from_public_key, verify_signature};
+use crate::{
+    Identity, PROTOCOL_VERSION, fingerprint_from_public_key, peer_protocol::PeerEndpointBundle,
+    verify_signature,
+};
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ContactCard {
@@ -68,11 +71,15 @@ pub enum RelayPayloadV1 {
         invite_id: String,
         welcome: String,
         ratchet_tree: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        peer_endpoint: Option<PeerEndpointBundle>,
         signature: String,
     },
-    Application {
+    PeerEndpointBootstrap {
         version: u16,
-        ciphertext: String,
+        sender: ContactCard,
+        recipient: String,
+        endpoint: PeerEndpointBundle,
     },
 }
 
@@ -100,6 +107,26 @@ impl RelayPayloadV1 {
         welcome: &[u8],
         ratchet_tree: &[u8],
     ) -> Self {
+        Self::welcome_with_endpoint(
+            identity,
+            nickname,
+            recipient,
+            invite_id,
+            welcome,
+            ratchet_tree,
+            None,
+        )
+    }
+
+    pub fn welcome_with_endpoint(
+        identity: &Identity,
+        nickname: &str,
+        recipient: String,
+        invite_id: String,
+        welcome: &[u8],
+        ratchet_tree: &[u8],
+        peer_endpoint: Option<PeerEndpointBundle>,
+    ) -> Self {
         let sender = ContactCard::from_identity(identity, nickname.trim());
         let welcome = URL_SAFE_NO_PAD.encode(welcome);
         let ratchet_tree = URL_SAFE_NO_PAD.encode(ratchet_tree);
@@ -109,6 +136,7 @@ impl RelayPayloadV1 {
             &invite_id,
             &welcome,
             &ratchet_tree,
+            peer_endpoint.as_ref(),
         ));
         Self::Welcome {
             version: PROTOCOL_VERSION,
@@ -117,14 +145,8 @@ impl RelayPayloadV1 {
             invite_id,
             welcome,
             ratchet_tree,
+            peer_endpoint,
             signature,
-        }
-    }
-
-    pub fn application(ciphertext: &[u8]) -> Self {
-        Self::Application {
-            version: PROTOCOL_VERSION,
-            ciphertext: URL_SAFE_NO_PAD.encode(ciphertext),
         }
     }
 
@@ -144,7 +166,7 @@ impl RelayPayloadV1 {
             Self::PairingOffer { version, .. }
             | Self::PairingRejected { version, .. }
             | Self::Welcome { version, .. }
-            | Self::Application { version, .. } => *version,
+            | Self::PeerEndpointBootstrap { version, .. } => *version,
         };
         if version != PROTOCOL_VERSION {
             return Err("unsupported relay payload version".into());
@@ -163,6 +185,7 @@ impl RelayPayloadV1 {
             invite_id,
             welcome,
             ratchet_tree,
+            peer_endpoint,
             signature,
             ..
         } = self
@@ -178,21 +201,19 @@ impl RelayPayloadV1 {
         }
         if !verify_signature(
             &sender.public_key,
-            &welcome_signing_bytes(sender, recipient, invite_id, welcome, ratchet_tree),
+            &welcome_signing_bytes(
+                sender,
+                recipient,
+                invite_id,
+                welcome,
+                ratchet_tree,
+                peer_endpoint.as_ref(),
+            ),
             signature,
         ) {
             return Err("invalid Welcome signature".into());
         }
         Ok(())
-    }
-
-    pub fn decode_application(&self) -> Result<Vec<u8>, String> {
-        let Self::Application { ciphertext, .. } = self else {
-            return Err("relay payload is not an application message".into());
-        };
-        URL_SAFE_NO_PAD
-            .decode(ciphertext)
-            .map_err(|_| "invalid application ciphertext encoding".into())
     }
 
     pub fn decode_welcome(&self) -> Result<(String, Vec<u8>, Vec<u8>), String> {
@@ -215,6 +236,56 @@ impl RelayPayloadV1 {
                 .map_err(|_| "invalid ratchet tree encoding")?,
         ))
     }
+
+    pub fn welcome_peer_endpoint(&self) -> Option<&PeerEndpointBundle> {
+        match self {
+            Self::Welcome { peer_endpoint, .. } => peer_endpoint.as_ref(),
+            _ => None,
+        }
+    }
+
+    pub fn peer_endpoint_bootstrap(
+        identity: &Identity,
+        nickname: &str,
+        recipient: String,
+        endpoint: PeerEndpointBundle,
+    ) -> Self {
+        Self::PeerEndpointBootstrap {
+            version: PROTOCOL_VERSION,
+            sender: ContactCard::from_identity(identity, nickname.trim()),
+            recipient,
+            endpoint,
+        }
+    }
+
+    pub fn verify_peer_endpoint_bootstrap(
+        &self,
+        expected_sender: &str,
+        expected_recipient: &str,
+    ) -> Result<PeerEndpointBundle, String> {
+        let Self::PeerEndpointBootstrap {
+            sender,
+            recipient,
+            endpoint,
+            ..
+        } = self
+        else {
+            return Err("relay payload is not a peer endpoint bootstrap".into());
+        };
+        sender.validate()?;
+        if sender.installation_id != expected_sender {
+            return Err("peer endpoint bootstrap sender does not match relay sender".into());
+        }
+        if recipient != expected_recipient {
+            return Err("peer endpoint bootstrap recipient does not match local identity".into());
+        }
+        if endpoint.installation_id != sender.installation_id
+            || endpoint.identity_public_key != sender.public_key
+        {
+            return Err("peer endpoint bootstrap does not match sender identity".into());
+        }
+        Ok(endpoint.clone())
+    }
 }
 
 fn welcome_signing_bytes(
@@ -223,6 +294,7 @@ fn welcome_signing_bytes(
     invite_id: &str,
     welcome: &str,
     ratchet_tree: &str,
+    peer_endpoint: Option<&PeerEndpointBundle>,
 ) -> Vec<u8> {
     let mut output = b"torchat-welcome-v1".to_vec();
     for value in [
@@ -238,6 +310,11 @@ fn welcome_signing_bytes(
         output.extend_from_slice(&(value.len() as u32).to_be_bytes());
         output.extend_from_slice(value);
     }
+    let endpoint = peer_endpoint
+        .map(|value| serde_json::to_vec(value).expect("peer endpoint must serialize"))
+        .unwrap_or_default();
+    output.extend_from_slice(&(endpoint.len() as u32).to_be_bytes());
+    output.extend_from_slice(&endpoint);
     output
 }
 
@@ -298,6 +375,7 @@ mod tests {
             invite_id,
             welcome,
             ratchet_tree,
+            peer_endpoint,
             signature,
             version,
         } = decoded
@@ -312,6 +390,7 @@ mod tests {
             invite_id,
             welcome,
             ratchet_tree,
+            peer_endpoint,
             signature,
         };
         assert!(

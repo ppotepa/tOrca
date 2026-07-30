@@ -93,7 +93,11 @@ fn main() -> Result<(), String> {
     let invite_states = string_list(manifest.get("inviteStates"))?;
     let pairing_actions = string_list(manifest.get("pairingAvailableActions"))?;
     let message_transport = string_list(manifest.get("messageTransportOutcomes"))?;
+    let contact_transport_policies = string_list(manifest.get("contactTransportPolicies"))?;
     let pairing_peer = string_list(manifest.get("pairingPeerOutcomes"))?;
+    let peer_endpoint_statuses = string_list(manifest.get("peerEndpointStatuses"))?;
+    let peer_connection_statuses = string_list(manifest.get("peerConnectionStatuses"))?;
+    let platform_action_types = string_list(manifest.get("platformActionTypes"))?;
 
     let android_output = repo_root
         .join("mobile/android/app/src/main/kotlin/org/torchat/generated/EngineContract.kt");
@@ -120,7 +124,11 @@ fn main() -> Result<(), String> {
             &invite_states,
             &pairing_actions,
             &message_transport,
+            &contact_transport_policies,
             &pairing_peer,
+            &peer_endpoint_statuses,
+            &peer_connection_statuses,
+            &platform_action_types,
         ),
     )?;
     write_file(
@@ -141,7 +149,11 @@ fn main() -> Result<(), String> {
             &invite_states,
             &pairing_actions,
             &message_transport,
+            &contact_transport_policies,
             &pairing_peer,
+            &peer_endpoint_statuses,
+            &peer_connection_statuses,
+            &platform_action_types,
         ),
     )?;
     write_file(
@@ -157,6 +169,8 @@ fn main() -> Result<(), String> {
             &pairing_actions,
             &message_transport,
             &pairing_peer,
+            &peer_endpoint_statuses,
+            &peer_connection_statuses,
         ),
     )?;
     Ok(())
@@ -211,7 +225,11 @@ fn render_kotlin_contract(
     invite_states: &[String],
     pairing_actions: &[String],
     message_transport: &[String],
+    contact_transport_policies: &[String],
     pairing_peer: &[String],
+    peer_endpoint_statuses: &[String],
+    peer_connection_statuses: &[String],
+    platform_action_types: &[String],
 ) -> String {
     let mut out = String::new();
     out.push_str(GENERATED_HEADER);
@@ -253,7 +271,19 @@ fn render_kotlin_contract(
     out.push('\n');
     render_kotlin_values(&mut out, "OUTCOME_", message_transport);
     out.push('\n');
+    render_kotlin_values(&mut out, "CONTACT_TRANSPORT_POLICY_", contact_transport_policies);
+    out.push('\n');
     render_kotlin_values(&mut out, "PAIRING_OUTCOME_", pairing_peer);
+    out.push('\n');
+    render_kotlin_values(&mut out, "PEER_ENDPOINT_STATUS_", peer_endpoint_statuses);
+    out.push('\n');
+    render_kotlin_values(
+        &mut out,
+        "PEER_CONNECTION_STATUS_",
+        peer_connection_statuses,
+    );
+    out.push('\n');
+    render_kotlin_values(&mut out, "PLATFORM_ACTION_", platform_action_types);
     out.push_str("}\n\n");
     out.push_str(KOTLIN_RESPONSE_MODEL);
     render_kotlin_event_model(&mut out, engine_event_types);
@@ -287,6 +317,7 @@ fn render_kotlin_event_model(out: &mut String, engine_event_types: &[String]) {
     out.push_str("                EngineContract.EVENT_RESPONSE -> GeneratedEngineResponse.fromJson(envelope)\n");
     out.push_str("                EngineContract.EVENT_RUNTIME -> requireObject(envelope, EngineContract.EVENT)\n");
     out.push_str("                EngineContract.EVENT_CONNECTION -> requireObject(envelope, EngineContract.SNAPSHOT)\n");
+    out.push_str("                EngineContract.EVENT_PLATFORM_ACTION -> requireObject(envelope, EngineContract.ACTION)\n");
     out.push_str("                EngineContract.EVENT_NOTIFICATION_REQUESTED -> requireObject(envelope, EngineContract.NOTIFICATION)\n");
     out.push_str(
         "                EngineContract.EVENT_LOG -> requireObject(envelope, EngineContract.LOG)\n",
@@ -329,7 +360,11 @@ fn render_dart_contract(
     invite_states: &[String],
     pairing_actions: &[String],
     message_transport: &[String],
+    contact_transport_policies: &[String],
     pairing_peer: &[String],
+    peer_endpoint_statuses: &[String],
+    peer_connection_statuses: &[String],
+    platform_action_types: &[String],
 ) -> String {
     let mut out = String::new();
     out.push_str(GENERATED_HEADER);
@@ -369,7 +404,19 @@ fn render_dart_contract(
     out.push('\n');
     render_dart_values(&mut out, "outcome_", message_transport);
     out.push('\n');
+    render_dart_values(&mut out, "contact_transport_policy_", contact_transport_policies);
+    out.push('\n');
     render_dart_values(&mut out, "pairing_outcome_", pairing_peer);
+    out.push('\n');
+    render_dart_values(&mut out, "peer_endpoint_status_", peer_endpoint_statuses);
+    out.push('\n');
+    render_dart_values(
+        &mut out,
+        "peer_connection_status_",
+        peer_connection_statuses,
+    );
+    out.push('\n');
+    render_dart_values(&mut out, "platform_action_", platform_action_types);
     out.push_str("}\n");
     out
 }
@@ -392,6 +439,8 @@ fn render_dart_models(
     pairing_actions: &[String],
     message_transport: &[String],
     pairing_peer: &[String],
+    peer_endpoint_statuses: &[String],
+    peer_connection_statuses: &[String],
 ) -> String {
     let mut out = String::new();
     out.push_str(GENERATED_HEADER);
@@ -460,6 +509,9 @@ fn render_dart_models(
     out.push_str("        break;\n");
     out.push_str("      case EngineContract.eventConnection:\n");
     out.push_str("        _requireGeneratedEventObject(envelope, EngineContract.snapshot);\n");
+    out.push_str("        break;\n");
+    out.push_str("      case EngineContract.eventPlatformAction:\n");
+    out.push_str("        _requireGeneratedEventObject(envelope, EngineContract.action);\n");
     out.push_str("        break;\n");
     out.push_str("      case EngineContract.eventNotificationRequested:\n");
     out.push_str("        _requireGeneratedEventObject(envelope, EngineContract.notification);\n");
@@ -568,6 +620,16 @@ fn render_dart_models(
         message_transport,
     );
     render_dart_string_list(&mut out, "generatedPairingPeerOutcomes", pairing_peer);
+    render_dart_string_list(
+        &mut out,
+        "generatedPeerEndpointStatuses",
+        peer_endpoint_statuses,
+    );
+    render_dart_string_list(
+        &mut out,
+        "generatedPeerConnectionStatuses",
+        peer_connection_statuses,
+    );
     out
 }
 
@@ -596,6 +658,7 @@ fn wire_keys() -> &'static [(&'static str, &'static str)] {
         ("LOG", "log"),
         ("ERROR", "error"),
         ("FACT", "fact"),
+        ("ACTION", "action"),
         ("NICKNAME", "nickname"),
         ("COMMAND_PAIRING_ID", "pairing_id"),
         ("COMMAND_CONVERSATION_ID", "conversation_id"),
@@ -603,6 +666,21 @@ fn wire_keys() -> &'static [(&'static str, &'static str)] {
         ("COMMAND_CONTACT_ID", "contact_id"),
         ("COMMAND_REPLY_TO_MESSAGE_ID", "reply_to_message_id"),
         ("FACT_SOCKS5_URL", "socks5_url"),
+        ("FACT_ONION_ADDRESS", "onion_address"),
+        ("FACT_VIRTUAL_PORT", "virtual_port"),
+        ("FACT_BATTERY_SAVER", "battery_saver"),
+        ("FACT_DEVICE_IDLE", "device_idle"),
+        ("ONION_ADDRESS", "onionAddress"),
+        ("VIRTUAL_PORT", "virtualPort"),
+        ("SEQUENCE", "sequence"),
+        ("ISSUED_AT", "issuedAt"),
+        ("CAPABILITIES", "capabilities"),
+        ("LOCAL_PORT", "localPort"),
+        ("GENERATION", "generation"),
+        ("ONLINE", "online"),
+        ("BATTERY_SAVER", "batterySaver"),
+        ("DEVICE_IDLE", "deviceIdle"),
+        ("RESTRICTED", "restricted"),
         ("PAIRING_ID", "pairingId"),
         ("CONVERSATION_ID", "conversationId"),
         ("INSTALLATION_ID", "installationId"),
@@ -615,6 +693,10 @@ fn wire_keys() -> &'static [(&'static str, &'static str)] {
         ("LOCAL_ALIAS", "localAlias"),
         ("MUTED", "muted"),
         ("BLOCKED", "blocked"),
+        ("PEER_ENDPOINT_STATUS", "peerEndpointStatus"),
+        ("PEER_CONNECTION_STATUS", "peerConnectionStatus"),
+        ("LAST_PEER_CONNECTED_AT", "lastPeerConnectedAt"),
+        ("TRANSPORT_POLICY", "transportPolicy"),
         ("CONTACT_INSTALLATION_ID", "contactInstallationId"),
         ("LAST_MESSAGE_PREVIEW", "lastMessagePreview"),
         ("LAST_MESSAGE_AT", "lastMessageAt"),
@@ -643,7 +725,6 @@ fn wire_keys() -> &'static [(&'static str, &'static str)] {
         ("LEVEL", "level"),
         ("BODY", "body"),
         ("TYPING", "typing"),
-        ("ONLINE", "online"),
         ("OBSERVED_AT", "observedAt"),
         ("PHASE", "phase"),
         ("PROGRESS", "progress"),
@@ -654,9 +735,8 @@ fn wire_keys() -> &'static [(&'static str, &'static str)] {
         ("ID", "id"),
         ("STATE", "state"),
         ("BACKOFF", "backoff"),
-        ("GENERATION", "generation"),
         ("ATTEMPT", "attempt"),
-        ("RETRY_IN_MS", "retry_in_ms"),
+        ("RETRY_IN_MS", "retryInMs"),
         ("LABEL", "label"),
         ("RETRY_ATTEMPT", "retryAttempt"),
         ("LATENCY_MS", "latencyMs"),

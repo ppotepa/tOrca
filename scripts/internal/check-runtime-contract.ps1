@@ -45,6 +45,9 @@ Assert-ExactContractList 'Public engine methods' $contract.methods.public @(
     'listContacts',
     'listConversations',
     'listMessages',
+    'getPeerEndpoint',
+    'retryPeerConnection',
+    'rotatePeerEndpoint',
     'setNickname',
     'refreshPairingCode',
     'submitPairingCode',
@@ -77,6 +80,9 @@ Assert-ExactContractList 'Engine command types' $contract.commandTypes @(
     'list_contacts',
     'list_conversations',
     'list_messages',
+    'get_peer_endpoint',
+    'retry_peer_connection',
+    'rotate_peer_endpoint',
     'set_nickname',
     'refresh_pairing_code',
     'submit_pairing_code',
@@ -104,6 +110,7 @@ Assert-ExactContractList 'Engine event types' $contract.engineEventTypes @(
     'runtime',
     'connection',
     'notification_requested',
+    'platform_action',
     'log',
     'fatal'
 )
@@ -113,8 +120,12 @@ Assert-ExactContractList 'Platform fact types' $contract.platformFactTypes @(
     'tor_status',
     'tor_endpoint_available',
     'tor_endpoint_lost',
+    'onion_service_available',
+    'onion_service_lost',
     'app_visibility_changed',
-    'network_changed'
+    'network_changed',
+    'power_mode_changed',
+    'background_execution_restricted'
 )
 
 Assert-ExactContractList 'Tor phases' $contract.torPhases @(

@@ -16,28 +16,29 @@ pub fn message_state_after_transport_outcome(
 ) -> Option<MessageState> {
     use MessageState::{Delivered, Failed, Queued, Read, Sending, Sent};
     use MessageTransportOutcome::{
-        Delivered as OutcomeDelivered, Forwarded, PermanentFailure, RecipientOffline,
+        Delivered as OutcomeDelivered, Forwarded, PeerAuthenticationFailed, PeerDelivered,
+        PeerPersisted, PeerRejected, PeerUnavailable, PermanentFailure, RecipientOffline,
         RetryableFailure,
     };
 
     match outcome {
-        Forwarded => match current {
+        Forwarded | PeerPersisted => match current {
             Sending => Some(Sent),
             Sent => Some(Sent),
             Delivered => Some(Delivered),
             Read => Some(Read),
             Queued | Failed => None,
         },
-        OutcomeDelivered => match current {
+        OutcomeDelivered | PeerDelivered => match current {
             Sending | Sent | Delivered => Some(Delivered),
             Read => Some(Read),
             Queued | Failed => None,
         },
-        RecipientOffline | RetryableFailure => match current {
+        RecipientOffline | PeerUnavailable | RetryableFailure => match current {
             Queued | Sending | Sent => Some(Queued),
             Delivered | Read | Failed => None,
         },
-        PermanentFailure => match current {
+        PermanentFailure | PeerAuthenticationFailed | PeerRejected => match current {
             Queued | Sending | Sent | Failed => Some(Failed),
             Delivered | Read => None,
         },

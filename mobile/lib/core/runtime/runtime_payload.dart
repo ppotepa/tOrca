@@ -60,6 +60,8 @@ class RuntimePayload {
 
   InviteCode inviteCode() => InviteCode.fromMap(toMap());
 
+  PeerEndpoint peerEndpoint() => PeerEndpoint.fromMap(toMap());
+
   RuntimeEvent runtimeEvent() {
     final type = string(EngineContract.type);
     switch (type) {
@@ -95,6 +97,18 @@ class RuntimePayload {
         );
       case EngineContract.runtimeLog:
         return RuntimeLogEvent(string(EngineContract.message) ?? '');
+      case EngineContract.peerEndpointChanged:
+        return PeerEndpointChangedEvent(
+          contactId: string(EngineContract.contactId) ?? '',
+          status: PeerEndpointStatus.fromValue(string(EngineContract.status)),
+        );
+      case EngineContract.peerConnectionChanged:
+        return PeerConnectionChangedEvent(
+          contactId: string(EngineContract.contactId) ?? '',
+          status: PeerConnectionStatus.fromValue(string(EngineContract.status)),
+          retryInMs:
+              intValue('retryInMs') ?? intValue(EngineContract.retryInMs),
+        );
       default:
         if (type == null || type.isEmpty) {
           throw FormatException('missing runtime event type');

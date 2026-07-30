@@ -89,6 +89,51 @@ void main() {
     expect(event, isA<TorStatusEvent>());
   });
 
+  test('runtime payload maps peer endpoint bundle into typed model', () {
+    final endpoint = RuntimePayload.fromMap({
+      'installationId': 'install-1',
+      'onionAddress': 'abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcd.onion',
+      'virtualPort': 443,
+      'sequence': 7,
+      'issuedAt': 123456,
+      'capabilities': ['peer_message_v1'],
+    }).peerEndpoint();
+
+    expect(endpoint.installationId, 'install-1');
+    expect(endpoint.virtualPort, 443);
+    expect(endpoint.sequence, 7);
+    expect(endpoint.capabilities, ['peer_message_v1']);
+  });
+
+  test('runtime payload decodes typed peer status events from runtime fields', () {
+    final endpointEvent = RuntimePayload.fromMap({
+      'type': 'peer_endpoint_changed',
+      'contactId': 'contact-1',
+      'status': 'VERIFIED',
+    }).runtimeEvent();
+    expect(endpointEvent, isA<PeerEndpointChangedEvent>());
+    expect(
+      (endpointEvent as PeerEndpointChangedEvent).status,
+      PeerEndpointStatus.verified,
+    );
+
+    final connectionEvent = RuntimePayload.fromMap({
+      'type': 'peer_connection_changed',
+      'contactId': 'contact-1',
+      'status': 'BACKOFF',
+      'retryInMs': 2500,
+    }).runtimeEvent();
+    expect(connectionEvent, isA<PeerConnectionChangedEvent>());
+    expect(
+      (connectionEvent as PeerConnectionChangedEvent).status,
+      PeerConnectionStatus.backoff,
+    );
+    expect(
+      (connectionEvent as PeerConnectionChangedEvent).retryInMs,
+      2500,
+    );
+  });
+
   test('runtime line preserves runtime error event payload', () {
     final line = EngineLine.parse(
       '{"type":"runtime","event":{"type":"runtime_error","message":"relay stopped"}}',
@@ -212,5 +257,59 @@ void main() {
       }),
       throwsFormatException,
     );
+  });
+
+  test('startup transitions allow late readiness updates and keep error terminal', () {
+    var steps = initialStartupSteps();
+    steps = transitionStartupStep(
+      steps,
+      StartupStepKind.engine,
+      StartupStepState.running,
+      'engine',
+    );
+    final rejectedTor = transitionStartupStep(
+      steps,
+      StartupStepKind.tor,
+      StartupStepState.running,
+      'tor',
+    );
+    expect(rejectedTor[1].state, StartupStepState.running);
+
+    steps = transitionStartupStep(
+      steps,
+      StartupStepKind.engine,
+      StartupStepState.error,
+      'migration failed',
+    );
+    final lateTor = transitionStartupStep(
+      steps,
+      StartupStepKind.tor,
+      StartupStepState.ready,
+      'late event',
+    );
+    expect(lateTor.first.state, StartupStepState.error);
+    expect(lateTor[1].state, StartupStepState.pending);
+    expect(
+      lateTor.where((step) => step.state == StartupStepState.running),
+      isEmpty,
+    );
+
+    final recoveredEngine = transitionStartupStep(
+      steps,
+      StartupStepKind.engine,
+      StartupStepState.ready,
+      'recovered',
+    );
+    expect(recoveredEngine.first.state, StartupStepState.ready);
+    expect(recoveredEngine.first.detail, 'recovered');
+
+    final blockedPeer = transitionStartupStep(
+      steps,
+      StartupStepKind.peerListener,
+      StartupStepState.ready,
+      'late peer',
+    );
+    expect(blockedPeer.first.state, StartupStepState.error);
+    expect(blockedPeer[2].state, StartupStepState.pending);
   });
 }
