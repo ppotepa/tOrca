@@ -29,13 +29,14 @@ class RuntimeRepository {
       final request = _runtime.connect();
       _connectionInFlight = request;
       unawaited(
-        request
-            .catchError((Object _) => false)
-            .whenComplete(() {
-              if (identical(_connectionInFlight, request)) {
-                _connectionInFlight = null;
-              }
-            }),
+        request.then<void>(
+          (_) {},
+          onError: (Object _, StackTrace __) {},
+        ).whenComplete(() {
+          if (identical(_connectionInFlight, request)) {
+            _connectionInFlight = null;
+          }
+        }),
       );
     }
 
