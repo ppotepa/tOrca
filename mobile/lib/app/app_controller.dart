@@ -497,6 +497,7 @@ class AppController extends Notifier<AppState> {
     String? localAlias,
     bool muted,
     bool blocked,
+    ContactTransportPolicy transportPolicy,
   ) async {
     try {
       await _repository.updateContactSettings(
@@ -504,6 +505,7 @@ class AppController extends Notifier<AppState> {
         localAlias: localAlias,
         muted: muted,
         blocked: blocked,
+        transportPolicy: transportPolicy,
       );
       state = state.copyWith(contacts: await _repository.contacts(), error: '');
     } catch (error) {
@@ -563,6 +565,32 @@ class AppController extends Notifier<AppState> {
     }
     if (normalized.contains('pairing request not found')) {
       return 'To zaproszenie wygasło albo zostało już obsłużone.';
+    }
+    if (normalized.contains('invalid welcome signature') ||
+        normalized.contains('identity') &&
+            normalized.contains('does not match') ||
+        normalized.contains('signature is invalid')) {
+      return 'Nie udało się potwierdzić tożsamości drugiej strony. Zaproszenie zostało odrzucone.';
+    }
+    if (normalized.contains('peer endpoint') &&
+        normalized.contains('missing')) {
+      return 'Kontakt nie przekazał jeszcze zweryfikowanego endpointu P2P.';
+    }
+    if (normalized.contains('peer endpoint') &&
+        (normalized.contains('invalid') ||
+            normalized.contains('expired') ||
+            normalized.contains('stale'))) {
+      return 'Endpoint P2P kontaktu jest nieprawidłowy albo wygasł.';
+    }
+    if (normalized.contains('contact') &&
+        (normalized.contains('already exists') ||
+            normalized.contains('already a contact'))) {
+      return 'Ten kontakt już istnieje.';
+    }
+    if (normalized.contains('acknowledgement') &&
+        (normalized.contains('missing') ||
+            normalized.contains('timed out'))) {
+      return 'Brak potwierdzenia drugiej strony. Spróbuj ponownie po odzyskaniu połączenia.';
     }
     if (normalized.contains('relay transport error')) {
       return 'Relay onion jest chwilowo niedostępny. Spróbuj ponownie za chwilę.';
@@ -690,7 +718,7 @@ class AppController extends Notifier<AppState> {
                 state.startupSteps,
                 StartupStepKind.communication,
                 StartupStepState.warning,
-                'Relay może działać bez P2P',
+                'Endpoint P2P jest wymagany do gotowości',
               ),
               StartupStepKind.peerListener,
               StartupStepState.ready,
@@ -895,6 +923,11 @@ class AppController extends Notifier<AppState> {
       for (var index = 0; index < steps.length; index += 1)
         index == active
             ? steps[index].copyWith(state: StartupStepState.error, detail: message)
+            : index > active
+            ? steps[index].copyWith(
+                state: StartupStepState.blocked,
+                detail: 'Zablokowano przez wcześniejszy błąd',
+              )
             : steps[index],
     ];
   }

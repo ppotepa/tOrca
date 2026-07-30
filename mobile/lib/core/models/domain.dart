@@ -97,7 +97,7 @@ enum StartupStepKind {
   communication,
 }
 
-enum StartupStepState { pending, running, ready, warning, error }
+enum StartupStepState { pending, running, ready, warning, error, blocked }
 
 class StartupStep {
   const StartupStep({
@@ -160,6 +160,11 @@ List<StartupStep> transitionStartupStep(
     for (var index = 0; index < steps.length; index += 1)
       if (index == target)
         steps[index].copyWith(state: nextState, detail: detail)
+      else if (nextState == StartupStepState.error && index > target)
+        steps[index].copyWith(
+          state: StartupStepState.blocked,
+          detail: 'Zablokowano przez wcześniejszy błąd',
+        )
       else if (nextState == StartupStepState.running && index > target)
         steps[index].copyWith(state: StartupStepState.pending, detail: '')
       else
@@ -169,10 +174,10 @@ List<StartupStep> transitionStartupStep(
 
 extension PeerServerStatusDisplay on PeerServerStatus {
   String get label => switch (this) {
-    PeerServerStatus.starting => 'Serwer P2P uruchamia siÄ™',
+    PeerServerStatus.starting => 'Serwer P2P uruchamia się',
     PeerServerStatus.ready => 'Serwer P2P aktywny',
-    PeerServerStatus.offline => 'Serwer P2P niedostÄ™pny',
-    PeerServerStatus.error => 'BÅ‚Ä…d serwera P2P',
+    PeerServerStatus.offline => 'Serwer P2P niedostępny',
+    PeerServerStatus.error => 'Błąd serwera P2P',
   };
 }
 

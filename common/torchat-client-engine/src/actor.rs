@@ -1021,6 +1021,15 @@ impl ClientEngineActor {
                     },
                 ])
             }
+            PeerTransportEvent::IngressError { error } => {
+                self.pending_engine_events.push(EngineEvent::Log {
+                    log: EngineLogEvent {
+                        level: "warn".to_owned(),
+                        message: format!("peer inbound connection failed: {error}"),
+                    },
+                });
+                Ok(Vec::new())
+            }
             PeerTransportEvent::ConnectionChanged {
                 installation_id,
                 status,

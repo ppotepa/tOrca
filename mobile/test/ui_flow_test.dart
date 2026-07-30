@@ -521,7 +521,7 @@ void main() {
             onSelect: (_) => selected = true,
             onScanInvite: () {},
             onShowInvite: () {},
-            onUpdateContactSettings: (_, _, _, _) async {},
+            onUpdateContactSettings: (_, _, _, _, _) async {},
             fingerprint: 'SELF',
             ownInvite: '12345678',
             error: '',
