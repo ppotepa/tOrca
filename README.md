@@ -60,11 +60,35 @@ This model is intended to reduce identity exposure and metadata leakage; it is n
 
 The relay is not part of the cryptographic trust boundary. It may coordinate delivery, but it must not receive client private keys or plaintext messages.
 
-## Architecture
+## System architecture
 
-![tOrca architecture](assets/architecture.svg)
+![tOrca system architecture](assets/architecture.svg)
 
-The codebase separates presentation, domain rules, cryptography, transport and platform lifecycle:
+This diagram shows the network and trust model: two trusted clients, local Tor runtimes and an untrusted onion relay used for delivery and pairing coordination.
+
+Trust-boundary summary:
+
+- trusted client devices own identities, keys, MLS state and local history;
+- the relay and PostgreSQL belong to untrusted infrastructure;
+- opaque encrypted envelopes cross the network boundary through Tor;
+- contacts do not expose ordinary direct Internet addresses to each other.
+
+## Application architecture
+
+![tOrca application architecture](assets/application-architecture.svg)
+
+This diagram shows how the application itself is organized on Android and desktop.
+
+- **`mobile/lib`** provides the shared Flutter UI and presentation logic.
+- **`ClientRuntime`** is the platform-neutral contract consumed by Flutter.
+- **`common/torchat-client-runtime`** owns canonical pairing, contact, conversation and message lifecycle rules.
+- **`common/torchat-client-engine`** owns persistence, outbound queues, delivery flow and transport integration.
+- **`common/torchat-core`** owns identity, protocol validation, wire types and MLS-based cryptographic components.
+- **platform adapters** connect the shared layers to Android services, desktop runtime hosts and local Tor lifecycle management.
+
+Flutter is intentionally a presentation layer. Pairing transitions, contact state, message delivery state and deduplication belong to the shared Rust runtime rather than separate Android, desktop or Dart implementations.
+
+## Repository layout
 
 - **`mobile/lib`** — shared Flutter UI, application controller and platform-neutral `ClientRuntime` contract.
 - **`common/torchat-client-runtime`** — canonical pairing, contact, conversation and message lifecycle rules.
@@ -75,32 +99,6 @@ The codebase separates presentation, domain rules, cryptography, transport and p
 - **`desktop`** — desktop process lifecycle, local Tor integration and the Flutter runtime bridge.
 - **`server/torchat-server`** — untrusted HTTP/WebSocket relay and pairing control plane.
 - **`infra`** — local Tor, PostgreSQL and container infrastructure.
-
-Flutter is intentionally a presentation layer. Pairing transitions, contact state, message delivery state and deduplication belong to the shared Rust runtime rather than separate Android, desktop or Dart implementations.
-
-## Trust boundaries
-
-```text
-TRUSTED CLIENT A
-Flutter UI -> shared Rust runtime -> client engine -> encryption -> local Tor
-      |                                                        |
-      +-- local identity, keys, MLS state and message history --+
-
-                         opaque encrypted envelopes
-                                      |
-                                      v
-
-UNTRUSTED INFRASTRUCTURE
-Tor v3 onion relay -> WebSocket/HTTP delivery -> PostgreSQL control plane
-No plaintext messages, private keys, client MLS state or conversation history
-
-                                      |
-                                      v
-                         opaque encrypted envelopes
-
-TRUSTED CLIENT B
-local Tor -> client engine -> decryption -> shared Rust runtime -> Flutter UI
-```
 
 ## Transport model
 
