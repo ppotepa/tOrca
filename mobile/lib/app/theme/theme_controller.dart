@@ -1,6 +1,6 @@
-import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'reduced_motion_policy.dart';
 import 'theme_preferences.dart';
 import 'theme_preferences_store.dart';
 
@@ -49,9 +49,6 @@ class ThemeController extends AsyncNotifier<TorChatThemePreferences> {
   }
 
   void _applyMotionPolicy(bool reducedMotion) {
-    // Flutter's scheduler applies this multiplier to animations globally.
-    // A small positive value keeps framework assertions and transition
-    // completion semantics intact while making motion effectively immediate.
-    timeDilation = reducedMotion ? 0.05 : 1.0;
+    TorChatMotionPolicy.setEnabled(reducedMotion);
   }
 }
