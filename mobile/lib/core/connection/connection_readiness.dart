@@ -10,6 +10,8 @@ class ConnectionReadiness {
     required this.relay,
     required this.peerListener,
     required this.onionService,
+    required this.communicationCommitted,
+    required this.communicationDetail,
   });
 
   factory ConnectionReadiness.fromRuntime({
@@ -26,6 +28,10 @@ class ConnectionReadiness {
       StartupStepKind.peerListener,
     );
     final onionStep = _step(startupSteps, StartupStepKind.onionService);
+    final communicationStep = _step(
+      startupSteps,
+      StartupStepKind.communication,
+    );
 
     // A successful identity read is authoritative even when the earlier
     // runtime-ready event arrived before Flutter attached to the event stream.
@@ -87,6 +93,9 @@ class ConnectionReadiness {
       relay: sequential[3],
       peerListener: sequential[4],
       onionService: sequential[5],
+      communicationCommitted:
+          communicationStep.state == StartupStepState.ready,
+      communicationDetail: communicationStep.detail,
     );
   }
 
@@ -96,6 +105,8 @@ class ConnectionReadiness {
   final ConnectionComponentStatus relay;
   final ConnectionComponentStatus peerListener;
   final ConnectionComponentStatus onionService;
+  final bool communicationCommitted;
+  final String communicationDetail;
 
   List<ConnectionComponentStatus> get components => [
     engine,
@@ -108,16 +119,21 @@ class ConnectionReadiness {
 
   bool get localCoreReady => engine.ready && localData.ready;
 
-  bool get onboardingReady =>
+  bool get startupComponentsReady =>
       localCoreReady &&
       tor.ready &&
       relay.ready &&
       peerListener.ready &&
       onionService.ready;
 
+  bool get onboardingReady =>
+      startupComponentsReady && communicationCommitted;
+
   bool get communicationReady => onboardingReady;
 
-  bool get busy => !communicationReady && components.any((item) => item.busy);
+  bool get busy =>
+      !communicationReady &&
+      (components.any((item) => item.busy) || startupComponentsReady);
 
   bool get degraded => components.any(
     (item) => item.state == ConnectionComponentState.degraded,
@@ -184,6 +200,11 @@ class ConnectionReadiness {
   ];
 
   String _communicationDetail() {
+    if (startupComponentsReady) {
+      return communicationDetail.isEmpty
+          ? 'Finalizowanie gotowości komunikacji'
+          : communicationDetail;
+    }
     final firstBlocking = components.firstWhere(
       (item) => !item.ready,
       orElse: () => onionService,
