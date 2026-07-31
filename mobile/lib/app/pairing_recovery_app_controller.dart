@@ -22,6 +22,18 @@ class PairingRecoveryAppController extends SequentialAppController {
   }
 
   @override
+  Future<void> initialize() async {
+    _lastPairingSync = null;
+    await super.initialize();
+    if (!state.transport.connected) return;
+    try {
+      await refreshData(forcePairing: true, allowAutoTorka: false);
+    } catch (_) {
+      // Startup remains usable; periodic reconciliation retries pairing sync.
+    }
+  }
+
+  @override
   Future<void> refreshData({
     bool forcePairing = false,
     bool allowAutoTorka = true,
