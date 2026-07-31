@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/app_controller.dart';
+import '../../core/connection/app_state_connection.dart';
+import '../../core/connection/connection_component.dart';
 import '../../core/models/domain.dart';
 
 class ConnectionCenterSheet extends ConsumerWidget {
@@ -12,11 +14,22 @@ class ConnectionCenterSheet extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(appControllerProvider);
     final controller = ref.read(appControllerProvider.notifier);
+    final readiness = state.connectionReadiness;
+    final summary = state.connectionSummary;
     final queued = state.messages.where((message) =>
         message.state == MessageState.queued ||
         message.state == MessageState.sending).length;
     final failed = state.messages
         .where((message) => message.state == MessageState.failed)
+        .length;
+    final directSessions = state.contacts
+        .where(
+          (contact) =>
+              contact.peerConnectionStatus == PeerConnectionStatus.connected,
+        )
+        .length;
+    final onlineContacts = state.onlineContacts.values
+        .where((value) => value)
         .length;
 
     return SafeArea(
@@ -27,44 +40,63 @@ class ConnectionCenterSheet extends ConsumerWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Connection Center', style: Theme.of(context).textTheme.titleLarge),
-              const SizedBox(height: 4),
               Text(
-                'Stan lokalnego engine, sieci Tor, relaya i komunikacji P2P aktualizuje się na żywo.',
-                style: Theme.of(context).textTheme.bodySmall,
+                'Centrum połączeń',
+                style: Theme.of(context).textTheme.titleLarge,
               ),
-              const SizedBox(height: 16),
-              for (final step in state.startupSteps)
-                _ConnectionStepTile(step: step),
-              const Divider(height: 28),
-              _StatusTile(
-                icon: Icons.eco_outlined,
-                title: 'Relay przez Tor',
-                state: state.transport.phase.name,
-                detail: state.transport.detail.isEmpty
-                    ? state.transport.label
-                    : state.transport.detail,
-                trailing: state.transport.latencyMs == null
-                    ? 'próba ${state.transport.retryAttempt}'
-                    : '${state.transport.latencyMs} ms',
+              const SizedBox(height: 4),
+              Text(summary.status, style: Theme.of(context).textTheme.titleSmall),
+              const SizedBox(height: 2),
+              Text(summary.detail, style: Theme.of(context).textTheme.bodySmall),
+              const SizedBox(height: 20),
+              Text(
+                'Infrastruktura aplikacji',
+                style: Theme.of(context).textTheme.titleMedium,
               ),
+              const SizedBox(height: 6),
+              for (final component in readiness.components)
+                _ConnectionComponentTile(status: component),
               _StatusTile(
-                icon: Icons.settings_input_antenna,
-                title: 'Lokalny onion P2P',
-                state: state.peerServerStatus.name,
-                detail: state.peerServerStatus.label,
+                icon: Icons.forum_outlined,
+                title: 'Gotowość komunikacji',
+                state: readiness.communicationReady
+                    ? 'ready'
+                    : readiness.failed
+                    ? 'failed'
+                    : readiness.degraded
+                    ? 'degraded'
+                    : 'starting',
+                detail: readiness.communicationReady
+                    ? 'Wszystkie wymagane komponenty startowe są gotowe.'
+                    : readiness.startupSteps.last.detail,
+              ),
+              const Divider(height: 30),
+              Text(
+                'Aktywność w aplikacji',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 6),
+              _StatusTile(
+                icon: Icons.cable_outlined,
+                title: 'Bezpośrednie sesje kontaktów',
+                state: '$directSessions/${state.contacts.length}',
+                detail:
+                    'Sesje z konkretnymi kontaktami powstają po onboardingu i nie blokują startu aplikacji.',
               ),
               _StatusTile(
                 icon: Icons.people_alt_outlined,
-                title: 'Kontakty i sesje P2P',
-                state: '${state.onlineContacts.values.where((value) => value).length}/${state.contacts.length}',
-                detail: 'Aktywne obecności kontaktów i preferowane sesje bezpośrednie',
+                title: 'Obecność kontaktów',
+                state: '$onlineContacts/${state.contacts.length}',
+                detail: 'Kontakty zgłaszające aktywną obecność w runtime.',
               ),
               _StatusTile(
                 icon: Icons.queue_outlined,
                 title: 'Kolejka wiadomości',
-                state: queued == 0 && failed == 0 ? 'czysta' : '$queued oczekuje · $failed błędów',
-                detail: 'Wiadomości pozostają w trwałej kolejce do czasu potwierdzenia dostawy',
+                state: queued == 0 && failed == 0
+                    ? 'czysta'
+                    : '$queued oczekuje · $failed błędów',
+                detail:
+                    'Wiadomości pozostają w trwałej kolejce do czasu potwierdzenia dostawy.',
               ),
               if (state.error.isNotEmpty)
                 _StatusTile(
@@ -85,7 +117,9 @@ class ConnectionCenterSheet extends ConsumerWidget {
                       await Clipboard.setData(ClipboardData(text: diagnostic));
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Diagnostyka skopiowana')),
+                          const SnackBar(
+                            content: Text('Diagnostyka skopiowana'),
+                          ),
                         );
                       }
                     },
@@ -95,7 +129,7 @@ class ConnectionCenterSheet extends ConsumerWidget {
                   FilledButton.icon(
                     onPressed: state.isLoading ? null : controller.retryTor,
                     icon: const Icon(Icons.refresh),
-                    label: const Text('Ponów relay'),
+                    label: const Text('Ponów połączenie'),
                   ),
                 ],
               ),
@@ -107,46 +141,58 @@ class ConnectionCenterSheet extends ConsumerWidget {
   }
 
   String _diagnosticText(AppState state) {
-    final steps = state.startupSteps
-        .map((step) => '${step.kind.name}=${step.state.name}:${step.detail}')
+    final readiness = state.connectionReadiness;
+    final components = readiness.components
+        .map(
+          (component) =>
+              '${component.component.name}=${component.state.name}:${component.detail}',
+        )
         .join('\n');
+    final directSessions = state.contacts
+        .where(
+          (contact) =>
+              contact.peerConnectionStatus == PeerConnectionStatus.connected,
+        )
+        .length;
     return [
       'screen=${state.screen.name}',
-      'transport=${state.transport.phase.name}',
-      'transportLabel=${state.transport.label}',
-      'transportDetail=${state.transport.detail}',
-      'transportRetry=${state.transport.retryAttempt}',
-      'peerServer=${state.peerServerStatus.name}',
+      'localCoreReady=${readiness.localCoreReady}',
+      'onboardingReady=${readiness.onboardingReady}',
+      'communicationReady=${readiness.communicationReady}',
       'contacts=${state.contacts.length}',
+      'directSessions=$directSessions',
       'conversations=${state.conversations.length}',
       'inbox=${state.inbox.length}',
       'outbox=${state.outbox.length}',
       'error=${state.error}',
-      steps,
+      components,
     ].join('\n');
   }
 }
 
-class _ConnectionStepTile extends StatelessWidget {
-  const _ConnectionStepTile({required this.step});
+class _ConnectionComponentTile extends StatelessWidget {
+  const _ConnectionComponentTile({required this.status});
 
-  final StartupStep step;
+  final ConnectionComponentStatus status;
 
   @override
   Widget build(BuildContext context) => _StatusTile(
-    icon: _icon(step.kind),
-    title: step.title,
-    state: step.state.name,
-    detail: step.detail.isEmpty ? step.description : step.detail,
+    icon: _icon(status.component),
+    title: status.component.title,
+    state: status.state.name,
+    detail: status.detail.isEmpty
+        ? status.component.description
+        : status.detail,
+    trailing: status.progress == null ? null : '${status.progress}%',
   );
 
-  IconData _icon(StartupStepKind kind) => switch (kind) {
-    StartupStepKind.engine => Icons.memory_outlined,
-    StartupStepKind.tor => Icons.hub_outlined,
-    StartupStepKind.peerListener => Icons.cell_tower_outlined,
-    StartupStepKind.onionService => Icons.security_outlined,
-    StartupStepKind.relay => Icons.cloud_sync_outlined,
-    StartupStepKind.communication => Icons.forum_outlined,
+  IconData _icon(ConnectionComponent component) => switch (component) {
+    ConnectionComponent.engine => Icons.memory_outlined,
+    ConnectionComponent.localData => Icons.storage_outlined,
+    ConnectionComponent.tor => Icons.hub_outlined,
+    ConnectionComponent.relay => Icons.cloud_sync_outlined,
+    ConnectionComponent.peerListener => Icons.cell_tower_outlined,
+    ConnectionComponent.onionService => Icons.security_outlined,
   };
 }
 
@@ -169,11 +215,10 @@ class _StatusTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final normalized = state.toLowerCase();
-    final color = normalized.contains('ready') ||
-            normalized.contains('connected') ||
-            normalized == 'czysta'
+    final color = normalized.contains('ready') || normalized == 'czysta'
         ? scheme.primary
-        : normalized.contains('error') || normalized.contains('failed')
+        : normalized.contains('error') ||
+              normalized.contains('failed')
         ? scheme.error
         : scheme.tertiary;
     return ListTile(
@@ -183,7 +228,11 @@ class _StatusTile extends StatelessWidget {
       subtitle: Text(detail),
       trailing: Text(
         trailing ?? state,
-        style: TextStyle(color: color, fontFamily: 'monospace', fontSize: 11),
+        style: TextStyle(
+          color: color,
+          fontFamily: 'monospace',
+          fontSize: 11,
+        ),
       ),
     );
   }
