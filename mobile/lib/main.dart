@@ -6,12 +6,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'app/app_controller.dart';
 import 'app/app_theme.dart';
 import 'client_runtime.dart';
+import 'core/connection/app_state_connection.dart';
+import 'core/connection/connection_gate.dart';
 import 'features/account/account_view.dart';
 import 'features/account/settings_view.dart';
 import 'features/connection/connection_center_sheet.dart';
 import 'features/invites/invite_scanner.dart';
-import 'features/shell/main_shell.dart';
+import 'features/onboarding/nickname_onboarding_screen.dart';
 import 'features/onboarding/onboarding_views.dart';
+import 'features/shell/main_shell.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -76,6 +79,8 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
   final _search = TextEditingController();
   final _composer = TextEditingController();
   final _nickname = TextEditingController();
+  bool _onboardingUnlocked = false;
+  bool _runningUnlocked = false;
 
   @override
   void initState() {
@@ -223,11 +228,12 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
 
   void _openSettings() {
     final state = ref.read(appControllerProvider);
+    final summary = state.connectionSummary;
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => SettingsView(
           nickname: state.profile.nickname,
-          torStatus: state.transport.label,
+          torStatus: summary.status,
           themePreferences:
               ref.read(themeControllerProvider).valueOrNull ??
               const TorChatThemePreferences(),
@@ -317,30 +323,50 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
   Widget build(BuildContext context) {
     final state = ref.watch(appControllerProvider);
     final controller = ref.read(appControllerProvider.notifier);
-    if (state.screen == ControllerScreen.boot) {
+    final connection = state.connectionReadiness;
+    final summary = state.connectionSummary;
+    final resolvedPhase = resolveLaunchPhase(
+      profile: state.profile,
+      connection: connection,
+    );
+
+    if (resolvedPhase == AppLaunchPhase.onboarding) {
+      _onboardingUnlocked = true;
+    }
+    if (resolvedPhase == AppLaunchPhase.running) {
+      _runningUnlocked = true;
+    }
+
+    final launchPhase = _runningUnlocked
+        ? AppLaunchPhase.running
+        : _onboardingUnlocked && state.profile.nickname.trim().isEmpty
+        ? AppLaunchPhase.onboarding
+        : resolvedPhase;
+
+    if (launchPhase == AppLaunchPhase.warming) {
       return BootScreen(
-        phase: state.transport.phase,
-        status: state.transport.label.isEmpty
-            ? 'Uruchamianie Tor…'
-            : state.transport.label,
-        detail: state.transport.detail,
+        phase: summary.phase,
+        status: summary.status,
+        detail: summary.detail,
         error: state.error,
         retry: controller.retryTor,
-        connecting: !state.transport.failed,
-        steps: state.startupSteps,
+        connecting: connection.busy,
+        steps: connection.startupSteps,
       );
     }
-    if (state.screen == ControllerScreen.nickname) {
-      return NicknameScreen(
+    if (launchPhase == AppLaunchPhase.onboarding) {
+      return NicknameOnboardingScreen(
         controller: _nickname,
-        transport: state.transport,
-        ready: state.startupSteps.isNotEmpty &&
-            state.startupSteps.every((step) => step.state == StartupStepState.ready),
+        connection: connection,
         error: state.error,
         onSave: () async {
           await controller.setNickname(_nickname.text);
-          if (ref.read(appControllerProvider).screen !=
-              ControllerScreen.nickname) {
+          if (ref
+              .read(appControllerProvider)
+              .profile
+              .nickname
+              .trim()
+              .isNotEmpty) {
             _nickname.clear();
           }
         },
@@ -358,10 +384,10 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
       nickname: state.profile.nickname,
       fingerprint: state.profile.fingerprint,
       ownInvite: state.ownInvite?.code ?? '',
-      status: state.transport.label,
-      phase: state.transport.phase,
-      latencyMs: state.transport.latencyMs,
-      peerServerStatus: state.peerServerStatus,
+      status: summary.status,
+      phase: summary.phase,
+      latencyMs: summary.latencyMs,
+      peerServerStatus: summary.peerServerStatus,
       contacts: contacts,
       conversations: conversations,
       messages: state.messages,
