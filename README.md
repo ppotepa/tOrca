@@ -1,33 +1,64 @@
 # tOrca
 
-**tOrca** is an experimental, cross-platform private messenger built with Flutter and Rust. The application is currently presented as **TorChat** and focuses on reliable one-to-one communication over Tor v3 onion services.
+**tOrca** is an experimental, cross-platform, identity-minimizing private messenger built with Flutter and Rust. The application is currently presented as **TorChat** and focuses on reliable one-to-one communication over Tor v3 onion services.
+
+The project is designed for private and pseudonymous communication without phone numbers, email addresses, public usernames or traditional user accounts. Its architecture aims to reduce linkability, metadata exposure and network-level traceability while keeping cryptographic identity and conversation data on user devices.
 
 > [!WARNING]
 > This project is under active development. Its protocol, storage format, user experience and security properties may change. It has not completed an independent security audit and should not yet be treated as production-ready software.
+>
+> tOrca does not claim unconditional anonymity. A compromised device, unsafe user behaviour, operating-system telemetry, implementation vulnerabilities or sufficiently capable traffic analysis may still reveal information about a user or their communication.
 
 ## Project goals
 
 tOrca explores a local-first messenger in which:
 
-- users create an installation identity without an email address, phone number or password;
+- users create a local installation identity without an email address, phone number, password or public account;
 - contacts are established through an expiring pairing code or QR code and explicit acceptance;
 - message content, conversation history, private keys and MLS state remain on client devices;
-- network traffic is routed through Tor;
+- network traffic is routed through Tor v3 onion services;
+- contacts do not establish ordinary direct Internet connections or disclose their public IP addresses to one another;
 - an untrusted relay coordinates pairing and transports opaque encrypted envelopes;
 - Android and desktop share the same Flutter interface and as much Rust client logic as possible.
 
 The current `0.1` release focus is Windows and Android. See [RELEASE_0_1.md](RELEASE_0_1.md) for the frozen feature scope and acceptance criteria.
 
+## Privacy model
+
+tOrca is designed to make communication substantially more difficult to observe, correlate and attribute at the network level.
+
+Each installation creates its own local cryptographic identity. There is no required phone number, email address, public username, central profile or public user directory. A contact relationship is created only after users exchange a short-lived pairing code or QR code and explicitly approve the connection.
+
+Communication is routed through Tor. The current transport uses a Tor v3 onion relay, so contacts do not need to reveal their ordinary network addresses to each other. Message content is protected before it leaves the sender's trusted client boundary and is processed after it reaches the recipient's trusted client boundary.
+
+The following data is intended to remain on client devices:
+
+- private identity keys;
+- MLS cryptographic state;
+- plaintext message content;
+- local contacts and aliases;
+- conversation history;
+- durable outbound queues;
+- encrypted attachment data.
+
+The relay is treated as untrusted infrastructure. It may authenticate sessions, coordinate pairing and forward opaque envelopes, but it must not be able to decrypt message content or access client private keys.
+
+PostgreSQL is used only for relay control-plane state, such as temporary pairing records, session authorization, installation routing metadata and database migration state. It is not intended to be a chat-history or message-content database.
+
+This model is intended to reduce identity exposure and metadata leakage; it is not a guarantee of perfect anonymity against compromised endpoints, global traffic analysis or vulnerabilities in the operating system, Tor network or application.
+
 ## How it works
 
-1. Each installation creates a local identity and connects through its local Tor runtime.
+1. Each installation creates a local cryptographic identity and connects through its local Tor runtime.
 2. Users exchange a short-lived pairing code or QR code.
 3. Explicit acceptance creates a trusted contact and conversation.
-4. The shared Rust client prepares local message state and cryptographic envelopes.
-5. The current transport sends opaque envelopes through a configured Tor v3 onion relay.
-6. The recipient processes and stores the message locally.
+4. The shared Rust runtime applies pairing, contact, conversation and message lifecycle rules.
+5. The shared client engine persists local state, prepares delivery and creates cryptographic envelopes.
+6. The current transport sends opaque envelopes through a configured Tor v3 onion relay.
+7. The recipient processes, decrypts and stores the message locally.
+8. Delivery acknowledgements update the sender's local message state.
 
-The relay is not part of the cryptographic trust boundary. It may authenticate sessions and coordinate delivery, but it must not receive client private keys or plaintext messages.
+The relay is not part of the cryptographic trust boundary. It may coordinate delivery, but it must not receive client private keys or plaintext messages.
 
 ## Architecture
 
@@ -43,9 +74,33 @@ The codebase separates presentation, domain rules, cryptography, transport and p
 - **`mobile/android`** — Android service lifecycle, native channels, local Tor integration and encrypted persistence.
 - **`desktop`** — desktop process lifecycle, local Tor integration and the Flutter runtime bridge.
 - **`server/torchat-server`** — untrusted HTTP/WebSocket relay and pairing control plane.
-- **`infra`** — local Tor, database and container infrastructure.
+- **`infra`** — local Tor, PostgreSQL and container infrastructure.
 
 Flutter is intentionally a presentation layer. Pairing transitions, contact state, message delivery state and deduplication belong to the shared Rust runtime rather than separate Android, desktop or Dart implementations.
+
+## Trust boundaries
+
+```text
+TRUSTED CLIENT A
+Flutter UI -> shared Rust runtime -> client engine -> encryption -> local Tor
+      |                                                        |
+      +-- local identity, keys, MLS state and message history --+
+
+                         opaque encrypted envelopes
+                                      |
+                                      v
+
+UNTRUSTED INFRASTRUCTURE
+Tor v3 onion relay -> WebSocket/HTTP delivery -> PostgreSQL control plane
+No plaintext messages, private keys, client MLS state or conversation history
+
+                                      |
+                                      v
+                         opaque encrypted envelopes
+
+TRUSTED CLIENT B
+local Tor -> client engine -> decryption -> shared Rust runtime -> Flutter UI
+```
 
 ## Transport model
 
@@ -55,7 +110,15 @@ The currently implemented transport uses a configured onion relay:
 Client A -> local Tor -> Tor v3 onion relay -> local Tor -> Client B
 ```
 
-The client architecture is transport-independent. Direct device-to-device onion delivery is a possible future strategy, but it is not a current release guarantee.
+This is not an ordinary direct Internet connection between users. Tor separates the application-level endpoints from the underlying network route, while the relay provides practical delivery and pairing coordination.
+
+The client architecture is transport-independent. Direct device-to-device onion delivery is technically possible and may become a future transport strategy:
+
+```text
+Client A onion service -> Tor network -> Client B onion service
+```
+
+Such a design would still use Tor relays at the network layer and would introduce significant mobile lifecycle, battery, availability and offline-delivery challenges. It is therefore not a current release guarantee.
 
 ## Technology
 
@@ -69,7 +132,9 @@ The client architecture is transport-independent. Direct device-to-device onion 
 
 ## Current limitations
 
-The project is still stabilizing startup, reconnect behavior, background lifecycle, pairing recovery, durable delivery and cross-platform release quality. Features such as calls, groups, multi-device synchronization, public discovery and cloud backup are outside the `0.1` scope.
+The project is still stabilizing startup, reconnect behaviour, background lifecycle, pairing recovery, durable delivery and cross-platform release quality. Features such as calls, groups, multi-device synchronization, public discovery and cloud backup are outside the `0.1` scope.
+
+Privacy properties also depend on correct implementation, secure endpoint devices, safe operational behaviour and the security of external components. The current experimental status must be considered when evaluating the application for sensitive use.
 
 ## Development
 
