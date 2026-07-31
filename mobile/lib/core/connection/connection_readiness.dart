@@ -15,6 +15,7 @@ class ConnectionReadiness {
     required RuntimeTorStatus transport,
     required PeerServerStatus peerServerStatus,
     required List<StartupStep> startupSteps,
+    required bool localDataReady,
   }) {
     final engineStep = _step(startupSteps, StartupStepKind.engine);
     final peerListenerStep = _step(
@@ -24,6 +25,13 @@ class ConnectionReadiness {
     final onionStep = _step(startupSteps, StartupStepKind.onionService);
 
     final engineState = _fromStartupState(engineStep.state);
+    final localDataState = engineState == ConnectionComponentState.failed
+        ? ConnectionComponentState.failed
+        : localDataReady
+        ? ConnectionComponentState.ready
+        : engineState == ConnectionComponentState.pending
+        ? ConnectionComponentState.pending
+        : ConnectionComponentState.starting;
     final tor = _torStatus(transport);
     final relay = _relayStatus(transport);
 
@@ -35,18 +43,14 @@ class ConnectionReadiness {
             ? ConnectionComponent.engine.description
             : engineStep.detail,
       ),
-      // The current runtime reports engine and encrypted local storage through
-      // one legacy startup step. Keeping the states coupled here is a
-      // compatibility bridge until the engine publishes LOCAL_DATA_READY as a
-      // separate fact.
       localData: ConnectionComponentStatus(
         component: ConnectionComponent.localData,
-        state: engineState,
-        detail: engineState == ConnectionComponentState.ready
+        state: localDataState,
+        detail: localDataReady
             ? 'Tożsamość i zaszyfrowane dane lokalne są gotowe'
-            : engineStep.detail.isEmpty
-            ? ConnectionComponent.localData.description
-            : engineStep.detail,
+            : engineState == ConnectionComponentState.failed
+            ? engineStep.detail
+            : 'Odczytywanie tożsamości, profilu i lokalnego snapshotu',
       ),
       tor: tor,
       relay: relay,
@@ -234,8 +238,6 @@ ConnectionComponentStatus _peerStatus({
           : allowReadyWhileAggregateStarts &&
                 stepState == ConnectionComponentState.ready
           ? ConnectionComponentState.ready
-          // This clamp prevents a legacy sticky timeline entry from opening
-          // onboarding while the runtime still reports P2P warmup.
           : ConnectionComponentState.starting,
     PeerServerStatus.offline =>
       component == ConnectionComponent.peerListener &&
