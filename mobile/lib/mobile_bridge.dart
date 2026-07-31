@@ -12,7 +12,7 @@ import 'core/runtime/runtime_payload.dart';
 /// The platform side owns the Tor process, identity and encrypted state.
 class MobileBridge extends Object
     with RuntimeBridgeMethods
-    implements RuntimeCallBridge {
+    implements RuntimeCallBridge, RuntimeAttachmentProvider {
   const MobileBridge();
 
   static const _channel = MethodChannel('org.torchat/mobile');
@@ -23,10 +23,29 @@ class MobileBridge extends Object
       .receiveBroadcastStream()
       .map((value) => RuntimePayload.fromDynamic(value).runtimeEvent());
 
-  /// Android owns relay retries in the foreground service. The Flutter startup
-  /// barrier is local engine readiness, not remote relay availability. Start
-  /// the long-running connect request once, then wait on a local query whose
-  /// native implementation is guarded by `localReady`.
+  @override
+  Future<Map<String, dynamic>?> runtimeSnapshot() async {
+    try {
+      final identity = await _channel.invokeMethod<Object?>(
+        EngineContract.getIdentity,
+      );
+      final profile = await _channel.invokeMethod<Object?>(
+        EngineContract.getProfile,
+      );
+      if (identity is! Map || profile is! Map) return null;
+      return <String, dynamic>{
+        'serviceAlive': true,
+        'localDataReady': true,
+        'identity': Map<String, dynamic>.from(identity),
+        'profile': Map<String, dynamic>.from(profile),
+      };
+    } on PlatformException {
+      return null;
+    }
+  }
+
+  /// Android owns the process and shared engine. Calling connect is idempotent:
+  /// on UI reattach it observes the existing service instead of rebuilding it.
   @override
   Future<bool> connect() async {
     unawaited(

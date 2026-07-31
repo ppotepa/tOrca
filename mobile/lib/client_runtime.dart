@@ -1,9 +1,18 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:shared_preferences/shared_preferences.dart';
+
 import 'windows_runtime.dart';
 export 'core/models/domain.dart';
 import 'core/models/domain.dart';
+
+const _sessionNicknameKey = 'torchat.session.nickname';
+
+/// Optional capability for platforms whose native process outlives Flutter UI.
+abstract interface class RuntimeAttachmentProvider {
+  Future<Map<String, dynamic>?> runtimeSnapshot();
+}
 
 /// Platform-neutral contract consumed by the Flutter UI.
 abstract interface class ClientRuntime {
@@ -47,9 +56,149 @@ abstract interface class ClientRuntime {
   Future<void> updateAppVisibility(bool foreground);
 }
 
+final class _SessionAwareClientRuntime
+    implements ClientRuntime, RuntimeAttachmentProvider {
+  _SessionAwareClientRuntime(this._delegate);
+
+  final ClientRuntime _delegate;
+
+  Future<void> _checkpoint(RuntimeProfile? profile) async {
+    final nickname = profile?.nickname.trim() ?? '';
+    if (nickname.length < 2) return;
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString(_sessionNicknameKey, nickname);
+  }
+
+  @override
+  Future<Map<String, dynamic>?> runtimeSnapshot() async {
+    if (_delegate case final RuntimeAttachmentProvider provider) {
+      final native = await provider.runtimeSnapshot();
+      final profile = native?['profile'];
+      if (profile is Map) {
+        final nickname = profile['nickname']?.toString().trim() ?? '';
+        if (nickname.length >= 2) {
+          final preferences = await SharedPreferences.getInstance();
+          await preferences.setString(_sessionNicknameKey, nickname);
+          return native;
+        }
+      }
+    }
+    final preferences = await SharedPreferences.getInstance();
+    final nickname = preferences.getString(_sessionNicknameKey)?.trim() ?? '';
+    if (nickname.length < 2) return null;
+    return <String, dynamic>{
+      'serviceAlive': false,
+      'localDataReady': false,
+      'checkpointOnly': true,
+      'profile': <String, dynamic>{'nickname': nickname},
+    };
+  }
+
+  @override
+  Stream<RuntimeEvent> get events => _delegate.events;
+  @override
+  Future<bool> connect() => _delegate.connect();
+  @override
+  Future<RuntimeIdentity?> identity() => _delegate.identity();
+  @override
+  Future<RuntimeProfile?> profile() async {
+    final value = await _delegate.profile();
+    await _checkpoint(value);
+    return value;
+  }
+  @override
+  Future<InviteCode?> refreshPairingCode() => _delegate.refreshPairingCode();
+  @override
+  Future<RuntimeProfile> setNickname(String nickname) async {
+    final value = await _delegate.setNickname(nickname);
+    await _checkpoint(value);
+    return value;
+  }
+  @override
+  Future<PairingItem> submitPairingCode(String code) =>
+      _delegate.submitPairingCode(code);
+  @override
+  Future<List<PairingItem>> pairingInbox() => _delegate.pairingInbox();
+  @override
+  Future<List<PairingItem>> pairingOutbox() => _delegate.pairingOutbox();
+  @override
+  Future<PeerEndpoint?> peerEndpoint() => _delegate.peerEndpoint();
+  @override
+  Future<bool> peerEndpointAvailable() => _delegate.peerEndpointAvailable();
+  @override
+  Future<void> retryPeerConnection(String installationId) =>
+      _delegate.retryPeerConnection(installationId);
+  @override
+  Future<void> rotatePeerEndpoint() => _delegate.rotatePeerEndpoint();
+  @override
+  Future<void> verifyContact(String installationId) =>
+      _delegate.verifyContact(installationId);
+  @override
+  Future<ContactRecord> updateContactSettings(
+    String installationId, {
+    String? localAlias,
+    required bool muted,
+    required bool blocked,
+    ContactTransportPolicy? transportPolicy,
+  }) => _delegate.updateContactSettings(
+    installationId,
+    localAlias: localAlias,
+    muted: muted,
+    blocked: blocked,
+    transportPolicy: transportPolicy,
+  );
+  @override
+  Future<List<ContactRecord>> contacts() => _delegate.contacts();
+  @override
+  Future<List<ConversationSummary>> conversations() =>
+      _delegate.conversations();
+  @override
+  Future<List<ChatMessage>> messages(String id) => _delegate.messages(id);
+  @override
+  Future<void> openConversation(String id) => _delegate.openConversation(id);
+  @override
+  Future<void> closeConversation() => _delegate.closeConversation();
+  @override
+  Future<void> startConversation(String contactId) =>
+      _delegate.startConversation(contactId);
+  @override
+  Future<void> sendMessage(
+    String id,
+    String text, {
+    String? replyToMessageId,
+  }) => _delegate.sendMessage(id, text, replyToMessageId: replyToMessageId);
+  @override
+  Future<void> retryMessage(String messageId) =>
+      _delegate.retryMessage(messageId);
+  @override
+  Future<void> deleteMessageLocal(String messageId) =>
+      _delegate.deleteMessageLocal(messageId);
+  @override
+  Future<void> setTyping(String conversationId, bool typing) =>
+      _delegate.setTyping(conversationId, typing);
+  @override
+  Future<void> setPresence(bool online) => _delegate.setPresence(online);
+  @override
+  Future<void> sendReadReceipts(String conversationId) =>
+      _delegate.sendReadReceipts(conversationId);
+  @override
+  Future<void> acceptPairing(String pairingId) =>
+      _delegate.acceptPairing(pairingId);
+  @override
+  Future<void> rejectPairing(String pairingId) =>
+      _delegate.rejectPairing(pairingId);
+  @override
+  Future<void> cancelPairing(String pairingId) =>
+      _delegate.cancelPairing(pairingId);
+  @override
+  Future<void> archivePairing(String pairingId) =>
+      _delegate.archivePairing(pairingId);
+  @override
+  Future<void> updateAppVisibility(bool foreground) =>
+      _delegate.updateAppVisibility(foreground);
+}
+
 /// Keeps process-backed desktop calls on one ordered command stream.
-/// This prevents concurrent lazy starts from launching multiple Rust sidecars
-/// against the same SQLite database and Tor data directory.
 final class _SerializedClientRuntime implements ClientRuntime {
   _SerializedClientRuntime(this._delegate);
 
@@ -117,19 +266,31 @@ final class _SerializedClientRuntime implements ClientRuntime {
   @override
   Future<List<ContactRecord>> contacts() => _run(_delegate.contacts);
   @override
-  Future<List<ConversationSummary>> conversations() => _run(_delegate.conversations);
+  Future<List<ConversationSummary>> conversations() =>
+      _run(_delegate.conversations);
   @override
-  Future<List<ChatMessage>> messages(String id) => _run(() => _delegate.messages(id));
+  Future<List<ChatMessage>> messages(String id) =>
+      _run(() => _delegate.messages(id));
   @override
-  Future<void> openConversation(String id) => _run(() => _delegate.openConversation(id));
+  Future<void> openConversation(String id) =>
+      _run(() => _delegate.openConversation(id));
   @override
   Future<void> closeConversation() => _run(_delegate.closeConversation);
   @override
   Future<void> startConversation(String contactId) =>
       _run(() => _delegate.startConversation(contactId));
   @override
-  Future<void> sendMessage(String id, String text, {String? replyToMessageId}) =>
-      _run(() => _delegate.sendMessage(id, text, replyToMessageId: replyToMessageId));
+  Future<void> sendMessage(
+    String id,
+    String text, {
+    String? replyToMessageId,
+  }) => _run(
+    () => _delegate.sendMessage(
+      id,
+      text,
+      replyToMessageId: replyToMessageId,
+    ),
+  );
   @override
   Future<void> retryMessage(String messageId) =>
       _run(() => _delegate.retryMessage(messageId));
@@ -140,7 +301,8 @@ final class _SerializedClientRuntime implements ClientRuntime {
   Future<void> setTyping(String conversationId, bool typing) =>
       _run(() => _delegate.setTyping(conversationId, typing));
   @override
-  Future<void> setPresence(bool online) => _run(() => _delegate.setPresence(online));
+  Future<void> setPresence(bool online) =>
+      _run(() => _delegate.setPresence(online));
   @override
   Future<void> sendReadReceipts(String conversationId) =>
       _run(() => _delegate.sendReadReceipts(conversationId));
@@ -162,9 +324,9 @@ final class _SerializedClientRuntime implements ClientRuntime {
 }
 
 ClientRuntime createClientRuntime() {
-  final runtime = createPlatformRuntime();
-  if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
-    return _SerializedClientRuntime(runtime);
-  }
-  return runtime;
+  final platform = createPlatformRuntime();
+  final ordered = Platform.isWindows || Platform.isLinux || Platform.isMacOS
+      ? _SerializedClientRuntime(platform)
+      : platform;
+  return _SessionAwareClientRuntime(ordered);
 }

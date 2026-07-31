@@ -82,19 +82,42 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
   final _nickname = TextEditingController();
   bool _onboardingUnlocked = false;
   bool _runningUnlocked = false;
+  String _reattachedNickname = '';
+  Timer? _backgroundDebounce;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) ref.read(appControllerProvider.notifier).initialize();
+      if (mounted) unawaited(_attachAndInitialize());
     });
+  }
+
+  Future<void> _attachAndInitialize() async {
+    final runtime = ref.read(clientRuntimeProvider);
+    final snapshot = runtime is RuntimeAttachmentProvider
+        ? await runtime.runtimeSnapshot()
+        : null;
+    final profile = snapshot?['profile'];
+    if (profile is Map) {
+      final nickname = profile['nickname']?.toString().trim() ?? '';
+      if (nickname.length >= 2 && mounted) {
+        setState(() {
+          _reattachedNickname = nickname;
+          _runningUnlocked = true;
+        });
+      }
+    }
+    if (mounted) {
+      await ref.read(appControllerProvider.notifier).initialize();
+    }
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _backgroundDebounce?.cancel();
     _search.dispose();
     _composer.dispose();
     _nickname.dispose();
@@ -103,16 +126,26 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    final foreground = switch (state) {
-      AppLifecycleState.resumed => true,
-      AppLifecycleState.inactive ||
-      AppLifecycleState.hidden ||
-      AppLifecycleState.paused ||
-      AppLifecycleState.detached => false,
-    };
-    unawaited(
-      ref.read(appControllerProvider.notifier).updateVisibility(foreground),
-    );
+    switch (state) {
+      case AppLifecycleState.resumed:
+        _backgroundDebounce?.cancel();
+        _backgroundDebounce = null;
+        unawaited(
+          ref.read(appControllerProvider.notifier).updateVisibility(true),
+        );
+      case AppLifecycleState.inactive:
+        break;
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.paused:
+      case AppLifecycleState.detached:
+        _backgroundDebounce?.cancel();
+        _backgroundDebounce = Timer(const Duration(seconds: 3), () {
+          if (!mounted) return;
+          unawaited(
+            ref.read(appControllerProvider.notifier).updateVisibility(false),
+          );
+        });
+    }
   }
 
   Future<void> _showInvite() async {
@@ -326,21 +359,32 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
     final controller = ref.read(appControllerProvider.notifier);
     final connection = state.connectionReadiness;
     final summary = state.connectionSummary;
+    final effectiveNickname = state.profile.nickname.trim().isNotEmpty
+        ? state.profile.nickname
+        : _reattachedNickname;
+    final effectiveProfile = effectiveNickname == state.profile.nickname
+        ? state.profile
+        : RuntimeProfile(
+            installationId: state.profile.installationId,
+            nickname: effectiveNickname,
+            fingerprint: state.profile.fingerprint,
+            publicKey: state.profile.publicKey,
+          );
     final resolvedPhase = resolveLaunchPhase(
-      profile: state.profile,
+      profile: effectiveProfile,
       connection: connection,
     );
 
     if (resolvedPhase == AppLaunchPhase.onboarding) {
       _onboardingUnlocked = true;
     }
-    if (resolvedPhase == AppLaunchPhase.running) {
+    if (resolvedPhase == AppLaunchPhase.running || _reattachedNickname.isNotEmpty) {
       _runningUnlocked = true;
     }
 
     final launchPhase = _runningUnlocked
         ? AppLaunchPhase.running
-        : _onboardingUnlocked && state.profile.nickname.trim().isEmpty
+        : _onboardingUnlocked && effectiveNickname.isEmpty
         ? AppLaunchPhase.onboarding
         : resolvedPhase;
 
@@ -379,7 +423,7 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
         MainDestination.contacts => MobileTab.contacts,
         _ => MobileTab.chats,
       },
-      nickname: state.profile.nickname,
+      nickname: effectiveNickname,
       fingerprint: state.profile.fingerprint,
       ownInvite: state.ownInvite?.code ?? '',
       status: summary.status,
