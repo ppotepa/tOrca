@@ -42,6 +42,18 @@ void main() {
     expect(source, contains('await _waitForOnionService(generation)'));
   });
 
+  test('startup owns the runtime event stream without repository side effects', () {
+    final source = File(
+      'lib/app/sequential_app_controller.dart',
+    ).readAsStringSync();
+
+    expect(source, contains('_events ??= _runtime.events.listen('));
+    expect(source, isNot(contains('_repository.events.listen(')));
+    expect(source, contains('onError: (Object error, StackTrace stackTrace)'));
+    expect(source, contains('Desktop runtime event stream closed during warmup'));
+    expect(source, contains('await _runtime.connect().timeout'));
+  });
+
   test('startup refreshes are serialized and event refreshes are conflated', () {
     final source = File(
       'lib/app/sequential_app_controller.dart',
@@ -53,6 +65,7 @@ void main() {
     expect(source, contains('while (_eventRefreshQueued && !_warming)'));
     expect(source, contains('if (_warming)'));
     expect(source, contains('_refreshAfterWarmup = true'));
+    expect(source, contains('await _repository.applicationSnapshot(force: true)'));
   });
 
   test('contact endpoint cannot be mistaken for the local onion endpoint', () {
