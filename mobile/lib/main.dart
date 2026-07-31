@@ -97,9 +97,10 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
 
   Future<void> _attachAndInitialize() async {
     final runtime = ref.read(clientRuntimeProvider);
-    final snapshot = runtime is RuntimeAttachmentProvider
-        ? await runtime.runtimeSnapshot()
-        : null;
+    Map<String, dynamic>? snapshot;
+    if (runtime is RuntimeAttachmentProvider) {
+      snapshot = await (runtime as RuntimeAttachmentProvider).runtimeSnapshot();
+    }
     final profile = snapshot?['profile'];
     if (profile is Map) {
       final nickname = profile['nickname']?.toString().trim() ?? '';
