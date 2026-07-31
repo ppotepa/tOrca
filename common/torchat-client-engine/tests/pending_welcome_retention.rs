@@ -4,7 +4,7 @@ const CONNECTION_PRAGMAS: &str =
     include_str!("../sql/queries/connection_pragmas.sql");
 
 #[test]
-fn forwarded_welcome_delete_is_converted_to_dormant_retention() {
+fn forwarded_welcome_delete_is_converted_to_scheduled_retry() {
     let connection = Connection::open_in_memory().expect("open sqlite");
     connection
         .execute_batch(CONNECTION_PRAGMAS)
@@ -39,9 +39,54 @@ fn forwarded_welcome_delete_is_converted_to_dormant_retention() {
             ["invite-a"],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
-        .expect("welcome must remain available for duplicate offer recovery");
-    assert_eq!(retained.0, expires_at * 1000);
+        .expect("welcome must remain available for retransmission");
+    assert!(retained.0 >= (now + 5) * 1000);
+    assert!(retained.0 < expires_at * 1000);
     assert_eq!(retained.1, None);
+}
+
+#[test]
+fn forwarded_welcome_preserves_scheduler_backoff_deadline() {
+    let connection = Connection::open_in_memory().expect("open sqlite");
+    connection
+        .execute_batch(CONNECTION_PRAGMAS)
+        .expect("install pragmas and retention trigger");
+
+    let now: i64 = connection
+        .query_row("SELECT unixepoch();", [], |row| row.get(0))
+        .expect("read sqlite clock");
+    let scheduled = (now + 40) * 1000;
+    connection
+        .execute(
+            "INSERT INTO pending_welcomes (
+                invite_id, recipient_installation_id, payload, expires_at,
+                attempt_count, next_attempt_at
+             ) VALUES (?1, ?2, ?3, ?4, 4, ?5);",
+            params![
+                "invite-backoff",
+                "peer-a",
+                b"welcome".as_slice(),
+                now + 120,
+                scheduled,
+            ],
+        )
+        .expect("insert scheduled pending welcome");
+
+    connection
+        .execute(
+            "DELETE FROM pending_welcomes WHERE invite_id = ?1;",
+            ["invite-backoff"],
+        )
+        .expect("legacy forwarded delete should be intercepted");
+
+    let retained: i64 = connection
+        .query_row(
+            "SELECT next_attempt_at FROM pending_welcomes WHERE invite_id = ?1;",
+            ["invite-backoff"],
+            |row| row.get(0),
+        )
+        .expect("scheduled welcome must remain");
+    assert_eq!(retained, scheduled);
 }
 
 #[test]
