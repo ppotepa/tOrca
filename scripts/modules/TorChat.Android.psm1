@@ -1,7 +1,7 @@
 Set-StrictMode -Version Latest
 
 function Get-TorChatAndroidWifiDeviceRegex {
-    return '^\\d{1,3}(?:\\.\\d{1,3}){3}:\\d+$'
+    return '^\d{1,3}(?:\.\d{1,3}){3}:\d+$'
 }
 
 function Test-TorChatAndroidDeviceIsWifi {
@@ -39,7 +39,7 @@ function Find-TorChatAndroidMdnsAddresses {
     Assert-TorChatTool -Name adb
     $text = adb mdns services 2>&1 | Out-String
     return @($text -split "`r?`n" | Where-Object {
-        $_ -match '_adb-tls-connect' -and $_ -match '\d{1,3}(?:\.\d{1,3}){3}:\d+'
+        $_ -match '_adb-tls-connect' -and $_ -match '^\d{1,3}(?:\.\d{1,3}){3}:\d+'
     } | ForEach-Object {
         if ($_ -match '(\d{1,3}(?:\.\d{1,3}){3}:\d+)') { $Matches[1] }
     } | Select-Object -Unique)
