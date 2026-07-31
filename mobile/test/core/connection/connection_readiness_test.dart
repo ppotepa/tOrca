@@ -14,6 +14,7 @@ void main() {
         ),
         peerServerStatus: PeerServerStatus.starting,
         startupSteps: _readyLegacySteps(),
+        localDataReady: true,
       );
 
       expect(readiness.relay.ready, isTrue);
@@ -34,6 +35,7 @@ void main() {
         ),
         peerServerStatus: PeerServerStatus.ready,
         startupSteps: _readyLegacySteps(),
+        localDataReady: true,
       );
 
       expect(readiness.onboardingReady, isTrue);
@@ -49,10 +51,28 @@ void main() {
         ),
         peerServerStatus: PeerServerStatus.ready,
         startupSteps: _readyLegacySteps(),
+        localDataReady: true,
       );
 
       // Readiness has no contact collection or peer-session dependency.
       expect(readiness.onboardingReady, isTrue);
+    });
+
+    test('engine ready does not imply local data ready', () {
+      final readiness = ConnectionReadiness.fromRuntime(
+        transport: const RuntimeTorStatus(
+          phase: TransportPhase.connected,
+          label: 'Połączono',
+        ),
+        peerServerStatus: PeerServerStatus.ready,
+        startupSteps: _readyLegacySteps(),
+        localDataReady: false,
+      );
+
+      expect(readiness.engine.ready, isTrue);
+      expect(readiness.localData.ready, isFalse);
+      expect(readiness.localCoreReady, isFalse);
+      expect(readiness.onboardingReady, isFalse);
     });
   });
 
@@ -65,6 +85,7 @@ void main() {
         ),
         peerServerStatus: PeerServerStatus.offline,
         startupSteps: _readyLegacySteps(),
+        localDataReady: true,
       );
 
       expect(readiness.localCoreReady, isTrue);
@@ -85,6 +106,7 @@ void main() {
         ),
         peerServerStatus: PeerServerStatus.starting,
         startupSteps: _readyLegacySteps(),
+        localDataReady: true,
       );
       final ready = ConnectionReadiness.fromRuntime(
         transport: const RuntimeTorStatus(
@@ -93,6 +115,7 @@ void main() {
         ),
         peerServerStatus: PeerServerStatus.ready,
         startupSteps: _readyLegacySteps(),
+        localDataReady: true,
       );
 
       expect(
