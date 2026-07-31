@@ -12,7 +12,12 @@
     "flutter-analyze",
     "flutter-tests",
     "android-debug-build",
-    "windows-debug-build"
+    "android-clean-install-smoke",
+    "android-upgrade-preserves-data",
+    "android-cold-start-recovery",
+    "windows-debug-build",
+    "windows-clean-profile-smoke",
+    "windows-profile-restart-preserves-data"
   ],
   "manual": [
     {
@@ -50,12 +55,17 @@
     {
       "id": "upgrade-preserves-data",
       "platforms": ["windows", "android"],
-      "description": "Upgrade an existing installation and verify identity, contacts, history, queue and preferences are preserved."
+      "description": "Upgrade from the previous signed 0.1 candidate and verify identity, contacts, history, queue, attachment cache and preferences are preserved."
     },
     {
       "id": "background-and-recovery",
       "platforms": ["windows", "android"],
       "description": "Exercise tray/background lifecycle, process termination, Tor loss and network recovery without fatal UI state."
+    },
+    {
+      "id": "image-storage-and-gallery",
+      "platforms": ["windows", "android"],
+      "description": "Verify manual and automatic image download, encrypted cache usage/clearing and explicit gallery export."
     },
     {
       "id": "diagnostic-export-privacy",
