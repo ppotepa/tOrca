@@ -33,6 +33,7 @@ flutter:
 
   assets:
     - assets/audio/intro.mp3
+    - windows/runner/resources/app_icon.ico
 
   fonts:
     - family: PressStart2P
