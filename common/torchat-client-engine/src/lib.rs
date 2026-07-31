@@ -1,4 +1,5 @@
 pub mod actor;
+pub mod application;
 pub mod command;
 pub mod config;
 pub mod engine;
@@ -10,6 +11,10 @@ pub mod relay;
 pub mod storage;
 
 pub use actor::ClientEngineActor;
+pub use application::{
+    CommandOutcome, EffectExecutor, EngineEffect, InlineEffectExecutor, OperationContext,
+    OperationSource, ProjectionDirty,
+};
 pub use command::{EngineCommand, EngineCommandEnvelope, PlatformFact, PlatformKind, TorPhase};
 pub use config::EngineConfig;
 pub use engine::ClientEngine;
