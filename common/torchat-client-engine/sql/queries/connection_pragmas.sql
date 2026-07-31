@@ -19,14 +19,19 @@ CREATE TABLE IF NOT EXISTS pending_welcomes (
 -- Relay FORWARDED only proves that the relay accepted the envelope. It does not
 -- prove that the recipient applied the MLS Welcome and committed the contact.
 -- The legacy actor calls DELETE after FORWARDED; convert that early delete into
--- a dormant retained record. A duplicate pairing offer can then resend the
--- exact same Welcome, while the normal retry scheduler sleeps until expiry.
+-- a retained retry. The first forward is retried after at least five seconds;
+-- later attempts keep the scheduler's exponential deadline. The row remains
+-- available for duplicate-offer recovery and is deleted normally after expiry.
 CREATE TRIGGER IF NOT EXISTS retain_forwarded_pending_welcome
 BEFORE DELETE ON pending_welcomes
 WHEN OLD.expires_at > unixepoch()
 BEGIN
     UPDATE pending_welcomes
-    SET next_attempt_at = OLD.expires_at * 1000,
+    SET next_attempt_at = CASE
+            WHEN OLD.next_attempt_at > unixepoch() * 1000
+                THEN OLD.next_attempt_at
+            ELSE (unixepoch() + 5) * 1000
+        END,
         last_error = NULL
     WHERE invite_id = OLD.invite_id;
     SELECT RAISE(IGNORE);
