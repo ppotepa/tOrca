@@ -40,6 +40,10 @@ abstract final class TorChatThemeRegistry {
 
   static ThemeData _withAccessibleColorScheme(ThemeData theme) {
     final scheme = theme.colorScheme;
+    final surface = _opaque(scheme.surface, Colors.white);
+    Color foreground(Color background) =>
+        accessibleForeground(background, backdrop: surface);
+
     final extensions = theme.extensions.values.toList(growable: true);
     final chat = theme.extension<TorChatChatTheme>();
     final inbox = theme.extension<TorChatInboxTheme>();
@@ -50,30 +54,30 @@ abstract final class TorChatThemeRegistry {
     if (chat != null) {
       extensions.add(
         chat.copyWith(
-          incomingForeground: accessibleForeground(chat.incomingBubble),
-          outgoingForeground: accessibleForeground(chat.outgoingBubble),
+          incomingForeground: foreground(chat.incomingBubble),
+          outgoingForeground: foreground(chat.outgoingBubble),
         ),
       );
     }
     if (inbox != null) {
       extensions.add(
         inbox.copyWith(
-          acceptForeground: accessibleForeground(inbox.accept),
-          rejectForeground: accessibleForeground(inbox.reject),
-          archiveForeground: accessibleForeground(inbox.archive),
+          acceptForeground: foreground(inbox.accept),
+          rejectForeground: foreground(inbox.reject),
+          archiveForeground: foreground(inbox.archive),
         ),
       );
     }
     return theme.copyWith(
       colorScheme: scheme.copyWith(
-        onPrimary: accessibleForeground(scheme.primary),
-        onSecondary: accessibleForeground(scheme.secondary),
-        onTertiary: accessibleForeground(scheme.tertiary),
-        onError: accessibleForeground(scheme.error),
-        onPrimaryContainer: accessibleForeground(scheme.primaryContainer),
-        onSecondaryContainer: accessibleForeground(scheme.secondaryContainer),
-        onTertiaryContainer: accessibleForeground(scheme.tertiaryContainer),
-        onErrorContainer: accessibleForeground(scheme.errorContainer),
+        onPrimary: foreground(scheme.primary),
+        onSecondary: foreground(scheme.secondary),
+        onTertiary: foreground(scheme.tertiary),
+        onError: foreground(scheme.error),
+        onPrimaryContainer: foreground(scheme.primaryContainer),
+        onSecondaryContainer: foreground(scheme.secondaryContainer),
+        onTertiaryContainer: foreground(scheme.tertiaryContainer),
+        onErrorContainer: foreground(scheme.errorContainer),
       ),
       extensions: extensions.cast<ThemeExtension<dynamic>>(),
     );
@@ -91,18 +95,29 @@ abstract final class TorChatThemeRegistry {
 }
 
 @visibleForTesting
-Color accessibleForeground(Color background) {
+Color accessibleForeground(
+  Color background, {
+  Color backdrop = Colors.white,
+}) {
   const dark = Color(0xff111111);
   const light = Colors.white;
-  return contrastRatio(background, light) >= contrastRatio(background, dark)
+  return contrastRatio(background, light, backdrop: backdrop) >=
+          contrastRatio(background, dark, backdrop: backdrop)
       ? light
       : dark;
 }
 
 @visibleForTesting
-double contrastRatio(Color first, Color second) {
-  final firstLuminance = first.computeLuminance();
-  final secondLuminance = second.computeLuminance();
+double contrastRatio(
+  Color first,
+  Color second, {
+  Color backdrop = Colors.white,
+}) {
+  final opaqueBackdrop = _opaque(backdrop, Colors.white);
+  final opaqueFirst = _opaque(first, opaqueBackdrop);
+  final opaqueSecond = _opaque(second, opaqueBackdrop);
+  final firstLuminance = opaqueFirst.computeLuminance();
+  final secondLuminance = opaqueSecond.computeLuminance();
   final lighter = firstLuminance > secondLuminance
       ? firstLuminance
       : secondLuminance;
@@ -111,3 +126,7 @@ double contrastRatio(Color first, Color second) {
       : firstLuminance;
   return (lighter + 0.05) / (darker + 0.05);
 }
+
+Color _opaque(Color color, Color backdrop) => color.a >= 1
+    ? color
+    : Color.alphaBlend(color, backdrop).withValues(alpha: 1);
