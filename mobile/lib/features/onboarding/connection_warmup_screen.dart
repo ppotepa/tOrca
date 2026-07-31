@@ -64,7 +64,12 @@ class ConnectionWarmupScreen extends StatelessWidget {
                         style: Theme.of(context).textTheme.headlineMedium,
                         textAlign: TextAlign.center,
                       ),
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'Prywatne wiadomości przez Tor',
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 8),
                       Text(
                         summary.status,
                         style: Theme.of(context).textTheme.titleSmall,
