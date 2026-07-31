@@ -61,26 +61,36 @@ class _ReleaseMessageBubbleState extends State<ReleaseMessageBubble> {
   }
 
   Future<void> _loadImage({bool force = false}) async {
-    final decoded = decodeImageMessageBody(message.text);
+    final messageId = message.id;
+    final messageText = message.text;
+    final outgoing = message.outgoing;
+    final decoded = decodeImageMessageBody(messageText);
     if (decoded == null) return;
     if (mounted) setState(() => _loading = true);
     try {
       final store = EncryptedImageStore.instance;
-      var bytes = await store.read(message.id);
+      var bytes = await store.read(messageId);
       var cached = bytes != null;
-      final automatic = await ImageAttachmentPreferences.automaticDownloadEnabled();
-      if (bytes == null && (force || message.outgoing || automatic)) {
-        await store.put(message.id, decoded.bytes);
+      final automatic =
+          await ImageAttachmentPreferences.automaticDownloadEnabled();
+      if (bytes == null && (force || outgoing || automatic)) {
+        await store.put(messageId, decoded.bytes);
         bytes = decoded.bytes;
         cached = true;
       }
-      if (!mounted || message.id != widget.message.id) return;
+      if (!mounted ||
+          widget.message.id != messageId ||
+          widget.message.text != messageText) {
+        return;
+      }
       setState(() {
         _imageBytes = bytes;
         _cached = cached;
       });
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted && widget.message.id == messageId) {
+        setState(() => _loading = false);
+      }
     }
   }
 
@@ -202,7 +212,9 @@ class _ReleaseMessageBubbleState extends State<ReleaseMessageBubble> {
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
                       Icon(
-                        _cached ? Icons.lock_outline : Icons.cloud_download_outlined,
+                        _cached
+                            ? Icons.lock_outline
+                            : Icons.cloud_download_outlined,
                         size: 13,
                         color: foreground.withValues(alpha: .72),
                       ),
@@ -309,7 +321,7 @@ class _ReleaseMessageBubbleState extends State<ReleaseMessageBubble> {
               actions: [
                 IconButton(
                   tooltip: 'Zapisz w galerii',
-                  onPressed: _saving ? null : _saveToGallery,
+                  onPressed: _saveToGallery,
                   icon: const ThemedIcon(Icons.download_for_offline_outlined),
                 ),
               ],
@@ -336,7 +348,8 @@ class _ReleaseMessageBubbleState extends State<ReleaseMessageBubble> {
       builder: (sheetContext) => SafeArea(
         child: Wrap(
           children: [
-            if (_imageBytes == null && decodeImageMessageBody(message.text) != null)
+            if (_imageBytes == null &&
+                decodeImageMessageBody(message.text) != null)
               ListTile(
                 leading: const ThemedIcon(Icons.download_outlined),
                 title: const Text('Pobierz obraz'),
@@ -372,15 +385,20 @@ class _ReleaseMessageBubbleState extends State<ReleaseMessageBubble> {
     switch (action) {
       case 'download':
         await _loadImage(force: true);
+        break;
       case 'save':
         await _saveToGallery();
+        break;
       case 'uncache':
         await _removeFromCache();
+        break;
       case 'retry':
         widget.onRetry(message.id);
+        break;
       case 'delete':
         await EncryptedImageStore.instance.remove(message.id);
         widget.onDelete(message.id);
+        break;
       case null:
         break;
     }
