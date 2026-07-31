@@ -9,20 +9,24 @@ final class TorChatThemePreferences {
     this.family = TorChatThemeFamily.current,
     this.brightness = TorChatBrightnessMode.system,
     this.retroPalette = TorChatRetroPalette.mocha,
+    this.reducedMotion = false,
   });
 
   final TorChatThemeFamily family;
   final TorChatBrightnessMode brightness;
   final TorChatRetroPalette retroPalette;
+  final bool reducedMotion;
 
   TorChatThemePreferences copyWith({
     TorChatThemeFamily? family,
     TorChatBrightnessMode? brightness,
     TorChatRetroPalette? retroPalette,
+    bool? reducedMotion,
   }) => TorChatThemePreferences(
     family: family ?? this.family,
     brightness: brightness ?? this.brightness,
     retroPalette: retroPalette ?? this.retroPalette,
+    reducedMotion: reducedMotion ?? this.reducedMotion,
   );
 
   static TorChatThemeFamily parseFamily(String? value) => switch (value) {
