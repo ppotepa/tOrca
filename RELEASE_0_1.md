@@ -100,8 +100,10 @@ The core exposes a dedicated versioned `ContactRemovedPayloadV1` contract with a
 | New-message counter and jump to bottom | IMPLEMENTED |
 | Own sent message scrolls to bottom | IMPLEMENTED |
 | Status updates do not force scroll | IMPLEMENTED |
-| SQLite pagination and prepend preservation | NOT_STARTED |
-| Restore per-conversation scroll position | NOT_STARTED |
+| SQLite pagination and prepend preservation | IN_PROGRESS |
+| Restore per-conversation scroll position | IMPLEMENTED |
+
+The timeline now exposes messages in 50-row pages, loads an older page near the top, preserves the current pixel anchor across prepend, and stores both the visible page limit and scroll offset per conversation. The presentation and restoration layer is complete. The runtime still returns the full SQLite result to Flutter, so the storage query must be converted to a `(created_at, id)` cursor before the pagination item can advance to `IMPLEMENTED`.
 
 ## Epic 7 — images
 
@@ -127,13 +129,13 @@ The core exposes a dedicated versioned `ContactRemovedPayloadV1` contract with a
 | Message/pairing notification switches | IMPLEMENTED |
 | Master, sound, vibration and preview switches | IMPLEMENTED |
 | Android native preference enforcement | IMPLEMENTED |
-| Deduplicate by message/pairing ID | IN_PROGRESS |
-| Suppress current-conversation notification | IN_PROGRESS |
-| Open exact conversation from alert | IN_PROGRESS |
-| Clear notification after opening | IN_PROGRESS |
+| Deduplicate by message/pairing ID | IMPLEMENTED |
+| Suppress current-conversation notification | IMPLEMENTED |
+| Open exact conversation from alert | IMPLEMENTED |
+| Clear notification after opening | IMPLEMENTED |
 | Desktop native notification and restore window | IMPLEMENTED |
 
-Desktop notifications now use persistent ID deduplication, suppress a toast when its conversation is already selected, respect master/message/preview preferences, restore the window, open the exact conversation and close the selected alert. The existing controller remains the single owner of the configured desktop sound to avoid duplicate audio. Android still needs its native notification `PendingIntent` to carry the same conversation and notification identifiers before the cross-platform items can advance beyond `IN_PROGRESS`.
+Desktop notifications use persistent ID deduplication, suppress a toast when its conversation is already selected, respect master/message/preview preferences, restore the window, open the exact conversation and close the selected alert. Android now applies the same category preferences and persistent deduplication in the foreground service, reads the active Flutter conversation from shared preferences, embeds the conversation and notification identifiers in `PendingIntent`, buffers cold-start clicks until the event channel attaches, opens the exact conversation and clears the native alert. These paths remain unverified until Windows and Android builds or user-provided local results are available.
 
 ## Epic 9 — settings and privacy
 
