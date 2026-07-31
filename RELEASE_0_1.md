@@ -28,9 +28,12 @@ Entering a pairing code and explicitly accepting the request establishes trust. 
 | Reliable reconnect without fatal network state | IN_PROGRESS |
 | Persist desktop size and position | IMPLEMENTED |
 | Close desktop window to background | IMPLEMENTED |
-| Desktop tray with show and exit | IN_PROGRESS |
-| Single desktop application instance | IN_PROGRESS |
+| Desktop tray with show, settings and exit | IMPLEMENTED |
+| Single desktop application instance | IMPLEMENTED |
+| Desktop autostart setting | IN_PROGRESS |
 | Desktop lifecycle verified on Windows | NOT_STARTED |
+
+The desktop lifecycle is now initialized before the Flutter application starts. A loopback activation socket prevents a second process from starting a competing Tor/storage runtime and restores the existing window instead. Closing the window hides it only after the tray is ready. These paths remain unverified until Windows CI or user-provided local results are available.
 
 ## Epic 2 — pairing
 
