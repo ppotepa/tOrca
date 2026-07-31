@@ -1,6 +1,7 @@
 export 'theme_controller.dart';
 export 'theme_preferences.dart';
 export 'theme_registry.dart';
+export 'extensions/torchat_activity_theme.dart';
 export 'extensions/torchat_chat_theme.dart';
 export 'extensions/torchat_effects_theme.dart';
 export 'extensions/torchat_inbox_theme.dart';
