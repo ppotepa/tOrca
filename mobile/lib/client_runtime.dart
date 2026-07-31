@@ -5,16 +5,15 @@ import 'windows_runtime.dart';
 export 'core/models/domain.dart';
 import 'core/models/domain.dart';
 
+/// Optional capability for platforms whose native process outlives Flutter UI.
+abstract interface class RuntimeAttachmentProvider {
+  Future<Map<String, dynamic>?> runtimeSnapshot();
+}
+
 /// Platform-neutral contract consumed by the Flutter UI.
 abstract interface class ClientRuntime {
   Stream<RuntimeEvent> get events;
   Future<bool> connect();
-
-  /// Returns process-owned runtime state when the platform keeps the engine
-  /// alive independently from Flutter. Desktop and test runtimes may return
-  /// null and use the normal cold-start path.
-  Future<Map<String, dynamic>?> runtimeSnapshot() async => null;
-
   Future<RuntimeIdentity?> identity();
   Future<RuntimeProfile?> profile();
   Future<InviteCode?> refreshPairingCode();
@@ -54,8 +53,6 @@ abstract interface class ClientRuntime {
 }
 
 /// Keeps process-backed desktop calls on one ordered command stream.
-/// This prevents concurrent lazy starts from launching multiple Rust sidecars
-/// against the same SQLite database and Tor data directory.
 final class _SerializedClientRuntime implements ClientRuntime {
   _SerializedClientRuntime(this._delegate);
 
@@ -78,9 +75,6 @@ final class _SerializedClientRuntime implements ClientRuntime {
   Stream<RuntimeEvent> get events => _delegate.events;
   @override
   Future<bool> connect() => _run(_delegate.connect);
-  @override
-  Future<Map<String, dynamic>?> runtimeSnapshot() =>
-      _run(_delegate.runtimeSnapshot);
   @override
   Future<RuntimeIdentity?> identity() => _run(_delegate.identity);
   @override
