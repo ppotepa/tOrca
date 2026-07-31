@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/app_controller.dart';
+import '../../app/application_snapshot_provider.dart';
+import '../../core/application_state/application_snapshot.dart';
 import '../../core/connection/app_state_connection.dart';
 import '../../core/connection/connection_component.dart';
 import '../../core/models/domain.dart';
@@ -13,16 +15,19 @@ class ConnectionCenterSheet extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(appControllerProvider);
+    final snapshot = ref.watch(applicationSnapshotProvider).valueOrNull;
     final controller = ref.read(appControllerProvider.notifier);
     final readiness = state.connectionReadiness;
     final summary = state.connectionSummary;
+    final contacts = snapshot?.contacts ?? state.contacts;
+    final conversations = snapshot?.conversations ?? state.conversations;
     final queued = state.messages.where((message) =>
         message.state == MessageState.queued ||
         message.state == MessageState.sending).length;
     final failed = state.messages
         .where((message) => message.state == MessageState.failed)
         .length;
-    final directSessions = state.contacts
+    final directSessions = contacts
         .where(
           (contact) =>
               contact.peerConnectionStatus == PeerConnectionStatus.connected,
@@ -79,15 +84,22 @@ class ConnectionCenterSheet extends ConsumerWidget {
               _StatusTile(
                 icon: Icons.cable_outlined,
                 title: 'Bezpośrednie sesje kontaktów',
-                state: '$directSessions/${state.contacts.length}',
+                state: '$directSessions/${contacts.length}',
                 detail:
                     'Sesje z konkretnymi kontaktami powstają po onboardingu i nie blokują startu aplikacji.',
               ),
               _StatusTile(
                 icon: Icons.people_alt_outlined,
                 title: 'Obecność kontaktów',
-                state: '$onlineContacts/${state.contacts.length}',
+                state: '$onlineContacts/${contacts.length}',
                 detail: 'Kontakty zgłaszające aktywną obecność w runtime.',
+              ),
+              _StatusTile(
+                icon: Icons.forum_outlined,
+                title: 'Lokalne podsumowania rozmów',
+                state: '${conversations.length}',
+                detail:
+                    'Lista rozmów pochodzi z atomowego snapshotu; wiadomości są ładowane dopiero po otwarciu.',
               ),
               _StatusTile(
                 icon: Icons.queue_outlined,
@@ -113,7 +125,7 @@ class ConnectionCenterSheet extends ConsumerWidget {
                 children: [
                   OutlinedButton.icon(
                     onPressed: () async {
-                      final diagnostic = _diagnosticText(state);
+                      final diagnostic = _diagnosticText(state, snapshot);
                       await Clipboard.setData(ClipboardData(text: diagnostic));
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
@@ -140,15 +152,17 @@ class ConnectionCenterSheet extends ConsumerWidget {
     );
   }
 
-  String _diagnosticText(AppState state) {
+  String _diagnosticText(AppState state, ApplicationSnapshot? snapshot) {
     final readiness = state.connectionReadiness;
+    final contacts = snapshot?.contacts ?? state.contacts;
+    final conversations = snapshot?.conversations ?? state.conversations;
     final components = readiness.components
         .map(
           (component) =>
               '${component.component.name}=${component.state.name}:${component.detail}',
         )
         .join('\n');
-    final directSessions = state.contacts
+    final directSessions = contacts
         .where(
           (contact) =>
               contact.peerConnectionStatus == PeerConnectionStatus.connected,
@@ -156,14 +170,16 @@ class ConnectionCenterSheet extends ConsumerWidget {
         .length;
     return [
       'screen=${state.screen.name}',
+      'snapshotGeneration=${snapshot?.generation ?? 0}',
+      'snapshotCreatedAt=${snapshot?.createdAtMs ?? 0}',
       'localCoreReady=${readiness.localCoreReady}',
       'onboardingReady=${readiness.onboardingReady}',
       'communicationReady=${readiness.communicationReady}',
-      'contacts=${state.contacts.length}',
+      'contacts=${contacts.length}',
       'directSessions=$directSessions',
-      'conversations=${state.conversations.length}',
-      'inbox=${state.inbox.length}',
-      'outbox=${state.outbox.length}',
+      'conversations=${conversations.length}',
+      'pendingInbox=${snapshot?.pendingInbox ?? state.inbox.length}',
+      'pendingOutbox=${snapshot?.pendingOutbox ?? state.outbox.length}',
       'error=${state.error}',
       components,
     ].join('\n');
