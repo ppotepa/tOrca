@@ -8,6 +8,7 @@ class ThemePreferencesStore {
   static const _familyKey = 'torchat.theme.family';
   static const _brightnessKey = 'torchat.theme.brightness';
   static const _retroPaletteKey = 'torchat.theme.retroPalette';
+  static const _reducedMotionKey = 'torchat.accessibility.reducedMotion';
 
   final SharedPreferences _preferences;
 
@@ -24,11 +25,13 @@ class ThemePreferencesStore {
     final retroPalette = TorChatThemePreferences.parseRetroPalette(
       _preferences.getString(_retroPaletteKey),
     );
+    final reducedMotion = _preferences.getBool(_reducedMotionKey) ?? false;
 
     return TorChatThemePreferences(
       family: family,
       brightness: brightness,
       retroPalette: retroPalette,
+      reducedMotion: reducedMotion,
     );
   }
 
@@ -39,5 +42,6 @@ class ThemePreferencesStore {
       _retroPaletteKey,
       value.retroPalette.storageValue,
     );
+    await _preferences.setBool(_reducedMotionKey, value.reducedMotion);
   }
 }
