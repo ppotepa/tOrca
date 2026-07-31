@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1080" viewBox="0 0 1600 1080" role="img" aria-labelledby="title desc">
+  <title id="title">tOrca application architecture</title>
+  <desc id="desc">Shared Flutter and Rust application architecture for Android and desktop, with platform adapters, local persistence and Tor integration.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/>
+    </marker>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="5" stdDeviation="8" flood-color="#0f172a" flood-opacity="0.12"/>
+    </filter>
+    <style>
+      .bg { fill: #f8fafc; }
+      .panel { fill: #ffffff; stroke: #cbd5e1; stroke-width: 2; }
+      .panelTitle { font: 700 28px system-ui, -apple-system, "Segoe UI", sans-serif; fill: #0f172a; }
+      .title { font: 700 24px system-ui, -apple-system, "Segoe UI", sans-serif; fill: #0f172a; }
+      .subtitle { font: 600 17px system-ui, -apple-system, "Segoe UI", sans-serif; fill: #475569; }
+      .text { font: 500 18px system-ui, -apple-system, "Segoe UI", sans-serif; fill: #0f172a; }
+      .small { font: 500 15px system-ui, -apple-system, "Segoe UI", sans-serif; fill: #475569; }
+      .shared { fill: #eff6ff; stroke: #3b82f6; stroke-width: 2; }
+      .runtime { fill: #ede9fe; stroke: #8b5cf6; stroke-width: 2; }
+      .engine { fill: #ecfccb; stroke: #65a30d; stroke-width: 2; }
+      .core { fill: #fef3c7; stroke: #d97706; stroke-width: 2; }
+      .storage { fill: #f1f5f9; stroke: #64748b; stroke-width: 2; }
+      .platform { fill: #ffffff; stroke: #94a3b8; stroke-width: 2; }
+      .android { fill: #dcfce7; stroke: #16a34a; stroke-width: 2; }
+      .desktop { fill: #fee2e2; stroke: #dc2626; stroke-width: 2; }
+      .tor { fill: #e0f2fe; stroke: #0284c7; stroke-width: 2; }
+      .arrow { stroke: #334155; stroke-width: 3; fill: none; marker-end: url(#arrow); }
+      .groupLabel { font: 700 18px system-ui, -apple-system, "Segoe UI", sans-serif; fill: #1e293b; }
+    </style>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1600" height="1080"/>
+
+  <rect class="panel" x="40" y="40" width="1520" height="1000" rx="28" filter="url(#shadow)"/>
+  <text class="panelTitle" x="80" y="95">tOrca / TorChat — application architecture</text>
+  <text class="subtitle" x="80" y="128">One shared Flutter UI and one shared Rust domain/runtime stack, with thin Android and desktop adapters.</text>
+
+  <rect class="shared" x="120" y="170" width="1360" height="120" rx="22"/>
+  <text class="title" x="800" y="225" text-anchor="middle">Shared Flutter UI</text>
+  <text class="text" x="800" y="255" text-anchor="middle">mobile/lib — presentation, navigation, state observation, user actions</text>
+
+  <rect class="shared" x="430" y="320" width="740" height="92" rx="20"/>
+  <text class="title" x="800" y="372" text-anchor="middle">ClientRuntime contract</text>
+  <text class="small" x="800" y="396" text-anchor="middle">Platform-neutral API consumed by Flutter on Android and desktop</text>
+
+  <line class="arrow" x1="800" y1="290" x2="800" y2="320"/>
+
+  <rect class="runtime" x="130" y="455" width="1340" height="430" rx="28"/>
+  <text class="title" x="800" y="498" text-anchor="middle">Shared Rust layers</text>
+
+  <rect class="runtime" x="185" y="535" width="1230" height="90" rx="18"/>
+  <text class="title" x="800" y="590" text-anchor="middle">torchat-client-runtime</text>
+  <text class="small" x="800" y="613" text-anchor="middle">Pairing, contacts, conversations, message lifecycle, deduplication, runtime events</text>
+
+  <rect class="engine" x="185" y="650" width="1230" height="95" rx="18"/>
+  <text class="title" x="800" y="706" text-anchor="middle">torchat-client-engine</text>
+  <text class="small" x="800" y="729" text-anchor="middle">Persistence, outbound queue, connection state, transport integration, delivery flow</text>
+
+  <rect class="core" x="185" y="770" width="560" height="90" rx="18"/>
+  <text class="title" x="465" y="824" text-anchor="middle">torchat-core</text>
+  <text class="small" x="465" y="848" text-anchor="middle">Identity, protocol validation, wire types, MLS and cryptographic primitives</text>
+
+  <rect class="storage" x="855" y="770" width="560" height="90" rx="18"/>
+  <text class="title" x="1135" y="824" text-anchor="middle">Local encrypted persistence</text>
+  <text class="small" x="1135" y="848" text-anchor="middle">SQLite / SQLCipher-compatible state, local history, attachments, queue storage</text>
+
+  <line class="arrow" x1="800" y1="412" x2="800" y2="455"/>
+  <line class="arrow" x1="800" y1="625" x2="800" y2="650"/>
+  <line class="arrow" x1="465" y1="745" x2="465" y2="770"/>
+  <line class="arrow" x1="1135" y1="745" x2="1135" y2="770"/>
+
+  <rect class="platform" x="80" y="915" width="1440" height="90" rx="22"/>
+  <text class="groupLabel" x="800" y="950" text-anchor="middle">Platform adapters and local networking</text>
+
+  <rect class="android" x="130" y="935" width="400" height="50" rx="14"/>
+  <text class="text" x="330" y="967" text-anchor="middle">Android adapter — service lifecycle, Method/EventChannel, local Tor integration</text>
+
+  <rect class="desktop" x="600" y="935" width="400" height="50" rx="14"/>
+  <text class="text" x="800" y="967" text-anchor="middle">Desktop adapter — process bridge, runtime host, desktop lifecycle</text>
+
+  <rect class="tor" x="1070" y="935" width="400" height="50" rx="14"/>
+  <text class="text" x="1270" y="967" text-anchor="middle">Local Tor runtime — onion transport used by the active client transport</text>
+
+  <line class="arrow" x1="330" y1="915" x2="330" y2="885"/>
+  <line class="arrow" x1="800" y1="915" x2="800" y2="885"/>
+  <line class="arrow" x1="1270" y1="915" x2="1270" y2="885"/>
+
+  <text class="small" x="800" y="1028" text-anchor="middle">The relay and PostgreSQL belong to system infrastructure, not to the trusted application runtime on user devices.</text>
+</svg>
