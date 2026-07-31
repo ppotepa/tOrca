@@ -1,0 +1,66 @@
+{
+  "schema": 1,
+  "release": "0.1",
+  "automated": [
+    "rust-format",
+    "runtime-tests",
+    "engine-tests",
+    "ffi-tests",
+    "rust-clippy",
+    "diagnostic-sanitization",
+    "flutter-format",
+    "flutter-analyze",
+    "flutter-tests",
+    "android-debug-build",
+    "windows-debug-build"
+  ],
+  "manual": [
+    {
+      "id": "pairing-a-to-b-20",
+      "platforms": ["windows", "android"],
+      "requiredRuns": 20,
+      "description": "Pair Windows to Android twenty consecutive times with fresh identities and no duplicate contact."
+    },
+    {
+      "id": "pairing-b-to-a-20",
+      "platforms": ["android", "windows"],
+      "requiredRuns": 20,
+      "description": "Pair Android to Windows twenty consecutive times with fresh identities and no duplicate contact."
+    },
+    {
+      "id": "offline-reconnect-delivery",
+      "platforms": ["windows", "android"],
+      "description": "Queue text and image messages while the recipient is offline, restart both clients and verify exactly-once delivery."
+    },
+    {
+      "id": "relationship-removal-repair",
+      "platforms": ["windows", "android"],
+      "description": "Remove the relationship with both history policies, verify symmetric blocking, then pair again with fresh MLS state."
+    },
+    {
+      "id": "notification-routing",
+      "platforms": ["windows", "android"],
+      "description": "Verify deduplication, current-conversation suppression, cold-start deep link and alert clearing."
+    },
+    {
+      "id": "clean-install",
+      "platforms": ["windows", "android"],
+      "description": "Install on a clean platform profile, complete onboarding, pair and exchange messages."
+    },
+    {
+      "id": "upgrade-preserves-data",
+      "platforms": ["windows", "android"],
+      "description": "Upgrade an existing installation and verify identity, contacts, history, queue and preferences are preserved."
+    },
+    {
+      "id": "background-and-recovery",
+      "platforms": ["windows", "android"],
+      "description": "Exercise tray/background lifecycle, process termination, Tor loss and network recovery without fatal UI state."
+    },
+    {
+      "id": "diagnostic-export-privacy",
+      "platforms": ["windows", "android"],
+      "description": "Export diagnostics after real messaging and independently verify no plaintext, image payload or key material is present."
+    }
+  ]
+}
