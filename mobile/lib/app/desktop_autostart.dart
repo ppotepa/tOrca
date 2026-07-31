@@ -9,6 +9,8 @@ class DesktopAutostart {
 
   static bool _configured = false;
 
+  static bool get isSupported => isDesktopPlatform;
+
   static void _configure() {
     if (_configured || !isDesktopPlatform) return;
     launchAtStartup.setup(
