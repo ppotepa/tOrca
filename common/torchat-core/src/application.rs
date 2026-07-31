@@ -58,14 +58,6 @@ pub enum ApplicationPayloadV1 {
         #[serde(rename = "readAt")]
         read_at: i64,
     },
-
-    ContactRemoved {
-        version: u16,
-        #[serde(rename = "revocationId")]
-        revocation_id: Uuid,
-        #[serde(rename = "removedAt")]
-        removed_at: i64,
-    },
 }
 
 impl ApplicationPayloadV1 {
@@ -122,11 +114,6 @@ mod tests {
                 version: 1,
                 message_ids: vec![Uuid::from_u128(9)],
                 read_at: 46,
-            },
-            ApplicationPayloadV1::ContactRemoved {
-                version: 1,
-                revocation_id: Uuid::from_u128(10),
-                removed_at: 47,
             },
         ] {
             let encoded = payload.encode().unwrap();
