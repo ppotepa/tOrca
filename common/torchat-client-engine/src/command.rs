@@ -71,7 +71,6 @@ pub enum EngineCommand {
     Connect,
     GetIdentity,
     GetProfile,
-    GetApplicationSnapshot,
     PairingInbox,
     PairingOutbox,
     ListContacts,
