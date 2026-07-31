@@ -17,6 +17,44 @@ Import-TorChatEnvironment $environmentState -RequireOnion
 function Stop-TorChatFlutterWindows {
     if ($env:OS -ne 'Windows_NT') { return }
     $windowsRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot 'mobile\build\windows'))
+    $windowsRootLower = $windowsRoot.ToLowerInvariant()
+    $mobileRootLower = [IO.Path]::GetFullPath($mobileRoot).ToLowerInvariant()
+
+    $toolNames = @(
+        'torchat_mobile.exe',
+        'flutter.exe',
+        'dart.exe',
+        'clang.exe',
+        'clang-cl.exe',
+        'lld-link.exe',
+        'link.exe',
+        'ninja.exe',
+        'cmake.exe',
+        'msbuild.exe',
+        'cc1.exe'
+    ) | ForEach-Object { $_.ToLowerInvariant() }
+
+    $allBuildProcesses = @(Get-CimInstance Win32_Process | Where-Object {
+        $name = if ($_.Name) { $_.Name.ToLowerInvariant() } else { '' }
+        $path = if ($_.ExecutablePath) { [IO.Path]::GetFullPath($_.ExecutablePath).ToLowerInvariant() } else { '' }
+        $commandLine = if ($_.CommandLine) { $_.CommandLine.ToLowerInvariant() } else { '' }
+        ($toolNames -contains $name) -and (
+            ($path.StartsWith($windowsRootLower, [StringComparison]::OrdinalIgnoreCase)) -or
+            ($path.StartsWith($mobileRootLower, [StringComparison]::OrdinalIgnoreCase)) -or
+            ($commandLine.Contains($windowsRootLower.Replace('\','/'))) -or
+            ($commandLine.Contains($mobileRootLower.Replace('\','/')))
+        )
+    })
+
+    if ($allBuildProcesses.Count -gt 0) {
+        Write-Host "[torchat] Stopping Windows Flutter toolchain processes before rebuild: $($allBuildProcesses.Count)"
+        foreach ($process in $allBuildProcesses) {
+            Write-Host "[torchat] Stopping process PID $($process.ProcessId) ($($process.Name))"
+            Stop-Process -Id ([int]$process.ProcessId) -Force -ErrorAction SilentlyContinue
+        }
+        Start-Sleep -Milliseconds 1500
+    }
+
     $running = @(Get-CimInstance Win32_Process -Filter "Name='torchat_mobile.exe'" |
         Where-Object {
             $_.ExecutablePath -and
@@ -38,14 +76,17 @@ function Remove-TorChatDirectoryRobust {
     if (-not (Test-Path -LiteralPath $Path)) { return }
 
     $resolvedPath = [IO.Path]::GetFullPath($Path)
-    for ($attempt = 1; $attempt -le 4; $attempt++) {
+    for ($attempt = 1; $attempt -le 6; $attempt++) {
         try {
             Remove-Item -LiteralPath $resolvedPath -Recurse -Force -ErrorAction Stop
             return
         } catch {
-            if ($attempt -eq 4) { break }
+            if (($attempt % 2) -eq 1) {
+                Stop-TorChatFlutterWindows
+            }
+            if ($attempt -eq 6) { break }
             Write-Warning "$Description removal attempt $attempt failed: $($_.Exception.Message)"
-            Start-Sleep -Milliseconds (250 * $attempt)
+            Start-Sleep -Milliseconds (500 * $attempt)
         }
     }
 
@@ -61,11 +102,17 @@ function Remove-TorChatDirectoryRobust {
         if ($LASTEXITCODE -gt 7) {
             throw "$Description cleanup mirror failed (robocopy exit $LASTEXITCODE)."
         }
+    } catch {
+        Write-Warning $_.Exception.Message
     } finally {
         Remove-Item -LiteralPath $emptyRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 
-    Remove-Item -LiteralPath $resolvedPath -Recurse -Force -ErrorAction Stop
+    try {
+        Remove-Item -LiteralPath $resolvedPath -Recurse -Force -ErrorAction Stop
+    } catch {
+        Write-Warning "$Description final cleanup failed: $($_.Exception.Message). Continuing."
+    }
 }
 
 function Build-WindowsFlutterOnNtfs([string]$Variant) {
@@ -118,7 +165,7 @@ function Build-WindowsFlutterOnNtfs([string]$Variant) {
         Remove-TorChatDirectoryRobust -Path $destinationBuild -Description 'Windows Flutter output directory'
     }
     New-Item -ItemType Directory -Force -Path $destinationBuild | Out-Null
-    & robocopy $stagingBuild $destinationBuild /E /NFL /NDL /NJH /NJS /NP | Out-Null
+    & robocopy $stagingBuild $destinationBuild /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
     if ($LASTEXITCODE -gt 7) { throw "Could not copy Flutter Windows build (robocopy exit $LASTEXITCODE)." }
 }
 

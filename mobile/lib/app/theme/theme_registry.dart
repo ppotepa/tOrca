@@ -37,10 +37,8 @@ abstract final class TorChatThemeRegistry {
     TorChatThemeFamily family,
     TorChatRetroPalette palette,
   ) {
-    final extensions = <ThemeExtension<dynamic>>[
-      ...theme.extensions.values,
-      TorChatActivityTheme.forTheme(family, palette: palette),
-    ];
-    return theme.copyWith(extensions: extensions);
+    final extensions = theme.extensions.values.toList(growable: true);
+    extensions.add(TorChatActivityTheme.forTheme(family, palette: palette));
+    return theme.copyWith(extensions: extensions.cast<ThemeExtension<dynamic>>());
   }
 }
