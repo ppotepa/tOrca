@@ -218,6 +218,11 @@ class PairingRecoveryAppController extends SequentialAppController {
     if (foreground) await _synchronizePairing(force: true);
   }
 
+  /// Called only after a newly discovered pairing contact has been promoted
+  /// to verified state. Subclasses may persist a fresh relationship boundary
+  /// before the conversation is opened.
+  Future<void> onPairingContactActivated(ContactRecord contact) async {}
+
   Future<void> _runPairingMutation(
     String key,
     String label,
@@ -372,6 +377,7 @@ class PairingRecoveryAppController extends SequentialAppController {
     }
     if (contact == null || !contact.verified) return;
 
+    await onPairingContactActivated(contact);
     _lastAutoOpenedContactId = openContactId;
     await super.openOrStartConversation(contact);
   }
