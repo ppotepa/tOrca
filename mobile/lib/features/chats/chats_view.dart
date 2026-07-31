@@ -7,15 +7,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/app_theme.dart';
 import '../../app/ui_operation_registry.dart';
 import '../../core/models/domain.dart';
-import '../../shared/async/async_operation_state.dart';
 import '../../shared/async/busy_surface.dart';
 import '../../shared/async/themed_activity_indicator.dart';
 import '../../shared/formatters/conversation_display.dart';
 import '../../shared/formatters/message_timestamps.dart';
 import '../../shared/widgets/feature_header.dart';
 import '../../shared/widgets/identity_avatar.dart';
-
-export 'chats_view_legacy.dart' hide ChatsView, MessageBubble;
 
 class ChatsView extends ConsumerStatefulWidget {
   const ChatsView({
@@ -71,8 +68,18 @@ class _ChatsViewState extends ConsumerState<ChatsView> {
   bool _searching = false;
 
   @override
+  void initState() {
+    super.initState();
+    widget.composer.addListener(_composerChanged);
+  }
+
+  @override
   void didUpdateWidget(covariant ChatsView oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.composer, widget.composer)) {
+      oldWidget.composer.removeListener(_composerChanged);
+      widget.composer.addListener(_composerChanged);
+    }
     if (widget.messages.length > oldWidget.messages.length) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!_scroll.hasClients) return;
@@ -85,8 +92,13 @@ class _ChatsViewState extends ConsumerState<ChatsView> {
     }
   }
 
+  void _composerChanged() {
+    if (mounted) setState(() {});
+  }
+
   @override
   void dispose() {
+    widget.composer.removeListener(_composerChanged);
     _typingTimer?.cancel();
     widget.onTypingChanged(false);
     _search.dispose();
@@ -446,10 +458,7 @@ class _MessageTimeline extends StatelessWidget {
                 ? null
                 : messages[index + 1];
             final showDay = previous == null ||
-                !isSameMessageDay(
-                  previous.createdAt,
-                  message.createdAt,
-                );
+                !isSameMessageDay(previous.createdAt, message.createdAt);
             final startsGroup = previous == null ||
                 previous.outgoing != message.outgoing ||
                 showDay;
@@ -617,17 +626,14 @@ class MessageBubble extends ConsumerWidget {
         ),
       ],
     );
-    switch (action) {
-      case 'reply':
-        onReply(message);
-      case 'copy':
-        await Clipboard.setData(ClipboardData(text: message.text));
-      case 'retry':
-        onRetry(message.id);
-      case 'delete':
-        onDelete(message.id);
-      default:
-        break;
+    if (action == 'reply') {
+      onReply(message);
+    } else if (action == 'copy') {
+      await Clipboard.setData(ClipboardData(text: message.text));
+    } else if (action == 'retry') {
+      onRetry(message.id);
+    } else if (action == 'delete') {
+      onDelete(message.id);
     }
   }
 }
@@ -686,7 +692,7 @@ class _BubbleFooter extends StatelessWidget {
               compact: true,
               color: foreground.withValues(alpha: .82),
             ),
-            const Spacer(),
+            const SizedBox(width: 12),
           ],
           Text(
             formatMessageTime(message.createdAt),
@@ -734,6 +740,7 @@ class _ComposerDock extends StatelessWidget {
   Widget build(BuildContext context) {
     final shell = context.shellTheme;
     final chat = context.chatTheme;
+    final hasText = composer.text.trim().isNotEmpty;
     return Material(
       color: shell.surface,
       child: Container(
@@ -756,7 +763,7 @@ class _ComposerDock extends StatelessWidget {
                 CallbackShortcuts(
                   bindings: {
                     const SingleActivator(LogicalKeyboardKey.enter): () {
-                      if (canSend && composer.text.trim().isNotEmpty) onSend();
+                      if (canSend && hasText) onSend();
                     },
                   },
                   child: TextField(
@@ -766,7 +773,7 @@ class _ComposerDock extends StatelessWidget {
                     maxLines: 5,
                     onChanged: onTypingChanged,
                     onSubmitted: (_) {
-                      if (canSend && composer.text.trim().isNotEmpty) onSend();
+                      if (canSend && hasText) onSend();
                     },
                     decoration: InputDecoration(
                       hintText: canSend
@@ -780,9 +787,7 @@ class _ComposerDock extends StatelessWidget {
                         height: 52,
                       ),
                       suffixIcon: FilledButton(
-                        onPressed: canSend && composer.text.trim().isNotEmpty
-                            ? onSend
-                            : null,
+                        onPressed: canSend && hasText ? onSend : null,
                         style: FilledButton.styleFrom(
                           padding: EdgeInsets.zero,
                           shape: RoundedRectangleBorder(
@@ -834,7 +839,9 @@ class _ReplyPreview extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    message.outgoing ? 'Odpowiedź na Twoją wiadomość' : 'Odpowiedź',
+                    message.outgoing
+                        ? 'Odpowiedź na Twoją wiadomość'
+                        : 'Odpowiedź',
                     style: Theme.of(context).textTheme.labelSmall,
                   ),
                   Text(
