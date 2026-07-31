@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app/app_controller.dart';
 import 'app/app_theme.dart';
+import 'app/application_snapshot_provider.dart';
 import 'client_runtime.dart';
 import 'core/connection/app_state_connection.dart';
 import 'core/connection/connection_gate.dart';
@@ -97,7 +98,7 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
   Future<void> _attachAndInitialize() async {
     final runtime = ref.read(clientRuntimeProvider);
     final snapshot = runtime is RuntimeAttachmentProvider
-        ? await (runtime as RuntimeAttachmentProvider).runtimeSnapshot()
+        ? await runtime.runtimeSnapshot()
         : null;
     final profile = snapshot?['profile'];
     if (profile is Map) {
@@ -199,12 +200,12 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
           if (peerId == null || peerId.isEmpty) return false;
           for (var attempt = 0; attempt < 15; attempt += 1) {
             await controller.refreshData();
-            if (ref
-                .read(appControllerProvider)
-                .contacts
-                .any((contact) => contact.id == peerId)) {
-              return true;
-            }
+            final contacts = ref
+                    .read(applicationSnapshotProvider)
+                    .valueOrNull
+                    ?.contacts ??
+                ref.read(appControllerProvider).contacts;
+            if (contacts.any((contact) => contact.id == peerId)) return true;
             await Future<void>.delayed(const Duration(seconds: 1));
           }
           return false;
@@ -242,12 +243,15 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
 
   void _openAccount() {
     final state = ref.read(appControllerProvider);
+    final snapshot = ref.read(applicationSnapshotProvider).valueOrNull;
+    final profile = snapshot?.profile ?? state.profile;
+    final identity = snapshot?.identity ?? state.identity;
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => AccountView(
-          nickname: state.profile.nickname,
-          installationId: state.identity.installationId,
-          fingerprint: state.profile.fingerprint,
+          nickname: profile.nickname,
+          installationId: identity.installationId,
+          fingerprint: profile.fingerprint,
           onShowInvite: () {
             Navigator.pop(context);
             _showInvite();
@@ -264,10 +268,11 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
   void _openSettings() {
     final state = ref.read(appControllerProvider);
     final summary = state.connectionSummary;
+    final snapshot = ref.read(applicationSnapshotProvider).valueOrNull;
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => SettingsView(
-          nickname: state.profile.nickname,
+          nickname: snapshot?.profile.nickname ?? state.profile.nickname,
           torStatus: summary.status,
           themePreferences:
               ref.read(themeControllerProvider).valueOrNull ??
@@ -321,8 +326,10 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
 
   Future<void> _editNickname() async {
     final appController = ref.read(appControllerProvider.notifier);
+    final state = ref.read(appControllerProvider);
+    final snapshot = ref.read(applicationSnapshotProvider).valueOrNull;
     final field = TextEditingController(
-      text: ref.read(appControllerProvider).profile.nickname,
+      text: snapshot?.profile.nickname ?? state.profile.nickname,
     );
     final nickname = await showDialog<String>(
       context: context,
@@ -357,14 +364,17 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(appControllerProvider);
+    final snapshot = ref.watch(applicationSnapshotProvider).valueOrNull;
     final controller = ref.read(appControllerProvider.notifier);
     final connection = state.connectionReadiness;
     final summary = state.connectionSummary;
-    final effectiveNickname = state.profile.nickname.trim().isNotEmpty
-        ? state.profile.nickname
+    final profile = snapshot?.profile ?? state.profile;
+    final identity = snapshot?.identity ?? state.identity;
+    final effectiveNickname = profile.nickname.trim().isNotEmpty
+        ? profile.nickname
         : _reattachedNickname;
     final resolvedPhase = resolveLaunchPhase(
-      profile: state.profile,
+      profile: profile,
       connection: connection,
     );
 
@@ -377,7 +387,7 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
 
     final launchPhase = _runningUnlocked
         ? AppLaunchPhase.running
-        : _onboardingUnlocked && state.profile.nickname.trim().isEmpty
+        : _onboardingUnlocked && profile.nickname.trim().isEmpty
         ? AppLaunchPhase.onboarding
         : resolvedPhase;
 
@@ -408,8 +418,8 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
       );
     }
 
-    final contacts = state.contacts;
-    final conversations = state.conversations;
+    final contacts = snapshot?.contacts ?? state.contacts;
+    final conversations = snapshot?.conversations ?? state.conversations;
     final selectedContact = state.selectedContact(contacts, conversations);
     return MainShell(
       tab: switch (state.destination) {
@@ -417,7 +427,9 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
         _ => MobileTab.chats,
       },
       nickname: effectiveNickname,
-      fingerprint: state.profile.fingerprint,
+      fingerprint: profile.fingerprint.isNotEmpty
+          ? profile.fingerprint
+          : identity.fingerprint,
       ownInvite: state.ownInvite?.code ?? '',
       status: summary.status,
       phase: summary.phase,
