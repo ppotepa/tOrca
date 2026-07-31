@@ -10,18 +10,24 @@ const _windowHeightKey = 'torchat.desktop.window.height';
 const _windowXKey = 'torchat.desktop.window.x';
 const _windowYKey = 'torchat.desktop.window.y';
 
-bool get isDesktopPlatform => Platform.isWindows || Platform.isLinux || Platform.isMacOS;
+bool get isDesktopPlatform =>
+    Platform.isWindows || Platform.isLinux || Platform.isMacOS;
 
 class DesktopWindowLifecycle with WindowListener {
   DesktopWindowLifecycle._();
 
   static final DesktopWindowLifecycle instance = DesktopWindowLifecycle._();
 
+  static Future<void>? _initialization;
   Timer? _persistDebounce;
   bool _allowClose = false;
 
-  static Future<void> initialize() async {
-    if (!isDesktopPlatform) return;
+  static Future<void> initialize() {
+    if (!isDesktopPlatform) return Future<void>.value();
+    return _initialization ??= instance._initialize();
+  }
+
+  Future<void> _initialize() async {
     await windowManager.ensureInitialized();
     final preferences = await SharedPreferences.getInstance();
     final storedWidth = preferences.getDouble(_windowWidthKey);
@@ -46,7 +52,7 @@ class DesktopWindowLifecycle with WindowListener {
         await windowManager.setPosition(Offset(storedX, storedY));
       }
       await windowManager.setPreventClose(true);
-      windowManager.addListener(instance);
+      windowManager.addListener(this);
       await windowManager.show();
       await windowManager.focus();
     });
@@ -54,6 +60,7 @@ class DesktopWindowLifecycle with WindowListener {
 
   Future<void> showWindow() async {
     if (!isDesktopPlatform) return;
+    await initialize();
     await windowManager.show();
     await windowManager.restore();
     await windowManager.focus();
@@ -70,7 +77,9 @@ class DesktopWindowLifecycle with WindowListener {
   @override
   void onWindowClose() {
     if (_allowClose) return;
-    unawaited(windowManager.hide());
+    // Until a packaged tray icon is available, minimizing is safer than
+    // hiding the only window and leaving no user-accessible restore path.
+    unawaited(windowManager.minimize());
   }
 
   @override
