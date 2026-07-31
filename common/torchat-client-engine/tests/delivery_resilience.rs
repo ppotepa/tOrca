@@ -1,0 +1,204 @@
+use std::{fs, path::PathBuf};
+
+use rusqlite::params;
+use torchat_client_engine::{
+    ClientDatabase,
+    config::SecretBytes,
+    storage::InboundEnvelopeStoreResult,
+};
+use torchat_core::{Identity, peer_protocol::PeerMessageEnvelope};
+use uuid::Uuid;
+
+fn temporary_database_path(test_name: &str) -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "torchat-{test_name}-{}.sqlite3",
+        Uuid::new_v4()
+    ))
+}
+
+fn database_key() -> SecretBytes {
+    SecretBytes(vec![0x6b; 32])
+}
+
+fn remove_database(path: &PathBuf) {
+    for candidate in [
+        path.clone(),
+        PathBuf::from(format!("{}-wal", path.display())),
+        PathBuf::from(format!("{}-shm", path.display())),
+    ] {
+        let _ = fs::remove_file(candidate);
+    }
+}
+
+fn insert_outbound_fixture(database: &ClientDatabase) {
+    let connection = database.connection();
+    connection
+        .execute(
+            "INSERT INTO contacts (
+                installation_id, nickname, public_key, fingerprint,
+                verification, source
+             ) VALUES (?1, ?2, ?3, ?4, 'VERIFIED', 'PAIRING');",
+            params!["peer-delivery", "Peer", "public-key", "fingerprint"],
+        )
+        .expect("contact should be stored");
+    connection
+        .execute(
+            "INSERT INTO conversations (
+                id, contact_installation_id, state, unread_count
+             ) VALUES (?1, ?2, 'ACTIVE', 0);",
+            params!["peer-delivery", "peer-delivery"],
+        )
+        .expect("conversation should be stored");
+    connection
+        .execute(
+            "INSERT INTO messages (
+                id, conversation_id, outgoing, body, state, created_at,
+                wire_ciphertext, attempt_count, next_attempt_at
+             ) VALUES (?1, ?2, 1, ?3, 'QUEUED', ?4, ?5, 0, 0);",
+            params![
+                "outbound-message",
+                "peer-delivery",
+                "durable payload",
+                100_i64,
+                &[9_u8, 8, 7][..]
+            ],
+        )
+        .expect("outgoing message should be stored");
+}
+
+#[test]
+fn in_flight_outbound_delivery_requeues_after_database_restart_without_duplication() {
+    let path = temporary_database_path("outbound-restart");
+    let key = database_key();
+
+    {
+        let database = ClientDatabase::open(&path, &key)
+            .expect("encrypted database should open");
+        insert_outbound_fixture(&database);
+        database
+            .enqueue_outbound_delivery(
+                "outbound-message",
+                "peer-delivery",
+                7,
+                100,
+            )
+            .expect("delivery should be enqueued");
+        assert!(database
+            .claim_outbound_delivery("outbound-message", 50_000, 60_000)
+            .expect("delivery should be claimable"));
+
+        let claimed = database
+            .outbound_delivery("outbound-message")
+            .expect("delivery lookup should succeed")
+            .expect("delivery should exist");
+        assert_eq!(claimed.state, "IN_FLIGHT");
+        assert_eq!(claimed.attempt_count, 1);
+        assert_eq!(claimed.ack_deadline, Some(60_000));
+    }
+
+    {
+        let database = ClientDatabase::open(&path, &key)
+            .expect("encrypted database should reopen");
+        database
+            .requeue_peer_deliveries(1_000)
+            .expect("restart recovery should requeue in-flight deliveries");
+
+        // Re-enqueueing the same public message id is intentionally idempotent.
+        database
+            .enqueue_outbound_delivery(
+                "outbound-message",
+                "peer-delivery",
+                7,
+                100,
+            )
+            .expect("duplicate enqueue should be harmless");
+
+        let due = database
+            .due_outbound_deliveries(1_000, 10)
+            .expect("due deliveries should be readable");
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].message_id, "outbound-message");
+        assert_eq!(due[0].state, "QUEUED");
+        assert_eq!(due[0].attempt_count, 1);
+        assert_eq!(due[0].next_attempt_at, 1_000);
+        assert_eq!(due[0].ack_deadline, None);
+
+        let message_state: String = database
+            .connection()
+            .query_row(
+                "SELECT state FROM messages WHERE id = ?1;",
+                ["outbound-message"],
+                |row| row.get(0),
+            )
+            .expect("message state should be readable");
+        assert_eq!(message_state, "QUEUED");
+    }
+
+    remove_database(&path);
+}
+
+#[test]
+fn inbound_peer_envelope_is_idempotent_across_restart_and_rejects_mutation() {
+    let path = temporary_database_path("inbound-idempotency");
+    let key = database_key();
+    let identity = Identity::from_private_key_bytes([0x2c; 32]);
+    let session_id = Uuid::new_v4();
+    let message_id = Uuid::new_v4();
+    let envelope = PeerMessageEnvelope::new(
+        &identity,
+        session_id,
+        message_id,
+        "conversation-id",
+        1,
+        200,
+        vec![1, 2, 3, 4],
+    );
+
+    {
+        let database = ClientDatabase::open(&path, &key)
+            .expect("encrypted database should open");
+        assert_eq!(
+            database
+                .store_inbound_peer_envelope(&envelope, 201)
+                .expect("first inbound envelope should be stored"),
+            InboundEnvelopeStoreResult::Stored
+        );
+    }
+
+    {
+        let database = ClientDatabase::open(&path, &key)
+            .expect("encrypted database should reopen");
+        assert_eq!(
+            database
+                .store_inbound_peer_envelope(&envelope, 202)
+                .expect("identical replay should be classified"),
+            InboundEnvelopeStoreResult::Duplicate { delivered: false }
+        );
+
+        let pending = database
+            .pending_inbound_peer_envelopes()
+            .expect("pending inbound envelopes should be readable");
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].message_id, message_id.to_string());
+        assert_eq!(pending[0].ciphertext, vec![1, 2, 3, 4]);
+
+        let mutated = PeerMessageEnvelope::new(
+            &identity,
+            session_id,
+            message_id,
+            "conversation-id",
+            1,
+            200,
+            vec![4, 3, 2, 1],
+        );
+        let error = database
+            .store_inbound_peer_envelope(&mutated, 203)
+            .expect_err("same message id with different ciphertext must be rejected");
+        assert!(
+            error.to_string().contains("different ciphertext"),
+            "unexpected error: {error}"
+        );
+    }
+
+    remove_database(&path);
+}
