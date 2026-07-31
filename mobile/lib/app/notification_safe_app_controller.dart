@@ -9,6 +9,7 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
   static const _legacyPairingNoticePrefix = 'Oczekujące zaproszenia:';
   bool _clearingLegacyNotice = false;
   bool _reconcilingRelationshipRemoval = false;
+  final Set<String> _appliedRelationshipRemovalMessageIds = <String>{};
 
   @override
   legacy.AppState build() {
@@ -61,6 +62,9 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
   ) async {
     ConversationSummary? relationshipConversation;
     var preserveHistory = true;
+    Object? removalDeliveryError;
+    StackTrace? removalDeliveryStackTrace;
+
     if (blocked && !contact.blocked) {
       for (final candidate in state.conversations) {
         if (candidate.contactId == contact.id) {
@@ -79,12 +83,21 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
           removedAt: DateTime.now(),
           preserveHistory: preserveHistory,
         ).encode();
-        await ref
-            .read(legacy.runtimeRepositoryProvider)
-            .sendMessage(relationshipConversation.id, payload);
+        try {
+          await ref
+              .read(legacy.runtimeRepositoryProvider)
+              .sendMessage(relationshipConversation.id, payload);
+        } catch (error, stackTrace) {
+          removalDeliveryError = error;
+          removalDeliveryStackTrace = stackTrace;
+        }
       }
     }
 
+    // Relationship removal is fail-closed locally. A transient transport
+    // failure must never leave a relationship active after the user removed
+    // it. The durable message pipeline normally accepts the removal while
+    // offline; any exceptional failure is surfaced after local state is safe.
     await super.updateContactSettings(
       contact,
       localAlias,
@@ -97,6 +110,16 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
     }
     await super.refreshData(forcePairing: false, allowAutoTorka: false);
     _hideRemovedRelationships();
+
+    if (removalDeliveryError != null) {
+      Error.throwWithStackTrace(
+        StateError(
+          'Relacja została usunięta lokalnie, ale komunikat dla kontaktu '
+          'nie został zakolejkowany: $removalDeliveryError',
+        ),
+        removalDeliveryStackTrace ?? StackTrace.current,
+      );
+    }
   }
 
   @override
@@ -151,11 +174,8 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
     if (_reconcilingRelationshipRemoval) return;
     _reconcilingRelationshipRemoval = true;
     try {
+      final repository = ref.read(legacy.runtimeRepositoryProvider);
       for (final conversation in List<ConversationSummary>.of(state.conversations)) {
-        final removal = RelationshipRemovedMessage.tryDecode(
-          conversation.preview,
-        );
-        if (removal == null) continue;
         ContactRecord? contact;
         for (final candidate in state.contacts) {
           if (candidate.id == conversation.contactId) {
@@ -164,6 +184,30 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
           }
         }
         if (contact == null || contact.blocked) continue;
+
+        ChatMessage? removalMessage;
+        RelationshipRemovedMessage? removal;
+        try {
+          final messages = await repository.messages(conversation.id);
+          for (final message in messages.reversed) {
+            if (message.outgoing) continue;
+            final candidate = RelationshipRemovedMessage.tryDecode(message.text);
+            if (candidate == null) continue;
+            removalMessage = message;
+            removal = candidate;
+            break;
+          }
+        } catch (_) {
+          // The preview fallback keeps compatibility with older runtime
+          // implementations while the real message list remains canonical.
+        }
+
+        removal ??= RelationshipRemovedMessage.tryDecode(conversation.preview);
+        if (removal == null) continue;
+        final removalId = removalMessage?.id ??
+            'preview:${conversation.id}:${removal.removedAt.toIso8601String()}';
+        if (!_appliedRelationshipRemovalMessageIds.add(removalId)) continue;
+
         await super.updateContactSettings(
           contact,
           contact.localAlias,
