@@ -46,4 +46,29 @@ void main() {
     expect(onionPhase.peerListener.state, ConnectionComponentState.ready);
     expect(onionPhase.onionService.state, ConnectionComponentState.starting);
   });
+
+  test('launch remains fenced until communication phase is committed', () {
+    final startup = SequentialStartupOrchestrator()..begin();
+
+    final finalizing = ConnectionReadiness.fromRuntime(
+      transport: const RuntimeTorStatus(phase: TransportPhase.connected),
+      peerServerStatus: PeerServerStatus.ready,
+      startupSteps: startup.stepsFor(SequentialStartupPhase.communication),
+      localDataReady: true,
+    );
+    expect(finalizing.startupComponentsReady, isTrue);
+    expect(finalizing.communicationCommitted, isFalse);
+    expect(finalizing.communicationReady, isFalse);
+    expect(finalizing.startupSteps.last.state, StartupStepState.running);
+
+    final complete = ConnectionReadiness.fromRuntime(
+      transport: const RuntimeTorStatus(phase: TransportPhase.connected),
+      peerServerStatus: PeerServerStatus.ready,
+      startupSteps: startup.stepsFor(SequentialStartupPhase.complete),
+      localDataReady: true,
+    );
+    expect(complete.communicationCommitted, isTrue);
+    expect(complete.communicationReady, isTrue);
+    expect(complete.startupSteps.last.state, StartupStepState.ready);
+  });
 }
