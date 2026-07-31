@@ -42,9 +42,13 @@ type RelayStream = WebSocketStream<RelaySocket>;
 // commands (profile, contacts, conversations, and P2P state) for minutes.
 // The actor owns retry/backoff, so availability is recovered by a later
 // attempt rather than by one long blocking request.
-const RELAY_CONNECT_TIMEOUT: Duration = Duration::from_secs(12);
-const RELAY_REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
-const RELAY_READY_TIMEOUT: Duration = Duration::from_secs(20);
+// Tor onion circuits regularly take longer than a LAN/WebSocket budget would
+// allow, especially immediately after bootstrap, after mobile network changes,
+// or while a peer/relay onion is still warming. Keep the relay responsive, but
+// do not tear it down so aggressively that healthy onion sessions flap.
+const RELAY_CONNECT_TIMEOUT: Duration = Duration::from_secs(25);
+const RELAY_REQUEST_TIMEOUT: Duration = Duration::from_secs(45);
+const RELAY_READY_TIMEOUT: Duration = Duration::from_secs(35);
 
 enum RelaySocket {
     Direct(TcpStream),
@@ -129,7 +133,7 @@ impl SharedRelayActor {
             },
             heartbeat: super::RelayHeartbeatConfig {
                 ping_interval: Duration::from_secs(25),
-                pong_timeout: Duration::from_secs(60),
+                pong_timeout: Duration::from_secs(150),
             },
             session_token: None,
             identity,
@@ -995,6 +999,22 @@ mod tests {
         assert!(relay_message_confirms_liveness(&Message::Ping(vec![1].into())));
         assert!(relay_message_confirms_liveness(&Message::Pong(vec![2].into())));
         assert!(!relay_message_confirms_liveness(&Message::Close(None)));
+    }
+
+    #[test]
+    fn default_relay_timeouts_are_tor_tolerant() {
+        let actor = SharedRelayActor::new(
+            Url::parse(
+                "http://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.onion",
+            )
+            .expect("test relay URL must parse"),
+            Some("socks5://127.0.0.1:9050".to_owned()),
+            Identity::generate(),
+        );
+
+        assert_eq!(actor.connection.connect_timeout, Duration::from_secs(25));
+        assert_eq!(actor.connection.ready_timeout, Duration::from_secs(35));
+        assert_eq!(actor.heartbeat.pong_timeout, Duration::from_secs(150));
     }
 
     #[test]

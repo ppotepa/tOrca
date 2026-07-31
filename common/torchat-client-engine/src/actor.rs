@@ -2099,16 +2099,7 @@ impl ClientEngineActor {
                         })?;
                         runtime_events.append(&mut reconcile_events);
                         if let Some(peer_endpoint) = peer_endpoint {
-                            self.database.put_contact_peer_endpoint(&peer_endpoint)?;
-                            if let Some(transport) = &self.peer_transport {
-                                transport.authorize_contact(&peer_endpoint);
-                            }
-                            runtime_events.push(
-                                torchat_client_runtime::RuntimeEvent::PeerEndpointChanged {
-                                    contact_id: peer_endpoint.installation_id.clone(),
-                                    status: PeerEndpointStatus::Verified,
-                                },
-                            );
+                            runtime_events.extend(self.apply_peer_endpoint(peer_endpoint)?);
                         }
                         self.pending_welcomes.remove(&invite_id);
                         Ok(runtime_events)
@@ -2169,20 +2160,13 @@ impl ClientEngineActor {
         &mut self,
         endpoint: PeerEndpointBundle,
     ) -> EngineResult<Vec<torchat_client_runtime::RuntimeEvent>> {
-        match self.database.contact_peer_endpoint(&endpoint.installation_id)? {
-            Some(previous) => {
-                if endpoint.sequence <= previous.sequence {
-                    return Ok(Vec::new());
-                }
-                endpoint
-                    .validate_successor(&previous, unix_secs())
-                    .map_err(EngineError::InvalidCommand)?;
-            }
-            None => {
-                endpoint
-                    .validate(unix_secs())
-                    .map_err(EngineError::InvalidCommand)?;
-            }
+        let previous = self
+            .database
+            .contact_peer_endpoint(&endpoint.installation_id)?;
+        if !peer_endpoint_requires_update(previous.as_ref(), &endpoint, unix_secs())
+            .map_err(EngineError::InvalidCommand)?
+        {
+            return Ok(Vec::new());
         }
         self.database.put_contact_peer_endpoint(&endpoint)?;
         if let Some(transport) = &self.peer_transport {
@@ -3440,14 +3424,7 @@ impl ClientEngineActor {
             None,
         )?;
         if let Some(peer_endpoint) = peer_endpoint {
-            self.database.put_contact_peer_endpoint(&peer_endpoint)?;
-            if let Some(transport) = &self.peer_transport {
-                transport.authorize_contact(&peer_endpoint);
-            }
-            runtime_events.push(torchat_client_runtime::RuntimeEvent::PeerEndpointChanged {
-                contact_id: peer_endpoint.installation_id.clone(),
-                status: PeerEndpointStatus::Verified,
-            });
+            runtime_events.extend(self.apply_peer_endpoint(peer_endpoint)?);
         }
         self.pending_welcomes
             .insert(invite.invite_id.clone(), pending.clone());
@@ -3742,6 +3719,26 @@ fn is_expected_peer_shutdown(error: &str) -> bool {
         || normalized.contains("connection reset by peer")
 }
 
+fn peer_endpoint_requires_update(
+    previous: Option<&PeerEndpointBundle>,
+    endpoint: &PeerEndpointBundle,
+    now_secs: i64,
+) -> Result<bool, String> {
+    match previous {
+        Some(previous) => {
+            if endpoint.sequence <= previous.sequence {
+                return Ok(false);
+            }
+            endpoint.validate_successor(previous, now_secs)?;
+            Ok(true)
+        }
+        None => {
+            endpoint.validate(now_secs)?;
+            Ok(true)
+        }
+    }
+}
+
 fn stable_message_sequence(message_id: uuid::Uuid) -> u64 {
     let bytes = message_id.as_bytes();
     let mut sequence = [0_u8; 8];
@@ -3803,9 +3800,24 @@ fn error_code(error: &EngineError) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_expected_peer_shutdown, protocol_nickname, runtime_phase_for_tor_ready};
+    use super::{
+        is_expected_peer_shutdown, peer_endpoint_requires_update, protocol_nickname,
+        runtime_phase_for_tor_ready,
+    };
     use crate::event::ConnectionState;
     use torchat_client_runtime::RuntimeStatusPhase;
+    use torchat_core::Identity;
+    use torchat_core::peer_protocol::PeerEndpointBundle;
+
+    fn test_endpoint(identity: &Identity, sequence: u64) -> PeerEndpointBundle {
+        PeerEndpointBundle::new(
+            identity,
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.onion",
+            sequence,
+            1_700_000_000,
+            Some(1_900_000_000),
+        )
+    }
 
     #[test]
     fn protocol_nickname_uses_profile_when_present() {
@@ -3851,5 +3863,27 @@ mod tests {
         ));
         assert!(is_expected_peer_shutdown("peer websocket closed"));
         assert!(!is_expected_peer_shutdown("peer client proof is invalid"));
+    }
+
+    #[test]
+    fn older_peer_endpoint_is_ignored() {
+        let identity = Identity::generate();
+        let previous = test_endpoint(&identity, 7);
+        let older = test_endpoint(&identity, 6);
+        assert!(
+            !peer_endpoint_requires_update(Some(&previous), &older, 1_800_000_000)
+                .expect("older endpoint should be ignored")
+        );
+    }
+
+    #[test]
+    fn newer_peer_endpoint_requires_valid_successor() {
+        let identity = Identity::generate();
+        let previous = test_endpoint(&identity, 7);
+        let newer = test_endpoint(&identity, 8);
+        assert!(
+            peer_endpoint_requires_update(Some(&previous), &newer, 1_800_000_000)
+                .expect("newer successor should be accepted")
+        );
     }
 }
