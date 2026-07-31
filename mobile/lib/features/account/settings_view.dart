@@ -32,7 +32,8 @@ class SettingsView extends ConsumerStatefulWidget {
   final ValueChanged<TorChatThemeFamily> onThemeFamilyChanged;
   final ValueChanged<TorChatBrightnessMode> onBrightnessChanged;
   final ValueChanged<TorChatRetroPalette> onRetroPaletteChanged;
-  final VoidCallback onOpenTor, onEditProfile;
+  final VoidCallback onOpenTor;
+  final VoidCallback onEditProfile;
   final VoidCallback onReset;
 
   @override
@@ -43,6 +44,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
   late TorChatThemePreferences _themePreferences;
   final Set<String> _saving = <String>{};
   bool _notifications = true;
+  bool _messageAlerts = true;
   bool _sound = true;
   bool _vibration = true;
   bool _preview = false;
@@ -71,6 +73,8 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     if (!mounted) return;
     setState(() {
       _notifications = store.getBool('torchat.notifications.enabled') ?? true;
+      _messageAlerts =
+          store.getBool('torchat.notifications.messages') ?? true;
       _sound = store.getBool('torchat.notifications.sound') ?? true;
       _vibration = store.getBool('torchat.notifications.vibration') ?? true;
       _preview = store.getBool('torchat.notifications.preview') ?? false;
@@ -107,12 +111,12 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
   }
 
   AsyncOperationState _preferenceState(String key) => AsyncOperationState(
-    phase: _saving.contains(key)
-        ? AsyncOperationPhase.running
-        : AsyncOperationPhase.idle,
-    label: 'Zapisywanie ustawienia',
-    targetId: key,
-  );
+        phase: _saving.contains(key)
+            ? AsyncOperationPhase.running
+            : AsyncOperationPhase.idle,
+        label: 'Zapisywanie ustawienia',
+        targetId: key,
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -238,10 +242,26 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
               children: [
                 _toggle(
                   'Powiadomienia',
-                  'Nowe wiadomości i zaproszenia',
+                  'Nadrzędny przełącznik wszystkich alertów',
                   _notifications,
                   'torchat.notifications.enabled',
                   (value) => _notifications = value,
+                ),
+                _toggle(
+                  'Nowe wiadomości',
+                  'Powiadamiaj o wiadomościach poza otwartą rozmową',
+                  _messageAlerts,
+                  'torchat.notifications.messages',
+                  (value) => _messageAlerts = value,
+                  enabled: _notifications,
+                ),
+                _toggle(
+                  'Zaproszenia do kontaktów',
+                  'Powiadamiaj wyłącznie o nowych prośbach pairing',
+                  _pairingAlerts,
+                  'torchat.notifications.pairing',
+                  (value) => _pairingAlerts = value,
+                  enabled: _notifications,
                 ),
                 _toggle(
                   'Dźwięk',
@@ -265,15 +285,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                   _preview,
                   'torchat.notifications.preview',
                   (value) => _preview = value,
-                  enabled: _notifications,
-                ),
-                _toggle(
-                  'Zaproszenia do kontaktów',
-                  'Powiadamiaj o nowych prośbach pairing',
-                  _pairingAlerts,
-                  'torchat.notifications.pairing',
-                  (value) => _pairingAlerts = value,
-                  enabled: _notifications,
+                  enabled: _notifications && _messageAlerts,
                 ),
               ],
             ),
@@ -360,16 +372,16 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     ValueChanged<bool> assign, {
     bool enabled = true,
   }) => BusySurface(
-    state: _preferenceState(key),
-    label: 'Zapisywanie…',
-    child: ThemedSwitchListTile(
-      contentPadding: EdgeInsets.zero,
-      title: Text(title),
-      subtitle: Text(subtitle),
-      value: value,
-      onChanged: enabled && !_saving.contains(key)
-          ? (next) => _set(key, value, next, assign)
-          : null,
-    ),
-  );
+        state: _preferenceState(key),
+        label: 'Zapisywanie…',
+        child: ThemedSwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: Text(title),
+          subtitle: Text(subtitle),
+          value: value,
+          onChanged: enabled && !_saving.contains(key)
+              ? (next) => _set(key, value, next, assign)
+              : null,
+        ),
+      );
 }
