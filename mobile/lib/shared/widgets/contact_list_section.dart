@@ -18,6 +18,9 @@ class ContactListSection extends StatelessWidget {
     this.showHeader = true,
     this.contactSubtitleBuilder,
     this.contactTrailingBuilder,
+    this.onDetails,
+    this.onToggleMute,
+    this.onRemove,
   });
 
   final String title;
@@ -29,6 +32,9 @@ class ContactListSection extends StatelessWidget {
   final bool showHeader;
   final String Function(ContactRecord contact)? contactSubtitleBuilder;
   final Widget Function(ContactRecord contact)? contactTrailingBuilder;
+  final ValueChanged<ContactRecord>? onDetails;
+  final Future<void> Function(ContactRecord contact)? onToggleMute;
+  final Future<void> Function(ContactRecord contact)? onRemove;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -46,24 +52,29 @@ class ContactListSection extends StatelessWidget {
                     separatorBuilder: (_, _) => const SizedBox(height: 5),
                     itemBuilder: (context, index) {
                       final contact = contacts[index];
-                      return GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onLongPressStart: (details) => _showContextMenu(
-                          context,
-                          contact,
-                          details.globalPosition,
-                        ),
-                        onSecondaryTapDown: (details) => _showContextMenu(
-                          context,
-                          contact,
-                          details.globalPosition,
-                        ),
-                        child: ContactListTile(
-                          contact: contact,
-                          onTap: onSelect,
-                          subtitle: contactSubtitleBuilder?.call(contact),
-                          trailing: contactTrailingBuilder?.call(contact),
-                          asCard: asCard,
+                      return Semantics(
+                        container: true,
+                        label: 'Kontakt ${contact.displayName}',
+                        hint: 'Naciśnij, aby rozpocząć rozmowę. Przytrzymaj, aby otworzyć menu.',
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onLongPressStart: (details) => _showContextMenu(
+                            context,
+                            contact,
+                            details.globalPosition,
+                          ),
+                          onSecondaryTapDown: (details) => _showContextMenu(
+                            context,
+                            contact,
+                            details.globalPosition,
+                          ),
+                          child: ContactListTile(
+                            contact: contact,
+                            onTap: onSelect,
+                            subtitle: contactSubtitleBuilder?.call(contact),
+                            trailing: contactTrailingBuilder?.call(contact),
+                            asCard: asCard,
+                          ),
                         ),
                       );
                     },
@@ -84,15 +95,36 @@ class ContactListSection extends StatelessWidget {
         Rect.fromPoints(position, position),
         Offset.zero & overlay.size,
       ),
-      items: const [
-        PopupMenuItem(value: 'open', child: Text('Rozpocznij rozmowę')),
-        PopupMenuItem(value: 'copy', child: Text('Kopiuj fingerprint')),
+      items: [
+        const PopupMenuItem(value: 'open', child: Text('Rozpocznij rozmowę')),
+        if (onDetails != null)
+          const PopupMenuItem(value: 'details', child: Text('Szczegóły kontaktu')),
+        if (onToggleMute != null)
+          PopupMenuItem(
+            value: 'mute',
+            child: Text(contact.muted ? 'Włącz powiadomienia' : 'Wycisz kontakt'),
+          ),
+        const PopupMenuItem(value: 'copy', child: Text('Kopiuj fingerprint')),
+        if (onRemove != null)
+          PopupMenuItem(
+            value: 'remove',
+            child: Text(
+              'Zakończ relację',
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ),
       ],
     );
     if (!context.mounted) return;
     switch (action) {
       case 'open':
         onSelect(contact);
+        return;
+      case 'details':
+        onDetails?.call(contact);
+        return;
+      case 'mute':
+        await onToggleMute?.call(contact);
         return;
       case 'copy':
         await Clipboard.setData(ClipboardData(text: contact.fingerprint));
@@ -101,6 +133,9 @@ class ContactListSection extends StatelessWidget {
             const SnackBar(content: Text('Fingerprint skopiowany.')),
           );
         }
+        return;
+      case 'remove':
+        await onRemove?.call(contact);
         return;
       default:
         return;
