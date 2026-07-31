@@ -7,6 +7,7 @@ pub mod domain;
 pub mod engine;
 pub mod error;
 pub mod event;
+pub mod inbound;
 mod logging;
 pub mod peer;
 pub mod relay;
@@ -39,6 +40,11 @@ pub use error::{EngineError, EngineResult};
 pub use event::{
     ConnectionSnapshot, ConnectionState, EngineEvent, EngineFatalError, EngineLogEvent,
     NotificationRequest, PlatformAction,
+};
+pub use inbound::{
+    AcknowledgementPlan, BasicInboundValidator, DedupDecision, InboundDedupKey,
+    InboundDeduplicator, InboundEnvelope, InboundPipeline, InboundPreparation, InboundTransport,
+    InboundValidator, TransportMetadata, ValidatedInbound,
 };
 pub use relay::{EngineRelay, NoopEngineRelay};
 pub use storage::{
