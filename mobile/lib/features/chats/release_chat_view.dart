@@ -133,10 +133,9 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
       _scheduleAnimatedBottomScroll();
     } else {
       setState(() {
-        _visibleMessageLimit = (_visibleMessageLimit + added.length).clamp(
-          _messagePageSize,
-          widget.messages.length,
-        );
+        _visibleMessageLimit = (_visibleMessageLimit + added.length)
+            .clamp(_messagePageSize, widget.messages.length)
+            .toInt();
         _unseenMessageCount += added.length;
       });
     }
@@ -214,10 +213,9 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
     final oldOffset = _scroll.offset;
     final oldExtent = _scroll.position.maxScrollExtent;
     setState(() {
-      _visibleMessageLimit = (_visibleMessageLimit + _messagePageSize).clamp(
-        _messagePageSize,
-        widget.messages.length,
-      );
+      _visibleMessageLimit = (_visibleMessageLimit + _messagePageSize)
+          .clamp(_messagePageSize, widget.messages.length)
+          .toInt();
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_scroll.hasClients) return;
@@ -244,7 +242,7 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
     final minimum = total < _messagePageSize ? total : _messagePageSize;
     final requested = savedLimit ?? minimum;
     setState(() {
-      _visibleMessageLimit = requested.clamp(minimum, total);
+      _visibleMessageLimit = requested.clamp(minimum, total).toInt();
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
