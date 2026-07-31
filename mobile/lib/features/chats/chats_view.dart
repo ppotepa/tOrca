@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/ui_operation_registry.dart';
 import '../../core/models/domain.dart';
+import '../../shared/async/async_operation_state.dart';
 import '../../shared/async/busy_surface.dart';
+import '../../shared/async/themed_activity_indicator.dart';
 import 'chats_view_legacy.dart' as legacy;
 
 export 'chats_view_legacy.dart' hide ChatsView;
@@ -71,40 +73,135 @@ class ChatsView extends ConsumerWidget {
     final messagesState = ref.watch(
       uiOperationProvider(UiOperationKey.messagesLoad(conversationId)),
     );
-    final effectiveState = messagesState.busy
+    final sendState = ref.watch(
+      uiOperationProvider(UiOperationKey.messageSend(conversationId)),
+    );
+    final verifyState = ref.watch(
+      uiOperationProvider(UiOperationKey.contactVerify(selectedContactId)),
+    );
+
+    AsyncOperationState? messageOperation;
+    String messageOperationLabel = '';
+    for (final message in messages) {
+      final retryState = ref.watch(
+        uiOperationProvider(UiOperationKey.messageRetry(message.id)),
+      );
+      final deleteState = ref.watch(
+        uiOperationProvider(UiOperationKey.messageDelete(message.id)),
+      );
+      if (retryState.busy) {
+        messageOperation = retryState;
+        messageOperationLabel = 'Ponawianie wiadomości…';
+        break;
+      }
+      if (deleteState.busy) {
+        messageOperation = deleteState;
+        messageOperationLabel = 'Usuwanie wiadomości…';
+        break;
+      }
+    }
+
+    final panelState = messagesState.busy
         ? messagesState
         : openState.busy
             ? openState
             : startState;
 
+    final chat = Stack(
+      children: [
+        Positioned.fill(
+          child: legacy.ChatsView(
+            selected: selected,
+            contacts: contacts,
+            conversations: conversations,
+            messages: messages,
+            composer: composer,
+            onOpenConversation: onOpenConversation,
+            onSend: sendState.busy ? (_) {} : onSend,
+            onTypingChanged: onTypingChanged,
+            onRetryMessage: (messageId) {
+              final state = ref.read(
+                uiOperationProvider(UiOperationKey.messageRetry(messageId)),
+              );
+              if (!state.busy) onRetryMessage(messageId);
+            },
+            onDeleteMessage: (messageId) {
+              final state = ref.read(
+                uiOperationProvider(UiOperationKey.messageDelete(messageId)),
+              );
+              if (!state.busy) onDeleteMessage(messageId);
+            },
+            onVerifyContact: verifyState.busy
+                ? (_) {}
+                : onVerifyContact,
+            onBack: onBack,
+            error: error,
+            notice: notice,
+            showConversationListWhenEmpty: showConversationListWhenEmpty,
+            canSend: canSend && !sendState.busy,
+            peerTyping: peerTyping,
+            peerOnline: peerOnline,
+          ),
+        ),
+        if (verifyState.busy)
+          const Positioned(
+            top: 12,
+            right: 16,
+            child: Material(
+              type: MaterialType.transparency,
+              child: ThemedActivityIndicator(
+                label: 'Weryfikowanie…',
+                compact: true,
+              ),
+            ),
+          ),
+        if (messageOperation?.busy == true)
+          Positioned(
+            top: 64,
+            left: 16,
+            child: Material(
+              elevation: 2,
+              color: Theme.of(context).colorScheme.surface,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 7,
+                ),
+                child: ThemedActivityIndicator(
+                  label: messageOperationLabel,
+                  compact: true,
+                ),
+              ),
+            ),
+          ),
+        if (sendState.busy)
+          Positioned(
+            right: 16,
+            bottom: 14,
+            child: Material(
+              elevation: 2,
+              color: Theme.of(context).colorScheme.surface,
+              child: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                child: ThemedActivityIndicator(
+                  label: 'Wysyłanie…',
+                  compact: true,
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+
     return BusySurface(
-      state: effectiveState,
+      state: panelState,
       presentation: messages.isEmpty
           ? BusyPresentation.replace
           : BusyPresentation.overlay,
       label: startState.busy
           ? 'Uruchamianie rozmowy…'
           : 'Ładowanie rozmowy…',
-      child: legacy.ChatsView(
-        selected: selected,
-        contacts: contacts,
-        conversations: conversations,
-        messages: messages,
-        composer: composer,
-        onOpenConversation: onOpenConversation,
-        onSend: onSend,
-        onTypingChanged: onTypingChanged,
-        onRetryMessage: onRetryMessage,
-        onDeleteMessage: onDeleteMessage,
-        onVerifyContact: onVerifyContact,
-        onBack: onBack,
-        error: error,
-        notice: notice,
-        showConversationListWhenEmpty: showConversationListWhenEmpty,
-        canSend: canSend,
-        peerTyping: peerTyping,
-        peerOnline: peerOnline,
-      ),
+      child: chat,
     );
   }
 }
