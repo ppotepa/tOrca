@@ -122,9 +122,9 @@ class _DesktopWorkspaceState extends State<DesktopWorkspace> {
                                     onPressed: () => setState(
                                       () => _inspectorOpen = !_inspectorOpen,
                                     ),
-                                    icon: ThemedIcon(
+                                  icon: ThemedIcon(
                                       showInspector
-                                          ? Icons.right_panel_close_outlined
+                                          ? Icons.expand_less
                                           : Icons.info_outline,
                                       size: 18,
                                     ),

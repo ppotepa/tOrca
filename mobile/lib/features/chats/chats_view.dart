@@ -688,7 +688,7 @@ class _BubbleFooter extends StatelessWidget {
         children: [
           if (busyLabel != null) ...[
             ThemedActivityIndicator(
-              label: busyLabel,
+              label: busyLabel ?? '',
               compact: true,
               color: foreground.withValues(alpha: .82),
             ),
