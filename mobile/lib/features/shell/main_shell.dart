@@ -2,20 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../../app/app_theme.dart';
 import '../../core/models/domain.dart';
-import '../../shared/widgets/action_status_strip.dart';
-import '../../shared/widgets/contact_list_section.dart';
-import '../../shared/widgets/conversation_list_section.dart';
 import '../../shared/widgets/counter_badge.dart';
-import '../../shared/widgets/empty_state.dart';
-import '../../shared/widgets/feature_header.dart';
-import '../../shared/widgets/identity_section.dart';
-import '../../shared/widgets/info_list_section.dart';
-import '../../shared/widgets/info_tile.dart';
-import '../../shared/widgets/list_items.dart';
-import '../../shared/widgets/section_card.dart';
 import '../../shared/widgets/tor_status_bar.dart';
 import '../chats/chats_view.dart';
 import '../contacts/contacts_view.dart';
+import 'desktop/cockpit_status_bar.dart';
+import 'desktop/desktop_workspace.dart';
 
 class MainShell extends StatelessWidget {
   const MainShell({
@@ -56,9 +48,17 @@ class MainShell extends StatelessWidget {
     required this.onRetryTor,
     required this.typingContacts,
     required this.onlineContacts,
+    this.onOpenConnectionCenter,
   });
+
   final MobileTab tab;
-  final String nickname, fingerprint, ownInvite, status, error, notice, action;
+  final String nickname;
+  final String fingerprint;
+  final String ownInvite;
+  final String status;
+  final String error;
+  final String notice;
+  final String action;
   final TransportPhase phase;
   final PeerServerStatus peerServerStatus;
   final int? latencyMs;
@@ -67,12 +67,15 @@ class MainShell extends StatelessWidget {
   final List<ChatMessage> messages;
   final String? selectedConversation;
   final ContactRecord? selectedContact;
-  final TextEditingController search, composer;
+  final TextEditingController search;
+  final TextEditingController composer;
   final ValueChanged<MobileTab> onTab;
-  final VoidCallback onSearch, onBack;
+  final VoidCallback onSearch;
+  final VoidCallback onBack;
   final ValueChanged<String?> onSend;
   final ValueChanged<bool> onTypingChanged;
-  final ValueChanged<String> onRetryMessage, onDeleteMessage;
+  final ValueChanged<String> onRetryMessage;
+  final ValueChanged<String> onDeleteMessage;
   final ValueChanged<String> onVerifyContact;
   final Future<void> Function(
     ContactRecord,
@@ -80,91 +83,107 @@ class MainShell extends StatelessWidget {
     bool,
     bool,
     ContactTransportPolicy,
-  )
-  onUpdateContactSettings;
+  ) onUpdateContactSettings;
   final ValueChanged<String> onOpenConversation;
   final ValueChanged<ContactRecord> onStartConversation;
-  final VoidCallback onScanInvite, onShowInvite;
+  final VoidCallback onScanInvite;
+  final VoidCallback onShowInvite;
   final VoidCallback onOpenAccount;
   final VoidCallback onOpenSettings;
   final VoidCallback onRetryTor;
-  final Map<String, bool> typingContacts, onlineContacts;
+  final VoidCallback? onOpenConnectionCenter;
+  final Map<String, bool> typingContacts;
+  final Map<String, bool> onlineContacts;
 
-  Widget _content(BuildContext context, {bool desktop = false}) =>
+  Widget _content(BuildContext context, {required bool desktop}) =>
       tab == MobileTab.chats
-      ? ChatsView(
-          selected: selectedContact,
-          contacts: contacts,
-          conversations: conversations,
-          messages: messages,
-          composer: composer,
-          onOpenConversation: onOpenConversation,
-          onSend: onSend,
-          onTypingChanged: onTypingChanged,
-          onRetryMessage: onRetryMessage,
-          onDeleteMessage: onDeleteMessage,
-          onVerifyContact: onVerifyContact,
-          onBack: onBack,
-          error: error,
-          notice: notice,
-          showConversationListWhenEmpty: !desktop,
-          canSend:
-              selectedConversation != null &&
-              selectedContact?.verified == true &&
-              conversations.any(
-                (item) =>
-                    item.id == selectedConversation &&
-                    item.state == ConversationState.active,
-              ),
-          peerTyping:
-              selectedConversation != null &&
-              (typingContacts[selectedConversation] ?? false),
-          peerOnline:
-              selectedContact != null &&
-              (onlineContacts[selectedContact!.id] ?? false),
-        )
-      : ContactsView(
-          saved: contacts,
-          search: search,
-          onSearch: onSearch,
-          onSelect: onStartConversation,
-          onScanInvite: onScanInvite,
-          onShowInvite: onShowInvite,
-          onUpdateContactSettings: onUpdateContactSettings,
-          fingerprint: fingerprint,
-          ownInvite: ownInvite,
-          error: error,
-          notice: notice,
-          busy: action.isNotEmpty,
-          showContactList: !desktop,
-        );
+          ? ChatsView(
+              selected: selectedContact,
+              contacts: contacts,
+              conversations: conversations,
+              messages: messages,
+              composer: composer,
+              onOpenConversation: onOpenConversation,
+              onSend: onSend,
+              onTypingChanged: onTypingChanged,
+              onRetryMessage: onRetryMessage,
+              onDeleteMessage: onDeleteMessage,
+              onVerifyContact: onVerifyContact,
+              onBack: onBack,
+              error: error,
+              notice: notice,
+              showConversationListWhenEmpty: !desktop,
+              canSend: selectedConversation != null &&
+                  selectedContact?.verified == true &&
+                  conversations.any(
+                    (item) => item.id == selectedConversation &&
+                        item.state == ConversationState.active,
+                  ),
+              peerTyping: selectedConversation != null &&
+                  (typingContacts[selectedConversation] ?? false),
+              peerOnline: selectedContact != null &&
+                  (onlineContacts[selectedContact!.id] ?? false),
+            )
+          : ContactsView(
+              saved: contacts,
+              search: search,
+              onSearch: onSearch,
+              onSelect: onStartConversation,
+              onScanInvite: onScanInvite,
+              onShowInvite: onShowInvite,
+              onUpdateContactSettings: onUpdateContactSettings,
+              fingerprint: fingerprint,
+              ownInvite: ownInvite,
+              error: error,
+              notice: notice,
+              busy: false,
+              showContactList: !desktop,
+            );
 
   int get unreadTotal => conversations.totalUnread;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, constraints) => constraints.maxWidth >= 900
-        ? DesktopMainShell(
-            tab: tab,
-            nickname: nickname,
-            status: status,
-            phase: phase,
-            latencyMs: latencyMs,
-            peerServerStatus: peerServerStatus,
-            contacts: contacts,
-            conversations: conversations,
-            selectedConversation: selectedConversation,
-            unreadTotal: unreadTotal,
-            action: action,
-            onTab: onTab,
-            onOpenConversation: onOpenConversation,
-            onStartConversation: onStartConversation,
-            onBack: onBack,
-            onAccount: onOpenAccount,
-            onSettings: onOpenSettings,
-            content: _content(context, desktop: true),
-          )
-        : Scaffold(
+        builder: (context, constraints) {
+          final desktop = constraints.maxWidth >= 900;
+          if (desktop) {
+            return Scaffold(
+              body: Column(
+                children: [
+                  CockpitStatusBar(
+                    phase: phase,
+                    peerServerStatus: peerServerStatus,
+                    nickname: nickname,
+                    latencyMs: latencyMs,
+                    onOpenConnectionCenter:
+                        onOpenConnectionCenter ?? onRetryTor,
+                    onOpenSettings: onOpenSettings,
+                  ),
+                  Expanded(
+                    child: DesktopWorkspace(
+                      tab: tab,
+                      nickname: nickname,
+                      contacts: contacts,
+                      conversations: conversations,
+                      selectedConversation: selectedConversation,
+                      selectedContact: selectedContact,
+                      onlineContacts: onlineContacts,
+                      content: _content(context, desktop: true),
+                      onTab: onTab,
+                      onOpenConversation: onOpenConversation,
+                      onStartConversation: onStartConversation,
+                      onVerifyContact: onVerifyContact,
+                      onBack: onBack,
+                      onAccount: onOpenAccount,
+                      onSettings: onOpenSettings,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
+
+          return Scaffold(
             appBar: AppBar(
               title: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -179,7 +198,7 @@ class MainShell extends StatelessWidget {
               actions: [
                 IconButton(
                   tooltip: peerServerStatus.label,
-                  onPressed: onRetryTor,
+                  onPressed: onOpenConnectionCenter ?? onRetryTor,
                   icon: PeerServerIndicator(status: peerServerStatus),
                 ),
                 IconButton(
@@ -188,9 +207,9 @@ class MainShell extends StatelessWidget {
                   icon: const ThemedIcon(Icons.person_outline, size: 18),
                 ),
                 IconButton(
-                  tooltip: 'Tor',
-                  onPressed: onRetryTor,
-                  icon: const ThemedIcon(Icons.eco_outlined, size: 18),
+                  tooltip: 'Ustawienia',
+                  onPressed: onOpenSettings,
+                  icon: const ThemedIcon(Icons.settings_outlined, size: 18),
                 ),
               ],
             ),
@@ -203,13 +222,12 @@ class MainShell extends StatelessWidget {
                     peerStatus: peerServerStatus,
                     latencyMs: latencyMs,
                   ),
-                  ActionStatusStrip(action: action),
                   Expanded(
                     child: Padding(
                       padding: selectedConversation == null
                           ? const EdgeInsets.fromLTRB(16, 4, 16, 0)
                           : EdgeInsets.zero,
-                      child: _content(context),
+                      child: _content(context, desktop: false),
                     ),
                   ),
                 ],
@@ -228,138 +246,16 @@ class MainShell extends StatelessWidget {
                         ),
                         label: 'Czaty',
                       ),
-                      NavigationDestination(
+                      const NavigationDestination(
                         icon: ThemedIcon(Icons.people_outline),
                         label: 'Kontakty',
                       ),
                     ],
                   )
                 : null,
-          ),
-  );
-}
-
-class DesktopMainShell extends StatelessWidget {
-  const DesktopMainShell({
-    super.key,
-    required this.tab,
-    required this.nickname,
-    required this.status,
-    required this.phase,
-    required this.latencyMs,
-    required this.peerServerStatus,
-    required this.contacts,
-    required this.conversations,
-    required this.selectedConversation,
-    required this.unreadTotal,
-    required this.action,
-    required this.onTab,
-    required this.onOpenConversation,
-    required this.onStartConversation,
-    required this.onBack,
-    required this.onAccount,
-    required this.onSettings,
-    required this.content,
-  });
-
-  final MobileTab tab;
-  final String nickname, status;
-  final TransportPhase phase;
-  final PeerServerStatus peerServerStatus;
-  final int? latencyMs;
-  final List<ContactRecord> contacts;
-  final List<ConversationSummary> conversations;
-  final String? selectedConversation;
-  final String action;
-  final int unreadTotal;
-  final ValueChanged<MobileTab> onTab;
-  final ValueChanged<String> onOpenConversation;
-  final ValueChanged<ContactRecord> onStartConversation;
-  final VoidCallback onBack;
-  final VoidCallback onAccount;
-  final VoidCallback onSettings;
-  final Widget content;
-
-  ContactRecord? get selectedContact {
-    final id = selectedConversation;
-    if (id == null) return null;
-    final conversation = conversations
-        .where((item) => item.id == id)
-        .firstOrNull;
-    if (conversation == null) return null;
-    return contacts
-        .where((item) => item.id == conversation.contactId)
-        .firstOrNull;
-  }
-
-  @override
-  Widget build(BuildContext context) => Scaffold(
-    body: Column(
-      children: [
-        TorStatusBar(
-          status: status,
-          phase: phase,
-          peerStatus: peerServerStatus,
-          desktop: true,
-          latencyMs: latencyMs,
-        ),
-        ActionStatusStrip(action: action),
-        Expanded(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final compact = constraints.maxWidth < 1100;
-              final listWidth = compact ? 260.0 : 304.0;
-              final showInspector = !compact && selectedContact != null;
-              return Row(
-                children: [
-                  SizedBox(
-                    width: compact ? 148 : 176,
-                    child: DesktopRail(
-                      tab: tab,
-                      nickname: nickname,
-                      peerServerStatus: peerServerStatus,
-                      unreadTotal: unreadTotal,
-                      onTab: onTab,
-                      onAccount: onAccount,
-                      onSettings: onSettings,
-                    ),
-                  ),
-                  SizedBox(
-                    width: listWidth,
-                    child: DesktopListPane(
-                      tab: tab,
-                      contacts: contacts,
-                      conversations: conversations,
-                      selectedConversation: selectedConversation,
-                      onOpenConversation: onOpenConversation,
-                      onStartConversation: onStartConversation,
-                    ),
-                  ),
-                  Expanded(
-                    child: ColoredBox(
-                      color: Theme.of(context).scaffoldBackgroundColor,
-                      child: Padding(
-                        padding: const EdgeInsets.all(20),
-                        child: content,
-                      ),
-                    ),
-                  ),
-                  if (showInspector)
-                    SizedBox(
-                      width: 280,
-                      child: DesktopInspector(
-                        contact: selectedContact!,
-                        onBack: onBack,
-                      ),
-                    ),
-                ],
-              );
-            },
-          ),
-        ),
-      ],
-    ),
-  );
+          );
+        },
+      );
 }
 
 class PeerServerIndicator extends StatelessWidget {
@@ -370,334 +266,14 @@ class PeerServerIndicator extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = switch (status) {
-      PeerServerStatus.ready => Colors.green,
-      PeerServerStatus.starting => Colors.orange,
-      PeerServerStatus.offline => Theme.of(context).colorScheme.outline,
-      PeerServerStatus.error => Theme.of(context).colorScheme.error,
+      PeerServerStatus.ready => context.statusTheme.success,
+      PeerServerStatus.starting => context.statusTheme.warning,
+      PeerServerStatus.offline => context.statusTheme.offline,
+      PeerServerStatus.error => context.statusTheme.danger,
     };
     return Tooltip(
       message: status.label,
       child: Icon(Icons.settings_input_antenna, color: color, size: 20),
-    );
-  }
-}
-
-class DesktopRail extends StatelessWidget {
-  const DesktopRail({
-    super.key,
-    required this.tab,
-    required this.nickname,
-    required this.peerServerStatus,
-    required this.unreadTotal,
-    required this.onTab,
-    required this.onAccount,
-    required this.onSettings,
-  });
-  final MobileTab tab;
-  final String nickname;
-  final PeerServerStatus peerServerStatus;
-  final int unreadTotal;
-  final ValueChanged<MobileTab> onTab;
-  final VoidCallback onAccount;
-  final VoidCallback onSettings;
-
-  @override
-  Widget build(BuildContext context) {
-    final shell = context.shellTheme;
-    return Container(
-      decoration: BoxDecoration(
-        color: shell.surface,
-        border: Border(
-          right: BorderSide(color: shell.border, width: shell.borderWidth),
-        ),
-      ),
-      child: Column(
-        children: [
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 16, 16, 14),
-            child: Row(
-              children: [
-                ThemedIcon(Icons.eco_outlined, size: 18),
-                SizedBox(width: 8),
-                Text('TorChat'),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: Row(
-              children: [
-                PeerServerIndicator(status: peerServerStatus),
-                const SizedBox(width: 8),
-                Text(peerServerStatus.label),
-              ],
-            ),
-          ),
-          const Divider(height: 1),
-          const SizedBox(height: 8),
-          for (final item in [
-            (MobileTab.chats, Icons.chat_bubble_outline, 'Czaty'),
-            (MobileTab.contacts, Icons.people_outline, 'Kontakty'),
-          ])
-            DesktopNavItem(
-              selected: tab == item.$1,
-              icon: item.$2,
-              label: item.$3,
-              alert: item.$1 == MobileTab.chats && unreadTotal > 0,
-              badge: item.$1 == MobileTab.chats ? unreadTotal : 0,
-              onPressed: () => onTab(item.$1),
-            ),
-          const Spacer(),
-          DesktopNavItem(
-            icon: Icons.person_outline,
-            label: nickname.isEmpty ? 'Konto' : nickname,
-            onPressed: onAccount,
-          ),
-          DesktopNavItem(
-            icon: Icons.settings_outlined,
-            label: 'Ustawienia',
-            onPressed: onSettings,
-          ),
-          const SizedBox(height: 10),
-        ],
-      ),
-    );
-  }
-}
-
-class DesktopNavItem extends StatelessWidget {
-  const DesktopNavItem({
-    super.key,
-    required this.icon,
-    required this.label,
-    required this.onPressed,
-    this.selected = false,
-    this.alert = false,
-    this.badge = 0,
-  });
-  final IconData icon;
-  final String label;
-  final VoidCallback onPressed;
-  final bool selected;
-  final bool alert;
-  final int badge;
-
-  @override
-  Widget build(BuildContext context) {
-    final shell = context.shellTheme;
-    final status = context.statusTheme;
-    return SizedBox(
-      height: 46,
-      width: double.infinity,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: selected
-              ? shell.selectedNavigationBackground
-              : shell.selectedNavigationBackground.withValues(alpha: 0),
-          boxShadow: alert
-              ? [
-                  BoxShadow(
-                    color: status.warning.withValues(alpha: .30),
-                    blurRadius: 14,
-                  ),
-                ]
-              : null,
-          border: selected
-              ? Border(
-                  left: BorderSide(
-                    color: shell.selectedNavigationBorder,
-                    width: shell.borderWidth * 3,
-                  ),
-                )
-              : null,
-        ),
-        child: TextButton.icon(
-          onPressed: onPressed,
-          style: TextButton.styleFrom(
-            alignment: Alignment.centerLeft,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            foregroundColor: selected
-                ? shell.selectedNavigationForeground
-                : shell.navigationForeground,
-            shape: const RoundedRectangleBorder(
-              borderRadius: BorderRadius.zero,
-            ),
-          ),
-          icon: ThemedIcon(icon, size: 18),
-          label: Row(
-            children: [
-              Expanded(child: Text(label, overflow: TextOverflow.ellipsis)),
-              if (badge > 0) CounterBadge(count: badge),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class DesktopListPane extends StatelessWidget {
-  const DesktopListPane({
-    super.key,
-    required this.tab,
-    required this.contacts,
-    required this.conversations,
-    required this.selectedConversation,
-    required this.onOpenConversation,
-    required this.onStartConversation,
-  });
-  final MobileTab tab;
-  final List<ContactRecord> contacts;
-  final List<ConversationSummary> conversations;
-  final String? selectedConversation;
-  final ValueChanged<String> onOpenConversation;
-  final ValueChanged<ContactRecord> onStartConversation;
-
-  @override
-  Widget build(BuildContext context) {
-    final shell = context.shellTheme;
-    return Container(
-      decoration: BoxDecoration(
-        border: Border(
-          right: BorderSide(color: shell.border, width: shell.borderWidth),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 18, 16, 10),
-            child: FeatureHeader(
-              title: switch (tab) {
-                MobileTab.chats => 'Czaty',
-                MobileTab.contacts => 'Kontakty',
-              },
-              subtitle: switch (tab) {
-                MobileTab.chats => 'Wybierz rozmowę',
-                MobileTab.contacts => 'Wybierz kontakt',
-              },
-            ),
-          ),
-          const SizedBox(height: 12),
-          Expanded(
-            child: tab == MobileTab.chats
-                ? Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    child: ConversationListSection(
-                      title: 'Czaty',
-                      subtitle: 'Wybierz rozmowę',
-                      conversations: conversations,
-                      contacts: contacts,
-                      selectedConversation: selectedConversation,
-                      onOpenConversation: onOpenConversation,
-                      emptyMessage:
-                          'Nie masz jeszcze rozmów.\nWybierz osobę w zakładce Kontakty.',
-                      asCard: false,
-                      showHeader: false,
-                    ),
-                  )
-                : ListView(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    children: tab == MobileTab.contacts
-                        ? [
-                            SizedBox(
-                              height: 420,
-                              child: ContactListSection(
-                                title: 'Kontakty',
-                                subtitle: 'Wybierz kontakt',
-                                contacts: contacts,
-                                onSelect: onStartConversation,
-                                asCard: false,
-                                showHeader: false,
-                                emptyMessage: 'Brak kontaktów.',
-                              ),
-                            ),
-                          ]
-                        : const [
-                            EmptyState(
-                              icon: Icons.inbox_outlined,
-                              message:
-                                  'Otwórz Inbox, aby zarządzać zaproszeniami',
-                            ),
-                          ],
-                  ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class DesktopInspector extends StatelessWidget {
-  const DesktopInspector({
-    super.key,
-    required this.contact,
-    required this.onBack,
-  });
-  final ContactRecord contact;
-  final VoidCallback onBack;
-
-  @override
-  Widget build(BuildContext context) {
-    final shell = context.shellTheme;
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: shell.surface,
-        border: Border(
-          left: BorderSide(color: shell.border, width: shell.borderWidth),
-        ),
-      ),
-      child: ListView(
-        children: [
-          IdentitySection(
-            title: 'TOŻSAMOŚĆ',
-            name: contact.displayName,
-            subtitle: 'Kontakt lokalny',
-            fingerprint: contact.fingerprint,
-          ),
-          const Divider(),
-          SectionCard(
-            title: 'POŁĄCZENIE',
-            child: Row(
-              children: [
-                PeerTransportIndicator(
-                  connectionStatus: contact.peerConnectionStatus,
-                  transportPolicy: contact.transportPolicy,
-                  endpointStatus: contact.peerEndpointStatus,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: InfoTile(
-                    title: 'Transport',
-                    subtitle: switch (contact.transportPolicy) {
-                      ContactTransportPolicy.relayOnly => 'Tylko relay',
-                      ContactTransportPolicy.peerOnly => 'Tylko P2P',
-                      ContactTransportPolicy.peerWithRelayFallback =>
-                        'P2P z fallbackiem relay',
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const Divider(),
-          const InfoListSection(
-            title: 'WSPÓŁDZIELONE',
-            items: [
-              InfoTile(title: 'Media', subtitle: '0'),
-              InfoTile(title: 'Pliki', subtitle: '0'),
-              InfoTile(title: 'Linki', subtitle: '0'),
-            ],
-          ),
-          const Divider(),
-          TextButton.icon(
-            onPressed: onBack,
-            icon: const ThemedIcon(Icons.arrow_back),
-            label: const Text('Zamknij rozmowę'),
-          ),
-        ],
-      ),
     );
   }
 }
