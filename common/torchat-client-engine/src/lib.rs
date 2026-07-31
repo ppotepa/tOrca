@@ -13,9 +13,13 @@ pub mod storage;
 pub use actor::ClientEngineActor;
 pub use application::{
     CommandFamily, CommandOutcome, CommandRoute, CommandRouter, EffectExecutor, EngineEffect,
-    InlineEffectExecutor, OperationContext, OperationSource, ProjectionDirty,
+    InlineEffectExecutor, OperationContext, OperationSource, ProjectionDirty, QueryProjection,
+    QueryRoute, QueryRouter,
 };
-pub use command::{EngineCommand, EngineCommandEnvelope, PlatformFact, PlatformKind, TorPhase};
+pub use command::{
+    EngineCommand, EngineCommandEnvelope, EngineQuery, EngineRequest, PlatformFact, PlatformKind,
+    TorPhase,
+};
 pub use config::EngineConfig;
 pub use engine::ClientEngine;
 pub use error::{EngineError, EngineResult};

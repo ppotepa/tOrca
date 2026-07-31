@@ -152,8 +152,76 @@ pub enum EngineCommand {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum EngineQuery {
+    GetIdentity,
+    GetProfile,
+    GetPairingInbox,
+    GetPairingOutbox,
+    ListContacts,
+    ListConversations,
+    ListMessages {
+        conversation_id: String,
+    },
+    GetPeerEndpoint,
+    GetApplicationSnapshot,
+    GetDiagnostics,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "request", rename_all = "snake_case")]
+pub enum EngineRequest {
+    Command(EngineCommand),
+    Query(EngineQuery),
+}
+
+impl EngineCommand {
+    pub fn legacy_query(&self) -> Option<EngineQuery> {
+        match self {
+            Self::GetIdentity => Some(EngineQuery::GetIdentity),
+            Self::GetProfile => Some(EngineQuery::GetProfile),
+            Self::ListContacts => Some(EngineQuery::ListContacts),
+            Self::ListConversations => Some(EngineQuery::ListConversations),
+            Self::ListMessages { conversation_id } => Some(EngineQuery::ListMessages {
+                conversation_id: conversation_id.clone(),
+            }),
+            Self::GetPeerEndpoint => Some(EngineQuery::GetPeerEndpoint),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EngineCommandEnvelope {
     pub request_id: String,
     pub command: EngineCommand,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_local_reads_map_to_pure_queries() {
+        assert_eq!(
+            EngineCommand::ListContacts.legacy_query(),
+            Some(EngineQuery::ListContacts),
+        );
+        assert_eq!(
+            EngineCommand::ListMessages {
+                conversation_id: "conversation".to_owned(),
+            }
+            .legacy_query(),
+            Some(EngineQuery::ListMessages {
+                conversation_id: "conversation".to_owned(),
+            }),
+        );
+    }
+
+    #[test]
+    fn synchronizing_pairing_commands_do_not_claim_query_semantics() {
+        assert_eq!(EngineCommand::PairingInbox.legacy_query(), None);
+        assert_eq!(EngineCommand::PairingOutbox.legacy_query(), None);
+    }
 }
