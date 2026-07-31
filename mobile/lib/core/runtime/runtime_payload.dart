@@ -120,7 +120,8 @@ class RuntimePayload {
             type == EngineContract.messageStateChanged ||
             type == EngineContract.conversationReadChanged ||
             type == EngineContract.typingChanged ||
-            type == EngineContract.presenceChanged) {
+            type == EngineContract.presenceChanged ||
+            type == 'notification_opened') {
           final payload = toMap()..remove(EngineContract.type);
           return DataChangedEvent(type, payload);
         }

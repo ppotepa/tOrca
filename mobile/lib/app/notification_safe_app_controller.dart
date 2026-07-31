@@ -6,6 +6,7 @@ import '../client_runtime.dart';
 import '../core/models/domain.dart';
 import '../core/relationships/relationship_message.dart';
 import 'app_controller_legacy.dart' as legacy;
+import 'conversation_navigation_intent.dart';
 import 'desktop_notification_service.dart';
 import 'pairing_recovery_app_controller.dart';
 
@@ -23,6 +24,13 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
     final initial = super.build();
     final repository = ref.watch(legacy.runtimeRepositoryProvider);
     _notificationEvents ??= repository.events.listen((event) {
+      if (event is DataChangedEvent && event.type == 'notification_opened') {
+        ConversationNavigationIntents.openConversation(
+          conversationId: event.payload['conversationId']?.toString() ?? '',
+          notificationId: event.payload['notificationId']?.toString() ?? '',
+        );
+        return;
+      }
       if (event is! NotificationRequestedEvent) return;
       unawaited(
         DesktopNotificationService.show(
@@ -124,10 +132,6 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
       }
     }
 
-    // Relationship removal is fail-closed locally. A transient transport
-    // failure must never leave a relationship active after the user removed
-    // it. The durable message pipeline normally accepts the removal while
-    // offline; any exceptional failure is surfaced after local state is safe.
     await super.updateContactSettings(
       contact,
       localAlias,
@@ -231,10 +235,7 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
             removal = candidate;
             break;
           }
-        } catch (_) {
-          // The preview fallback keeps compatibility with older runtime
-          // implementations while the real message list remains canonical.
-        }
+        } catch (_) {}
 
         removal ??= RelationshipRemovedMessage.tryDecode(conversation.preview);
         if (removal == null) continue;
@@ -254,8 +255,6 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
         if (activeSince != null &&
             storedAt != null &&
             !storedAt.toUtc().isAfter(activeSince.toUtc())) {
-          // This control message belongs to history retained from an older
-          // relationship. A fresh pairing and MLS generation supersede it.
           continue;
         }
 
@@ -290,10 +289,7 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
         }
         await repository.deleteMessageLocal(message.id);
       }
-    } catch (_) {
-      // Storage-level tombstones remain the final guard. This cleanup prevents
-      // a stale retry through older runtime implementations when available.
-    }
+    } catch (_) {}
   }
 
   Future<void> _deleteHistoryExceptRemoval(String conversationId) async {

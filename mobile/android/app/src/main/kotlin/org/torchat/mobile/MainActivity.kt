@@ -1,5 +1,6 @@
 package org.torchat.mobile
 
+import android.app.NotificationManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.MediaPlayer
@@ -27,6 +28,7 @@ class MainActivity : FlutterActivity() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var eventSink: EventChannel.EventSink? = null
     private var introPlayer: MediaPlayer? = null
+    private var pendingNotificationOpen: Map<String, Any?>? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -38,11 +40,18 @@ class MainActivity : FlutterActivity() {
         intent.removeExtra("reset_dev_state")
         intent.removeExtra("clean_state")
         ContextCompat.startForegroundService(this, serviceIntent)
+        handleNotificationIntent(intent)
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED
         ) {
             requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 4102)
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleNotificationIntent(intent)
     }
 
     override fun configureFlutterEngine(engine: FlutterEngine) {
@@ -54,6 +63,10 @@ class MainActivity : FlutterActivity() {
                     eventSink = events
                     val sink = events ?: return
                     TorChatForegroundService.runtimeSnapshot().forEach(sink::success)
+                    pendingNotificationOpen?.also { event ->
+                        pendingNotificationOpen = null
+                        sink.success(event)
+                    }
                 }
 
                 override fun onCancel(arguments: Any?) {
@@ -72,6 +85,36 @@ class MainActivity : FlutterActivity() {
                     .onSuccess { result.success(null) }
                     .onFailure { result.error("AUDIO", it.message, null) }
             }
+    }
+
+    private fun handleNotificationIntent(source: Intent) {
+        if (source.action != NotificationNavigation.ACTION_OPEN_CONVERSATION) return
+        val conversationId = source
+            .getStringExtra(NotificationNavigation.EXTRA_CONVERSATION_ID)
+            ?.trim()
+            .orEmpty()
+        val notificationId = source.getIntExtra(
+            NotificationNavigation.EXTRA_NOTIFICATION_ID,
+            -1,
+        )
+        source.action = null
+        source.removeExtra(NotificationNavigation.EXTRA_CONVERSATION_ID)
+        source.removeExtra(NotificationNavigation.EXTRA_NOTIFICATION_ID)
+        if (conversationId.isEmpty()) return
+
+        val event = mapOf<String, Any?>(
+            EngineContract.TYPE to NotificationNavigation.EVENT_TYPE,
+            EngineContract.CONVERSATION_ID to conversationId,
+            "notificationId" to notificationId.toString(),
+        )
+        if (eventSink == null) {
+            pendingNotificationOpen = event
+        } else {
+            emit(event)
+        }
+        if (notificationId >= 0) {
+            getSystemService(NotificationManager::class.java).cancel(notificationId)
+        }
     }
 
     private fun playIntro() {
@@ -124,11 +167,10 @@ class MainActivity : FlutterActivity() {
             EngineContract.SET_NICKNAME -> runAsync(result) {
                 val nickname = call.argument<String>(EngineContract.NICKNAME)?.trim().orEmpty()
                 require(nickname.length in 2..32) { "Nick musi miec od 2 do 32 znakow" }
-                val profile = readyEngineHost().submitCommandAndAwait(
+                readyEngineHost().submitCommandAndAwait(
                     engineCommand(EngineContract.COMMAND_SET_NICKNAME)
                         .put(EngineContract.NICKNAME, nickname),
                 )
-                profile
             }
             EngineContract.SUBMIT_PAIRING_CODE -> submitCommandResult(
                 result,
