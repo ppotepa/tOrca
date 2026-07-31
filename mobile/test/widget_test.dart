@@ -39,7 +39,6 @@ class _SplashRuntime implements ClientRuntime {
   Future<void> rejectPairing(String pairingId) async {}
   @override
   Future<void> cancelPairing(String pairingId) async {}
-
   @override
   Future<void> archivePairing(String pairingId) async {}
   @override
@@ -66,7 +65,6 @@ class _SplashRuntime implements ClientRuntime {
   Future<List<ChatMessage>> messages(String id) async => const [];
   @override
   Future<void> openConversation(String id) async {}
-
   @override
   Future<void> closeConversation() async {}
   @override
@@ -87,9 +85,47 @@ class _SplashRuntime implements ClientRuntime {
   Future<void> setPresence(bool online) async {}
   @override
   Future<void> sendReadReceipts(String conversationId) async {}
-
   @override
   Future<void> updateAppVisibility(bool foreground) async {}
+}
+
+class _AttachedRuntime extends _SplashRuntime
+    implements RuntimeAttachmentProvider {
+  const _AttachedRuntime();
+
+  static const identityValue = RuntimeIdentity(
+    installationId: 'alice-device',
+    fingerprint: 'AA:BB',
+    publicKey: 'alice-public-key',
+  );
+  static const profileValue = RuntimeProfile(
+    installationId: 'alice-device',
+    nickname: 'Alice',
+    fingerprint: 'AA:BB',
+    publicKey: 'alice-public-key',
+  );
+
+  @override
+  Future<Map<String, dynamic>?> runtimeSnapshot() async => {
+    'serviceAlive': true,
+    'localDataReady': true,
+    'identity': {
+      'installationId': identityValue.installationId,
+      'fingerprint': identityValue.fingerprint,
+      'publicKey': identityValue.publicKey,
+    },
+    'profile': {
+      'installationId': profileValue.installationId,
+      'nickname': profileValue.nickname,
+      'fingerprint': profileValue.fingerprint,
+      'publicKey': profileValue.publicKey,
+    },
+  };
+
+  @override
+  Future<RuntimeIdentity?> identity() async => identityValue;
+  @override
+  Future<RuntimeProfile?> profile() async => profileValue;
 }
 
 void main() {
@@ -98,5 +134,15 @@ void main() {
     expect(find.text('TorChat'), findsOneWidget);
     expect(find.text('Prywatne wiadomości przez Tor'), findsOneWidget);
     await tester.pump(const Duration(milliseconds: 900));
+  });
+
+  testWidgets('reattaches to running Android session without warmup replay', (
+    tester,
+  ) async {
+    await tester.pumpWidget(const TorChatMobileApp(runtime: _AttachedRuntime()));
+    await tester.pump();
+
+    expect(find.text('@Alice'), findsOneWidget);
+    expect(find.text('Rozgrzewanie TorChat'), findsNothing);
   });
 }
