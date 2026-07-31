@@ -1,5 +1,6 @@
 import '../models/domain.dart';
 import 'connection_component.dart';
+import 'sequential_connection_sequence.dart';
 
 class ConnectionReadiness {
   const ConnectionReadiness({
@@ -24,7 +25,12 @@ class ConnectionReadiness {
     );
     final onionStep = _step(startupSteps, StartupStepKind.onionService);
 
-    final engineState = _fromStartupState(engineStep.state);
+    // Local data cannot be available before the engine has opened its state.
+    // Treat a successful identity read as authoritative even if the earlier
+    // runtime-ready event arrived before Flutter attached to the event stream.
+    final engineState = localDataReady
+        ? ConnectionComponentState.ready
+        : _fromStartupState(engineStep.state);
     final localDataState = engineState == ConnectionComponentState.failed
         ? ConnectionComponentState.failed
         : localDataReady
@@ -32,18 +38,16 @@ class ConnectionReadiness {
         : engineState == ConnectionComponentState.pending
         ? ConnectionComponentState.pending
         : ConnectionComponentState.starting;
-    final tor = _torStatus(transport);
-    final relay = _relayStatus(transport);
 
-    return ConnectionReadiness(
-      engine: ConnectionComponentStatus(
+    final raw = <ConnectionComponentStatus>[
+      ConnectionComponentStatus(
         component: ConnectionComponent.engine,
         state: engineState,
         detail: engineStep.detail.isEmpty
             ? ConnectionComponent.engine.description
             : engineStep.detail,
       ),
-      localData: ConnectionComponentStatus(
+      ConnectionComponentStatus(
         component: ConnectionComponent.localData,
         state: localDataState,
         detail: localDataReady
@@ -52,20 +56,30 @@ class ConnectionReadiness {
             ? engineStep.detail
             : 'Odczytywanie tożsamości, profilu i lokalnego snapshotu',
       ),
-      tor: tor,
-      relay: relay,
-      peerListener: _peerStatus(
+      _torStatus(transport),
+      _relayStatus(transport),
+      _peerStatus(
         component: ConnectionComponent.peerListener,
         aggregate: peerServerStatus,
         step: peerListenerStep,
         allowReadyWhileAggregateStarts: true,
       ),
-      onionService: _peerStatus(
+      _peerStatus(
         component: ConnectionComponent.onionService,
         aggregate: peerServerStatus,
         step: onionStep,
         allowReadyWhileAggregateStarts: false,
       ),
+    ];
+    final sequential = sequentialConnectionStatuses(raw);
+
+    return ConnectionReadiness(
+      engine: sequential[0],
+      localData: sequential[1],
+      tor: sequential[2],
+      relay: sequential[3],
+      peerListener: sequential[4],
+      onionService: sequential[5],
     );
   }
 
@@ -133,6 +147,11 @@ class ConnectionReadiness {
       detail: tor.detail,
     ),
     StartupStep(
+      kind: StartupStepKind.relay,
+      state: _toStartupState(relay.state),
+      detail: relay.detail,
+    ),
+    StartupStep(
       kind: StartupStepKind.peerListener,
       state: _toStartupState(peerListener.state),
       detail: peerListener.detail,
@@ -141,11 +160,6 @@ class ConnectionReadiness {
       kind: StartupStepKind.onionService,
       state: _toStartupState(onionService.state),
       detail: onionService.detail,
-    ),
-    StartupStep(
-      kind: StartupStepKind.relay,
-      state: _toStartupState(relay.state),
-      detail: relay.detail,
     ),
     StartupStep(
       kind: StartupStepKind.communication,
@@ -165,7 +179,7 @@ class ConnectionReadiness {
   String _communicationDetail() {
     final firstBlocking = components.firstWhere(
       (item) => !item.ready,
-      orElse: () => relay,
+      orElse: () => onionService,
     );
     if (firstBlocking.state == ConnectionComponentState.failed) {
       return '${firstBlocking.component.title}: ${firstBlocking.detail}';
