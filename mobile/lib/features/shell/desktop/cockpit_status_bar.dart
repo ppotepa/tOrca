@@ -24,18 +24,6 @@ class CockpitStatusBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final shell = context.shellTheme;
-    final relayState = phase.isError
-        ? CockpitIndicatorState.error
-        : phase == TransportPhase.connected
-            ? CockpitIndicatorState.ready
-            : CockpitIndicatorState.transitioning;
-    final p2pState = switch (peerServerStatus) {
-      PeerServerStatus.ready => CockpitIndicatorState.ready,
-      PeerServerStatus.starting => CockpitIndicatorState.transitioning,
-      PeerServerStatus.offline => CockpitIndicatorState.inactive,
-      PeerServerStatus.error => CockpitIndicatorState.error,
-    };
-
     return Material(
       color: shell.surface,
       child: InkWell(
@@ -55,10 +43,7 @@ class CockpitStatusBar extends StatelessWidget {
             children: [
               const ThemedIcon(Icons.shield_outlined, size: 18),
               const SizedBox(width: 8),
-              Text(
-                'TorChat',
-                style: Theme.of(context).textTheme.titleSmall,
-              ),
+              Text('TorChat', style: Theme.of(context).textTheme.titleSmall),
               const Spacer(),
               const CockpitIndicator(
                 label: 'ENGINE',
@@ -68,15 +53,15 @@ class CockpitStatusBar extends StatelessWidget {
               const SizedBox(width: 10),
               CockpitIndicator(
                 label: 'TOR RELAY',
-                state: relayState,
+                state: cockpitRelayState(phase),
                 detail: latencyMs == null
                     ? 'Połączenie z relayem przez Tor'
-                    : 'Połączenie z relayem · ${latencyMs} ms',
+                    : 'Połączenie z relayem · $latencyMs ms',
               ),
               const SizedBox(width: 10),
               CockpitIndicator(
                 label: 'TOR P2P',
-                state: p2pState,
+                state: cockpitP2pState(peerServerStatus),
                 detail: peerServerStatus.label,
               ),
               const Spacer(),
@@ -101,6 +86,84 @@ class CockpitStatusBar extends StatelessWidget {
   }
 }
 
+class CompactCockpitStatusBar extends StatelessWidget {
+  const CompactCockpitStatusBar({
+    super.key,
+    required this.phase,
+    required this.peerServerStatus,
+    required this.onOpenConnectionCenter,
+    this.latencyMs,
+  });
+
+  final TransportPhase phase;
+  final PeerServerStatus peerServerStatus;
+  final int? latencyMs;
+  final VoidCallback onOpenConnectionCenter;
+
+  @override
+  Widget build(BuildContext context) {
+    final shell = context.shellTheme;
+    return Material(
+      color: shell.surface,
+      child: InkWell(
+        onTap: onOpenConnectionCenter,
+        child: Container(
+          height: 34,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+            border: Border(
+              bottom: BorderSide(
+                color: shell.border,
+                width: shell.borderWidth,
+              ),
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const CockpitIndicator(
+                label: 'ENG',
+                state: CockpitIndicatorState.ready,
+                detail: 'Engine gotowy',
+                compact: true,
+              ),
+              const SizedBox(width: 6),
+              CockpitIndicator(
+                label: 'RELAY',
+                state: cockpitRelayState(phase),
+                detail: latencyMs == null
+                    ? phase.label
+                    : '${phase.label} · $latencyMs ms',
+                compact: true,
+              ),
+              const SizedBox(width: 6),
+              CockpitIndicator(
+                label: 'P2P',
+                state: cockpitP2pState(peerServerStatus),
+                detail: peerServerStatus.label,
+                compact: true,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+CockpitIndicatorState cockpitRelayState(TransportPhase phase) => phase.isError
+    ? CockpitIndicatorState.error
+    : phase == TransportPhase.connected
+        ? CockpitIndicatorState.ready
+        : CockpitIndicatorState.transitioning;
+
+CockpitIndicatorState cockpitP2pState(PeerServerStatus status) => switch (status) {
+      PeerServerStatus.ready => CockpitIndicatorState.ready,
+      PeerServerStatus.starting => CockpitIndicatorState.transitioning,
+      PeerServerStatus.offline => CockpitIndicatorState.inactive,
+      PeerServerStatus.error => CockpitIndicatorState.error,
+    };
+
 enum CockpitIndicatorState { ready, transitioning, inactive, error }
 
 class CockpitIndicator extends StatefulWidget {
@@ -109,11 +172,13 @@ class CockpitIndicator extends StatefulWidget {
     required this.label,
     required this.state,
     required this.detail,
+    this.compact = false,
   });
 
   final String label;
   final CockpitIndicatorState state;
   final String detail;
+  final bool compact;
 
   @override
   State<CockpitIndicator> createState() => _CockpitIndicatorState();
@@ -171,7 +236,10 @@ class _CockpitIndicatorState extends State<CockpitIndicator>
     return Tooltip(
       message: '${widget.label}\n${widget.detail}',
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        padding: EdgeInsets.symmetric(
+          horizontal: widget.compact ? 7 : 10,
+          vertical: widget.compact ? 3 : 5,
+        ),
         decoration: BoxDecoration(
           color: shell.raisedSurface,
           border: Border.all(color: shell.border, width: shell.borderWidth),
@@ -187,8 +255,8 @@ class _CockpitIndicatorState extends State<CockpitIndicator>
               builder: (context, _) => Opacity(
                 opacity: reduceMotion ? 1 : _pulse.value,
                 child: Container(
-                  width: 8,
-                  height: 8,
+                  width: widget.compact ? 6 : 8,
+                  height: widget.compact ? 6 : 8,
                   decoration: BoxDecoration(
                     color: color,
                     shape: BoxShape.circle,
@@ -197,18 +265,19 @@ class _CockpitIndicatorState extends State<CockpitIndicator>
                         : [
                             BoxShadow(
                               color: color.withValues(alpha: .45),
-                              blurRadius: 8,
+                              blurRadius: widget.compact ? 5 : 8,
                             ),
                           ],
                   ),
                 ),
               ),
             ),
-            const SizedBox(width: 7),
+            SizedBox(width: widget.compact ? 5 : 7),
             Text(
               widget.label,
               style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    letterSpacing: .7,
+                    fontSize: widget.compact ? 9 : null,
+                    letterSpacing: widget.compact ? .3 : .7,
                     fontWeight: FontWeight.w700,
                   ),
             ),
