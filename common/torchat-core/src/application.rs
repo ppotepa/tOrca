@@ -10,6 +10,27 @@ pub struct ApplicationReply {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContactRemovedPayloadV1 {
+    pub version: u16,
+    pub message_id: Uuid,
+    pub removed_at: i64,
+    pub preserve_history: bool,
+}
+
+impl ContactRemovedPayloadV1 {
+    pub fn encode(&self) -> Result<Vec<u8>, String> {
+        serde_json::to_vec(self)
+            .map_err(|error| format!("encode contact removal payload: {error}"))
+    }
+
+    pub fn decode(bytes: &[u8]) -> Result<Self, String> {
+        serde_json::from_slice(bytes)
+            .map_err(|error| format!("decode contact removal payload: {error}"))
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ApplicationPayloadV1 {
     Message {
@@ -35,19 +56,6 @@ pub enum ApplicationPayloadV1 {
 
         #[serde(rename = "receivedAt")]
         received_at: i64,
-    },
-
-    ContactRemoved {
-        version: u16,
-
-        #[serde(rename = "messageId")]
-        message_id: Uuid,
-
-        #[serde(rename = "removedAt")]
-        removed_at: i64,
-
-        #[serde(rename = "preserveHistory")]
-        preserve_history: bool,
     },
 
     Typing {
@@ -113,12 +121,6 @@ mod tests {
         assert_eq!(ApplicationPayloadV1::decode(&encoded).unwrap(), receipt);
 
         for payload in [
-            ApplicationPayloadV1::ContactRemoved {
-                version: 1,
-                message_id: Uuid::from_u128(8),
-                removed_at: 44,
-                preserve_history: true,
-            },
             ApplicationPayloadV1::Typing {
                 version: 1,
                 sent_at: 45,
@@ -138,5 +140,17 @@ mod tests {
             let encoded = payload.encode().unwrap();
             assert_eq!(ApplicationPayloadV1::decode(&encoded).unwrap(), payload);
         }
+    }
+
+    #[test]
+    fn contact_removal_payload_round_trips() {
+        let payload = ContactRemovedPayloadV1 {
+            version: 1,
+            message_id: Uuid::from_u128(8),
+            removed_at: 44,
+            preserve_history: true,
+        };
+        let encoded = payload.encode().unwrap();
+        assert_eq!(ContactRemovedPayloadV1::decode(&encoded).unwrap(), payload);
     }
 }
