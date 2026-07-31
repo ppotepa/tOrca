@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:collection';
+
 import '../../client_runtime.dart';
 import '../application_state/application_snapshot.dart';
 import '../application_state/application_state_store.dart';
@@ -37,19 +40,43 @@ final class RuntimeRefreshSnapshot {
   final RuntimePairingSnapshot? pairing;
 }
 
+enum ConversationMessagesPhase { idle, loading, ready, failed }
+
+final class ConversationMessagesLoadState {
+  const ConversationMessagesLoadState({
+    required this.conversationId,
+    required this.phase,
+    this.error = '',
+  });
+
+  final String conversationId;
+  final ConversationMessagesPhase phase;
+  final String error;
+}
+
 class RuntimeRepository {
   RuntimeRepository(this._runtime);
+
+  static const int _messageCacheLimit = 5;
+
   final ClientRuntime _runtime;
   final RefreshCoordinator _refreshCoordinator = RefreshCoordinator();
-  final ApplicationStateStore applicationState = ApplicationStateStore();
+  final ApplicationStateStore applicationState = ApplicationStateStore.shared;
+  final LinkedHashMap<String, List<ChatMessage>> _messageCache =
+      LinkedHashMap<String, List<ChatMessage>>();
+  final StreamController<ConversationMessagesLoadState> _messageLoadController =
+      StreamController<ConversationMessagesLoadState>.broadcast(sync: true);
 
   Future<RuntimeLocalSnapshot>? _localBatchInFlight;
   Future<RuntimePairingSnapshot>? _pairingBatchInFlight;
   Future<ApplicationSnapshot>? _applicationSnapshotInFlight;
+  bool _applicationSnapshotIncludesPairing = false;
   RuntimeLocalSnapshot? _latestLocalSnapshot;
   RuntimePairingSnapshot? _latestPairingSnapshot;
   DateTime? _localCacheTime;
   DateTime? _pairingCacheTime;
+  Timer? _snapshotRefreshDebounce;
+  bool _snapshotRefreshNeedsPairing = false;
   int _snapshotGeneration = 0;
   final Map<String, Future<List<ChatMessage>>> _messagesInFlight = {};
   final Map<String, bool> _lastTyping = {};
@@ -61,47 +88,81 @@ class RuntimeRepository {
   }).asBroadcastStream();
 
   Stream<RuntimeEvent> get events => _events;
+  Stream<ApplicationSnapshot?> get applicationSnapshots => applicationState.changes;
+  Stream<ConversationMessagesLoadState> get messageLoadStates =>
+      _messageLoadController.stream;
 
   Future<bool> connect() async {
     final connected = await _runtime.connect();
     _lastTyping.clear();
     _lastPresence = null;
-    invalidateLocalCache();
+
+    // A retained process can render from the shared snapshot immediately.
+    // Refresh it in the background. A cold process builds the snapshot once
+    // before the controller starts requesting the same local resources.
+    if (applicationState.hasSnapshot) {
+      _refreshApplicationSnapshotInBackground();
+    } else {
+      try {
+        await applicationSnapshot(force: true);
+      } catch (_) {
+        // Existing identity/profile calls remain the compatibility fallback.
+      }
+    }
     return connected;
   }
 
   Future<RuntimeIdentity> identity() async =>
-      await _runtime.identity() ?? const RuntimeIdentity();
+      applicationState.current?.identity ??
+      await _runtime.identity() ??
+      const RuntimeIdentity();
+
   Future<RuntimeProfile> profile() async =>
-      await _runtime.profile() ?? const RuntimeProfile();
+      applicationState.current?.profile ??
+      await _runtime.profile() ??
+      const RuntimeProfile();
+
   Future<RuntimeProfile> setNickname(String value) async {
     final profile = await _runtime.setNickname(value);
     final current = applicationState.current;
     if (current != null) {
-      applicationState.hydrate(current.copyWith(
-        profile: profile,
-        generation: current.generation + 1,
-        createdAtMs: DateTime.now().millisecondsSinceEpoch,
-      ));
+      applicationState.hydrate(
+        current.copyWith(
+          profile: profile,
+          generation: _nextGeneration(current.generation),
+          createdAtMs: DateTime.now().millisecondsSinceEpoch,
+        ),
+      );
     }
     return profile;
   }
+
   Future<InviteCode?> refreshInviteCode() => _runtime.refreshPairingCode();
 
   Future<ApplicationSnapshot> applicationSnapshot({
     bool includePairing = false,
     bool force = false,
   }) {
-    if (!force && applicationState.current case final current?) {
-      return Future.value(current);
+    final cached = applicationState.current;
+    if (!force && cached != null && !applicationState.isStale) {
+      return Future.value(cached);
     }
+
     final inFlight = _applicationSnapshotInFlight;
-    if (inFlight != null) return inFlight;
+    if (inFlight != null) {
+      if (!includePairing || _applicationSnapshotIncludesPairing) return inFlight;
+      return inFlight.then(
+        (_) => applicationSnapshot(includePairing: true, force: true),
+      );
+    }
+
+    _applicationSnapshotIncludesPairing = includePairing;
     final request = _buildApplicationSnapshot(includePairing: includePairing);
     _applicationSnapshotInFlight = request;
     return request.whenComplete(() {
       if (identical(_applicationSnapshotInFlight, request)) {
         _applicationSnapshotInFlight = null;
+        _applicationSnapshotIncludesPairing = false;
       }
     });
   }
@@ -110,38 +171,66 @@ class RuntimeRepository {
     required bool includePairing,
   }) async {
     final values = await Future.wait<Object>([
-      identity(),
-      profile(),
+      _runtime.identity().then((value) => value ?? const RuntimeIdentity()),
+      _runtime.profile().then((value) => value ?? const RuntimeProfile()),
       _loadLocalBatch(force: true),
       if (includePairing) _loadPairingBatch(force: true),
     ]);
+
     final identityValue = values[0] as RuntimeIdentity;
     final profileValue = values[1] as RuntimeProfile;
     final local = values[2] as RuntimeLocalSnapshot;
     final pairing = includePairing && values.length > 3
         ? values[3] as RuntimePairingSnapshot
         : _latestPairingSnapshot;
-    final generation = [
-      local.generation,
-      pairing?.generation ?? 0,
-      ++_snapshotGeneration,
-    ].reduce((left, right) => left > right ? left : right);
+
+    final contacts = [...local.contacts]
+      ..sort((left, right) {
+        final leftName = left.displayName.toLowerCase();
+        final rightName = right.displayName.toLowerCase();
+        return leftName.compareTo(rightName) != 0
+            ? leftName.compareTo(rightName)
+            : left.id.compareTo(right.id);
+      });
+    final conversations = [...local.conversations]
+      ..sort((left, right) {
+        final byTime = right.lastMessageAt.compareTo(left.lastMessageAt);
+        return byTime != 0 ? byTime : left.id.compareTo(right.id);
+      });
+
     final snapshot = ApplicationSnapshot(
-      generation: generation,
+      generation: _nextGeneration(local.generation),
       createdAtMs: DateTime.now().millisecondsSinceEpoch,
       identity: identityValue,
       profile: profileValue,
-      contacts: List.unmodifiable(local.contacts),
-      conversations: List.unmodifiable(local.conversations),
-      pendingInbox: pairing?.inbox.pendingCount ?? 0,
+      contacts: List.unmodifiable(contacts),
+      conversations: List.unmodifiable(conversations),
+      pendingInbox: pairing?.inbox.pendingCount ??
+          applicationState.current?.pendingInbox ??
+          0,
       pendingOutbox: pairing?.outbox
-              .where((item) => item.status == InviteState.pending)
+              .where(
+                (item) =>
+                    item.status == InviteState.pending ||
+                    item.status == InviteState.accepted,
+              )
               .length ??
+          applicationState.current?.pendingOutbox ??
           0,
       peerEndpointAvailable: local.peerEndpointAvailable,
     );
     applicationState.hydrate(snapshot);
     return snapshot;
+  }
+
+  int _nextGeneration([int minimum = 0]) {
+    final current = applicationState.current?.generation ?? 0;
+    _snapshotGeneration = [
+      _snapshotGeneration + 1,
+      current + 1,
+      minimum + 1,
+    ].reduce((left, right) => left > right ? left : right);
+    return _snapshotGeneration;
   }
 
   Future<RuntimeRefreshSnapshot> refresh({
@@ -156,6 +245,7 @@ class RuntimeRepository {
       await applicationSnapshot(includePairing: includePairing, force: true);
       return RuntimeRefreshSnapshot(local: local, pairing: pairing);
     }
+
     await _refreshCoordinator.schedule(
       includeRemote: includePairing,
       local: (_) async {
@@ -166,7 +256,9 @@ class RuntimeRepository {
       },
     );
     final local = _latestLocalSnapshot;
-    if (local == null) throw StateError('Local runtime refresh produced no snapshot');
+    if (local == null) {
+      throw StateError('Local runtime refresh produced no snapshot');
+    }
     await applicationSnapshot(includePairing: includePairing, force: true);
     return RuntimeRefreshSnapshot(
       local: local,
@@ -177,30 +269,45 @@ class RuntimeRepository {
   bool get _localCacheFresh {
     final time = _localCacheTime;
     return time != null &&
-        DateTime.now().difference(time) < const Duration(milliseconds: 350);
+        DateTime.now().difference(time) < const Duration(seconds: 2);
   }
 
   bool get _pairingCacheFresh {
     final time = _pairingCacheTime;
     return time != null &&
-        DateTime.now().difference(time) < const Duration(seconds: 5);
+        DateTime.now().difference(time) < const Duration(seconds: 10);
   }
 
   Future<RuntimeLocalSnapshot> _loadLocalBatch({bool force = false}) {
     if (!force && _localCacheFresh && _latestLocalSnapshot != null) {
       return Future.value(_latestLocalSnapshot!);
     }
+
+    final retained = applicationState.current;
+    if (!force && retained != null && !applicationState.isStale) {
+      final snapshot = RuntimeLocalSnapshot(
+        contacts: retained.contacts,
+        conversations: retained.conversations,
+        peerEndpointAvailable: retained.peerEndpointAvailable,
+        generation: retained.generation,
+      );
+      _latestLocalSnapshot = snapshot;
+      _localCacheTime = DateTime.now();
+      return Future.value(snapshot);
+    }
+
     final current = _localBatchInFlight;
     if (current != null) return current;
-    final generation = ++_snapshotGeneration;
+    final generation = _nextGeneration();
     final request = Future.wait<Object>([
       _runtime.contacts(),
       _runtime.conversations(),
       _runtime.peerEndpointAvailable(),
     ]).then((values) {
       final snapshot = RuntimeLocalSnapshot(
-        contacts: values[0] as List<ContactRecord>,
-        conversations: values[1] as List<ConversationSummary>,
+        contacts: List.unmodifiable(values[0] as List<ContactRecord>),
+        conversations:
+            List.unmodifiable(values[1] as List<ConversationSummary>),
         peerEndpointAvailable: values[2] as bool,
         generation: generation,
       );
@@ -220,14 +327,14 @@ class RuntimeRepository {
     }
     final current = _pairingBatchInFlight;
     if (current != null) return current;
-    final generation = ++_snapshotGeneration;
+    final generation = _nextGeneration();
     final request = Future.wait<Object>([
       _runtime.pairingInbox(),
       _runtime.pairingOutbox(),
     ]).then((values) {
       final snapshot = RuntimePairingSnapshot(
-        inbox: values[0] as List<PairingItem>,
-        outbox: values[1] as List<PairingItem>,
+        inbox: List.unmodifiable(values[0] as List<PairingItem>),
+        outbox: List.unmodifiable(values[1] as List<PairingItem>),
         generation: generation,
       );
       _latestPairingSnapshot = snapshot;
@@ -242,36 +349,79 @@ class RuntimeRepository {
     });
   }
 
-  void invalidateLocalCache() {
+  void invalidateLocalCache({bool markSnapshotStale = true}) {
     _localCacheTime = null;
     _latestLocalSnapshot = null;
+    if (markSnapshotStale) applicationState.markStale();
   }
 
-  void invalidatePairingCache() {
+  void invalidatePairingCache({bool markSnapshotStale = true}) {
     _pairingCacheTime = null;
     _latestPairingSnapshot = null;
+    if (markSnapshotStale) applicationState.markStale();
   }
 
   void _invalidateCachesForEvent(RuntimeEvent event) {
+    var refreshShell = false;
+    var includePairing = false;
     switch (event) {
       case ProfileReadyEvent():
       case PeerEndpointChangedEvent():
       case PeerConnectionChangedEvent():
         invalidateLocalCache();
+        refreshShell = true;
       case DataChangedEvent(:final type):
         invalidateLocalCache();
+        refreshShell = true;
         if (type == EngineContract.inviteReceived ||
             type == EngineContract.inviteStateChanged) {
           invalidatePairingCache();
+          includePairing = true;
+        }
+        if (type.startsWith('messages:')) {
+          invalidateMessages(type.substring('messages:'.length));
         }
       default:
         break;
     }
+    if (refreshShell) {
+      _scheduleApplicationSnapshotRefresh(includePairing: includePairing);
+    }
+  }
+
+  void _scheduleApplicationSnapshotRefresh({bool includePairing = false}) {
+    _snapshotRefreshNeedsPairing =
+        _snapshotRefreshNeedsPairing || includePairing;
+    _snapshotRefreshDebounce?.cancel();
+    _snapshotRefreshDebounce = Timer(const Duration(milliseconds: 160), () {
+      final withPairing = _snapshotRefreshNeedsPairing;
+      _snapshotRefreshNeedsPairing = false;
+      _refreshApplicationSnapshotInBackground(includePairing: withPairing);
+    });
+  }
+
+  void _refreshApplicationSnapshotInBackground({bool includePairing = false}) {
+    unawaited(
+      applicationSnapshot(includePairing: includePairing, force: true)
+          .then<void>((_) {})
+          .catchError((Object _, StackTrace __) {}),
+    );
+  }
+
+  void _warmPairingCache() {
+    unawaited(
+      _loadPairingBatch()
+          .then<void>((_) {
+            _refreshApplicationSnapshotInBackground(includePairing: true);
+          })
+          .catchError((Object _, StackTrace __) {}),
+    );
   }
 
   Future<PairingItem> submitPairingCode(String code) async {
     final item = await _runtime.submitPairingCode(code);
     invalidatePairingCache();
+    _scheduleApplicationSnapshotRefresh(includePairing: true);
     return item;
   }
 
@@ -279,26 +429,31 @@ class RuntimeRepository {
     await _runtime.acceptPairing(id);
     invalidatePairingCache();
     invalidateLocalCache();
+    _scheduleApplicationSnapshotRefresh(includePairing: true);
   }
 
   Future<void> rejectPairing(String id) async {
     await _runtime.rejectPairing(id);
     invalidatePairingCache();
+    _scheduleApplicationSnapshotRefresh(includePairing: true);
   }
 
   Future<void> archiveInvite(String id) async {
     await _runtime.archivePairing(id);
     invalidatePairingCache();
+    _scheduleApplicationSnapshotRefresh(includePairing: true);
   }
 
   Future<void> cancelPairing(String id) async {
     await _runtime.cancelPairing(id);
     invalidatePairingCache();
+    _scheduleApplicationSnapshotRefresh(includePairing: true);
   }
 
   Future<void> verifyContact(String id) async {
     await _runtime.verifyContact(id);
     invalidateLocalCache();
+    _scheduleApplicationSnapshotRefresh();
   }
 
   Future<ContactRecord> updateContactSettings(
@@ -316,6 +471,7 @@ class RuntimeRepository {
       transportPolicy: transportPolicy,
     );
     invalidateLocalCache();
+    _scheduleApplicationSnapshotRefresh();
     return contact;
   }
 
@@ -325,10 +481,43 @@ class RuntimeRepository {
   Future<List<ConversationSummary>> conversations() async =>
       (await _loadLocalBatch()).conversations;
 
-  Future<List<ChatMessage>> messages(String id) {
+  Future<List<ChatMessage>> messages(String id, {bool force = false}) {
+    if (!force && _messageCache.remove(id) case final cached?) {
+      _messageCache[id] = cached;
+      return Future.value(cached);
+    }
     final current = _messagesInFlight[id];
     if (current != null) return current;
-    final request = _runtime.messages(id);
+
+    _messageLoadController.add(
+      ConversationMessagesLoadState(
+        conversationId: id,
+        phase: ConversationMessagesPhase.loading,
+      ),
+    );
+    final request = _runtime.messages(id).then((messages) {
+      final immutable = List<ChatMessage>.unmodifiable(messages);
+      _messageCache[id] = immutable;
+      while (_messageCache.length > _messageCacheLimit) {
+        _messageCache.remove(_messageCache.keys.first);
+      }
+      _messageLoadController.add(
+        ConversationMessagesLoadState(
+          conversationId: id,
+          phase: ConversationMessagesPhase.ready,
+        ),
+      );
+      return immutable;
+    }).catchError((Object error, StackTrace stackTrace) {
+      _messageLoadController.add(
+        ConversationMessagesLoadState(
+          conversationId: id,
+          phase: ConversationMessagesPhase.failed,
+          error: error.toString(),
+        ),
+      );
+      Error.throwWithStackTrace(error, stackTrace);
+    });
     _messagesInFlight[id] = request;
     return request.whenComplete(() {
       if (identical(_messagesInFlight[id], request)) {
@@ -337,11 +526,29 @@ class RuntimeRepository {
     });
   }
 
-  Future<List<PairingItem>> inbox({bool force = false}) async =>
-      (await _loadPairingBatch(force: force)).inbox;
+  void invalidateMessages([String? conversationId]) {
+    if (conversationId == null || conversationId.isEmpty) {
+      _messageCache.clear();
+      return;
+    }
+    _messageCache.remove(conversationId);
+  }
 
-  Future<List<PairingItem>> outbox({bool force = false}) async =>
-      (await _loadPairingBatch(force: force)).outbox;
+  Future<List<PairingItem>> inbox({bool force = false}) async {
+    if (force) return (await _loadPairingBatch(force: true)).inbox;
+    final current = _latestPairingSnapshot;
+    if (current != null) return current.inbox;
+    _warmPairingCache();
+    return const [];
+  }
+
+  Future<List<PairingItem>> outbox({bool force = false}) async {
+    if (force) return (await _loadPairingBatch(force: true)).outbox;
+    final current = _latestPairingSnapshot;
+    if (current != null) return current.outbox;
+    _warmPairingCache();
+    return const [];
+  }
 
   Future<PeerEndpoint?> peerEndpoint() => _runtime.peerEndpoint();
 
@@ -351,22 +558,27 @@ class RuntimeRepository {
   Future<void> retryPeerConnection(String installationId) async {
     await _runtime.retryPeerConnection(installationId);
     invalidateLocalCache();
+    _scheduleApplicationSnapshotRefresh();
   }
 
   Future<void> rotatePeerEndpoint() async {
     await _runtime.rotatePeerEndpoint();
     invalidateLocalCache();
+    _scheduleApplicationSnapshotRefresh();
   }
 
   Future<void> openConversation(String id) async {
     await _runtime.openConversation(id);
     invalidateLocalCache();
+    _scheduleApplicationSnapshotRefresh();
   }
+
   Future<void> closeConversation() => _runtime.closeConversation();
 
   Future<void> startConversation(String id) async {
     await _runtime.startConversation(id);
     invalidateLocalCache();
+    _scheduleApplicationSnapshotRefresh();
   }
 
   Future<void> sendMessage(
@@ -375,17 +587,23 @@ class RuntimeRepository {
     String? replyToMessageId,
   }) async {
     await _runtime.sendMessage(id, text, replyToMessageId: replyToMessageId);
+    invalidateMessages(id);
     invalidateLocalCache();
+    _scheduleApplicationSnapshotRefresh();
   }
 
   Future<void> retryMessage(String messageId) async {
     await _runtime.retryMessage(messageId);
+    invalidateMessages();
     invalidateLocalCache();
+    _scheduleApplicationSnapshotRefresh();
   }
 
   Future<void> deleteMessageLocal(String messageId) async {
     await _runtime.deleteMessageLocal(messageId);
+    invalidateMessages();
     invalidateLocalCache();
+    _scheduleApplicationSnapshotRefresh();
   }
 
   Future<void> setTyping(String conversationId, bool typing) async {
