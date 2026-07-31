@@ -49,6 +49,7 @@ Commands:
   stack   [start|stop|restart|status|reset|repair]
   build   [server|desktop-runtime|android|windows|clients|all]
   deploy  [android|windows|all]
+  deploy-clean
   run     [android|windows|all]
   stop    [android|windows|all]
   test    [runtime|flutter|android|windows|all]
@@ -60,6 +61,7 @@ Examples:
   .\scripts\torchat.ps1 deploy all
   .\scripts\torchat.ps1 deploy android -Device auto
   .\scripts\torchat.ps1 deploy all -Device all
+  .\scripts\torchat.ps1 deploy-clean
   .\scripts\torchat.ps1 run android -Device auto
   .\scripts\torchat.ps1 stack restart -OnionPolicy preserve
   .\scripts\torchat.ps1 stop all -Device all
@@ -113,6 +115,18 @@ switch ($Command) {
         if ($BuildPolicy -eq 'smart') { $BuildPolicy = 'rebuild' }
         if ($InstallPolicy -eq 'if-changed') { $InstallPolicy = 'always' }
         if ($RunPolicy -eq 'restart') { $RunPolicy = 'start' }
+    }
+    'deploy-clean' {
+        $Command = 'deploy'
+        $Target = 'all'
+        $BuildPolicy = 'rebuild'
+        $OnionPolicy = 'rotate'
+        $DatabasePolicy = 'reset'
+        $ClientDataPolicy = 'reset'
+        $InstallPolicy = 'always'
+        $RunPolicy = 'restart'
+        $StackPolicy = 'ensure'
+        $Confirm = $true
     }
     'redeploy' {
         $Command = 'deploy'
