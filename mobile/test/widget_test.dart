@@ -1,5 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:torchat_mobile/client_runtime.dart';
+import 'package:torchat_mobile/core/application_state/application_snapshot_codec.dart';
+import 'package:torchat_mobile/core/application_state/application_state_store.dart';
 import 'package:torchat_mobile/main.dart';
 
 class _SplashRuntime implements ClientRuntime {
@@ -104,31 +106,79 @@ class _AttachedRuntime extends _SplashRuntime
     fingerprint: 'AA:BB',
     publicKey: 'alice-public-key',
   );
+  static const contactValue = ContactRecord(
+    id: 'bob-device',
+    nickname: 'Bob',
+    fingerprint: 'CC:DD',
+    publicKey: 'bob-public-key',
+    verified: true,
+  );
+  static const conversationValue = ConversationSummary(
+    id: 'bob-device',
+    contactId: 'bob-device',
+    preview: 'Wiadomość ze snapshotu',
+    unread: 1,
+  );
 
   @override
-  Future<Map<String, dynamic>?> runtimeSnapshot() async => {
-    'serviceAlive': true,
-    'localDataReady': true,
-    'identity': {
-      'installationId': identityValue.installationId,
-      'fingerprint': identityValue.fingerprint,
-      'publicKey': identityValue.publicKey,
-    },
-    'profile': {
-      'installationId': profileValue.installationId,
-      'nickname': profileValue.nickname,
-      'fingerprint': profileValue.fingerprint,
-      'publicKey': profileValue.publicKey,
-    },
-  };
+  Future<Map<String, dynamic>?> runtimeSnapshot() async {
+    final snapshot = <String, dynamic>{
+      'serviceAlive': true,
+      'localDataReady': true,
+      'generation': 10,
+      'createdAtMs': 10,
+      'identity': {
+        'installationId': identityValue.installationId,
+        'fingerprint': identityValue.fingerprint,
+        'publicKey': identityValue.publicKey,
+      },
+      'profile': {
+        'installationId': profileValue.installationId,
+        'nickname': profileValue.nickname,
+        'fingerprint': profileValue.fingerprint,
+        'publicKey': profileValue.publicKey,
+      },
+      'contacts': [
+        {
+          'installationId': contactValue.id,
+          'nickname': contactValue.nickname,
+          'fingerprint': contactValue.fingerprint,
+          'publicKey': contactValue.publicKey,
+          'verification': 'VERIFIED',
+        },
+      ],
+      'conversations': [
+        {
+          'id': conversationValue.id,
+          'contactInstallationId': conversationValue.contactId,
+          'lastMessagePreview': conversationValue.preview,
+          'unreadCount': conversationValue.unread,
+          'status': 'ACTIVE',
+        },
+      ],
+      'peerEndpointAvailable': true,
+    };
+    hydrateApplicationSnapshotMap(snapshot);
+    return snapshot;
+  }
 
   @override
   Future<RuntimeIdentity?> identity() async => identityValue;
   @override
   Future<RuntimeProfile?> profile() async => profileValue;
+  @override
+  Future<List<ContactRecord>> contacts() async => const [contactValue];
+  @override
+  Future<List<ConversationSummary>> conversations() async => const [
+    conversationValue,
+  ];
+  @override
+  Future<bool> peerEndpointAvailable() async => true;
 }
 
 void main() {
+  setUp(ApplicationStateStore.shared.clear);
+
   testWidgets('shows TorChat splash before runtime bootstrap', (tester) async {
     await tester.pumpWidget(const TorChatMobileApp(runtime: _SplashRuntime()));
     expect(find.text('TorChat'), findsOneWidget);
@@ -136,13 +186,13 @@ void main() {
     await tester.pump(const Duration(milliseconds: 900));
   });
 
-  testWidgets('reattaches to running Android session without warmup replay', (
-    tester,
-  ) async {
+  testWidgets('reattaches complete shell without warmup replay', (tester) async {
     await tester.pumpWidget(const TorChatMobileApp(runtime: _AttachedRuntime()));
     await tester.pump();
 
     expect(find.text('@Alice'), findsOneWidget);
+    expect(find.text('Bob'), findsWidgets);
+    expect(find.text('Wiadomość ze snapshotu'), findsOneWidget);
     expect(find.text('Rozgrzewanie TorChat'), findsNothing);
   });
 }
