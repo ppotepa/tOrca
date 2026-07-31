@@ -3,31 +3,40 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
+
+import 'desktop_navigation_intent.dart';
 
 const _windowWidthKey = 'torchat.desktop.window.width';
 const _windowHeightKey = 'torchat.desktop.window.height';
 const _windowXKey = 'torchat.desktop.window.x';
 const _windowYKey = 'torchat.desktop.window.y';
+const _singleInstancePort = 49631;
+const _activationMessage = 'activate';
 
 bool get isDesktopPlatform =>
     Platform.isWindows || Platform.isLinux || Platform.isMacOS;
 
-class DesktopWindowLifecycle with WindowListener {
+class DesktopWindowLifecycle with WindowListener, TrayListener {
   DesktopWindowLifecycle._();
 
   static final DesktopWindowLifecycle instance = DesktopWindowLifecycle._();
 
-  static Future<void>? _initialization;
+  static Future<bool>? _initialization;
   Timer? _persistDebounce;
+  ServerSocket? _activationServer;
   bool _allowClose = false;
+  bool _trayReady = false;
 
-  static Future<void> initialize() {
-    if (!isDesktopPlatform) return Future<void>.value();
+  static Future<bool> initialize() {
+    if (!isDesktopPlatform) return Future<bool>.value(true);
     return _initialization ??= instance._initialize();
   }
 
-  Future<void> _initialize() async {
+  Future<bool> _initialize() async {
+    if (!await _acquireSingleInstance()) return false;
+
     await windowManager.ensureInitialized();
     final preferences = await SharedPreferences.getInstance();
     final storedWidth = preferences.getDouble(_windowWidthKey);
@@ -53,16 +62,75 @@ class DesktopWindowLifecycle with WindowListener {
       }
       await windowManager.setPreventClose(true);
       windowManager.addListener(this);
+      await _initializeTray();
       await windowManager.show();
       await windowManager.focus();
     });
+    return true;
+  }
+
+  Future<bool> _acquireSingleInstance() async {
+    try {
+      _activationServer = await ServerSocket.bind(
+        InternetAddress.loopbackIPv4,
+        _singleInstancePort,
+        shared: false,
+      );
+      _activationServer!.listen((socket) {
+        socket.transform(const SystemEncoding().decoder).listen((message) {
+          if (message.trim() == _activationMessage) {
+            unawaited(showWindow());
+          }
+        });
+      });
+      return true;
+    } on SocketException {
+      try {
+        final socket = await Socket.connect(
+          InternetAddress.loopbackIPv4,
+          _singleInstancePort,
+          timeout: const Duration(seconds: 1),
+        );
+        socket.write(_activationMessage);
+        await socket.flush();
+        await socket.close();
+      } on Object {
+        // The first instance may still be starting. The second instance exits
+        // rather than starting a competing Tor and storage runtime.
+      }
+      return false;
+    }
+  }
+
+  Future<void> _initializeTray() async {
+    if (_trayReady) return;
+    final executableDirectory = File(Platform.resolvedExecutable).parent.path;
+    final iconPath = Platform.isWindows
+        ? '$executableDirectory${Platform.pathSeparator}data${Platform.pathSeparator}flutter_assets${Platform.pathSeparator}windows${Platform.pathSeparator}runner${Platform.pathSeparator}resources${Platform.pathSeparator}app_icon.ico'
+        : 'windows/runner/resources/app_icon.ico';
+
+    await trayManager.setIcon(iconPath);
+    await trayManager.setToolTip('TorChat');
+    await trayManager.setContextMenu(
+      Menu(
+        items: [
+          MenuItem(key: 'show', label: 'Pokaż TorChat'),
+          MenuItem(key: 'settings', label: 'Ustawienia'),
+          MenuItem.separator(),
+          MenuItem(key: 'exit', label: 'Zakończ'),
+        ],
+      ),
+    );
+    trayManager.addListener(this);
+    _trayReady = true;
   }
 
   Future<void> showWindow() async {
     if (!isDesktopPlatform) return;
-    await initialize();
     await windowManager.show();
-    await windowManager.restore();
+    if (await windowManager.isMinimized()) {
+      await windowManager.restore();
+    }
     await windowManager.focus();
   }
 
@@ -70,16 +138,39 @@ class DesktopWindowLifecycle with WindowListener {
     if (!isDesktopPlatform) return;
     _allowClose = true;
     await _persistNow();
+    trayManager.removeListener(this);
+    await trayManager.destroy();
+    await _activationServer?.close();
     await windowManager.setPreventClose(false);
     await windowManager.close();
   }
 
   @override
+  void onTrayIconMouseDown() {
+    unawaited(showWindow());
+  }
+
+  @override
+  void onTrayMenuItemClick(MenuItem menuItem) {
+    switch (menuItem.key) {
+      case 'show':
+        unawaited(showWindow());
+      case 'settings':
+        unawaited(showWindow());
+        DesktopNavigationIntents.openSettings();
+      case 'exit':
+        unawaited(exitApplication());
+    }
+  }
+
+  @override
   void onWindowClose() {
     if (_allowClose) return;
-    // Until a packaged tray icon is available, minimizing is safer than
-    // hiding the only window and leaving no user-accessible restore path.
-    unawaited(windowManager.minimize());
+    if (_trayReady) {
+      unawaited(windowManager.hide());
+    } else {
+      unawaited(windowManager.minimize());
+    }
   }
 
   @override
