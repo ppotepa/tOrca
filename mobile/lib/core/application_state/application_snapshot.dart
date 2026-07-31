@@ -1,5 +1,7 @@
 import '../models/domain.dart';
 
+const Object _snapshotSentinel = Object();
+
 class ApplicationSnapshot {
   const ApplicationSnapshot({
     this.schemaVersion = 1,
@@ -12,6 +14,8 @@ class ApplicationSnapshot {
     this.pendingInbox = 0,
     this.pendingOutbox = 0,
     this.peerEndpointAvailable = false,
+    this.destination = 'chats',
+    this.selectedConversationId,
   });
 
   final int schemaVersion;
@@ -24,6 +28,8 @@ class ApplicationSnapshot {
   final int pendingInbox;
   final int pendingOutbox;
   final bool peerEndpointAvailable;
+  final String destination;
+  final String? selectedConversationId;
 
   bool get hasProfile => profile.nickname.trim().length >= 2;
 
@@ -38,6 +44,8 @@ class ApplicationSnapshot {
     int? pendingInbox,
     int? pendingOutbox,
     bool? peerEndpointAvailable,
+    String? destination,
+    Object? selectedConversationId = _snapshotSentinel,
   }) => ApplicationSnapshot(
     schemaVersion: schemaVersion ?? this.schemaVersion,
     generation: generation ?? this.generation,
@@ -50,5 +58,12 @@ class ApplicationSnapshot {
     pendingOutbox: pendingOutbox ?? this.pendingOutbox,
     peerEndpointAvailable:
         peerEndpointAvailable ?? this.peerEndpointAvailable,
+    destination: destination ?? this.destination,
+    selectedConversationId: identical(
+      selectedConversationId,
+      _snapshotSentinel,
+    )
+        ? this.selectedConversationId
+        : selectedConversationId as String?,
   );
 }
