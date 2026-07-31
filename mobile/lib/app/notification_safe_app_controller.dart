@@ -7,6 +7,8 @@ import 'pairing_recovery_app_controller.dart';
 
 class NotificationSafeAppController extends PairingRecoveryAppController {
   static const _legacyPairingNoticePrefix = 'Oczekujące zaproszenia:';
+  static const _relationshipActiveSincePrefix =
+      'torchat.relationship.activeSince.';
   bool _clearingLegacyNotice = false;
   bool _reconcilingRelationshipRemoval = false;
   final Set<String> _appliedRelationshipRemovalMessageIds = <String>{};
@@ -50,6 +52,18 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
     );
     await _reconcileRelationshipRemovals();
     _hideRemovedRelationships();
+  }
+
+  @override
+  Future<void> onPairingContactActivated(ContactRecord contact) async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString(
+      '$_relationshipActiveSincePrefix${contact.id}',
+      DateTime.now().toUtc().toIso8601String(),
+    );
+    _appliedRelationshipRemovalMessageIds.removeWhere(
+      (id) => id.startsWith('preview:${contact.id}:'),
+    );
   }
 
   @override
@@ -175,6 +189,7 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
     _reconcilingRelationshipRemoval = true;
     try {
       final repository = ref.read(legacy.runtimeRepositoryProvider);
+      final preferences = await SharedPreferences.getInstance();
       for (final conversation in List<ConversationSummary>.of(state.conversations)) {
         ContactRecord? contact;
         for (final candidate in state.contacts) {
@@ -207,6 +222,23 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
         final removalId = removalMessage?.id ??
             'preview:${conversation.id}:${removal.removedAt.toIso8601String()}';
         if (!_appliedRelationshipRemovalMessageIds.add(removalId)) continue;
+
+        final activeSince = DateTime.tryParse(
+          preferences.getString(
+                '$_relationshipActiveSincePrefix${conversation.contactId}',
+              ) ??
+              '',
+        );
+        final storedAt = removalMessage == null
+            ? removal.removedAt
+            : DateTime.tryParse(removalMessage.createdAt);
+        if (activeSince != null &&
+            storedAt != null &&
+            !storedAt.toUtc().isAfter(activeSince.toUtc())) {
+          // This control message belongs to history retained from an older
+          // relationship. A fresh pairing and MLS generation supersede it.
+          continue;
+        }
 
         await super.updateContactSettings(
           contact,
