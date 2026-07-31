@@ -61,9 +61,9 @@ The desktop lifecycle is now initialized before the Flutter application starts. 
 | Remote relationship removal | IN_PROGRESS |
 | Block sending after removal | IN_PROGRESS |
 | Preserve/delete history choice | IN_PROGRESS |
-| Fresh re-pair and MLS state after removal | BLOCKED |
+| Fresh re-pair and MLS state after removal | IN_PROGRESS |
 
-The core exposes a dedicated versioned `ContactRemovedPayloadV1` contract with a stable message ID, removal timestamp and history policy. It remains transported inside the existing encrypted durable message channel so older clients and intermediate commits keep an exhaustive `ApplicationPayloadV1` contract. Relationship storage atomically writes the tombstone, disables the contact, stops all ordinary queued messages, removes MLS and peer endpoint state, and applies the local history policy while preserving only the durable removal delivery. Engine routing and fresh re-pair isolation remain in progress. Removal must not be faked by hiding a contact only in UI.
+The core exposes a dedicated versioned `ContactRemovedPayloadV1` contract with a stable message ID, removal timestamp and history policy. It remains transported inside the existing encrypted durable message channel so older clients and intermediate commits keep an exhaustive `ApplicationPayloadV1` contract. Relationship storage atomically writes the tombstone, disables the contact, stops all ordinary queued messages, removes MLS and peer endpoint state, and applies the local history policy while preserving only the durable removal delivery. Remote reconciliation now reads the real durable message list instead of relying on conversation preview. A newly completed and verified pairing records a fresh relationship boundary, so retained removal events from an older relationship cannot terminate the new conversation. Engine-level tombstone routing and Windows/Android verification remain in progress.
 
 ## Epic 4 — conversations
 
