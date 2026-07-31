@@ -4,8 +4,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     ClientEngineActor, EngineCommand, EngineCommandEnvelope, EngineConfig, EngineError,
-    EngineEvent, EngineFatalError, EngineResult, PlatformFact, event::EngineEventReceiver,
-    logging::StartupJournal,
+    EngineEvent, EngineFatalError, EngineResult, PlatformFact, COMMAND_CHANNEL_CAPACITY,
+    WORKER_OUTCOME_CHANNEL_CAPACITY, event::EngineEventReceiver, logging::StartupJournal,
 };
 
 pub struct ClientEngine {
@@ -16,9 +16,10 @@ pub struct ClientEngine {
 
 impl ClientEngine {
     pub fn new(config: EngineConfig) -> EngineResult<Self> {
-        let (command_tx, command_rx) = mpsc::channel(64);
-        let (actor_event_tx, mut actor_event_rx) = mpsc::channel(256);
-        let (event_tx, event_rx) = mpsc::channel(256);
+        let (command_tx, command_rx) = mpsc::channel(COMMAND_CHANNEL_CAPACITY);
+        let (actor_event_tx, mut actor_event_rx) =
+            mpsc::channel(WORKER_OUTCOME_CHANNEL_CAPACITY);
+        let (event_tx, event_rx) = mpsc::channel(WORKER_OUTCOME_CHANNEL_CAPACITY);
         let shutdown = CancellationToken::new();
         let mut journal =
             StartupJournal::open(config.log_directory.as_deref(), &config.platform);

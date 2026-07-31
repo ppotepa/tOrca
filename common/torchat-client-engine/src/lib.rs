@@ -1,5 +1,6 @@
 pub mod actor;
 pub mod application;
+pub mod backpressure;
 pub mod command;
 pub mod config;
 pub mod delivery;
@@ -21,6 +22,10 @@ pub use application::{
     CommandFamily, CommandOutcome, CommandRoute, CommandRouter, EffectExecutor, EngineEffect,
     InlineEffectExecutor, OperationContext, OperationSource, ProjectionDirty, QueryProjection,
     QueryRoute, QueryRouter,
+};
+pub use backpressure::{
+    BackpressureDecision, BackpressurePolicy, ConflatedValue, DeadlineSet, PriorityBudget,
+    QueueClass, QueuePressure,
 };
 pub use command::{
     EngineCommand, EngineCommandEnvelope, EngineQuery, EngineRequest, PlatformFact, PlatformKind,
