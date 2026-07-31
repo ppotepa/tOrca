@@ -234,6 +234,28 @@ function Invoke-TorChatDeployCommand {
         throw 'Onion rotation requires -Confirm.'
     }
 
+    function Ensure-TorChatWindowsArtifacts {
+        param(
+            [Parameter(Mandatory = $true)]$Context,
+            [Parameter(Mandatory = $true)]$EnvironmentState,
+            [Parameter(Mandatory = $true)][string]$BuildPolicy
+        )
+        if ($env:OS -ne 'Windows_NT') { return }
+        $variant = if ($Context.Configuration -eq 'release') { 'Release' } else { 'Debug' }
+        $profile = if ($Context.Configuration -eq 'release') { 'release' } else { 'debug' }
+        $engine = Join-Path $Context.RepositoryRoot "target\$profile\torchat-desktop.exe"
+        $runner = Join-Path $Context.RepositoryRoot "mobile\build\windows\x64\runner\$variant\torchat_mobile.exe"
+        if (Test-Path -LiteralPath $engine -and Test-Path -LiteralPath $runner) { return }
+
+        if ($BuildPolicy -eq 'skip') {
+            throw "Windows artifacts are missing (engine: $engine, runner: $runner) and BuildPolicy=skip; rerun with -BuildPolicy smart or -BuildPolicy rebuild."
+        }
+
+        Write-TorChatWarning 'Windows runtime artifacts are missing or stale. Rebuilding before start.'
+        Build-TorChatDesktopEngine -Context $Context -EnvironmentState $EnvironmentState -Policy $BuildPolicy
+        Build-TorChatWindowsClient -Context $Context -EnvironmentState $EnvironmentState -Policy $BuildPolicy
+    }
+
     # Preflight is invoked by Invoke-TorChatCommand before this function. Keep
     # the relay build here so a broken Docker engine fails immediately instead
     # of wasting time in `docker compose build`.
@@ -312,6 +334,7 @@ function Invoke-TorChatDeployCommand {
         if ($RunPolicy -eq 'start' -and $ClientDataPolicy -eq 'preserve' -and -not $skipWindowsRun) {
             $skipWindowsRun = (Get-TorChatWindowsStatus -Context $Context).State -eq 'Ready'
         }
+        Ensure-TorChatWindowsArtifacts -Context $Context -EnvironmentState $EnvironmentState -BuildPolicy $BuildPolicy
         Invoke-TorChatStage -Context $Context -Id 'runtime.windows' -Name 'Start Windows client' -Skip:$skipWindowsRun -Action {
             Start-TorChatWindowsClient -Context $Context -EnvironmentState $EnvironmentState -ClientDataPolicy $ClientDataPolicy
         }
