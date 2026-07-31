@@ -7,7 +7,6 @@ import '../../app/app_theme.dart';
 import '../../app/ui_operation_registry.dart';
 import '../../core/models/domain.dart';
 import '../../shared/async/busy_action_button.dart';
-import '../../shared/async/busy_action_button.dart' show BusyIconButton;
 import '../../shared/async/busy_surface.dart';
 import '../../shared/formatters/invite_code.dart';
 import '../../shared/widgets/contact_list_section.dart';
@@ -98,36 +97,46 @@ class ContactsView extends ConsumerWidget {
           StatusBanner(message: notice, color: context.statusTheme.success),
         if (error.isNotEmpty)
           StatusBanner(message: error, color: context.statusTheme.danger),
-        TextField(
-          controller: search,
-          enabled: !submit.busy,
-          onSubmitted: (_) {
-            if (!submit.busy) onSearch();
-          },
-          keyboardType: TextInputType.number,
-          maxLength: 9,
-          inputFormatters: const [PairingCodeInputFormatter()],
-          decoration: InputDecoration(
-            counterText: '',
-            hintText: submit.busy
-                ? 'Przetwarzanie kodu…'
-                : 'Wpisz 8-cyfrowy kod parowania',
-            prefixIcon: const ThemedIcon(Icons.password),
-            suffixIcon: BusyIconButton(
-              busy: submit.busy,
-              onPressed: submit.busy ? null : onSearch,
-              tooltip: 'Wyślij kod',
-              icon: const ThemedIcon(Icons.arrow_forward),
+        Semantics(
+          textField: true,
+          label: 'Kod parowania',
+          hint: 'Wpisz ośmiocyfrowy kod kontaktu',
+          child: TextField(
+            controller: search,
+            enabled: !submit.busy,
+            onSubmitted: (_) {
+              if (!submit.busy) onSearch();
+            },
+            keyboardType: TextInputType.number,
+            maxLength: 9,
+            inputFormatters: const [PairingCodeInputFormatter()],
+            decoration: InputDecoration(
+              counterText: '',
+              hintText: submit.busy
+                  ? 'Przetwarzanie kodu…'
+                  : 'Wpisz 8-cyfrowy kod parowania',
+              prefixIcon: const ThemedIcon(Icons.password),
+              suffixIcon: BusyIconButton(
+                busy: submit.busy,
+                onPressed: submit.busy ? null : onSearch,
+                tooltip: 'Wyślij kod',
+                icon: const ThemedIcon(Icons.arrow_forward),
+              ),
             ),
           ),
         ),
         const SizedBox(height: 8),
         Text('Twój fingerprint', style: Theme.of(context).textTheme.labelLarge),
-        Text(
-          fingerprint,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: Theme.of(context).textTheme.bodySmall,
+        Semantics(
+          label: 'Twój fingerprint: $fingerprint',
+          child: ExcludeSemantics(
+            child: Text(
+              fingerprint,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
         ),
         if (showContactList) ...[
           const SizedBox(height: 12),
@@ -142,6 +151,24 @@ class ContactsView extends ConsumerWidget {
                 title: 'Kontakty',
                 contacts: visible,
                 onSelect: onSelect,
+                onDetails: (contact) =>
+                    _showContactDetails(context, ref, contact),
+                onToggleMute: (contact) => onUpdateContactSettings(
+                  contact,
+                  contact.localAlias,
+                  !contact.muted,
+                  false,
+                  contact.transportPolicy,
+                ),
+                onRemove: (contact) => _confirmRelationshipRemoval(
+                  context,
+                  ref,
+                  contact,
+                  contact.localAlias,
+                  contact.muted,
+                  contact.transportPolicy,
+                  closeParentOnSuccess: false,
+                ),
                 contactSubtitleBuilder: (contact) => contact.fingerprint.isEmpty
                     ? 'Fingerprint niedostępny'
                     : contact.fingerprint,
@@ -345,7 +372,9 @@ class ContactsView extends ConsumerWidget {
                   },
                 ),
                 TextButton(
-                  onPressed: saveState.busy ? null : () => Navigator.pop(context),
+                  onPressed: saveState.busy
+                      ? null
+                      : () => Navigator.pop(context),
                   child: const Text('Zamknij'),
                 ),
               ],
@@ -362,8 +391,9 @@ class ContactsView extends ConsumerWidget {
     ContactRecord contact,
     String? localAlias,
     bool muted,
-    ContactTransportPolicy transportPolicy,
-  ) async {
+    ContactTransportPolicy transportPolicy, {
+    bool closeParentOnSuccess = true,
+  }) async {
     var preserveHistory = true;
     final confirmed = await showDialog<bool>(
       context: context,
@@ -424,8 +454,13 @@ class ContactsView extends ConsumerWidget {
     final result = ref.read(
       uiOperationProvider(UiOperationKey.contactSettingsFor(contact.id)),
     );
-    if (context.mounted && !result.failed) {
+    if (!context.mounted || result.failed) return;
+    if (closeParentOnSuccess) {
       Navigator.of(context).pop();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Relacja z ${contact.displayName} została zakończona.')),
+      );
     }
   }
 }

@@ -14,6 +14,7 @@ import '../../shared/widgets/action_tile.dart';
 import '../../shared/widgets/callout_card.dart';
 import '../../shared/widgets/info_tile.dart';
 import '../../shared/widgets/themed_switch_list_tile.dart';
+import 'image_storage_settings_section.dart';
 
 class SettingsView extends ConsumerStatefulWidget {
   const SettingsView({
@@ -421,6 +422,8 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
             subtitle: widget.torStatus,
             onTap: widget.onOpenTor,
           ),
+          const Divider(),
+          const ImageStorageSettingsSection(),
           const Divider(),
           ActionSection(
             title: 'TOŻSAMOŚĆ',

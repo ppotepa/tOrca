@@ -112,6 +112,32 @@ function Test-TorChatAndroidDevice {
     return $devices | Select-Object -First 1
 }
 
+function Assert-TorChatAndroidProcess {
+    param([Parameter(Mandatory = $true)][string]$DeviceId)
+    Start-Sleep -Seconds 3
+    $pidValue = (& adb -s $DeviceId shell pidof org.torchat.mobile 2>$null | Out-String).Trim()
+    if (-not $pidValue) {
+        throw 'TorChat Android process did not remain alive after launch.'
+    }
+}
+
+function Start-TorChatWindowsSmokeProcess {
+    param(
+        [Parameter(Mandatory = $true)][string]$Executable,
+        [Parameter(Mandatory = $true)][string]$Profile
+    )
+    $process = Start-Process -FilePath $Executable -PassThru -WindowStyle Hidden `
+        -Environment @{ APPDATA = $Profile; LOCALAPPDATA = $Profile }
+    Start-Sleep -Seconds 5
+    if ($process.HasExited -and $process.ExitCode -ne 0) {
+        throw "Windows client exited with code $($process.ExitCode)"
+    }
+    if (-not $process.HasExited) {
+        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+        $process.WaitForExit(5000) | Out-Null
+    }
+}
+
 $runCore = $Target -in @('all','core')
 $runAndroid = $Target -in @('all','android')
 $runWindows = $Target -in @('all','windows')
@@ -162,22 +188,48 @@ if ($runAndroid) {
     }
 
     $resolvedDevice = Test-TorChatAndroidDevice -RequestedDevice $Device
+    $androidIds = @(
+        'android-clean-install-smoke',
+        'android-upgrade-preserves-data',
+        'android-cold-start-recovery'
+    )
     if ($resolvedDevice) {
+        $apk = Join-Path $repositoryRoot 'mobile\build\app\outputs\flutter-apk\app-debug.apk'
         Invoke-TorChatMatrixStep 'android-clean-install-smoke' 'android' {
-            $apk = Join-Path $repositoryRoot 'mobile\build\app\outputs\flutter-apk\app-debug.apk'
             if (-not (Test-Path -LiteralPath $apk)) { throw "Android APK is missing: $apk" }
             & adb -s $resolvedDevice uninstall org.torchat.mobile 2>$null | Out-Null
-            & adb -s $resolvedDevice install -r $apk
+            & adb -s $resolvedDevice install $apk
             if ($LASTEXITCODE -ne 0) { throw "adb install failed with code $LASTEXITCODE" }
             & adb -s $resolvedDevice shell monkey -p org.torchat.mobile 1 | Out-Null
             if ($LASTEXITCODE -ne 0) { throw "Android launch failed with code $LASTEXITCODE" }
+            Assert-TorChatAndroidProcess -DeviceId $resolvedDevice
+        }
+        Invoke-TorChatMatrixStep 'android-upgrade-preserves-data' 'android' {
+            & adb -s $resolvedDevice shell run-as org.torchat.mobile sh -c `
+                'mkdir -p files && echo release-upgrade-marker > files/release-upgrade-marker'
+            if ($LASTEXITCODE -ne 0) { throw 'Unable to seed Android upgrade marker.' }
+            & adb -s $resolvedDevice install -r $apk | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "adb upgrade failed with code $LASTEXITCODE" }
+            $marker = (& adb -s $resolvedDevice shell run-as org.torchat.mobile `
+                cat files/release-upgrade-marker 2>$null | Out-String).Trim()
+            if ($marker -ne 'release-upgrade-marker') {
+                throw 'Android application data was not preserved across upgrade.'
+            }
+        }
+        Invoke-TorChatMatrixStep 'android-cold-start-recovery' 'android' {
+            & adb -s $resolvedDevice shell am force-stop org.torchat.mobile | Out-Null
+            & adb -s $resolvedDevice shell monkey -p org.torchat.mobile 1 | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw 'Android cold start command failed.' }
+            Assert-TorChatAndroidProcess -DeviceId $resolvedDevice
         }
     } else {
-        $reason = 'No authorized Android device is available; build completed without install smoke test.'
-        if ($RequirePlatforms) {
-            Add-TorChatMatrixResult 'android-clean-install-smoke' 'android' failed 0 $reason
-        } else {
-            Skip-TorChatMatrixStep 'android-clean-install-smoke' 'android' $reason
+        $reason = 'No authorized Android device is available; build completed without device validation.'
+        foreach ($id in $androidIds) {
+            if ($RequirePlatforms) {
+                Add-TorChatMatrixResult $id 'android' failed 0 $reason
+            } else {
+                Skip-TorChatMatrixStep $id 'android' $reason
+            }
         }
     }
 }
@@ -189,26 +241,40 @@ if ($runWindows) {
             Invoke-TorChatNativeCommand flutter @('pub','get') (Join-Path $repositoryRoot 'mobile')
             Invoke-TorChatNativeCommand flutter @('build','windows','--debug') (Join-Path $repositoryRoot 'mobile')
         }
+        $executable = Join-Path $repositoryRoot 'mobile\build\windows\x64\runner\Debug\torchat_mobile.exe'
         Invoke-TorChatMatrixStep 'windows-clean-profile-smoke' 'windows' {
-            $executable = Join-Path $repositoryRoot 'mobile\build\windows\x64\runner\Debug\torchat_mobile.exe'
             if (-not (Test-Path -LiteralPath $executable)) { throw "Windows executable is missing: $executable" }
             $profile = Join-Path ([System.IO.Path]::GetTempPath()) ("torchat-profile-" + [guid]::NewGuid().ToString('N'))
             New-Item -ItemType Directory -Force -Path $profile | Out-Null
             try {
-                $process = Start-Process -FilePath $executable -PassThru -WindowStyle Hidden `
-                    -Environment @{ APPDATA = $profile; LOCALAPPDATA = $profile }
-                if (-not $process.WaitForExit(15000)) {
-                    Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-                } elseif ($process.ExitCode -ne 0) {
-                    throw "Windows client exited with code $($process.ExitCode)"
+                Start-TorChatWindowsSmokeProcess -Executable $executable -Profile $profile
+            } finally {
+                Remove-Item -LiteralPath $profile -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+        Invoke-TorChatMatrixStep 'windows-profile-restart-preserves-data' 'windows' {
+            if (-not (Test-Path -LiteralPath $executable)) { throw "Windows executable is missing: $executable" }
+            $profile = Join-Path ([System.IO.Path]::GetTempPath()) ("torchat-upgrade-profile-" + [guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Force -Path $profile | Out-Null
+            try {
+                Start-TorChatWindowsSmokeProcess -Executable $executable -Profile $profile
+                $marker = Join-Path $profile 'torchat-release-upgrade-marker.txt'
+                'release-upgrade-marker' | Set-Content -LiteralPath $marker -Encoding UTF8
+                Start-TorChatWindowsSmokeProcess -Executable $executable -Profile $profile
+                if ((Get-Content -LiteralPath $marker -Raw).Trim() -ne 'release-upgrade-marker') {
+                    throw 'Windows application profile was not preserved across restart.'
                 }
             } finally {
                 Remove-Item -LiteralPath $profile -Recurse -Force -ErrorAction SilentlyContinue
             }
         }
     } else {
-        $reason = 'Windows build and clean-profile smoke test require a Windows host.'
-        foreach ($id in @('windows-debug-build','windows-clean-profile-smoke')) {
+        $reason = 'Windows build and profile smoke tests require a Windows host.'
+        foreach ($id in @(
+            'windows-debug-build',
+            'windows-clean-profile-smoke',
+            'windows-profile-restart-preserves-data'
+        )) {
             if ($RequirePlatforms) {
                 Add-TorChatMatrixResult $id 'windows' failed 0 $reason
             } else {
