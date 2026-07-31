@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../../app/app_theme.dart';
 import '../../core/models/domain.dart';
 import '../../shared/widgets/counter_badge.dart';
-import '../chats/chats_view.dart';
+import '../chats/release_chat_view.dart';
 import '../contacts/contacts_view.dart';
 import 'desktop/cockpit_status_bar.dart';
 import 'desktop/desktop_workspace.dart';
@@ -99,7 +99,7 @@ class MainShell extends StatelessWidget {
 
   Widget _content(BuildContext context, {required bool desktop}) =>
       tab == MobileTab.chats
-          ? ChatsView(
+          ? ReleaseChatView(
               selected: selectedContact,
               contacts: contacts,
               conversations: conversations,
@@ -110,7 +110,6 @@ class MainShell extends StatelessWidget {
               onTypingChanged: onTypingChanged,
               onRetryMessage: onRetryMessage,
               onDeleteMessage: onDeleteMessage,
-              onVerifyContact: onVerifyContact,
               onBack: onBack,
               error: error,
               notice: notice,
