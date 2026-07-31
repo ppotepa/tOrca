@@ -16,6 +16,7 @@ pub mod peer;
 pub mod processes;
 pub mod projections;
 pub mod relay;
+pub mod stabilization;
 pub mod storage;
 pub mod supervisor;
 
@@ -75,6 +76,7 @@ pub use projections::{
     NotificationProjector, ProjectionDiagnostics, ProjectionPatchError, ProjectionUpdate,
 };
 pub use relay::{EngineRelay, NoopEngineRelay};
+pub use stabilization::{queue_class, EngineStabilizationPipeline, PipelineAdmission};
 pub use storage::{
     ClientDatabase, InboundEnvelopeStoreResult, InboundPeerEnvelopeRecord, Migration,
     MigrationRunner, OutboundDeliveryRecord, SqliteRuntimeStorage, SqliteTransaction,
