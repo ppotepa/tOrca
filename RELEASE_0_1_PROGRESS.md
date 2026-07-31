@@ -32,14 +32,21 @@ This file records implementation commits after the feature freeze in `RELEASE_0_
 | Desktop window size and position persistence | IMPLEMENTED | `d45e6a95` |
 | Desktop lifecycle initialization | IMPLEMENTED | `c380e003` |
 | Recoverable desktop close behavior | IMPLEMENTED | `c818e235` |
-| Versioned contact-removal wire payload | IMPLEMENTED | `baa5332b` |
+| Durable encrypted relationship-removal sentinel | IMPLEMENTED | `c68dc695`, `cfb33572` |
+| Relationship removal system-event rendering | IMPLEMENTED | `d038e222` |
+| Relationship-removal format tests | IMPLEMENTED | `0cd7cbcc` |
+| Durable relationship tombstone storage | IMPLEMENTED | `d9e717c7`, `e0a0f353` |
+| Relationship storage tests and hardening | IMPLEMENTED | `ad04ff47`, `ed8bce92` |
+| Remove incomplete parallel core removal variant | IMPLEMENTED | `686edb03` |
+| Release validation workflow | IMPLEMENTED | `387da850` |
+| Application version 0.1.0+1 | IMPLEMENTED | `fcc7a1f9` |
 
 ## Still in progress
 
-- durable contact-removal outbox and symmetric application of `ContactRemoved`
-- relationship tombstones and safe re-pairing with fresh MLS state
-- explicit preserve/delete-history choice during contact removal
-- system events for contact connected, removed and re-added
+- explicit preserve/delete-history choice during contact removal UI
+- physical actor integration of relationship tombstones
+- safe re-pairing with fresh MLS state after tombstone
+- system events for contact connected and re-added
 - persisted `sentAt`, `deliveredAt` and `readAt`
 - SQLite message pagination and stable prepend scroll position
 - per-conversation scroll restoration
@@ -54,4 +61,4 @@ This file records implementation commits after the feature freeze in `RELEASE_0_
 ## Qualification state
 
 No listed feature may be marked `DONE` until both Windows and Android validation has completed where applicable.
-Current GitHub commits do not have CI workflow results attached, so all entries above remain unverified.
+Current GitHub commits do not yet have confirmed CI results attached, so all entries above remain unverified.
