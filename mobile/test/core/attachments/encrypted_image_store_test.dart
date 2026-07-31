@@ -33,7 +33,9 @@ void main() {
     final files = await directory.list().where((item) => item is File).toList();
     expect(files, hasLength(1));
     final encrypted = await (files.single as File).readAsBytes();
-    expect(encrypted, isNot(contains(cleartext.sublist(0, 32))));
+    expect(encrypted, isNot(equals(cleartext)));
+    expect(encrypted.length, greaterThan(cleartext.length));
+    expect(encrypted.take(6), equals(const [0x54, 0x43, 0x49, 0x4d, 0x47, 0x31]));
 
     final usage = await store.usage();
     expect(usage.files, 1);
