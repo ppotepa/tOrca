@@ -3,103 +3,77 @@ package org.torchat.mobile
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import org.torchat.generated.EngineContract
-import kotlin.math.min
-import kotlin.random.Random
 
+/**
+ * Starts the shared Rust relay state machine once.
+ *
+ * Retry, backoff, network recovery and connection generations belong to the
+ * shared engine. Android only owns process lifecycle and publishes platform
+ * facts. Keeping a second reconnect loop here caused duplicate CONNECT calls,
+ * state oscillation and avoidable background wakeups.
+ */
 internal class RelaySupervisor(
     private val scope: CoroutineScope,
     private val startupLogger: StartupPlatformLogger,
     private val onState: (state: String, attempt: Int, detail: String) -> Unit,
 ) {
-    private val wakeups = Channel<Unit>(Channel.CONFLATED)
     @Volatile private var job: Job? = null
     @Volatile private var host: AndroidEngineHost? = null
 
     fun start(engineHost: AndroidEngineHost) {
         host = engineHost
-        if (job?.isActive == true) {
-            wakeups.trySend(Unit)
-            return
+        if (job?.isActive == true) return
+        job = scope.launch {
+            onState("connecting", 1, "Uruchamianie współdzielonego nadzorcy relay")
+            val startedAt = System.currentTimeMillis()
+            runCatching {
+                withTimeout(60_000L) {
+                    engineHost.submitCommandAndAwait(
+                        engineCommand(EngineContract.COMMAND_CONNECT),
+                        timeoutMs = 60_000L,
+                    )
+                }
+            }.onSuccess {
+                startupLogger.write(
+                    level = "info",
+                    component = "relay",
+                    eventCode = "relay_supervisor_started",
+                    stage = "RELAY_READY",
+                    message = "Shared Rust relay supervisor accepted startup",
+                    attempt = 1,
+                    state = "ready",
+                    durationMs = System.currentTimeMillis() - startedAt,
+                )
+                onState("ready", 1, "Nadzorca relay działa w engine")
+            }.onFailure { error ->
+                // A failed startup command is reported, but it is not retried
+                // here. The shared actor owns its retry schedule.
+                Log.w("TorChat-Engine", "Initial relay startup command failed", error)
+                startupLogger.write(
+                    level = "warn",
+                    component = "relay",
+                    eventCode = "relay_supervisor_start_deferred",
+                    stage = "RELAY_READY",
+                    message = error.message ?: "Relay startup deferred",
+                    attempt = 1,
+                    state = "retrying",
+                    durationMs = System.currentTimeMillis() - startedAt,
+                    errorCode = error.javaClass.simpleName,
+                )
+                onState("retrying", 1, error.message ?: "Engine ponowi relay w tle")
+            }
         }
-        job = scope.launch { runLoop() }
     }
 
-    fun signalNetworkAvailable() {
-        wakeups.trySend(Unit)
-    }
+    /** Network changes are published directly to the Rust engine by the service. */
+    fun signalNetworkAvailable() = Unit
 
     fun stop() {
         job?.cancel()
         job = null
         host = null
-        wakeups.trySend(Unit)
-    }
-
-    private suspend fun runLoop() {
-        var attempt = 0
-        while (scope.isActive) {
-            val currentHost = host
-            if (currentHost == null) {
-                wakeups.receive()
-                continue
-            }
-            attempt += 1
-            onState("connecting", attempt, "Łączenie z relayem")
-            val startedAt = System.currentTimeMillis()
-            val result = runCatching {
-                withTimeout(60_000L) {
-                    currentHost.submitCommandAndAwait(
-                        engineCommand(EngineContract.COMMAND_CONNECT),
-                        timeoutMs = 60_000L,
-                    )
-                }
-            }
-            if (result.isSuccess) {
-                startupLogger.write(
-                    level = "info",
-                    component = "relay",
-                    eventCode = "relay_connected",
-                    stage = "RELAY_READY",
-                    message = "Relay connection established",
-                    attempt = attempt,
-                    state = "ready",
-                    durationMs = System.currentTimeMillis() - startedAt,
-                )
-                onState("ready", attempt, "Relay połączony")
-                attempt = 0
-                wakeups.receive()
-                continue
-            }
-
-            val error = result.exceptionOrNull()
-            val exponent = min(attempt - 1, 5)
-            val baseDelay = min(1_000L shl exponent, 30_000L)
-            val jitter = Random.nextLong(0L, min(1_000L, baseDelay / 3 + 1))
-            val retryDelayMs = baseDelay + jitter
-            Log.w(
-                "TorChat-Engine",
-                "Relay connect attempt $attempt failed; retrying in ${retryDelayMs}ms",
-                error,
-            )
-            startupLogger.write(
-                level = "warn",
-                component = "relay",
-                eventCode = "relay_connect_retry",
-                stage = "RELAY_READY",
-                message = error?.message ?: "Relay connection failed",
-                attempt = attempt,
-                state = "retrying",
-                durationMs = System.currentTimeMillis() - startedAt,
-                errorCode = error?.javaClass?.simpleName,
-            )
-            onState("retrying", attempt, error?.message ?: "Relay connection failed")
-            delay(retryDelayMs)
-        }
     }
 }
