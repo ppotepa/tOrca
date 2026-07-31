@@ -61,9 +61,9 @@ The desktop lifecycle is now initialized before the Flutter application starts. 
 | Remote relationship removal | IN_PROGRESS |
 | Block sending after removal | IN_PROGRESS |
 | Preserve/delete history choice | IN_PROGRESS |
-| Fresh re-pair and MLS state after removal | BLOCKED |
+| Fresh re-pair and MLS state after removal | IN_PROGRESS |
 
-The core exposes a dedicated versioned `ContactRemovedPayloadV1` contract with a stable message ID, removal timestamp and history policy. It remains transported inside the existing encrypted durable message channel so older clients and intermediate commits keep an exhaustive `ApplicationPayloadV1` contract. Relationship storage atomically writes the tombstone, disables the contact, stops all ordinary queued messages, removes MLS and peer endpoint state, and applies the local history policy while preserving only the durable removal delivery. Engine routing and fresh re-pair isolation remain in progress. Removal must not be faked by hiding a contact only in UI.
+The core exposes a dedicated versioned `ContactRemovedPayloadV1` contract with a stable message ID, removal timestamp and history policy. It remains transported inside the existing encrypted durable message channel so older clients and intermediate commits keep an exhaustive `ApplicationPayloadV1` contract. Relationship storage atomically writes the tombstone, disables the contact, stops all ordinary queued messages, removes MLS and peer endpoint state, and applies the local history policy while preserving only the durable removal delivery. The application additionally deletes every ordinary `QUEUED` or `SENDING` message through the existing runtime API after either local or remote removal, preventing older runtime implementations from resuming stale traffic after reconnect. Remote reconciliation reads the real durable message list instead of relying on conversation preview. A newly completed and verified pairing records a fresh relationship boundary, so retained removal events from an older relationship cannot terminate the new conversation. Engine-level tombstone routing and Windows/Android verification remain in progress.
 
 ## Epic 4 — conversations
 
@@ -128,10 +128,12 @@ The core exposes a dedicated versioned `ContactRemovedPayloadV1` contract with a
 | Master, sound, vibration and preview switches | IMPLEMENTED |
 | Android native preference enforcement | IMPLEMENTED |
 | Deduplicate by message/pairing ID | IN_PROGRESS |
-| Suppress current-conversation notification | NOT_STARTED |
-| Open exact conversation from alert | NOT_STARTED |
-| Clear notification after opening | NOT_STARTED |
-| Desktop native notification and restore window | IN_PROGRESS |
+| Suppress current-conversation notification | IN_PROGRESS |
+| Open exact conversation from alert | IN_PROGRESS |
+| Clear notification after opening | IN_PROGRESS |
+| Desktop native notification and restore window | IMPLEMENTED |
+
+Desktop notifications now use persistent ID deduplication, suppress a toast when its conversation is already selected, respect master/message/preview preferences, restore the window, open the exact conversation and close the selected alert. The existing controller remains the single owner of the configured desktop sound to avoid duplicate audio. Android still needs its native notification `PendingIntent` to carry the same conversation and notification identifiers before the cross-platform items can advance beyond `IN_PROGRESS`.
 
 ## Epic 9 — settings and privacy
 

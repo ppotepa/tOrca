@@ -1,19 +1,37 @@
+import 'dart:async';
+
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../client_runtime.dart';
 import '../core/models/domain.dart';
 import '../core/relationships/relationship_message.dart';
 import 'app_controller_legacy.dart' as legacy;
+import 'desktop_notification_service.dart';
 import 'pairing_recovery_app_controller.dart';
 
 class NotificationSafeAppController extends PairingRecoveryAppController {
   static const _legacyPairingNoticePrefix = 'Oczekujące zaproszenia:';
+  static const _relationshipActiveSincePrefix =
+      'torchat.relationship.activeSince.';
   bool _clearingLegacyNotice = false;
   bool _reconcilingRelationshipRemoval = false;
+  StreamSubscription<RuntimeEvent>? _notificationEvents;
   final Set<String> _appliedRelationshipRemovalMessageIds = <String>{};
 
   @override
   legacy.AppState build() {
     final initial = super.build();
+    final repository = ref.watch(legacy.runtimeRepositoryProvider);
+    _notificationEvents ??= repository.events.listen((event) {
+      if (event is! NotificationRequestedEvent) return;
+      unawaited(
+        DesktopNotificationService.show(
+          event,
+          selectedConversationId: state.selectedConversationId,
+        ),
+      );
+    });
+    ref.onDispose(() => _notificationEvents?.cancel());
     listenSelf((_, next) {
       if (_clearingLegacyNotice ||
           !next.notice.startsWith(_legacyPairingNoticePrefix)) {
@@ -50,6 +68,18 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
     );
     await _reconcileRelationshipRemovals();
     _hideRemovedRelationships();
+  }
+
+  @override
+  Future<void> onPairingContactActivated(ContactRecord contact) async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString(
+      '$_relationshipActiveSincePrefix${contact.id}',
+      DateTime.now().toUtc().toIso8601String(),
+    );
+    _appliedRelationshipRemovalMessageIds.removeWhere(
+      (id) => id.startsWith('preview:${contact.id}:'),
+    );
   }
 
   @override
@@ -105,8 +135,11 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
       blocked,
       transportPolicy,
     );
-    if (blocked && !preserveHistory && relationshipConversation != null) {
-      await _deleteHistoryExceptRemoval(relationshipConversation.id);
+    if (blocked && relationshipConversation != null) {
+      await _cancelPendingOrdinaryMessages(relationshipConversation.id);
+      if (!preserveHistory) {
+        await _deleteHistoryExceptRemoval(relationshipConversation.id);
+      }
     }
     await super.refreshData(forcePairing: false, allowAutoTorka: false);
     _hideRemovedRelationships();
@@ -175,6 +208,7 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
     _reconcilingRelationshipRemoval = true;
     try {
       final repository = ref.read(legacy.runtimeRepositoryProvider);
+      final preferences = await SharedPreferences.getInstance();
       for (final conversation in List<ConversationSummary>.of(state.conversations)) {
         ContactRecord? contact;
         for (final candidate in state.contacts) {
@@ -208,6 +242,23 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
             'preview:${conversation.id}:${removal.removedAt.toIso8601String()}';
         if (!_appliedRelationshipRemovalMessageIds.add(removalId)) continue;
 
+        final activeSince = DateTime.tryParse(
+          preferences.getString(
+                '$_relationshipActiveSincePrefix${conversation.contactId}',
+              ) ??
+              '',
+        );
+        final storedAt = removalMessage == null
+            ? removal.removedAt
+            : DateTime.tryParse(removalMessage.createdAt);
+        if (activeSince != null &&
+            storedAt != null &&
+            !storedAt.toUtc().isAfter(activeSince.toUtc())) {
+          // This control message belongs to history retained from an older
+          // relationship. A fresh pairing and MLS generation supersede it.
+          continue;
+        }
+
         await super.updateContactSettings(
           contact,
           contact.localAlias,
@@ -215,12 +266,33 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
           true,
           contact.transportPolicy,
         );
+        await _cancelPendingOrdinaryMessages(conversation.id);
         if (!removal.preserveHistory) {
           await _deleteHistoryExceptRemoval(conversation.id);
         }
       }
     } finally {
       _reconcilingRelationshipRemoval = false;
+    }
+  }
+
+  Future<void> _cancelPendingOrdinaryMessages(String conversationId) async {
+    final repository = ref.read(legacy.runtimeRepositoryProvider);
+    try {
+      final messages = await repository.messages(conversationId);
+      for (final message in messages) {
+        final pending = message.state == MessageState.queued ||
+            message.state == MessageState.sending;
+        if (!message.outgoing ||
+            !pending ||
+            isRelationshipRemovedMessage(message.text)) {
+          continue;
+        }
+        await repository.deleteMessageLocal(message.id);
+      }
+    } catch (_) {
+      // Storage-level tombstones remain the final guard. This cleanup prevents
+      // a stale retry through older runtime implementations when available.
     }
   }
 

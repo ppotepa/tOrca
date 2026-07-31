@@ -6,7 +6,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'app/app_controller.dart';
 import 'app/app_theme.dart';
 import 'app/application_snapshot_provider.dart';
+import 'app/conversation_navigation_intent.dart';
 import 'app/desktop_navigation_intent.dart';
+import 'app/desktop_notification_service.dart';
 import 'app/desktop_window_lifecycle.dart';
 import 'client_runtime.dart';
 import 'core/connection/app_state_connection.dart';
@@ -89,6 +91,8 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
   String _reattachedNickname = '';
   Timer? _backgroundDebounce;
   StreamSubscription<DesktopNavigationIntent>? _desktopNavigationSubscription;
+  StreamSubscription<ConversationNavigationIntent>?
+      _conversationNavigationSubscription;
 
   @override
   void initState() {
@@ -105,6 +109,10 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
         },
       );
     }
+    _conversationNavigationSubscription =
+        ConversationNavigationIntents.stream.listen((intent) {
+      if (mounted) unawaited(_openConversationFromNotification(intent));
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_attachAndInitialize());
     });
@@ -132,10 +140,32 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
     }
   }
 
+  Future<void> _openConversationFromNotification(
+    ConversationNavigationIntent intent,
+  ) async {
+    if (isDesktopPlatform) {
+      await DesktopWindowLifecycle.instance.showWindow();
+    }
+    final controller = ref.read(appControllerProvider.notifier);
+    for (var attempt = 0; attempt < 12 && mounted; attempt += 1) {
+      final state = ref.read(appControllerProvider);
+      final snapshot = ref.read(applicationSnapshotProvider).valueOrNull;
+      final conversations = snapshot?.conversations ?? state.conversations;
+      if (conversations.any((item) => item.id == intent.conversationId)) {
+        await controller.openConversation(intent.conversationId);
+        await DesktopNotificationService.clear(intent.notificationId);
+        return;
+      }
+      await controller.refreshData(forcePairing: false, allowAutoTorka: false);
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    }
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _desktopNavigationSubscription?.cancel();
+    _conversationNavigationSubscription?.cancel();
     _backgroundDebounce?.cancel();
     _search.dispose();
     _composer.dispose();
