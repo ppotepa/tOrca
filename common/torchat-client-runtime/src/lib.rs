@@ -1,5 +1,6 @@
 //! Internal shared client domain runtime used exclusively by `torchat-client-engine`.
 
+pub mod application_snapshot;
 pub mod clock;
 pub mod collections;
 pub mod contract;
@@ -14,6 +15,9 @@ pub mod session;
 pub mod storage;
 pub mod transport;
 
+pub use application_snapshot::{
+    APPLICATION_SNAPSHOT_SCHEMA_VERSION, ApplicationSnapshot, PairingSummary, UiCheckpoint,
+};
 pub use clock::{RuntimeClock, SystemRuntimeClock};
 pub use collections::{
     RuntimeMessageLike, RuntimePairingItemLike, runtime_contacts_from_iter,
