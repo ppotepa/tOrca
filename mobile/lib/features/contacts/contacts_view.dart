@@ -1,8 +1,13 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/app_theme.dart';
+import '../../app/ui_operation_registry.dart';
 import '../../core/models/domain.dart';
+import '../../shared/async/busy_action_button.dart';
+import '../../shared/async/busy_surface.dart';
+import '../../shared/async/busy_action_button.dart' show BusyIconButton;
 import '../../shared/formatters/invite_code.dart';
 import '../../shared/widgets/contact_list_section.dart';
 import '../../shared/widgets/feature_header.dart';
@@ -10,7 +15,7 @@ import '../../shared/widgets/list_items.dart';
 import '../../shared/widgets/status_banner.dart';
 import '../../shared/widgets/themed_switch_list_tile.dart';
 
-class ContactsView extends StatelessWidget {
+class ContactsView extends ConsumerWidget {
   const ContactsView({
     super.key,
     required this.saved,
@@ -27,6 +32,7 @@ class ContactsView extends StatelessWidget {
     required this.busy,
     this.showContactList = true,
   });
+
   final List<ContactRecord> saved;
   final TextEditingController search;
   final VoidCallback onSearch;
@@ -38,14 +44,22 @@ class ContactsView extends StatelessWidget {
     bool,
     bool,
     ContactTransportPolicy,
-  )
-  onUpdateContactSettings;
+  ) onUpdateContactSettings;
   final String fingerprint, ownInvite;
   final String error, notice;
+  @Deprecated('Busy is derived from component-scoped operation providers.')
   final bool busy;
   final bool showContactList;
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final contactsLoad = ref.watch(
+      uiOperationProvider(UiOperationKey.contactsLoad),
+    );
+    final submit = ref.watch(uiOperationProvider(UiOperationKey.pairingSubmit));
+    final inviteCode = ref.watch(
+      uiOperationProvider(UiOperationKey.inviteCodeLoad),
+    );
     final visible = <ContactRecord>[];
     for (final contact in saved) {
       if (contact.id.isNotEmpty &&
@@ -53,6 +67,7 @@ class ContactsView extends StatelessWidget {
         visible.add(contact);
       }
     }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -60,13 +75,15 @@ class ContactsView extends StatelessWidget {
           title: 'Dodaj kontakt',
           subtitle: 'Wpisz kod parowania albo zeskanuj QR',
           actions: [
-            IconButton.filledTonal(
-              onPressed: onScanInvite,
+            BusyIconButton(
+              busy: submit.busy,
+              onPressed: submit.busy ? null : onScanInvite,
               tooltip: 'Dodaj kontakt',
               icon: const ThemedIcon(Icons.person_add_alt_1),
             ),
-            IconButton.filledTonal(
-              onPressed: onShowInvite,
+            BusyIconButton(
+              busy: inviteCode.busy,
+              onPressed: inviteCode.busy ? null : onShowInvite,
               tooltip: 'Mój kod parowania',
               icon: const ThemedIcon(Icons.qr_code_2),
             ),
@@ -79,23 +96,24 @@ class ContactsView extends StatelessWidget {
           StatusBanner(message: error, color: context.statusTheme.danger),
         TextField(
           controller: search,
-          enabled: !busy,
-          onSubmitted: (_) => onSearch(),
+          enabled: !submit.busy,
+          onSubmitted: (_) {
+            if (!submit.busy) onSearch();
+          },
           keyboardType: TextInputType.number,
           maxLength: 9,
           inputFormatters: const [PairingCodeInputFormatter()],
           decoration: InputDecoration(
             counterText: '',
-            hintText: 'Wpisz 8-cyfrowy kod parowania',
+            hintText: submit.busy
+                ? 'Przetwarzanie kodu…'
+                : 'Wpisz 8-cyfrowy kod parowania',
             prefixIcon: const ThemedIcon(Icons.password),
-            suffixIcon: IconButton(
-              onPressed: busy ? null : onSearch,
-              icon: busy
-                  ? const SizedBox.square(
-                      dimension: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const ThemedIcon(Icons.arrow_forward),
+            suffixIcon: BusyIconButton(
+              busy: submit.busy,
+              onPressed: submit.busy ? null : onSearch,
+              tooltip: 'Wyślij kod',
+              icon: const ThemedIcon(Icons.arrow_forward),
             ),
           ),
         ),
@@ -110,31 +128,38 @@ class ContactsView extends StatelessWidget {
         if (showContactList) ...[
           const SizedBox(height: 12),
           Expanded(
-            child: ContactListSection(
-              title: 'Kontakty',
-              contacts: visible,
-              onSelect: onSelect,
-              contactSubtitleBuilder: (contact) => contact.fingerprint.isEmpty
-                  ? 'Fingerprint niedostępny'
-                  : contact.fingerprint,
-              contactTrailingBuilder: (contact) => Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  PeerTransportIndicator(
-                    connectionStatus: contact.peerConnectionStatus,
-                    transportPolicy: contact.transportPolicy,
-                    endpointStatus: contact.peerEndpointStatus,
-                  ),
-                  const SizedBox(width: 4),
-                  if (contact.devFixture != null)
-                    const Chip(label: Text('DEV')),
-                  IconButton(
-                    tooltip: 'Szczegóły kontaktu',
-                    onPressed: () => _showContactDetails(context, contact),
-                    icon: const ThemedIcon(Icons.info_outline),
-                  ),
-                  const ThemedIcon(Icons.chevron_right),
-                ],
+            child: BusySurface(
+              state: contactsLoad,
+              presentation: visible.isEmpty
+                  ? BusyPresentation.replace
+                  : BusyPresentation.overlay,
+              label: 'Ładowanie kontaktów…',
+              child: ContactListSection(
+                title: 'Kontakty',
+                contacts: visible,
+                onSelect: onSelect,
+                contactSubtitleBuilder: (contact) => contact.fingerprint.isEmpty
+                    ? 'Fingerprint niedostępny'
+                    : contact.fingerprint,
+                contactTrailingBuilder: (contact) => Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    PeerTransportIndicator(
+                      connectionStatus: contact.peerConnectionStatus,
+                      transportPolicy: contact.transportPolicy,
+                      endpointStatus: contact.peerEndpointStatus,
+                    ),
+                    const SizedBox(width: 4),
+                    if (contact.devFixture != null)
+                      const Chip(label: Text('DEV')),
+                    IconButton(
+                      tooltip: 'Szczegóły kontaktu',
+                      onPressed: () => _showContactDetails(context, ref, contact),
+                      icon: const ThemedIcon(Icons.info_outline),
+                    ),
+                    const ThemedIcon(Icons.chevron_right),
+                  ],
+                ),
               ),
             ),
           ),
@@ -145,6 +170,7 @@ class ContactsView extends StatelessWidget {
 
   Future<void> _showContactDetails(
     BuildContext context,
+    WidgetRef ref,
     ContactRecord contact,
   ) {
     final alias = TextEditingController(text: contact.localAlias ?? '');
@@ -153,142 +179,118 @@ class ContactsView extends StatelessWidget {
     var transportPolicy = contact.transportPolicy;
     return showDialog<void>(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: Text(contact.displayName),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  contact.verified ? 'Kontakt zweryfikowany' : 'Brak weryfikacji',
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'P2P przez Tor: ${_peerEndpointLabel(contact.peerEndpointStatus)}',
-                ),
-                Text(
-                  'Połączenie bezpośrednie: '
-                  '${_peerConnectionLabel(contact.peerConnectionStatus)}',
-                ),
-                Text('Aktualna trasa: ${_effectiveRouteLabel(contact)}'),
-                if (kDebugMode) ...[
-                  const SizedBox(height: 12),
-                  const Divider(),
-                  Text(
-                    'Diagnostyka transportu DEV',
-                    style: Theme.of(context).textTheme.titleSmall,
-                  ),
-                  const SizedBox(height: 6),
-                  _DiagnosticLine(
-                    label: 'Polityka',
-                    value: _transportPolicyLabel(contact.transportPolicy),
-                  ),
-                  _DiagnosticLine(
-                    label: 'Efektywna trasa',
-                    value: _effectiveRouteLabel(contact),
-                  ),
-                  _DiagnosticLine(
-                    label: 'Stan endpointu',
-                    value: _peerEndpointLabel(contact.peerEndpointStatus),
-                  ),
-                  _DiagnosticLine(
-                    label: 'Stan sesji P2P',
-                    value: _peerConnectionLabel(contact.peerConnectionStatus),
-                  ),
-                  _DiagnosticLine(
-                    label: 'Ostatnie P2P',
-                    value: contact.lastPeerConnectedAt?.trim().isNotEmpty == true
-                        ? contact.lastPeerConnectedAt!
-                        : 'brak',
-                  ),
-                  _DiagnosticLine(
-                    label: 'Fallback relay',
-                    value: contact.transportPolicy ==
-                            ContactTransportPolicy.peerWithRelayFallback
-                        ? 'dozwolony'
-                        : 'wyłączony',
-                  ),
-                ],
-                const SizedBox(height: 12),
-                DropdownButtonFormField<ContactTransportPolicy>(
-                  initialValue: transportPolicy,
-                  decoration: const InputDecoration(
-                    labelText: 'Polityka transportu',
-                  ),
-                  items: [
-                    for (final policy in ContactTransportPolicy.values)
-                      DropdownMenuItem(
-                        value: policy,
-                        child: Text(_transportPolicyLabel(policy)),
+      builder: (dialogContext) => Consumer(
+        builder: (context, dialogRef, _) {
+          final saveState = dialogRef.watch(
+            uiOperationProvider(UiOperationKey.contactSettingsFor(contact.id)),
+          );
+          return StatefulBuilder(
+            builder: (context, setDialogState) => AlertDialog(
+              title: Text(contact.displayName),
+              content: BusySurface(
+                state: saveState,
+                label: 'Zapisywanie ustawień…',
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(contact.verified
+                          ? 'Kontakt zweryfikowany'
+                          : 'Brak weryfikacji'),
+                      const SizedBox(height: 6),
+                      Text('P2P przez Tor: ${_peerEndpointLabel(contact.peerEndpointStatus)}'),
+                      Text('Połączenie bezpośrednie: ${_peerConnectionLabel(contact.peerConnectionStatus)}'),
+                      Text('Aktualna trasa: ${_effectiveRouteLabel(contact)}'),
+                      if (kDebugMode) ...[
+                        const SizedBox(height: 12),
+                        const Divider(),
+                        Text('Diagnostyka transportu DEV',
+                            style: Theme.of(context).textTheme.titleSmall),
+                        const SizedBox(height: 6),
+                        _DiagnosticLine(label: 'Polityka', value: _transportPolicyLabel(contact.transportPolicy)),
+                        _DiagnosticLine(label: 'Efektywna trasa', value: _effectiveRouteLabel(contact)),
+                        _DiagnosticLine(label: 'Stan endpointu', value: _peerEndpointLabel(contact.peerEndpointStatus)),
+                        _DiagnosticLine(label: 'Stan sesji P2P', value: _peerConnectionLabel(contact.peerConnectionStatus)),
+                      ],
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<ContactTransportPolicy>(
+                        initialValue: transportPolicy,
+                        decoration: const InputDecoration(labelText: 'Polityka transportu'),
+                        items: [
+                          for (final policy in ContactTransportPolicy.values)
+                            DropdownMenuItem(value: policy, child: Text(_transportPolicyLabel(policy))),
+                        ],
+                        onChanged: saveState.busy
+                            ? null
+                            : (value) {
+                                if (value != null) setDialogState(() => transportPolicy = value);
+                              },
                       ),
-                  ],
-                  onChanged: (value) {
-                    if (value != null) {
-                      setDialogState(() => transportPolicy = value);
-                    }
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: alias,
+                        enabled: !saveState.busy,
+                        maxLength: 32,
+                        decoration: const InputDecoration(labelText: 'Lokalny alias'),
+                      ),
+                      ThemedSwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Wycisz powiadomienia'),
+                        value: muted,
+                        onChanged: saveState.busy
+                            ? null
+                            : (value) => setDialogState(() => muted = value),
+                      ),
+                      ThemedSwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Zablokuj kontakt'),
+                        subtitle: const Text('Nie odbieraj ani nie wysyłaj wiadomości'),
+                        value: blocked,
+                        onChanged: saveState.busy
+                            ? null
+                            : (value) => setDialogState(() => blocked = value),
+                      ),
+                      const SizedBox(height: 16),
+                      Text('Installation ID', style: Theme.of(context).textTheme.labelLarge),
+                      SelectableText(contact.id),
+                      const SizedBox(height: 12),
+                      Text('Fingerprint', style: Theme.of(context).textTheme.labelLarge),
+                      SelectableText(
+                        contact.fingerprint.isEmpty ? 'Fingerprint niedostępny' : contact.fingerprint,
+                        style: const TextStyle(fontFamily: 'monospace'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                BusyActionButton(
+                  busy: saveState.busy,
+                  label: 'Zapisz',
+                  busyLabel: 'Zapisywanie…',
+                  onPressed: () async {
+                    await onUpdateContactSettings(
+                      contact,
+                      alias.text.trim().isEmpty ? null : alias.text.trim(),
+                      muted,
+                      blocked,
+                      transportPolicy,
+                    );
+                    final result = dialogRef.read(
+                      uiOperationProvider(UiOperationKey.contactSettingsFor(contact.id)),
+                    );
+                    if (context.mounted && !result.failed) Navigator.pop(context);
                   },
                 ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: alias,
-                  maxLength: 32,
-                  decoration: const InputDecoration(labelText: 'Lokalny alias'),
-                ),
-                ThemedSwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Wycisz powiadomienia'),
-                  value: muted,
-                  onChanged: (value) => setDialogState(() => muted = value),
-                ),
-                ThemedSwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Zablokuj kontakt'),
-                  subtitle: const Text('Nie odbieraj ani nie wysyłaj wiadomości'),
-                  value: blocked,
-                  onChanged: (value) => setDialogState(() => blocked = value),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'Installation ID',
-                  style: Theme.of(context).textTheme.labelLarge,
-                ),
-                SelectableText(contact.id),
-                const SizedBox(height: 12),
-                Text(
-                  'Fingerprint',
-                  style: Theme.of(context).textTheme.labelLarge,
-                ),
-                SelectableText(
-                  contact.fingerprint.isEmpty
-                      ? 'Fingerprint niedostępny'
-                      : contact.fingerprint,
-                  style: const TextStyle(fontFamily: 'monospace'),
+                TextButton(
+                  onPressed: saveState.busy ? null : () => Navigator.pop(context),
+                  child: const Text('Zamknij'),
                 ),
               ],
             ),
-          ),
-          actions: [
-            FilledButton(
-              onPressed: () async {
-                await onUpdateContactSettings(
-                  contact,
-                  alias.text.trim().isEmpty ? null : alias.text.trim(),
-                  muted,
-                  blocked,
-                  transportPolicy,
-                );
-                if (context.mounted) Navigator.pop(context);
-              },
-              child: const Text('Zapisz'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Zamknij'),
-            ),
-          ],
-        ),
+          );
+        },
       ),
     ).whenComplete(alias.dispose);
   }
@@ -296,20 +298,15 @@ class ContactsView extends StatelessWidget {
 
 class _DiagnosticLine extends StatelessWidget {
   const _DiagnosticLine({required this.label, required this.value});
-
   final String label;
   final String value;
-
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(bottom: 4),
     child: Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        SizedBox(
-          width: 126,
-          child: Text(label, style: Theme.of(context).textTheme.labelMedium),
-        ),
+        SizedBox(width: 126, child: Text(label, style: Theme.of(context).textTheme.labelMedium)),
         Expanded(child: SelectableText(value)),
       ],
     ),
@@ -317,14 +314,9 @@ class _DiagnosticLine extends StatelessWidget {
 }
 
 String _effectiveRouteLabel(ContactRecord contact) {
-  if (contact.transportPolicy == ContactTransportPolicy.relayOnly) {
-    return 'relay';
-  }
-  if (contact.peerConnectionStatus == PeerConnectionStatus.connected) {
-    return 'P2P onion';
-  }
-  if (contact.transportPolicy ==
-      ContactTransportPolicy.peerWithRelayFallback) {
+  if (contact.transportPolicy == ContactTransportPolicy.relayOnly) return 'relay';
+  if (contact.peerConnectionStatus == PeerConnectionStatus.connected) return 'P2P onion';
+  if (contact.transportPolicy == ContactTransportPolicy.peerWithRelayFallback) {
     return 'relay fallback (P2P nieaktywne)';
   }
   return 'P2P oczekuje / offline';
