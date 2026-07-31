@@ -76,13 +76,17 @@ jobs:
       - run: flutter build apk --debug
 
   windows:
-    name: Windows debug build
+    name: Windows debug build and diagnostics
     runs-on: windows-latest
     defaults:
       run:
         working-directory: mobile
     steps:
       - uses: actions/checkout@v4
+      - name: Diagnostic sanitization test
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+        run: ./scripts/tests/test-diagnostic-sanitization.ps1
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
