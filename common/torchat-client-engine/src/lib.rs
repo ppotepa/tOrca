@@ -11,6 +11,7 @@ pub mod inbound;
 mod logging;
 pub mod peer;
 pub mod processes;
+pub mod projections;
 pub mod relay;
 pub mod storage;
 pub mod supervisor;
@@ -34,7 +35,7 @@ pub use delivery::{
     TransportRouter,
 };
 pub use domain::{
-    transition_connection, transition_message, ConnectionEvent, EngineConnectionState,
+    transition_connection, transition_message, ConnectionEvent, DomainEvent, EngineConnectionState,
     InvalidConnectionTransition, InvalidMessageTransition, MessageDeliveryEvent,
 };
 pub use engine::ClientEngine;
@@ -53,6 +54,10 @@ pub use processes::{
     OnionRotationProcess, OnionRotationState, PairingProcess, PairingProcessAction,
     PairingProcessEvent, PairingProcessRepository, PairingProcessState, ReconnectAction,
     ReconnectApply, ReconnectBackoff, ReconnectEvent, ReconnectProcess, ReconnectState,
+};
+pub use projections::{
+    ApplicationSnapshotPatch, ApplicationSnapshotProjector, NotificationProjectionInput,
+    NotificationProjector, ProjectionDiagnostics, ProjectionPatchError, ProjectionUpdate,
 };
 pub use relay::{EngineRelay, NoopEngineRelay};
 pub use storage::{
