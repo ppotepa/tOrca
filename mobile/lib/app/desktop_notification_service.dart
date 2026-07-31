@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:local_notifier/local_notifier.dart';
@@ -50,15 +51,16 @@ class DesktopNotificationService {
     await _ensureInitialized();
     final showPreview =
         preferences.getBool('torchat.notifications.preview') ?? false;
-    final sound = preferences.getBool('torchat.notifications.sound') ?? true;
     final notification = LocalNotification(
       identifier: id,
       title: event.title.trim().isEmpty ? 'TorChat' : event.title.trim(),
       body: showPreview ? event.body : 'Nowa zaszyfrowana wiadomość',
-      silent: !sound,
+      // The existing controller owns the user-configurable pager sound. Keep
+      // the native toast silent to avoid playing two sounds for one event.
+      silent: true,
     );
     notification.onClick = () {
-      DesktopWindowLifecycle.instance.showWindow();
+      unawaited(DesktopWindowLifecycle.instance.showWindow());
       ConversationNavigationIntents.openConversation(
         conversationId: conversationId,
         notificationId: id,
