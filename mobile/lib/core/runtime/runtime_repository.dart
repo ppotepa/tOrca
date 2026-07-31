@@ -1,4 +1,6 @@
 import '../../client_runtime.dart';
+import '../application_state/application_snapshot.dart';
+import '../application_state/application_state_store.dart';
 import 'generated/runtime_contract.g.dart';
 import 'refresh_coordinator.dart';
 
@@ -39,9 +41,11 @@ class RuntimeRepository {
   RuntimeRepository(this._runtime);
   final ClientRuntime _runtime;
   final RefreshCoordinator _refreshCoordinator = RefreshCoordinator();
+  final ApplicationStateStore applicationState = ApplicationStateStore();
 
   Future<RuntimeLocalSnapshot>? _localBatchInFlight;
   Future<RuntimePairingSnapshot>? _pairingBatchInFlight;
+  Future<ApplicationSnapshot>? _applicationSnapshotInFlight;
   RuntimeLocalSnapshot? _latestLocalSnapshot;
   RuntimePairingSnapshot? _latestPairingSnapshot;
   DateTime? _localCacheTime;
@@ -70,9 +74,75 @@ class RuntimeRepository {
       await _runtime.identity() ?? const RuntimeIdentity();
   Future<RuntimeProfile> profile() async =>
       await _runtime.profile() ?? const RuntimeProfile();
-  Future<RuntimeProfile> setNickname(String value) async =>
-      await _runtime.setNickname(value);
+  Future<RuntimeProfile> setNickname(String value) async {
+    final profile = await _runtime.setNickname(value);
+    final current = applicationState.current;
+    if (current != null) {
+      applicationState.hydrate(current.copyWith(
+        profile: profile,
+        generation: current.generation + 1,
+        createdAtMs: DateTime.now().millisecondsSinceEpoch,
+      ));
+    }
+    return profile;
+  }
   Future<InviteCode?> refreshInviteCode() => _runtime.refreshPairingCode();
+
+  Future<ApplicationSnapshot> applicationSnapshot({
+    bool includePairing = false,
+    bool force = false,
+  }) {
+    if (!force && applicationState.current case final current?) {
+      return Future.value(current);
+    }
+    final inFlight = _applicationSnapshotInFlight;
+    if (inFlight != null) return inFlight;
+    final request = _buildApplicationSnapshot(includePairing: includePairing);
+    _applicationSnapshotInFlight = request;
+    return request.whenComplete(() {
+      if (identical(_applicationSnapshotInFlight, request)) {
+        _applicationSnapshotInFlight = null;
+      }
+    });
+  }
+
+  Future<ApplicationSnapshot> _buildApplicationSnapshot({
+    required bool includePairing,
+  }) async {
+    final values = await Future.wait<Object>([
+      identity(),
+      profile(),
+      _loadLocalBatch(force: true),
+      if (includePairing) _loadPairingBatch(force: true),
+    ]);
+    final identityValue = values[0] as RuntimeIdentity;
+    final profileValue = values[1] as RuntimeProfile;
+    final local = values[2] as RuntimeLocalSnapshot;
+    final pairing = includePairing && values.length > 3
+        ? values[3] as RuntimePairingSnapshot
+        : _latestPairingSnapshot;
+    final generation = [
+      local.generation,
+      pairing?.generation ?? 0,
+      ++_snapshotGeneration,
+    ].reduce((left, right) => left > right ? left : right);
+    final snapshot = ApplicationSnapshot(
+      generation: generation,
+      createdAtMs: DateTime.now().millisecondsSinceEpoch,
+      identity: identityValue,
+      profile: profileValue,
+      contacts: List.unmodifiable(local.contacts),
+      conversations: List.unmodifiable(local.conversations),
+      pendingInbox: pairing?.inbox.pendingCount ?? 0,
+      pendingOutbox: pairing?.outbox
+              .where((item) => item.status == InviteState.pending)
+              .length ??
+          0,
+      peerEndpointAvailable: local.peerEndpointAvailable,
+    );
+    applicationState.hydrate(snapshot);
+    return snapshot;
+  }
 
   Future<RuntimeRefreshSnapshot> refresh({
     bool includePairing = false,
@@ -83,6 +153,7 @@ class RuntimeRepository {
       final pairing = includePairing
           ? await _loadPairingBatch(force: true)
           : null;
+      await applicationSnapshot(includePairing: includePairing, force: true);
       return RuntimeRefreshSnapshot(local: local, pairing: pairing);
     }
     await _refreshCoordinator.schedule(
@@ -96,6 +167,7 @@ class RuntimeRepository {
     );
     final local = _latestLocalSnapshot;
     if (local == null) throw StateError('Local runtime refresh produced no snapshot');
+    await applicationSnapshot(includePairing: includePairing, force: true);
     return RuntimeRefreshSnapshot(
       local: local,
       pairing: includePairing ? _latestPairingSnapshot : null,
