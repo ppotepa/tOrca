@@ -225,30 +225,25 @@ ConnectionComponentStatus _peerStatus({
   required bool allowReadyWhileAggregateStarts,
 }) {
   final stepState = _fromStartupState(step.state);
-  late final ConnectionComponentState state;
-  switch (aggregate) {
-    case PeerServerStatus.ready:
-      state = ConnectionComponentState.ready;
-    case PeerServerStatus.starting:
-      if (stepState == ConnectionComponentState.failed ||
-          stepState == ConnectionComponentState.degraded) {
-        state = stepState;
-      } else if (allowReadyWhileAggregateStarts &&
-          stepState == ConnectionComponentState.ready) {
-        state = ConnectionComponentState.ready;
-      } else {
-        // This clamp prevents a legacy sticky timeline entry from opening the
-        // onboarding gate while the runtime still reports P2P warmup.
-        state = ConnectionComponentState.starting;
-      }
-    case PeerServerStatus.offline:
-      state = component == ConnectionComponent.peerListener &&
+  final state = switch (aggregate) {
+    PeerServerStatus.ready => ConnectionComponentState.ready,
+    PeerServerStatus.starting =>
+      stepState == ConnectionComponentState.failed ||
+              stepState == ConnectionComponentState.degraded
+          ? stepState
+          : allowReadyWhileAggregateStarts &&
+                stepState == ConnectionComponentState.ready
+          ? ConnectionComponentState.ready
+          // This clamp prevents a legacy sticky timeline entry from opening
+          // onboarding while the runtime still reports P2P warmup.
+          : ConnectionComponentState.starting,
+    PeerServerStatus.offline =>
+      component == ConnectionComponent.peerListener &&
               stepState == ConnectionComponentState.ready
           ? ConnectionComponentState.ready
-          : ConnectionComponentState.degraded;
-    case PeerServerStatus.error:
-      state = ConnectionComponentState.failed;
-  }
+          : ConnectionComponentState.degraded,
+    PeerServerStatus.error => ConnectionComponentState.failed,
+  };
   return ConnectionComponentStatus(
     component: component,
     state: state,
