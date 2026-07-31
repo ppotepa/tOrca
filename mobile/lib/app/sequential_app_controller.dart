@@ -46,13 +46,14 @@ class SequentialAppController extends legacy.AppController {
     final current = _initializeInFlight;
     if (current != null) return current;
 
-    final run = _runSequentialWarmup();
-    _initializeInFlight = run;
-    return run.whenComplete(() {
+    late final Future<void> run;
+    run = _runSequentialWarmup().whenComplete(() {
       if (identical(_initializeInFlight, run)) {
         _initializeInFlight = null;
       }
     });
+    _initializeInFlight = run;
+    return run;
   }
 
   Future<void> _runSequentialWarmup() async {
@@ -294,8 +295,7 @@ class SequentialAppController extends legacy.AppController {
         }
       case PeerEndpointChangedEvent(:final contactId, :final status):
         final identity = state.identity.installationId;
-        final local = contactId.isNotEmpty &&
-            (identity.isEmpty || contactId == identity);
+        final local = identity.isNotEmpty && contactId == identity;
         if (local) {
           final available = status == PeerEndpointStatus.verified;
           _startup.observePeerEndpoint(available);
@@ -317,7 +317,9 @@ class SequentialAppController extends legacy.AppController {
           ],
         );
       case RuntimeErrorEvent(:final message):
-        _startup.fail(StateError(message));
+        if (_isFatalStartupError(message)) {
+          _startup.fail(StateError(message));
+        }
         state = state.copyWith(error: message);
       case RuntimeLogEvent(:final message):
         final normalized = message.toLowerCase();
@@ -336,6 +338,17 @@ class SequentialAppController extends legacy.AppController {
       case NotificationRequestedEvent():
         unawaited(_notificationBeep());
     }
+  }
+
+  bool _isFatalStartupError(String message) {
+    final normalized = message.toLowerCase();
+    return normalized.contains('engine actor failed') ||
+        normalized.contains('engine_fatal') ||
+        normalized.contains('sqlite') ||
+        normalized.contains('database') ||
+        normalized.contains('identity') && normalized.contains('failed') ||
+        normalized.contains('integrity_check') ||
+        normalized.contains('private key');
   }
 
   void _scheduleEventRefresh() {
