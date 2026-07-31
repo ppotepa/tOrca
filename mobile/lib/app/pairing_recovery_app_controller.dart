@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../client_runtime.dart';
 import '../core/models/domain.dart';
+import '../core/problems/runtime_problem_classifier.dart';
 import '../shared/async/async_operation_state.dart';
 import '../shared/formatters/operation_status.dart';
 import 'app_controller_legacy.dart' as legacy;
@@ -18,11 +19,13 @@ class PairingRecoveryAppController extends SequentialAppController {
   Timer? _pairingWatchdog;
   Future<void>? _pairingSyncInFlight;
   bool _pairingSyncQueued = false;
+  bool _sanitizingProblem = false;
   DateTime? _lastPairingSync;
 
   @override
   legacy.AppState build() {
     final initial = super.build();
+    listenSelf((_, next) => _sanitizeTechnicalProblem(next.error));
     _pairingWatchdog = Timer.periodic(
       _watchdogInterval,
       (_) => _schedulePairingSync(force: false),
@@ -257,14 +260,25 @@ class PairingRecoveryAppController extends SequentialAppController {
 
   void _finishFromController(String key, String label, [String? targetId]) {
     final error = state.error.trim();
+    final classification = classifyRuntimeProblem(error);
+    final visibleError = classification.userVisible ? error : '';
     ref.read(uiOperationProvider(key).notifier).state = AsyncOperationState(
-      phase: error.isEmpty
+      phase: visibleError.isEmpty
           ? AsyncOperationPhase.succeeded
           : AsyncOperationPhase.failed,
       label: label,
       targetId: targetId,
-      error: error,
+      error: visibleError,
     );
+  }
+
+  void _sanitizeTechnicalProblem(String message) {
+    if (_sanitizingProblem || message.trim().isEmpty) return;
+    final classification = classifyRuntimeProblem(message);
+    if (classification.userVisible) return;
+    _sanitizingProblem = true;
+    state = state.copyWith(error: '');
+    _sanitizingProblem = false;
   }
 
   void _schedulePairingSync({required bool force}) {
