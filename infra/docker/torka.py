@@ -197,6 +197,13 @@ def respond_to_commands(engine, handled_message_ids):
         log(f"command={text!r} reply={reply!r} message={message_id}")
 
 
+def env_interval(name, default, minimum=1):
+    try:
+        return max(minimum, float(os.environ.get(name, str(default))))
+    except ValueError:
+        return float(default)
+
+
 def main():
     engine = Engine()
     try:
@@ -207,31 +214,46 @@ def main():
         reserved_code = os.environ.get("TORCHAT_TORKA_PAIRING_CODE", "").strip()
         if reserved_code:
             log(f"reserved pairing code: {reserved_code}")
+
+        pairing_interval = env_interval("TORCHAT_TORKA_PAIRING_POLL_SECONDS", 20, 5)
+        message_interval = env_interval("TORCHAT_TORKA_MESSAGE_POLL_SECONDS", 10, 5)
+        idle_sleep = env_interval("TORCHAT_TORKA_IDLE_SLEEP_SECONDS", 1, 0.25)
+        next_pairing_poll = 0.0
+        next_message_poll = 0.0
         next_code_refresh = 0.0
         handled_message_ids = set()
+
         while True:
-            try:
-                inbox = engine.command({"type": "pairing_inbox"}, timeout=15)
-                for pairing_id in pending_pairing_ids(inbox):
-                    log(f"accepting pairing request {pairing_id}")
-                    engine.command({"type": "accept_pairing", "pairing_id": pairing_id}, timeout=30)
-            except Exception as error:
-                log(f"pairing inbox deferred: {error}")
-            try:
-                if time.monotonic() >= next_code_refresh:
+            now = time.monotonic()
+            if now >= next_pairing_poll:
+                next_pairing_poll = now + pairing_interval
+                try:
+                    inbox = engine.command({"type": "pairing_inbox"}, timeout=15)
+                    for pairing_id in pending_pairing_ids(inbox):
+                        log(f"accepting pairing request {pairing_id}")
+                        engine.command({"type": "accept_pairing", "pairing_id": pairing_id}, timeout=30)
+                except Exception as error:
+                    log(f"pairing inbox deferred: {error}")
+
+            if now >= next_code_refresh:
+                try:
                     invite = engine.command({"type": "refresh_pairing_code"}, timeout=15)
                     code = invite.get("code") if isinstance(invite, dict) else None
                     if code:
                         log(f"pairing code (valid until rotation): {code}")
-                    # Do not invalidate a code while a tester is entering it.
-                    next_code_refresh = time.monotonic() + 10 * 60
-            except Exception as error:
-                log(f"pairing code refresh deferred: {error}")
-            try:
-                respond_to_commands(engine, handled_message_ids)
-            except Exception as error:
-                log(f"message poll deferred: {error}")
-            time.sleep(5)
+                    next_code_refresh = now + 10 * 60
+                except Exception as error:
+                    next_code_refresh = now + 60
+                    log(f"pairing code refresh deferred: {error}")
+
+            if now >= next_message_poll:
+                next_message_poll = now + message_interval
+                try:
+                    respond_to_commands(engine, handled_message_ids)
+                except Exception as error:
+                    log(f"message poll deferred: {error}")
+
+            time.sleep(idle_sleep)
     finally:
         if engine.process.poll() is None:
             try:
