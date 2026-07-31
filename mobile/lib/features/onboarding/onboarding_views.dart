@@ -1,17 +1,19 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../app/app_theme.dart';
+import '../../app/ui_operation_registry.dart';
 import '../../core/models/domain.dart';
+import '../../shared/async/themed_activity_indicator.dart';
 import '../../shared/formatters/invite_code.dart';
-import '../../shared/widgets/retro_activity_indicator.dart';
 
 export 'onboarding_views_legacy.dart'
     hide PairingCodeDialog, PairingCodeDialogState;
 
-class PairingCodeDialog extends StatefulWidget {
+class PairingCodeDialog extends ConsumerStatefulWidget {
   const PairingCodeDialog({
     super.key,
     required this.initialCode,
@@ -32,10 +34,10 @@ class PairingCodeDialog extends StatefulWidget {
   final Future<void> Function(PairingItem request)? onReject;
 
   @override
-  State<PairingCodeDialog> createState() => PairingCodeDialogState();
+  ConsumerState<PairingCodeDialog> createState() => PairingCodeDialogState();
 }
 
-class PairingCodeDialogState extends State<PairingCodeDialog> {
+class PairingCodeDialogState extends ConsumerState<PairingCodeDialog> {
   late String _code = widget.initialCode;
   late int _expiresAt = widget.initialExpiresAt;
   Timer? _timer;
@@ -45,9 +47,11 @@ class PairingCodeDialogState extends State<PairingCodeDialog> {
   bool _refreshing = false;
   bool _checkingRequest = false;
   bool _processing = false;
+  bool _awaitingContact = false;
   bool _completed = false;
   PairingItem? _request;
   String _error = '';
+  String _status = '';
 
   @override
   void initState() {
@@ -89,6 +93,7 @@ class PairingCodeDialogState extends State<PairingCodeDialog> {
     setState(() {
       _refreshing = true;
       _error = '';
+      _status = '';
     });
     try {
       final fresh = await widget.refresh();
@@ -128,9 +133,10 @@ class PairingCodeDialogState extends State<PairingCodeDialog> {
       setState(() {
         _request = request;
         _error = '';
+        _status = '';
       });
     } catch (_) {
-      // The global pairing recovery controller retries every two seconds.
+      // Pairing reconciliation retries independently.
     } finally {
       _checkingRequest = false;
     }
@@ -139,38 +145,72 @@ class PairingCodeDialogState extends State<PairingCodeDialog> {
   Future<void> _accept() async {
     final request = _request;
     final accept = widget.onAccept;
-    if (request == null || accept == null || _processing) return;
+    if (request == null || accept == null || _processing || _awaitingContact) {
+      return;
+    }
     setState(() {
       _processing = true;
       _error = '';
+      _status = '';
     });
+
+    final completion = accept(request);
     try {
-      final contactReady = await accept(request);
+      await _waitForLocalDecision(request.id);
+      if (mounted) {
+        setState(() {
+          _processing = false;
+          _awaitingContact = true;
+          _status =
+              'Zaproszenie zaakceptowano. Finalizacja bezpiecznego kontaktu trwa w tle.';
+        });
+      }
+
+      final contactReady = await completion;
       if (!mounted) return;
       setState(() {
         _processing = false;
+        _awaitingContact = !contactReady;
         _completed = contactReady;
-        if (!contactReady) {
-          _error =
-              'Zaproszenie zaakceptowano. Kontakt nadal finalizuje bezpieczne połączenie; możesz zamknąć okno, a aplikacja będzie kontynuować synchronizację.';
-        }
+        _status = contactReady
+            ? ''
+            : 'Zaproszenie zaakceptowano. Kontakt pojawi się po zakończeniu wymiany MLS.';
       });
     } catch (error) {
       if (mounted) {
         setState(() {
           _processing = false;
+          _awaitingContact = false;
           _error = error.toString();
         });
       }
     }
   }
 
+  Future<void> _waitForLocalDecision(String pairingId) async {
+    final key = UiOperationKey.pairingAccept(pairingId);
+    var observedBusy = false;
+    final deadline = DateTime.now().add(const Duration(seconds: 8));
+    while (DateTime.now().isBefore(deadline)) {
+      final operation = ref.read(uiOperationProvider(key));
+      observedBusy = observedBusy || operation.busy;
+      if (observedBusy && !operation.busy) return;
+      if (operation.failed) {
+        throw StateError(operation.error);
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+    }
+    // The callback may include remote reconciliation. Do not keep the UI busy
+    // after the local command window; transition to a domain waiting state.
+  }
+
   Future<void> _reject() async {
     final request = _request;
-    if (request == null || _processing) return;
+    if (request == null || _processing || _awaitingContact) return;
     setState(() {
       _processing = true;
       _error = '';
+      _status = '';
     });
     try {
       await widget.onReject?.call(request);
@@ -195,11 +235,12 @@ class PairingCodeDialogState extends State<PairingCodeDialog> {
           mainAxisSize: MainAxisSize.min,
           children: [
             if (_completed)
-              _CompletedPairing()
+              const _CompletedPairing()
             else if (_request case final request?)
               _PendingPairingDecision(
                 request: request,
                 processing: _processing,
+                awaitingContact: _awaitingContact,
                 onAccept: _accept,
                 onReject: _reject,
               )
@@ -226,6 +267,15 @@ class PairingCodeDialogState extends State<PairingCodeDialog> {
                 minHeight: 3,
               ),
             ],
+            if (_status.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: Text(
+                  _status,
+                  style: TextStyle(color: context.statusTheme.warning),
+                  textAlign: TextAlign.center,
+                ),
+              ),
             if (_error.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 10),
@@ -239,10 +289,7 @@ class PairingCodeDialogState extends State<PairingCodeDialog> {
               TextButton.icon(
                 onPressed: _refreshing ? null : _refresh,
                 icon: _refreshing
-                    ? const RetroActivityIndicator(
-                        style: RetroActivityStyle.dots,
-                        compact: true,
-                      )
+                    ? const ThemedActivityIndicator(compact: true)
                     : const ThemedIcon(Icons.refresh),
                 label: Text(_refreshing ? 'Odświeżanie…' : 'Odśwież kod'),
               ),
@@ -260,6 +307,8 @@ class PairingCodeDialogState extends State<PairingCodeDialog> {
 }
 
 class _CompletedPairing extends StatelessWidget {
+  const _CompletedPairing();
+
   @override
   Widget build(BuildContext context) => Column(
     children: [
@@ -287,12 +336,14 @@ class _PendingPairingDecision extends StatelessWidget {
   const _PendingPairingDecision({
     required this.request,
     required this.processing,
+    required this.awaitingContact,
     required this.onAccept,
     required this.onReject,
   });
 
   final PairingItem request;
   final bool processing;
+  final bool awaitingContact;
   final VoidCallback onAccept;
   final VoidCallback onReject;
 
@@ -302,7 +353,7 @@ class _PendingPairingDecision extends StatelessWidget {
     return Column(
       children: [
         ThemedIcon(
-          Icons.person_add_alt_1,
+          awaitingContact ? Icons.schedule : Icons.person_add_alt_1,
           size: 64,
           color: Theme.of(context).colorScheme.primary,
         ),
@@ -315,7 +366,9 @@ class _PendingPairingDecision extends StatelessWidget {
         const SizedBox(height: 8),
         Text(
           processing
-              ? 'Finalizujemy zaproszenie i czekamy na kontakt po obu stronach…'
+              ? 'Zapisywanie decyzji…'
+              : awaitingContact
+              ? 'Zaproszenie zaakceptowane. Finalizacja kontaktu przebiega w tle.'
               : 'Zaproszenie oczekuje na Twoją decyzję. Nie zostanie automatycznie odrzucone przez licznik interfejsu.',
           textAlign: TextAlign.center,
         ),
@@ -340,11 +393,10 @@ class _PendingPairingDecision extends StatelessWidget {
         ],
         const SizedBox(height: 18),
         if (processing)
-          const RetroActivityIndicator(
-            style: RetroActivityStyle.hourglass,
-            label: 'Czekamy na zakończenie parowania…',
+          const ThemedActivityIndicator(
+            label: 'Akceptowanie…',
           )
-        else
+        else if (!awaitingContact)
           Row(
             children: [
               Expanded(
@@ -407,12 +459,12 @@ class _PairingCode extends StatelessWidget {
         ),
       ),
       const SizedBox(height: 10),
-      RetroActivityIndicator(
-        style: RetroActivityStyle.dots,
-        compact: true,
-        label: checkingRequest
+      Text(
+        checkingRequest
             ? 'Sprawdzanie nowych zaproszeń…'
             : 'Oczekiwanie na użycie kodu…',
+        textAlign: TextAlign.center,
+        style: Theme.of(context).textTheme.bodySmall,
       ),
     ],
   );
