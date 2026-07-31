@@ -1,3 +1,4 @@
+import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'theme_preferences.dart';
@@ -14,7 +15,9 @@ class ThemeController extends AsyncNotifier<TorChatThemePreferences> {
   @override
   Future<TorChatThemePreferences> build() async {
     _store = await ThemePreferencesStore.create();
-    return _store.load();
+    final preferences = await _store.load();
+    _applyMotionPolicy(preferences.reducedMotion);
+    return preferences;
   }
 
   Future<void> setFamily(TorChatThemeFamily family) =>
@@ -26,11 +29,29 @@ class ThemeController extends AsyncNotifier<TorChatThemePreferences> {
   Future<void> setRetroPalette(TorChatRetroPalette palette) =>
       _update((value) => value.copyWith(retroPalette: palette));
 
+  Future<void> setReducedMotion(bool reducedMotion) =>
+      _update((value) => value.copyWith(reducedMotion: reducedMotion));
+
   Future<void> _update(
     TorChatThemePreferences Function(TorChatThemePreferences) mutate,
   ) async {
-    final next = mutate(state.value ?? const TorChatThemePreferences());
+    final previous = state.value ?? const TorChatThemePreferences();
+    final next = mutate(previous);
+    _applyMotionPolicy(next.reducedMotion);
     state = AsyncData(next);
-    await _store.save(next);
+    try {
+      await _store.save(next);
+    } catch (_) {
+      _applyMotionPolicy(previous.reducedMotion);
+      state = AsyncData(previous);
+      rethrow;
+    }
+  }
+
+  void _applyMotionPolicy(bool reducedMotion) {
+    // Flutter's scheduler applies this multiplier to animations globally.
+    // A small positive value keeps framework assertions and transition
+    // completion semantics intact while making motion effectively immediate.
+    timeDilation = reducedMotion ? 0.05 : 1.0;
   }
 }
