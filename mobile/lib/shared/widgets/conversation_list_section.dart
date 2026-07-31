@@ -267,14 +267,18 @@ class ConversationListSection extends ConsumerWidget {
         );
         field.dispose();
         if (result != null) await controller.setTitle(conversation.id, result);
+        return;
       case 'pin':
         await controller.togglePinned(conversation.id);
+        return;
       case 'mute':
         await controller.toggleMuted(conversation.id);
+        return;
       case 'archive':
         await controller.setArchived(conversation.id, true);
+        return;
       default:
-        break;
+        return;
     }
   }
 }
