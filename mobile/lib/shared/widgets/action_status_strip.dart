@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -52,7 +54,7 @@ class _ActionStatusStripState extends ConsumerState<ActionStatusStrip> {
               onAccept: () => _runPairingAction(
                 incoming,
                 OperationAction.acceptPairing,
-                () => controller.acceptPairing(incoming.id),
+                () => _acceptAndWaitForContact(incoming),
               ),
               onReject: () => _runPairingAction(
                 incoming,
@@ -77,6 +79,25 @@ class _ActionStatusStripState extends ConsumerState<ActionStatusStrip> {
         ],
       ),
     );
+  }
+
+  Future<void> _acceptAndWaitForContact(PairingItem item) async {
+    final controller = ref.read(appControllerProvider.notifier);
+    await controller.acceptPairing(item.id);
+    if (ref.read(appControllerProvider).error.isNotEmpty) return;
+
+    final peerId = item.peer?.id.trim() ?? '';
+    if (peerId.isEmpty) return;
+    for (var attempt = 0; attempt < 20; attempt += 1) {
+      await controller.refreshData(
+        forcePairing: true,
+        allowAutoTorka: false,
+      );
+      final state = ref.read(appControllerProvider);
+      if (state.contacts.any((contact) => contact.id == peerId)) return;
+      if (state.error.isNotEmpty) return;
+      await Future<void>.delayed(const Duration(seconds: 1));
+    }
   }
 
   Future<void> _runPairingAction(
@@ -150,56 +171,82 @@ class _IncomingPairingPanel extends StatelessWidget {
     final accepting = busyAction == OperationAction.acceptPairing;
     final rejecting = busyAction == OperationAction.rejectPairing;
     final busy = busyAction.isNotEmpty;
+    final details = Row(
+      children: [
+        const ThemedIcon(Icons.person_add_alt_1, size: 20),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Nowe zaproszenie od $peerName',
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+              Text(
+                busy
+                    ? 'Czekamy na zakończenie operacji i synchronizację kontaktu…'
+                    : 'Potwierdź lub odrzuć prośbę o kontakt.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+    final actions = Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      alignment: WrapAlignment.end,
+      children: [
+        OutlinedButton.icon(
+          onPressed: busy ? null : onReject,
+          icon: rejecting
+              ? const RetroActivityIndicator(
+                  style: RetroActivityStyle.dots,
+                  compact: true,
+                )
+              : const ThemedIcon(Icons.close, size: 16),
+          label: Text(rejecting ? 'Odrzucanie…' : 'Odrzuć'),
+        ),
+        FilledButton.icon(
+          onPressed: busy ? null : onAccept,
+          icon: accepting
+              ? const RetroActivityIndicator(
+                  style: RetroActivityStyle.hourglass,
+                  compact: true,
+                )
+              : const ThemedIcon(Icons.check, size: 16),
+          label: Text(accepting ? 'Akceptowanie…' : 'Akceptuj'),
+        ),
+      ],
+    );
 
     return Material(
       color: context.statusTheme.statusBackground,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 9, 14, 10),
-        child: Row(
-          children: [
-            const ThemedIcon(Icons.person_add_alt_1, size: 20),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Nowe zaproszenie od $peerName',
-                    style: Theme.of(context).textTheme.labelLarge,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxWidth < 640;
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(14, 9, 14, 10),
+            child: compact
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      details,
+                      const SizedBox(height: 9),
+                      Align(alignment: Alignment.centerRight, child: actions),
+                    ],
+                  )
+                : Row(
+                    children: [
+                      Expanded(child: details),
+                      const SizedBox(width: 10),
+                      actions,
+                    ],
                   ),
-                  Text(
-                    busy
-                        ? 'Czekamy na zakończenie operacji i synchronizację kontaktu…'
-                        : 'Potwierdź lub odrzuć prośbę o kontakt.',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 10),
-            OutlinedButton.icon(
-              onPressed: busy ? null : onReject,
-              icon: rejecting
-                  ? const RetroActivityIndicator(
-                      style: RetroActivityStyle.dots,
-                      compact: true,
-                    )
-                  : const ThemedIcon(Icons.close, size: 16),
-              label: Text(rejecting ? 'Odrzucanie…' : 'Odrzuć'),
-            ),
-            const SizedBox(width: 8),
-            FilledButton.icon(
-              onPressed: busy ? null : onAccept,
-              icon: accepting
-                  ? const RetroActivityIndicator(
-                      style: RetroActivityStyle.hourglass,
-                      compact: true,
-                    )
-                  : const ThemedIcon(Icons.check, size: 16),
-              label: Text(accepting ? 'Akceptowanie…' : 'Akceptuj'),
-            ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }
@@ -219,47 +266,74 @@ class _OutgoingPairingPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cancelling = busyAction == OperationAction.cancelPairing;
+    final details = Row(
+      children: [
+        const RetroActivityIndicator(
+          style: RetroActivityStyle.dots,
+          compact: true,
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Zaproszenie do ${_peerName(item)} oczekuje',
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+              Text(
+                item.status == InviteState.accepted
+                    ? 'Druga strona zaakceptowała. Finalizujemy bezpieczny kontakt…'
+                    : 'Czekamy na akceptację drugiej strony.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+    final cancel = onCancel == null
+        ? null
+        : OutlinedButton.icon(
+            onPressed: busyAction.isEmpty ? onCancel : null,
+            icon: cancelling
+                ? const RetroActivityIndicator(
+                    style: RetroActivityStyle.dots,
+                    compact: true,
+                  )
+                : const ThemedIcon(Icons.cancel_outlined, size: 16),
+            label: Text(cancelling ? 'Anulowanie…' : 'Anuluj'),
+          );
+
     return Material(
       color: context.statusTheme.statusBackground,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 9, 14, 10),
-        child: Row(
-          children: [
-            const RetroActivityIndicator(
-              style: RetroActivityStyle.dots,
-              compact: true,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Zaproszenie do ${_peerName(item)} oczekuje',
-                    style: Theme.of(context).textTheme.labelLarge,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxWidth < 560;
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(14, 9, 14, 10),
+            child: compact
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      details,
+                      if (cancel != null) ...[
+                        const SizedBox(height: 9),
+                        Align(alignment: Alignment.centerRight, child: cancel),
+                      ],
+                    ],
+                  )
+                : Row(
+                    children: [
+                      Expanded(child: details),
+                      if (cancel != null) ...[
+                        const SizedBox(width: 10),
+                        cancel,
+                      ],
+                    ],
                   ),
-                  Text(
-                    item.status == InviteState.accepted
-                        ? 'Druga strona zaakceptowała. Finalizujemy bezpieczny kontakt…'
-                        : 'Czekamy na akceptację drugiej strony.',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ],
-              ),
-            ),
-            if (onCancel != null)
-              OutlinedButton.icon(
-                onPressed: busyAction.isEmpty ? onCancel : null,
-                icon: cancelling
-                    ? const RetroActivityIndicator(
-                        style: RetroActivityStyle.dots,
-                        compact: true,
-                      )
-                    : const ThemedIcon(Icons.cancel_outlined, size: 16),
-                label: Text(cancelling ? 'Anulowanie…' : 'Anuluj'),
-              ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }
