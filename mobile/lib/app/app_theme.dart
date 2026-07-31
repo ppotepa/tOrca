@@ -1,3 +1,4 @@
+export 'theme/reduced_motion_policy.dart';
 export 'theme/torchat_theme.dart';
 
 import 'package:flutter/material.dart';
