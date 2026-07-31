@@ -13,6 +13,7 @@ pub mod peer;
 pub mod processes;
 pub mod relay;
 pub mod storage;
+pub mod supervisor;
 
 pub use actor::ClientEngineActor;
 pub use application::{
@@ -57,4 +58,10 @@ pub use relay::{EngineRelay, NoopEngineRelay};
 pub use storage::{
     ClientDatabase, InboundEnvelopeStoreResult, InboundPeerEnvelopeRecord, Migration,
     MigrationRunner, OutboundDeliveryRecord, SqliteRuntimeStorage, SqliteTransaction,
+};
+pub use supervisor::{
+    failure_class, EngineSupervisor, ShutdownPhase, SupervisorAction, WorkerFailureClass,
+    WorkerKind, WorkerStatus, COMMAND_CHANNEL_CAPACITY, DELIVERY_CHANNEL_CAPACITY,
+    NOTIFICATION_CHANNEL_CAPACITY, PROJECTION_CHANNEL_CAPACITY,
+    WORKER_OUTCOME_CHANNEL_CAPACITY,
 };
