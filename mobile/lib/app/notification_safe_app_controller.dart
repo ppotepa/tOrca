@@ -59,22 +59,29 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
     bool blocked,
     ContactTransportPolicy transportPolicy,
   ) async {
+    ConversationSummary? relationshipConversation;
+    var preserveHistory = true;
     if (blocked && !contact.blocked) {
-      ConversationSummary? conversation;
       for (final candidate in state.conversations) {
         if (candidate.contactId == contact.id) {
-          conversation = candidate;
+          relationshipConversation = candidate;
           break;
         }
       }
-      if (conversation != null) {
+      final preferences = await SharedPreferences.getInstance();
+      final preferenceKey =
+          'torchat.relationship.preserveHistory.${contact.id}';
+      preserveHistory = preferences.getBool(preferenceKey) ?? true;
+      await preferences.remove(preferenceKey);
+
+      if (relationshipConversation != null) {
         final payload = RelationshipRemovedMessage(
           removedAt: DateTime.now(),
-          preserveHistory: true,
+          preserveHistory: preserveHistory,
         ).encode();
         await ref
             .read(legacy.runtimeRepositoryProvider)
-            .sendMessage(conversation.id, payload);
+            .sendMessage(relationshipConversation.id, payload);
       }
     }
 
@@ -85,6 +92,9 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
       blocked,
       transportPolicy,
     );
+    if (blocked && !preserveHistory && relationshipConversation != null) {
+      await _deleteHistoryExceptRemoval(relationshipConversation.id);
+    }
     await super.refreshData(forcePairing: false, allowAutoTorka: false);
     _hideRemovedRelationships();
   }
@@ -142,9 +152,10 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
     _reconcilingRelationshipRemoval = true;
     try {
       for (final conversation in List<ConversationSummary>.of(state.conversations)) {
-        if (RelationshipRemovedMessage.tryDecode(conversation.preview) == null) {
-          continue;
-        }
+        final removal = RelationshipRemovedMessage.tryDecode(
+          conversation.preview,
+        );
+        if (removal == null) continue;
         ContactRecord? contact;
         for (final candidate in state.contacts) {
           if (candidate.id == conversation.contactId) {
@@ -160,9 +171,21 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
           true,
           contact.transportPolicy,
         );
+        if (!removal.preserveHistory) {
+          await _deleteHistoryExceptRemoval(conversation.id);
+        }
       }
     } finally {
       _reconcilingRelationshipRemoval = false;
+    }
+  }
+
+  Future<void> _deleteHistoryExceptRemoval(String conversationId) async {
+    final repository = ref.read(legacy.runtimeRepositoryProvider);
+    final messages = await repository.messages(conversationId);
+    for (final message in messages) {
+      if (isRelationshipRemovedMessage(message.text)) continue;
+      await repository.deleteMessageLocal(message.id);
     }
   }
 
