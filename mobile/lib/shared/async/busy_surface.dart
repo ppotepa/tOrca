@@ -155,14 +155,12 @@ class _BusySurfaceState extends State<BusySurface> {
     final activity = context.activityTheme;
     return Stack(
       children: [
-        Positioned.fill(
-          child: AbsorbPointer(
-            absorbing: widget.blockInput && widget.state.busy,
-            child: AnimatedOpacity(
-              duration: duration,
-              opacity: _indicatorVisible ? activity.disabledOpacity : 1,
-              child: widget.child,
-            ),
+        AbsorbPointer(
+          absorbing: widget.blockInput && widget.state.busy,
+          child: AnimatedOpacity(
+            duration: duration,
+            opacity: _indicatorVisible ? activity.disabledOpacity : 1,
+            child: widget.child,
           ),
         ),
         Positioned.fill(
