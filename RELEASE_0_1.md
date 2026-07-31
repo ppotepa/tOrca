@@ -75,8 +75,10 @@ The core exposes a dedicated versioned `ContactRemovedPayloadV1` contract with a
 | Mute conversation | IMPLEMENTED |
 | Archive conversation locally | IMPLEMENTED |
 | Desktop/mobile context menu | IMPLEMENTED |
-| Clear local history | IN_PROGRESS |
+| Clear local history | IMPLEMENTED |
 | Local system events | IN_PROGRESS |
+
+Local history clearing now uses the runtime delete operation for every persisted message in the selected conversation, clears the repository page/cache state and keeps the contact relationship intact. Platform verification remains outstanding.
 
 ## Epic 5 — text messaging
 
@@ -88,7 +90,9 @@ The core exposes a dedicated versioned `ContactRemovedPayloadV1` contract with a
 | Queued/sending/sent/delivered/read/failed states | IMPLEMENTED |
 | Reply, copy, retry and local delete | IMPLEMENTED |
 | Local search in current conversation | IMPLEMENTED |
-| Persist sent/delivered/read timestamps | NOT_STARTED |
+| Persist sent/delivered/read timestamps | IMPLEMENTED |
+
+Message state transitions are now recorded in a dedicated `message_state_timestamps` table inside the encrypted SQLCipher client database. Idempotent insert/update triggers preserve the first `sent_at`, `delivered_at` and `read_at` values, a projection view exposes them beside the canonical message row, and integration coverage checks monotonic transitions, restart persistence and cascading deletion. The fields are intentionally storage-side for 0.1 and do not expand the public wire payload.
 
 ## Epic 6 — timeline and scrolling
 
@@ -159,22 +163,27 @@ Desktop notifications use persistent ID deduplication, suppress a toast when its
 | Responsive desktop workspace and splitter | IMPLEMENTED |
 | Keyboard focus and shortcuts | IN_PROGRESS |
 | Accessible semantics and contrast | IN_PROGRESS |
-| Sanitized diagnostic ZIP | IN_PROGRESS |
-| Database migrations preserve data | NOT_STARTED |
+| Sanitized diagnostic ZIP | IMPLEMENTED |
+| Database migrations preserve data | IMPLEMENTED |
 | Clean install and upgrade validation | NOT_STARTED |
 | Windows end-to-end matrix | NOT_STARTED |
 | Android end-to-end matrix | NOT_STARTED |
+
+Diagnostic export now copies only text diagnostics into a temporary staging directory, excludes databases, key stores, private-key files and executable/binary artifacts, and redacts structured message bodies, attachment payloads, ciphertexts, tokens, credentials, onion addresses, PEM blocks and large base64/hex values before creating the ZIP. The archive includes a sanitization manifest and an integration test asserts that representative secrets cannot survive export.
+
+The SQLCipher migration suite now verifies that a fresh database applies every registered migration and that reopening an existing encrypted database preserves contacts, conversations, messages and settings. It also verifies durable message-state timestamps across restart. Actual application-upgrade validation remains a separate release-matrix requirement.
 
 ## Release blockers
 
 0.1 must not be tagged until these blockers are resolved and verified:
 
-1. Transactional relationship removal and fresh re-pair identity.
-2. SQLite message pagination with scroll-position preservation.
-3. Durable and idempotent message/pairing delivery verified through restarts.
-4. Notification deduplication and deep-link behavior.
-5. Windows and Android clean-install, upgrade, cold-start and recovery matrices.
-6. Local compilation and static analysis for all newly added Flutter, Kotlin and Rust code.
+1. Complete engine-level relationship tombstone routing and verify fresh re-pair on both platforms.
+2. Verify durable and idempotent message/pairing delivery through offline periods, reconnects and process restarts.
+3. Verify cursor pagination, notification routing and database migrations on Windows and Android builds.
+4. Complete clean-install, upgrade, cold-start and recovery matrices for Windows and Android.
+5. Run compilation, static analysis and all automated tests for newly added Flutter, Kotlin, PowerShell and Rust code.
+
+GitHub Actions currently creates the release jobs but fails before assigning executable steps, so no `VERIFIED_WINDOWS`, `VERIFIED_ANDROID` or `DONE` status may be inferred from the implementation commits alone.
 
 ## Acceptance criteria
 
