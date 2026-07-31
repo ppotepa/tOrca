@@ -12,7 +12,7 @@ import 'core/runtime/runtime_payload.dart';
 /// The platform side owns the Tor process, identity and encrypted state.
 class MobileBridge extends Object
     with RuntimeBridgeMethods
-    implements RuntimeCallBridge {
+    implements RuntimeCallBridge, RuntimeAttachmentProvider {
   const MobileBridge();
 
   static const _channel = MethodChannel('org.torchat/mobile');
@@ -40,8 +40,6 @@ class MobileBridge extends Object
         'profile': Map<String, dynamic>.from(profile),
       };
     } on PlatformException {
-      // A cold service start is not an error. initialize() continues through
-      // the normal local-engine warmup path.
       return null;
     }
   }
