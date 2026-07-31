@@ -17,7 +17,6 @@ class MobileBridge extends Object
 
   static const _channel = MethodChannel('org.torchat/mobile');
   static const _eventsChannel = EventChannel('org.torchat/mobile/events');
-  static const _runtimeSnapshotMethod = 'runtimeSnapshot';
 
   @override
   Stream<RuntimeEvent> get events => _eventsChannel
@@ -26,9 +25,25 @@ class MobileBridge extends Object
 
   @override
   Future<Map<String, dynamic>?> runtimeSnapshot() async {
-    final value = await _channel.invokeMethod<Object?>(_runtimeSnapshotMethod);
-    if (value is! Map) return null;
-    return Map<String, dynamic>.from(value);
+    try {
+      final identity = await _channel.invokeMethod<Object?>(
+        EngineContract.getIdentity,
+      );
+      final profile = await _channel.invokeMethod<Object?>(
+        EngineContract.getProfile,
+      );
+      if (identity is! Map || profile is! Map) return null;
+      return <String, dynamic>{
+        'serviceAlive': true,
+        'localDataReady': true,
+        'identity': Map<String, dynamic>.from(identity),
+        'profile': Map<String, dynamic>.from(profile),
+      };
+    } on PlatformException {
+      // A cold service start is not an error. initialize() continues through
+      // the normal local-engine warmup path.
+      return null;
+    }
   }
 
   /// Android owns the process and shared engine. Calling connect is idempotent:
