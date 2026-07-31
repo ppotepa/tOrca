@@ -28,7 +28,7 @@ class AndroidEngineEventPump(
             while (isActive && running.get()) {
                 runCatching { host.pollEvent(timeoutMs) }
                     .onSuccess { event ->
-                        if (event != null && shouldForwardEvent(event)) {
+                        if (event != null && shouldForwardEngineEvent(event)) {
                             if (!host.acceptPolledEvent(event)) {
                                 onEvent(event)
                             }
@@ -47,23 +47,23 @@ class AndroidEngineEventPump(
         job?.cancelAndJoin()
         job = null
     }
+}
 
-    internal fun shouldForwardEvent(event: JSONObject): Boolean {
-        if (event.optString(EngineContract.TYPE) != EngineContract.EVENT_NOTIFICATION_REQUESTED) {
-            return true
-        }
-        val notification = event.optJSONObject(EngineContract.NOTIFICATION) ?: return false
-        val title = notification.optString(EngineContract.TITLE).trim()
-        val body = notification.optString(EngineContract.BODY).trim()
-
-        // The legacy actor emits this alert while processing PairingOffer,
-        // which is already a post-acceptance protocol stage. It is not a new
-        // inbox request and can be replayed after reconnect, producing stale
-        // or duplicate user notifications. Pending invitations are rendered
-        // from the committed pairing inbox instead.
-        if (title == "Nowe zaproszenie" && body == "Masz nową prośbę o rozmowę.") {
-            return false
-        }
+internal fun shouldForwardEngineEvent(event: JSONObject): Boolean {
+    if (event.optString(EngineContract.TYPE) != EngineContract.EVENT_NOTIFICATION_REQUESTED) {
         return true
     }
+    val notification = event.optJSONObject(EngineContract.NOTIFICATION) ?: return false
+    val title = notification.optString(EngineContract.TITLE).trim()
+    val body = notification.optString(EngineContract.BODY).trim()
+
+    // The legacy actor emits this alert while processing PairingOffer,
+    // which is already a post-acceptance protocol stage. It is not a new
+    // inbox request and can be replayed after reconnect, producing stale
+    // or duplicate user notifications. Pending invitations are rendered
+    // from the committed pairing inbox instead.
+    if (title == "Nowe zaproszenie" && body == "Masz nową prośbę o rozmowę.") {
+        return false
+    }
+    return true
 }
