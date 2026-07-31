@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:torchat_mobile/client_runtime.dart';
 import 'package:torchat_mobile/core/application_state/application_snapshot_codec.dart';
@@ -187,6 +188,9 @@ void main() {
   });
 
   testWidgets('reattaches complete shell without warmup replay', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
     await tester.pumpWidget(const TorChatMobileApp(runtime: _AttachedRuntime()));
     await tester.pump();
 
