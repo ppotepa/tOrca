@@ -1,7 +1,5 @@
 package org.torchat.mobile
 
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import org.json.JSONObject
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -9,12 +7,6 @@ import org.junit.Test
 import org.torchat.generated.EngineContract
 
 class AndroidEngineEventPumpNotificationTest {
-    private val pump = AndroidEngineEventPump(
-        host = FakeAndroidEngineHost(),
-        scope = CoroutineScope(Dispatchers.Unconfined),
-        onEvent = {},
-    )
-
     @Test
     fun legacyPairingOfferNotificationIsSuppressed() {
         val event = JSONObject()
@@ -26,7 +18,7 @@ class AndroidEngineEventPumpNotificationTest {
                     .put(EngineContract.BODY, "Masz nową prośbę o rozmowę."),
             )
 
-        assertFalse(pump.shouldForwardEvent(event))
+        assertFalse(shouldForwardEngineEvent(event))
     }
 
     @Test
@@ -40,7 +32,7 @@ class AndroidEngineEventPumpNotificationTest {
                     .put(EngineContract.BODY, "Cześć"),
             )
 
-        assertTrue(pump.shouldForwardEvent(event))
+        assertTrue(shouldForwardEngineEvent(event))
     }
 
     @Test
@@ -48,6 +40,6 @@ class AndroidEngineEventPumpNotificationTest {
         val event = JSONObject()
             .put(EngineContract.TYPE, EngineContract.TOR_STATUS)
 
-        assertTrue(pump.shouldForwardEvent(event))
+        assertTrue(shouldForwardEngineEvent(event))
     }
 }
