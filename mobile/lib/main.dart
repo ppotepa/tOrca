@@ -6,6 +6,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'app/app_controller.dart';
 import 'app/app_theme.dart';
 import 'app/application_snapshot_provider.dart';
+import 'app/desktop_navigation_intent.dart';
+import 'app/desktop_window_lifecycle.dart';
 import 'client_runtime.dart';
 import 'core/connection/app_state_connection.dart';
 import 'core/connection/connection_gate.dart';
@@ -18,8 +20,9 @@ import 'features/onboarding/nickname_onboarding_screen.dart';
 import 'features/onboarding/onboarding_views.dart';
 import 'features/shell/main_shell.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  if (!await DesktopWindowLifecycle.initialize()) return;
   runApp(const TorChatMobileApp());
 }
 
@@ -85,11 +88,23 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
   bool _runningUnlocked = false;
   String _reattachedNickname = '';
   Timer? _backgroundDebounce;
+  StreamSubscription<DesktopNavigationIntent>? _desktopNavigationSubscription;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    if (isDesktopPlatform) {
+      _desktopNavigationSubscription = DesktopNavigationIntents.stream.listen(
+        (intent) {
+          if (!mounted) return;
+          switch (intent) {
+            case DesktopNavigationIntent.openSettings:
+              _openSettings();
+          }
+        },
+      );
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_attachAndInitialize());
     });
@@ -120,6 +135,7 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _desktopNavigationSubscription?.cancel();
     _backgroundDebounce?.cancel();
     _search.dispose();
     _composer.dispose();
