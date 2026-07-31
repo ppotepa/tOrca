@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import '../client_runtime.dart';
 import '../shared/formatters/operation_status.dart';
 import 'app_controller_legacy.dart' as legacy;
 import 'sequential_app_controller.dart';
@@ -44,8 +45,11 @@ class PairingRecoveryAppController extends SequentialAppController {
   @override
   Future<void> updateVisibility(bool foreground) async {
     await super.updateVisibility(foreground);
-    if (foreground) {
+    if (!foreground) return;
+    try {
       await refreshData(forcePairing: true, allowAutoTorka: false);
+    } catch (_) {
+      // Foreground reconciliation is best-effort; the periodic poll retries it.
     }
   }
 
@@ -87,7 +91,9 @@ class PairingRecoveryAppController extends SequentialAppController {
         .length;
     final current = state.notice;
     if (pending > 0) {
-      final suffix = pending == 1 ? '1 nowe zaproszenie.' : '$pending nowe zaproszenia.';
+      final suffix = pending == 1
+          ? '1 nowe zaproszenie.'
+          : '$pending nowe zaproszenia.';
       final notice = '$_pairingNoticePrefix $suffix';
       if (current != notice &&
           (current.isEmpty || current.startsWith(_pairingNoticePrefix))) {
