@@ -3,11 +3,21 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('active app controller provider uses the sequential implementation', () {
+  test('active provider layers pairing recovery over sequential warmup', () {
     final wrapper = File('lib/app/app_controller.dart').readAsStringSync();
+    final recovery = File(
+      'lib/app/pairing_recovery_app_controller.dart',
+    ).readAsStringSync();
 
-    expect(wrapper, contains("import 'sequential_app_controller.dart';"));
-    expect(wrapper, contains('() => SequentialAppController()'));
+    expect(
+      wrapper,
+      contains("import 'pairing_recovery_app_controller.dart';"),
+    );
+    expect(wrapper, contains('() => PairingRecoveryAppController()'));
+    expect(
+      recovery,
+      contains('extends SequentialAppController'),
+    );
     expect(
       wrapper,
       contains("export 'app_controller_legacy.dart' hide appControllerProvider"),
