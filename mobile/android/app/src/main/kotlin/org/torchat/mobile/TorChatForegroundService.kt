@@ -33,6 +33,7 @@ import org.torchat.generated.EngineContract
 import org.torchat.security.LocalSecretStore
 import org.torchat.security.TorRuntime
 import java.io.File
+import java.util.LinkedHashSet
 
 /** Owns Tor, engine lifecycle and notifications outside the Flutter UI. */
 class TorChatForegroundService : Service() {
@@ -124,7 +125,8 @@ class TorChatForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val deployRunId = intent?.getStringExtra("deploy_run_id")
-        val resetDev = BuildConfig.DEBUG && intent?.getBooleanExtra("reset_dev_state", false) == true
+        val resetDev = BuildConfig.DEBUG &&
+            intent?.getBooleanExtra("reset_dev_state", false) == true
         val clean = intent?.getBooleanExtra("clean_state", false) == true
         if ((resetDev || clean) && runtime == null && engineHost == null && !starting) {
             resetLocalState(resetDev = resetDev, clean = clean)
@@ -563,11 +565,13 @@ class TorChatForegroundService : Service() {
                 publishRuntimeError(message)
             }
             EngineContract.EVENT_NOTIFICATION_REQUESTED -> {
-                val notification = event.optJSONObject(EngineContract.NOTIFICATION) ?: return
+                val request = event.optJSONObject(EngineContract.NOTIFICATION) ?: return
                 postAlert(
-                    title = notification.optString(EngineContract.TITLE).ifBlank { "TorChat" },
-                    text = notification.optString(EngineContract.BODY).ifBlank { "Nowe zdarzenie" },
-                    id = notification.optString(EngineContract.ID).hashCode(),
+                    title = request.optString(EngineContract.TITLE).ifBlank { "TorChat" },
+                    text = request.optString(EngineContract.BODY).ifBlank { "Nowe zdarzenie" },
+                    stableId = request.optString(EngineContract.ID),
+                    conversationId = request.optString(EngineContract.CONVERSATION_ID),
+                    kind = request.optString(EngineContract.KIND),
                 )
             }
         }
@@ -708,12 +712,25 @@ class TorChatForegroundService : Service() {
         )
     }
 
-    private fun postAlert(title: String, text: String, id: Int) {
+    private fun postAlert(
+        title: String,
+        text: String,
+        stableId: String,
+        conversationId: String,
+        kind: String,
+    ) {
+        val normalizedId = stableId.ifBlank {
+            "$kind:$conversationId:${title.hashCode()}:${text.hashCode()}"
+        }
+        val notificationId = ALERT_NOTIFICATION_BASE + (normalizedId.hashCode() and 0x3fff)
         notifyIncomingNotification(
             context = this,
             title = title,
             text = text,
-            notificationId = ALERT_NOTIFICATION_BASE + (id and 0x3fff),
+            stableId = normalizedId,
+            conversationId = conversationId,
+            kind = kind,
+            notificationId = notificationId,
         )
     }
 
@@ -722,6 +739,12 @@ class TorChatForegroundService : Service() {
         private const val ALERT_CHANNEL_ID = "torchat-alerts"
         private const val NOTIFICATION_ID = 4101
         private const val ALERT_NOTIFICATION_BASE = 5100
+        private const val MAX_PROCESSED_NOTIFICATION_IDS = 256
+        private const val PROCESSED_NOTIFICATION_IDS_KEY =
+            "flutter.torchat.notifications.android.processedIds"
+        private const val ACTIVE_CONVERSATION_KEY =
+            "flutter.torchat.notifications.activeConversationId"
+
         @Volatile private var processStarted = CompletableDeferred<Unit>()
         @Volatile private var engineReady = CompletableDeferred<Unit>()
         @Volatile private var localDataReady = CompletableDeferred<Unit>()
@@ -772,6 +795,9 @@ class TorChatForegroundService : Service() {
             context: Context,
             title: String,
             text: String,
+            stableId: String,
+            conversationId: String,
+            kind: String,
             notificationId: Int,
         ) {
             val preferences = context.getSharedPreferences(
@@ -779,12 +805,48 @@ class TorChatForegroundService : Service() {
                 Context.MODE_PRIVATE,
             )
             if (!preferences.getBoolean("flutter.torchat.notifications.enabled", true)) return
+
+            val pairing = kind.equals("pairing", ignoreCase = true)
+            val categoryEnabled = if (pairing) {
+                preferences.getBoolean("flutter.torchat.notifications.pairing", true)
+            } else {
+                preferences.getBoolean("flutter.torchat.notifications.messages", true)
+            }
+            if (!categoryEnabled) return
+            if (!pairing && conversationId.isNotBlank() &&
+                preferences.getString(ACTIVE_CONVERSATION_KEY, "") == conversationId
+            ) {
+                return
+            }
+
+            val processed = LinkedHashSet(
+                preferences.getStringSet(PROCESSED_NOTIFICATION_IDS_KEY, emptySet())
+                    ?: emptySet(),
+            )
+            if (!processed.add(stableId)) return
+            while (processed.size > MAX_PROCESSED_NOTIFICATION_IDS) {
+                processed.remove(processed.first())
+            }
+            preferences.edit()
+                .putStringSet(PROCESSED_NOTIFICATION_IDS_KEY, processed)
+                .apply()
+
             val sound = preferences.getBoolean("flutter.torchat.notifications.sound", true)
-            val vibration = preferences.getBoolean("flutter.torchat.notifications.vibration", true)
+            val vibration =
+                preferences.getBoolean("flutter.torchat.notifications.vibration", true)
             val preview = preferences.getBoolean("flutter.torchat.notifications.preview", false)
             val visibleTitle = if (preview) title else "TorChat"
             val visibleText = if (preview) text else "Nowa prywatna wiadomość"
             ensureIncomingNotificationChannel(context)
+
+            val openIntent = Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                if (conversationId.isNotBlank()) {
+                    action = NotificationNavigation.ACTION_OPEN_CONVERSATION
+                    putExtra(NotificationNavigation.EXTRA_CONVERSATION_ID, conversationId)
+                    putExtra(NotificationNavigation.EXTRA_NOTIFICATION_ID, notificationId)
+                }
+            }
             val notification = NotificationCompat.Builder(context, ALERT_CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_stat_tor)
                 .setContentTitle(visibleTitle)
@@ -804,7 +866,7 @@ class TorChatForegroundService : Service() {
                     PendingIntent.getActivity(
                         context,
                         notificationId,
-                        Intent(context, MainActivity::class.java),
+                        openIntent,
                         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
                     ),
                 )
