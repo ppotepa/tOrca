@@ -135,8 +135,11 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
       blocked,
       transportPolicy,
     );
-    if (blocked && !preserveHistory && relationshipConversation != null) {
-      await _deleteHistoryExceptRemoval(relationshipConversation.id);
+    if (blocked && relationshipConversation != null) {
+      await _cancelPendingOrdinaryMessages(relationshipConversation.id);
+      if (!preserveHistory) {
+        await _deleteHistoryExceptRemoval(relationshipConversation.id);
+      }
     }
     await super.refreshData(forcePairing: false, allowAutoTorka: false);
     _hideRemovedRelationships();
@@ -263,12 +266,33 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
           true,
           contact.transportPolicy,
         );
+        await _cancelPendingOrdinaryMessages(conversation.id);
         if (!removal.preserveHistory) {
           await _deleteHistoryExceptRemoval(conversation.id);
         }
       }
     } finally {
       _reconcilingRelationshipRemoval = false;
+    }
+  }
+
+  Future<void> _cancelPendingOrdinaryMessages(String conversationId) async {
+    final repository = ref.read(legacy.runtimeRepositoryProvider);
+    try {
+      final messages = await repository.messages(conversationId);
+      for (final message in messages) {
+        final pending = message.state == MessageState.queued ||
+            message.state == MessageState.sending;
+        if (!message.outgoing ||
+            !pending ||
+            isRelationshipRemovedMessage(message.text)) {
+          continue;
+        }
+        await repository.deleteMessageLocal(message.id);
+      }
+    } catch (_) {
+      // Storage-level tombstones remain the final guard. This cleanup prevents
+      // a stale retry through older runtime implementations when available.
     }
   }
 
