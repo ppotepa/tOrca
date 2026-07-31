@@ -96,7 +96,9 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
 
   Future<void> _attachAndInitialize() async {
     final runtime = ref.read(clientRuntimeProvider);
-    final snapshot = await runtime.runtimeSnapshot();
+    final snapshot = runtime is RuntimeAttachmentProvider
+        ? await runtime.runtimeSnapshot()
+        : null;
     final profile = snapshot?['profile'];
     if (profile is Map) {
       final nickname = profile['nickname']?.toString().trim() ?? '';
@@ -132,8 +134,6 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
           ref.read(appControllerProvider.notifier).updateVisibility(true),
         );
       case AppLifecycleState.inactive:
-        // Inactive is frequently a short system transition (permissions,
-        // app switcher, notification shade). Do not flap presence or relay.
         break;
       case AppLifecycleState.hidden:
       case AppLifecycleState.paused:
