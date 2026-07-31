@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import 'extensions/torchat_activity_theme.dart';
+import 'extensions/torchat_chat_theme.dart';
+import 'extensions/torchat_inbox_theme.dart';
 import 'families/current_theme.dart';
 import 'families/retro_theme.dart';
 import 'theme_preferences.dart';
@@ -38,6 +40,30 @@ abstract final class TorChatThemeRegistry {
 
   static ThemeData _withAccessibleColorScheme(ThemeData theme) {
     final scheme = theme.colorScheme;
+    final extensions = theme.extensions.values.toList(growable: true);
+    final chat = theme.extension<TorChatChatTheme>();
+    final inbox = theme.extension<TorChatInboxTheme>();
+    extensions.removeWhere(
+      (extension) =>
+          extension is TorChatChatTheme || extension is TorChatInboxTheme,
+    );
+    if (chat != null) {
+      extensions.add(
+        chat.copyWith(
+          incomingForeground: accessibleForeground(chat.incomingBubble),
+          outgoingForeground: accessibleForeground(chat.outgoingBubble),
+        ),
+      );
+    }
+    if (inbox != null) {
+      extensions.add(
+        inbox.copyWith(
+          acceptForeground: accessibleForeground(inbox.accept),
+          rejectForeground: accessibleForeground(inbox.reject),
+          archiveForeground: accessibleForeground(inbox.archive),
+        ),
+      );
+    }
     return theme.copyWith(
       colorScheme: scheme.copyWith(
         onPrimary: accessibleForeground(scheme.primary),
@@ -49,6 +75,7 @@ abstract final class TorChatThemeRegistry {
         onTertiaryContainer: accessibleForeground(scheme.tertiaryContainer),
         onErrorContainer: accessibleForeground(scheme.errorContainer),
       ),
+      extensions: extensions.cast<ThemeExtension<dynamic>>(),
     );
   }
 
