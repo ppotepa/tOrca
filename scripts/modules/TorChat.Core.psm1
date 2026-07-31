@@ -195,8 +195,23 @@ function Invoke-TorChatNative {
         }
         if ($AllowedExitCodes -notcontains $exitCode) {
             $summary = "$FilePath exited with code $exitCode."
-            if ($FilePath -eq 'docker' -and $text -match 'dockerDesktopLinuxEngine|request returned 500|Cannot connect to the Docker daemon') {
-                $summary = 'Docker Desktop Linux engine is unavailable. Start or restart Docker Desktop, wait for "Engine running", then retry.'
+            if ($FilePath -eq 'docker') {
+                $normalized = $text.ToLowerInvariant()
+
+                if ($normalized -match 'dockerdesktoplinuxengine|request returned 500|cannot connect to the docker daemon') {
+                    $summary = 'Docker Desktop Linux engine is unavailable. Start or restart Docker Desktop, wait for "Engine running", then retry.'
+                } elseif ($normalized -match 'failed to fetch oauth token|i/o timeout|context deadline exceeded|failed to resolve|name resolution|temporary failure in name resolution') {
+                    $summary = @(
+                        'Docker image registry is unreachable (OAuth/token or DNS timeout).',
+                        'Check internet connectivity, corporate proxy/VPN, and Docker daemon DNS settings.',
+                        'Try: docker login, docker logout && docker login, then retry.',
+                        'If the issue is transient, rerun deploy with -BuildPolicy skip when cached images already exist.'
+                    ) -join ' '
+                } elseif ($normalized -match 'denied: requested access to the resource is denied|unauthorized: authentication required') {
+                    $summary = 'Docker registry authentication failed. Run "docker login" and retry.'
+                } elseif ($normalized -match 'error while pulling image|pull access denied|manifest unknown') {
+                    $summary = 'Docker cannot pull a required image. Verify access to registry and image tags used by this repo.'
+                }
             }
             throw "$summary Full command output: $logPath"
         }
