@@ -26,18 +26,36 @@ class MobileBridge extends Object
   @override
   Future<Map<String, dynamic>?> runtimeSnapshot() async {
     try {
-      final identity = await _channel.invokeMethod<Object?>(
-        EngineContract.getIdentity,
-      );
-      final profile = await _channel.invokeMethod<Object?>(
-        EngineContract.getProfile,
-      );
+      final values = await Future.wait<Object?>([
+        _channel.invokeMethod<Object?>(EngineContract.getIdentity),
+        _channel.invokeMethod<Object?>(EngineContract.getProfile),
+        _channel.invokeMethod<Object?>(EngineContract.listContacts),
+        _channel.invokeMethod<Object?>(EngineContract.listConversations),
+      ]);
+      final identity = values[0];
+      final profile = values[1];
       if (identity is! Map || profile is! Map) return null;
+
+      var peerEndpointAvailable = false;
+      try {
+        peerEndpointAvailable =
+            await _channel.invokeMethod<Object?>(EngineContract.getPeerEndpoint) !=
+            null;
+      } on PlatformException {
+        // A missing endpoint is a normal warmup state, not attach failure.
+      }
+
+      final now = DateTime.now();
       return <String, dynamic>{
         'serviceAlive': true,
         'localDataReady': true,
+        'generation': now.microsecondsSinceEpoch,
+        'createdAtMs': now.millisecondsSinceEpoch,
         'identity': Map<String, dynamic>.from(identity),
         'profile': Map<String, dynamic>.from(profile),
+        'contacts': _mapItems(values[2]),
+        'conversations': _mapItems(values[3]),
+        'peerEndpointAvailable': peerEndpointAvailable,
       };
     } on PlatformException {
       return null;
@@ -62,4 +80,12 @@ class MobileBridge extends Object
     String method, [
     RuntimeArguments params = RuntimeArguments.empty,
   ]) => _channel.invokeMethod(method, params.toMap());
+}
+
+List<Map<String, dynamic>> _mapItems(Object? value) {
+  final items = value is Map ? value[EngineContract.items] : value;
+  return (items as List? ?? const [])
+      .whereType<Map>()
+      .map((item) => Map<String, dynamic>.from(item))
+      .toList(growable: false);
 }
