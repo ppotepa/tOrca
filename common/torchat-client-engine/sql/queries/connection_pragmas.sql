@@ -2,9 +2,9 @@ PRAGMA foreign_keys = ON;
 PRAGMA journal_mode = WAL;
 PRAGMA busy_timeout = 5000;
 
--- These base declarations are byte-compatible with migration 001. Connection
--- pragmas run before MigrationRunner, so the durable recovery and relationship
--- triggers need their target tables to exist on both fresh and existing stores.
+-- These base declarations are byte-compatible with migrations 001 and 007.
+-- Connection pragmas run before MigrationRunner, so every trigger target must
+-- exist on both fresh and existing stores before triggers are installed.
 CREATE TABLE IF NOT EXISTS contacts (
     installation_id TEXT PRIMARY KEY,
     nickname TEXT NOT NULL,
@@ -30,6 +30,15 @@ CREATE TABLE IF NOT EXISTS conversations (
         REFERENCES contacts(installation_id)
 );
 
+CREATE TABLE IF NOT EXISTS conversation_mls (
+    conversation_id TEXT PRIMARY KEY,
+    snapshot BLOB NOT NULL,
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    FOREIGN KEY (conversation_id)
+        REFERENCES conversations(id)
+        ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS messages (
     id TEXT PRIMARY KEY,
     conversation_id TEXT NOT NULL,
@@ -46,6 +55,17 @@ CREATE TABLE IF NOT EXISTS messages (
     last_transport_error TEXT,
     FOREIGN KEY (conversation_id)
         REFERENCES conversations(id)
+        ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS contact_peer_endpoints (
+    contact_installation_id TEXT PRIMARY KEY,
+    bundle_json BLOB NOT NULL,
+    sequence INTEGER NOT NULL,
+    last_connected_at INTEGER,
+    updated_at INTEGER NOT NULL,
+    FOREIGN KEY (contact_installation_id)
+        REFERENCES contacts(installation_id)
         ON DELETE CASCADE
 );
 
@@ -160,7 +180,9 @@ CREATE TABLE IF NOT EXISTS relationship_tombstones (
 );
 
 INSERT INTO relationship_boundaries (contact_installation_id, boundary_at)
-SELECT installation_id, updated_at * 1000 FROM contacts
+SELECT installation_id, updated_at * 1000
+FROM contacts
+WHERE true
 ON CONFLICT(contact_installation_id) DO NOTHING;
 
 CREATE TRIGGER IF NOT EXISTS record_inserted_relationship_boundary
