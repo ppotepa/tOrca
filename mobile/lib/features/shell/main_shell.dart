@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../app/app_theme.dart';
 import '../../core/models/domain.dart';
@@ -97,6 +98,28 @@ class MainShell extends StatelessWidget {
   VoidCallback get _openConnectionCenter =>
       onOpenConnectionCenter ?? onRetryTor;
 
+  Map<ShortcutActivator, VoidCallback> get _shortcuts => {
+        const SingleActivator(LogicalKeyboardKey.digit1, control: true):
+            () => onTab(MobileTab.chats),
+        const SingleActivator(LogicalKeyboardKey.digit2, control: true):
+            () => onTab(MobileTab.contacts),
+        const SingleActivator(LogicalKeyboardKey.comma, control: true):
+            onOpenSettings,
+        const SingleActivator(
+          LogicalKeyboardKey.keyA,
+          control: true,
+          shift: true,
+        ): onOpenAccount,
+        const SingleActivator(
+          LogicalKeyboardKey.keyR,
+          control: true,
+          shift: true,
+        ): onRetryTor,
+        const SingleActivator(LogicalKeyboardKey.escape): () {
+          if (selectedConversation != null) onBack();
+        },
+      };
+
   Widget _content(BuildContext context, {required bool desktop}) =>
       tab == MobileTab.chats
           ? ReleaseChatView(
@@ -144,111 +167,122 @@ class MainShell extends StatelessWidget {
   int get unreadTotal => conversations.totalUnread;
 
   @override
-  Widget build(BuildContext context) => LayoutBuilder(
-        builder: (context, constraints) {
-          final desktop = constraints.maxWidth >= 900;
-          if (desktop) {
-            return Scaffold(
-              body: Column(
-                children: [
-                  CockpitStatusBar(
-                    phase: phase,
-                    peerServerStatus: peerServerStatus,
-                    nickname: nickname,
-                    latencyMs: latencyMs,
-                    onOpenConnectionCenter: _openConnectionCenter,
-                    onOpenSettings: onOpenSettings,
-                  ),
-                  Expanded(
-                    child: DesktopWorkspace(
-                      tab: tab,
-                      nickname: nickname,
-                      contacts: contacts,
-                      conversations: conversations,
-                      selectedConversation: selectedConversation,
-                      selectedContact: selectedContact,
-                      onlineContacts: onlineContacts,
-                      content: _content(context, desktop: true),
-                      onTab: onTab,
-                      onOpenConversation: onOpenConversation,
-                      onStartConversation: onStartConversation,
-                      onVerifyContact: onVerifyContact,
-                      onBack: onBack,
-                      onAccount: onOpenAccount,
-                      onSettings: onOpenSettings,
-                    ),
-                  ),
-                ],
-              ),
-            );
-          }
-
-          return Scaffold(
-            appBar: AppBar(
-              title: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('TorChat'),
-                  Text(
-                    '@$nickname',
-                    style: Theme.of(context).textTheme.labelSmall,
-                  ),
-                ],
-              ),
-              actions: [
-                IconButton(
-                  tooltip: 'Konto',
-                  onPressed: onOpenAccount,
-                  icon: const ThemedIcon(Icons.person_outline, size: 18),
-                ),
-                IconButton(
-                  tooltip: 'Ustawienia',
-                  onPressed: onOpenSettings,
-                  icon: const ThemedIcon(Icons.settings_outlined, size: 18),
-                ),
-              ],
-            ),
-            body: SafeArea(
-              child: Column(
-                children: [
-                  CompactCockpitStatusBar(
-                    phase: phase,
-                    peerServerStatus: peerServerStatus,
-                    latencyMs: latencyMs,
-                    onOpenConnectionCenter: _openConnectionCenter,
-                  ),
-                  Expanded(
-                    child: Padding(
-                      padding: selectedConversation == null
-                          ? const EdgeInsets.fromLTRB(16, 4, 16, 0)
-                          : EdgeInsets.zero,
-                      child: _content(context, desktop: false),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            bottomNavigationBar: selectedConversation == null
-                ? NavigationBar(
-                    selectedIndex: tab.index,
-                    onDestinationSelected: (index) =>
-                        onTab(MobileTab.values[index]),
-                    destinations: [
-                      NavigationDestination(
-                        icon: CounterBadge(
-                          count: unreadTotal,
-                          child: const ThemedIcon(Icons.chat_bubble_outline),
+  Widget build(BuildContext context) => CallbackShortcuts(
+        bindings: _shortcuts,
+        child: Focus(
+          autofocus: true,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final desktop = constraints.maxWidth >= 900;
+              if (desktop) {
+                return Scaffold(
+                  body: Semantics(
+                    label: 'Główna przestrzeń TorChat',
+                    container: true,
+                    child: Column(
+                      children: [
+                        CockpitStatusBar(
+                          phase: phase,
+                          peerServerStatus: peerServerStatus,
+                          nickname: nickname,
+                          latencyMs: latencyMs,
+                          onOpenConnectionCenter: _openConnectionCenter,
+                          onOpenSettings: onOpenSettings,
                         ),
-                        label: 'Czaty',
-                      ),
-                      const NavigationDestination(
-                        icon: ThemedIcon(Icons.people_outline),
-                        label: 'Kontakty',
+                        Expanded(
+                          child: DesktopWorkspace(
+                            tab: tab,
+                            nickname: nickname,
+                            contacts: contacts,
+                            conversations: conversations,
+                            selectedConversation: selectedConversation,
+                            selectedContact: selectedContact,
+                            onlineContacts: onlineContacts,
+                            content: _content(context, desktop: true),
+                            onTab: onTab,
+                            onOpenConversation: onOpenConversation,
+                            onStartConversation: onStartConversation,
+                            onVerifyContact: onVerifyContact,
+                            onBack: onBack,
+                            onAccount: onOpenAccount,
+                            onSettings: onOpenSettings,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }
+
+              return Scaffold(
+                appBar: AppBar(
+                  title: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('TorChat'),
+                      Text(
+                        '@$nickname',
+                        style: Theme.of(context).textTheme.labelSmall,
                       ),
                     ],
-                  )
-                : null,
-          );
-        },
+                  ),
+                  actions: [
+                    IconButton(
+                      tooltip: 'Konto',
+                      onPressed: onOpenAccount,
+                      icon: const ThemedIcon(Icons.person_outline, size: 18),
+                    ),
+                    IconButton(
+                      tooltip: 'Ustawienia',
+                      onPressed: onOpenSettings,
+                      icon: const ThemedIcon(Icons.settings_outlined, size: 18),
+                    ),
+                  ],
+                ),
+                body: SafeArea(
+                  child: Column(
+                    children: [
+                      CompactCockpitStatusBar(
+                        phase: phase,
+                        peerServerStatus: peerServerStatus,
+                        latencyMs: latencyMs,
+                        onOpenConnectionCenter: _openConnectionCenter,
+                      ),
+                      Expanded(
+                        child: Padding(
+                          padding: selectedConversation == null
+                              ? const EdgeInsets.fromLTRB(16, 4, 16, 0)
+                              : EdgeInsets.zero,
+                          child: _content(context, desktop: false),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                bottomNavigationBar: selectedConversation == null
+                    ? NavigationBar(
+                        selectedIndex: tab.index,
+                        onDestinationSelected: (index) =>
+                            onTab(MobileTab.values[index]),
+                        destinations: [
+                          NavigationDestination(
+                            icon: CounterBadge(
+                              count: unreadTotal,
+                              child:
+                                  const ThemedIcon(Icons.chat_bubble_outline),
+                            ),
+                            label: 'Czaty',
+                          ),
+                          const NavigationDestination(
+                            icon: ThemedIcon(Icons.people_outline),
+                            label: 'Kontakty',
+                          ),
+                        ],
+                      )
+                    : null,
+              );
+            },
+          ),
+        ),
       );
 }
