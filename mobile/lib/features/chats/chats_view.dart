@@ -52,15 +52,21 @@ class ChatsView extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final conversation = selected == null
-        ? null
-        : conversations.where((item) => item.contactId == selected!.id).firstOrNull;
-    final conversationId = conversation?.id ?? selected?.id ?? '';
+    final selectedContactId = selected?.id ?? '';
+    var conversationId = '';
+    for (final conversation in conversations) {
+      if (conversation.contactId == selectedContactId) {
+        conversationId = conversation.id;
+        break;
+      }
+    }
+    if (conversationId.isEmpty) conversationId = selectedContactId;
+
     final openState = ref.watch(
       uiOperationProvider(UiOperationKey.conversationOpen(conversationId)),
     );
     final startState = ref.watch(
-      uiOperationProvider(UiOperationKey.conversationStart(selected?.id ?? '')),
+      uiOperationProvider(UiOperationKey.conversationStart(selectedContactId)),
     );
     final messagesState = ref.watch(
       uiOperationProvider(UiOperationKey.messagesLoad(conversationId)),
