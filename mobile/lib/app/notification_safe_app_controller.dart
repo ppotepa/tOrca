@@ -1,5 +1,6 @@
-import 'pairing_recovery_app_controller.dart';
+import '../core/models/domain.dart';
 import 'app_controller_legacy.dart' as legacy;
+import 'pairing_recovery_app_controller.dart';
 
 class NotificationSafeAppController extends PairingRecoveryAppController {
   static const _legacyPairingNoticePrefix = 'Oczekujące zaproszenia:';
@@ -20,5 +21,55 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
     return initial.notice.startsWith(_legacyPairingNoticePrefix)
         ? initial.copyWith(notice: '')
         : initial;
+  }
+
+  @override
+  Future<void> openOrStartConversation(ContactRecord contact) async {
+    final alreadyExists = state.conversations.any(
+      (conversation) => conversation.contactId == contact.id,
+    );
+    if (alreadyExists) {
+      await super.openOrStartConversation(contact);
+      return;
+    }
+
+    // Start the real operation first. Its synchronous prefix selects the
+    // contact and enters the MLS-starting state before the first await.
+    final operation = super.openOrStartConversation(contact);
+    final optimistic = ConversationSummary(
+      id: contact.id,
+      contactId: contact.id,
+      preview: 'Oczekiwanie na bezpieczne połączenie…',
+      unread: 0,
+      state: ConversationState.pending,
+      lastMessageAt: DateTime.now().toIso8601String(),
+    );
+    state = state.copyWith(
+      conversations: [
+        optimistic,
+        for (final conversation in state.conversations)
+          if (conversation.contactId != contact.id) conversation,
+      ],
+      selectedConversationId: contact.id,
+      destination: legacy.MainDestination.chats,
+    );
+
+    await operation;
+
+    final realConversationExists = state.conversations.any(
+      (conversation) => conversation.contactId == contact.id,
+    );
+    if (state.error.trim().isNotEmpty) {
+      state = state.copyWith(
+        conversations: [
+          for (final conversation in state.conversations)
+            if (conversation.contactId != contact.id ||
+                conversation.id != contact.id)
+              conversation,
+        ],
+      );
+    } else if (!realConversationExists) {
+      state = state.copyWith(conversations: [optimistic, ...state.conversations]);
+    }
   }
 }
