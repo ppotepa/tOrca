@@ -48,8 +48,10 @@ pub use inbound::{
     InboundValidator, TransportMetadata, ValidatedInbound,
 };
 pub use processes::{
-    InvalidPairingTransition, PairingProcess, PairingProcessAction, PairingProcessEvent,
-    PairingProcessRepository, PairingProcessState,
+    InvalidPairingTransition, OnionRotationAction, OnionRotationApply, OnionRotationEvent,
+    OnionRotationProcess, OnionRotationState, PairingProcess, PairingProcessAction,
+    PairingProcessEvent, PairingProcessRepository, PairingProcessState, ReconnectAction,
+    ReconnectApply, ReconnectBackoff, ReconnectEvent, ReconnectProcess, ReconnectState,
 };
 pub use relay::{EngineRelay, NoopEngineRelay};
 pub use storage::{

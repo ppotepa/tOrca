@@ -1,8 +1,18 @@
+pub mod onion_rotation;
 pub mod pairing;
+pub mod reconnect;
 
+pub use onion_rotation::{
+    OnionRotationAction, OnionRotationApply, OnionRotationEvent, OnionRotationProcess,
+    OnionRotationState,
+};
 pub use pairing::{
     InvalidPairingTransition, PairingProcess, PairingProcessAction, PairingProcessEvent,
     PairingProcessRepository, PairingProcessState,
+};
+pub use reconnect::{
+    ReconnectAction, ReconnectApply, ReconnectBackoff, ReconnectEvent, ReconnectProcess,
+    ReconnectState,
 };
 
 #[cfg(test)]
