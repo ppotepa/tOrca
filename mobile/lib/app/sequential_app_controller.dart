@@ -16,6 +16,7 @@ class SequentialAppController extends legacy.AppController {
       SequentialStartupOrchestrator();
   final Map<String, Timer> _typingExpiry = {};
 
+  late ClientRuntime _runtime;
   late RuntimeRepository _repository;
   StreamSubscription<RuntimeEvent>? _events;
   Future<void>? _initializeInFlight;
@@ -31,6 +32,7 @@ class SequentialAppController extends legacy.AppController {
   @override
   legacy.AppState build() {
     final initial = super.build();
+    _runtime = ref.read(legacy.clientRuntimeProvider);
     _repository = ref.read(legacy.runtimeRepositoryProvider);
     ref.onDispose(() {
       _startup.cancel();
@@ -58,7 +60,7 @@ class SequentialAppController extends legacy.AppController {
   }
 
   Future<void> _runSequentialWarmup() async {
-    _events ??= _repository.events.listen(
+    _events ??= _runtime.events.listen(
       _handleSequentialEvent,
       onError: (Object error, StackTrace stackTrace) {
         _handleEventStreamFailure(error, stackTrace);
@@ -78,6 +80,8 @@ class SequentialAppController extends legacy.AppController {
       peerEndpointAvailable:
           state.peerServerStatus == PeerServerStatus.ready,
     );
+    final retainedIdentity =
+        _repository.applicationState.current?.identity.installationId ?? '';
     _warming = true;
     _startupComplete = false;
     _applyPhase(SequentialStartupPhase.engine);
@@ -91,11 +95,11 @@ class SequentialAppController extends legacy.AppController {
     );
 
     try {
-      await _repository.connect().timeout(const Duration(seconds: 60));
+      // Use the runtime directly. RuntimeRepository.connect() intentionally
+      // hydrates snapshots for compatibility, which would collapse engine and
+      // local-data phases into one operation and reintroduce startup races.
+      await _runtime.connect().timeout(const Duration(seconds: 60));
       _ensureGeneration(generation);
-      // The actor accepts commands only after binding the local peer listener.
-      // Keep this fact even when the runtime-ready event arrived before the
-      // Flutter event subscription was fully established.
       _startup.observeRuntimeReady();
 
       _applyPhase(SequentialStartupPhase.localData);
@@ -103,6 +107,12 @@ class SequentialAppController extends legacy.AppController {
           .applicationSnapshot(force: true)
           .timeout(const Duration(seconds: 30));
       _ensureGeneration(generation);
+      if (retainedIdentity.isNotEmpty &&
+          snapshot.identity.installationId.isNotEmpty &&
+          retainedIdentity != snapshot.identity.installationId) {
+        _repository.invalidatePairingCache(markSnapshotStale: false);
+        _repository.invalidateMessages();
+      }
       if (snapshot.peerEndpointAvailable) {
         _startup.observePeerEndpoint(true);
       }
@@ -248,6 +258,10 @@ class SequentialAppController extends legacy.AppController {
     bool forcePairing = false,
     bool allowAutoTorka = true,
   }) {
+    if (_warming) {
+      _refreshAfterWarmup = true;
+      return Future<void>.value();
+    }
     final completer = Completer<void>();
     _refreshTail = _refreshTail.catchError((Object _) {}).then<void>((_) async {
       try {
@@ -255,6 +269,9 @@ class SequentialAppController extends legacy.AppController {
           forcePairing: forcePairing,
           allowAutoTorka: allowAutoTorka,
         );
+        if (!forcePairing) {
+          await _repository.applicationSnapshot(force: true);
+        }
         _restoreStartupProjection();
         completer.complete();
       } catch (error, stackTrace) {
@@ -296,6 +313,7 @@ class SequentialAppController extends legacy.AppController {
           unawaited(_playIntro());
         }
       case ProfileReadyEvent(:final profile):
+        _repository.invalidateLocalCache();
         final current = state.profile;
         final next = profile.nickname.trim().isEmpty &&
                 current.nickname.trim().isNotEmpty
@@ -316,9 +334,18 @@ class SequentialAppController extends legacy.AppController {
             );
           }
         } else {
+          _repository.invalidateLocalCache();
+          if (type == EngineContract.inviteReceived ||
+              type == EngineContract.inviteStateChanged) {
+            _repository.invalidatePairingCache();
+          }
+          if (type.startsWith('messages:')) {
+            _repository.invalidateMessages(type.substring('messages:'.length));
+          }
           _scheduleEventRefresh();
         }
       case PeerEndpointChangedEvent(:final contactId, :final status):
+        _repository.invalidateLocalCache();
         final identity = state.identity.installationId;
         final local = identity.isNotEmpty && contactId == identity;
         if (local) {
@@ -332,6 +359,7 @@ class SequentialAppController extends legacy.AppController {
         }
         _scheduleEventRefresh();
       case PeerConnectionChangedEvent(:final contactId, :final status):
+        _repository.invalidateLocalCache();
         state = state.copyWith(
           contacts: [
             for (final contact in state.contacts)
