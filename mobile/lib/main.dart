@@ -102,10 +102,11 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
     final profile = snapshot?['profile'];
     if (profile is Map) {
       final nickname = profile['nickname']?.toString().trim() ?? '';
+      final serviceAlive = snapshot?['serviceAlive'] == true;
       if (nickname.length >= 2 && mounted) {
         setState(() {
           _reattachedNickname = nickname;
-          _runningUnlocked = true;
+          if (serviceAlive) _runningUnlocked = true;
         });
       }
     }
@@ -362,29 +363,21 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
     final effectiveNickname = state.profile.nickname.trim().isNotEmpty
         ? state.profile.nickname
         : _reattachedNickname;
-    final effectiveProfile = effectiveNickname == state.profile.nickname
-        ? state.profile
-        : RuntimeProfile(
-            installationId: state.profile.installationId,
-            nickname: effectiveNickname,
-            fingerprint: state.profile.fingerprint,
-            publicKey: state.profile.publicKey,
-          );
     final resolvedPhase = resolveLaunchPhase(
-      profile: effectiveProfile,
+      profile: state.profile,
       connection: connection,
     );
 
     if (resolvedPhase == AppLaunchPhase.onboarding) {
       _onboardingUnlocked = true;
     }
-    if (resolvedPhase == AppLaunchPhase.running || _reattachedNickname.isNotEmpty) {
+    if (resolvedPhase == AppLaunchPhase.running) {
       _runningUnlocked = true;
     }
 
     final launchPhase = _runningUnlocked
         ? AppLaunchPhase.running
-        : _onboardingUnlocked && effectiveNickname.isEmpty
+        : _onboardingUnlocked && state.profile.nickname.trim().isEmpty
         ? AppLaunchPhase.onboarding
         : resolvedPhase;
 
