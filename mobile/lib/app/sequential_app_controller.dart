@@ -25,6 +25,7 @@ class SequentialAppController extends legacy.AppController {
   bool _refreshAfterWarmup = false;
   bool _warming = false;
   bool _startupComplete = false;
+  bool _introPlayed = false;
   SequentialStartupPhase _phase = SequentialStartupPhase.engine;
 
   @override
@@ -57,7 +58,20 @@ class SequentialAppController extends legacy.AppController {
   }
 
   Future<void> _runSequentialWarmup() async {
-    _events ??= _repository.events.listen(_handleSequentialEvent);
+    _events ??= _repository.events.listen(
+      _handleSequentialEvent,
+      onError: (Object error, StackTrace stackTrace) {
+        _handleEventStreamFailure(error, stackTrace);
+      },
+      onDone: () {
+        if (_warming) {
+          _handleEventStreamFailure(
+            StateError('Desktop runtime event stream closed during warmup'),
+            StackTrace.current,
+          );
+        }
+      },
+    );
     final generation = _startup.begin(
       transport: state.transport,
       runtimeReady: state.identity.installationId.isNotEmpty,
@@ -160,7 +174,10 @@ class SequentialAppController extends legacy.AppController {
     } finally {
       if (_startup.generation == generation) {
         _warming = false;
-        if (_refreshAfterWarmup) {
+        if (_startupComplete) {
+          _refreshAfterWarmup = false;
+          unawaited(refreshData());
+        } else if (_refreshAfterWarmup) {
           _refreshAfterWarmup = false;
           _scheduleEventRefresh();
         }
@@ -262,6 +279,8 @@ class SequentialAppController extends legacy.AppController {
       case RuntimeReadyEvent():
         _startup.observeRuntimeReady();
       case TorStatusEvent(:final snapshot):
+        final becameConnected =
+            !state.transport.connected && snapshot.connected;
         _startup.observeTransport(snapshot);
         state = state.copyWith(
           transport: snapshot,
@@ -270,6 +289,12 @@ class SequentialAppController extends legacy.AppController {
               ? legacy.ControllerScreen.main
               : state.screen,
         );
+        if (becameConnected &&
+            state.profile.nickname.trim().isEmpty &&
+            !_introPlayed) {
+          _introPlayed = true;
+          unawaited(_playIntro());
+        }
       case ProfileReadyEvent(:final profile):
         final current = state.profile;
         final next = profile.nickname.trim().isEmpty &&
@@ -338,6 +363,16 @@ class SequentialAppController extends legacy.AppController {
       case NotificationRequestedEvent():
         unawaited(_notificationBeep());
     }
+  }
+
+  void _handleEventStreamFailure(Object error, StackTrace stackTrace) {
+    _startup.fail(error);
+    state = state.copyWith(
+      isLoading: false,
+      action: '',
+      error: _message(error),
+      startupSteps: _startup.stepsFor(_phase, error: error),
+    );
   }
 
   bool _isFatalStartupError(String message) {
@@ -452,5 +487,16 @@ class SequentialAppController extends legacy.AppController {
       }
     }
     await SystemSound.play(SystemSoundType.alert);
+  }
+
+  Future<void> _playIntro() async {
+    try {
+      const channel = MethodChannel('org.torchat/audio');
+      await channel.invokeMethod<void>('playIntro');
+    } on MissingPluginException {
+      // Widget tests and unsupported desktop platforms have no audio plugin.
+    } on PlatformException {
+      // Onboarding audio is optional and never changes startup readiness.
+    }
   }
 }
