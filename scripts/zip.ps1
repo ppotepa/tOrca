@@ -37,13 +37,16 @@ param(
     [switch]$AllowMissingDesktop,
     [switch]$AllHistory,
     [switch]$IncludeBugreport,
-    [switch]$LogsOnly,
+[switch]$LogsOnly,
     [Alias('IncludeRepository')]
     [switch]$IncludeGit
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+if ($null -ne (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue)) {
+    $script:PSNativeCommandUseErrorActionPreference = $false
+}
 
 $repoRoot = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 $snapshotRoot = if ($OutputDirectory) {
@@ -58,6 +61,10 @@ $stagedRepository = Join-Path $stagingRoot 'repository'
 $collectedLogs = Join-Path $stagingRoot 'logs\last-run'
 $metadataRoot = Join-Path $stagingRoot 'snapshot'
 $snapshotSucceeded = $false
+
+if (-not $LogsOnly -and -not $PSBoundParameters.ContainsKey('IncludeGit')) {
+    $IncludeGit = $true
+}
 
 if ($LogsOnly -and $IncludeGit) {
     throw '-LogsOnly cannot be combined with -IncludeGit. Logs-only archives do not include source or .git.'
@@ -91,28 +98,92 @@ function Write-Utf8 {
 function Set-ClipboardFile {
     param([Parameter(Mandatory = $true)][string]$Path)
 
-    if (-not $IsWindows) {
+    if ($env:OS -ne 'Windows_NT') {
         Write-Warning "Clipboard file copy is only supported on Windows. ZIP path: $Path"
         return
     }
 
     try {
-        Add-Type -AssemblyName System.Windows.Forms
         $absolutePath = [IO.Path]::GetFullPath($Path)
-        $files = [Collections.Specialized.StringCollection]::new()
-        [void]$files.Add($absolutePath)
-        [Windows.Forms.Clipboard]::SetFileDropList($files)
-        Write-Host "[torchat] ZIP copied to clipboard: $absolutePath"
+        if (Get-Command Set-Clipboard -ErrorAction SilentlyContinue) {
+            Set-Clipboard -Value $absolutePath
+        } elseif (Get-Command clip.exe -ErrorAction SilentlyContinue) {
+            $absolutePath | clip.exe
+        } else {
+            throw 'neither Set-Clipboard nor clip.exe is available'
+        }
+        Write-Host "[torchat] ZIP path copied to clipboard: $absolutePath"
     } catch {
-        Write-Warning "ZIP was created but could not be copied to clipboard: $($_.Exception.Message)"
+        Write-Warning "ZIP was created but its path could not be copied to clipboard: $($_.Exception.Message)"
+    }
+}
+
+function Convert-GitOutputText {
+    param([AllowNull()][object[]]$InputObject)
+
+    $text = ($InputObject | Out-String).TrimEnd()
+    if ([string]::IsNullOrWhiteSpace($text)) { return '' }
+
+    $lines = @(
+        $text -split "`r?`n" |
+            Where-Object {
+                $_ -and
+                $_ -notmatch '^warning: in the working copy of .+ will be replaced by CRLF the next time Git touches it$' -and
+                $_ -notmatch '^warning: in the working copy of .+ will be replaced by LF the next time Git touches it$'
+            }
+    )
+    ($lines -join [Environment]::NewLine).TrimEnd()
+}
+
+function Join-CommandLineArguments {
+    param([Parameter(Mandatory = $true)][string[]]$Arguments)
+    ($Arguments | ForEach-Object {
+        if ($_ -match '[\s"]') {
+            '"' + ($_ -replace '(\\*)"', '$1$1\"' -replace '(\\+)$', '$1$1') + '"'
+        } else {
+            $_
+        }
+    }) -join ' '
+}
+
+function Invoke-GitCapture {
+    param([Parameter(Mandatory = $true)][string[]]$Arguments)
+
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = 'git'
+    $gitArguments = @(
+        '-c', 'core.autocrlf=false',
+        '-c', 'core.safecrlf=false'
+    ) + $Arguments
+    $startInfo.Arguments = Join-CommandLineArguments $gitArguments
+    $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.CreateNoWindow = $true
+
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    [void]$process.Start()
+    try {
+        $stdout = $process.StandardOutput.ReadToEnd()
+        $stderr = $process.StandardError.ReadToEnd()
+        $process.WaitForExit()
+        [pscustomobject]@{
+            ExitCode = $process.ExitCode
+            Output = Convert-GitOutputText @($stdout, $stderr)
+        }
+    } finally {
+        $process.Dispose()
     }
 }
 
 function Invoke-GitText {
     param([Parameter(Mandatory = $true)][string[]]$Arguments)
-    $result = (& git @Arguments 2>&1 | Out-String).TrimEnd()
-    Assert-LastExitCode "git $($Arguments -join ' ') failed.`n$result"
-    $result
+    $result = Invoke-GitCapture $Arguments
+    if ($result.ExitCode -ne 0) {
+        throw "git $($Arguments -join ' ') failed.`n$($result.Output)"
+    }
+    $result.Output
 }
 
 function Get-SafeGitRemote {
@@ -133,8 +204,7 @@ function Get-SafeGitRemote {
 
 function Assert-RepositoryClean {
     param([Parameter(Mandatory = $true)][string]$Context)
-    $dirty = (& git status --porcelain=v1 --untracked-files=all 2>$null | Out-String).TrimEnd()
-    Assert-LastExitCode "Could not inspect repository state $Context."
+    $dirty = Invoke-GitText @('status', '--porcelain=v1', '--untracked-files=all')
     if ($dirty) {
         throw "Repository changed $Context. Snapshot aborted to avoid mixing code from different commits:`n$dirty"
     }
@@ -164,6 +234,72 @@ function Get-SnapshotFileBytes {
     $measure = @( $files | Measure-Object -Property Length -Sum )
     if ($measure.Count -eq 0 -or $null -eq $measure[0].Sum) { return [double]0 }
     [double]$measure[0].Sum
+}
+
+function Get-TorChatRunDirectories {
+    $runsRoot = Join-Path $repoRoot '.torchat\runs'
+    if (-not (Test-Path -LiteralPath $runsRoot)) { return @() }
+    @(Get-ChildItem -LiteralPath $runsRoot -Directory -ErrorAction SilentlyContinue)
+}
+
+function Resolve-CollectorRunDirectory {
+    param([string[]]$KnownRunPaths = @())
+
+    $runs = @(Get-TorChatRunDirectories | Sort-Object LastWriteTimeUtc -Descending)
+    if ($runs.Count -eq 0) {
+        throw 'collect-logs did not create any .torchat\\runs directory.'
+    }
+    $known = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($path in $KnownRunPaths) {
+        if (-not [string]::IsNullOrWhiteSpace($path)) {
+            [void]$known.Add([IO.Path]::GetFullPath($path))
+        }
+    }
+    foreach ($run in $runs) {
+        $fullName = [IO.Path]::GetFullPath($run.FullName)
+        if (-not $known.Contains($fullName)) {
+            return $fullName
+        }
+    }
+    return [IO.Path]::GetFullPath($runs[0].FullName)
+}
+
+function Import-CollectorRun {
+    param([Parameter(Mandatory = $true)][string]$RunDirectory)
+
+    $collectorRoot = Join-Path $collectedLogs 'collector-run'
+    New-Item -ItemType Directory -Force -Path $collectorRoot | Out-Null
+
+    foreach ($name in @('run.json', 'summary.json', 'events.jsonl')) {
+        $source = Join-Path $RunDirectory $name
+        if (Test-Path -LiteralPath $source) {
+            Copy-Item -LiteralPath $source -Destination (Join-Path $collectorRoot $name) -Force
+        }
+    }
+    foreach ($name in @('logs', 'diagnostics')) {
+        $source = Join-Path $RunDirectory $name
+        if (Test-Path -LiteralPath $source) {
+            Copy-Item -LiteralPath $source -Destination (Join-Path $collectorRoot $name) -Recurse -Force
+        }
+    }
+
+    $summaryPath = Join-Path $collectorRoot 'summary.json'
+    if (Test-Path -LiteralPath $summaryPath) {
+        try {
+            $summary = Get-Content -LiteralPath $summaryPath -Raw | ConvertFrom-Json
+            $lines = @(
+                "runId=$($summary.runId)"
+                "command=$($summary.command)"
+                "target=$($summary.target)"
+                "state=$($summary.state)"
+                "startedAt=$($summary.startedAt)"
+                "completedAt=$($summary.completedAt)"
+            )
+            Write-Utf8 (Join-Path $collectedLogs 'startup-summary.txt') ($lines -join [Environment]::NewLine)
+        } catch {
+            Write-Utf8 (Join-Path $collectedLogs 'startup-summary.txt') "collector summary parse failed: $($_.Exception.Message)"
+        }
+    }
 }
 
 function Copy-RepositorySnapshot {
@@ -440,8 +576,7 @@ try {
         if ([IO.Path]::GetFullPath($actualRoot).TrimEnd('\') -ne $repoRoot.TrimEnd('\')) {
             throw "Refusing to snapshot unexpected Git root: $actualRoot"
         }
-        $unmerged = (& git diff --name-only --diff-filter=U 2>$null | Out-String).TrimEnd()
-        Assert-LastExitCode 'Could not inspect the repository for unmerged files.'
+        $unmerged = Invoke-GitText @('diff', '--name-only', '--diff-filter=U')
         if ($unmerged) { throw "Resolve unmerged files before creating a snapshot:`n$unmerged" }
 
         if ($LogsOnly) {
@@ -451,8 +586,7 @@ try {
             }
         } else {
             Write-SnapshotStage 2 8 'Creating or reusing the checkpoint commit...'
-            $pendingChanges = (& git status --porcelain=v1 --untracked-files=all 2>$null | Out-String).TrimEnd()
-            Assert-LastExitCode 'Could not inspect pending repository changes.'
+            $pendingChanges = Invoke-GitText @('status', '--porcelain=v1', '--untracked-files=all')
             if ($pendingChanges) {
                 & git add --all
                 Assert-LastExitCode 'git add --all failed.'
@@ -477,19 +611,25 @@ try {
 
         Write-SnapshotStage 3 8 'Collecting uncapped Docker, Android and desktop diagnostics...'
         New-Item -ItemType Directory -Force -Path $collectedLogs | Out-Null
+        $knownRunPaths = @(Get-TorChatRunDirectories | ForEach-Object { $_.FullName })
         $collectorArguments = @{
+            Command = 'logs'
+            Target = 'collect'
             Environment = $Environment
-            OutputDirectory = $collectedLogs
-            Full = $true
+            Ui = 'plain'
+            Verbosity = 'normal'
         }
-        if ($DeviceAddress) { $collectorArguments.DeviceAddress = $DeviceAddress }
-        if ($AllHistory) { $collectorArguments.AllHistory = $true }
-        if ($IncludeBugreport) { $collectorArguments.IncludeBugreport = $true }
-        & (Join-Path $PSScriptRoot 'collect-logs.ps1') @collectorArguments
-        if (-not $?) { throw 'Full log collection failed.' }
+        if ($DeviceAddress) {
+            $collectorArguments.Device = $DeviceAddress
+        }
+        & (Join-Path $PSScriptRoot 'torchat.ps1') @collectorArguments
+        Assert-LastExitCode 'Log collection failed.'
+        $collectorRun = Resolve-CollectorRunDirectory -KnownRunPaths $knownRunPaths
+        Import-CollectorRun -RunDirectory $collectorRun
 
         Write-SnapshotStage 4 8 'Validating required diagnostic sources...'
-        $androidLog = Join-Path $collectedLogs 'android-app.log'
+        $collectorRoot = Join-Path $collectedLogs 'collector-run'
+        $androidLog = Join-Path $collectorRoot 'diagnostics\android\android-app.log'
         if (-not $AllowMissingAndroid) {
             if (-not (Test-Path -LiteralPath $androidLog)) {
                 throw 'Android logs are missing. Connect a device or use -AllowMissingAndroid explicitly.'
@@ -499,7 +639,7 @@ try {
                 throw 'No connected Android device was captured. Connect it or use -AllowMissingAndroid explicitly.'
             }
         }
-        if (-not $AllowMissingDesktop -and -not (Test-Path -LiteralPath (Join-Path $collectedLogs 'desktop.log'))) {
+        if (-not $AllowMissingDesktop -and -not (Test-Path -LiteralPath (Join-Path $collectorRoot 'diagnostics\windows-processes.txt'))) {
             throw 'The latest desktop log is missing. Run the desktop app or use -AllowMissingDesktop explicitly.'
         }
 
@@ -530,6 +670,7 @@ try {
                 'snapshot/files.sha256',
                 'logs/last-run/startup-summary.txt'
             )
+            $requiredEntries += 'logs/last-run/collector-run/summary.json'
             if ($IncludeGit) {
                 $requiredEntries += 'repository/.git/HEAD'
             }
@@ -537,7 +678,7 @@ try {
                 $requiredEntries += 'repository/Cargo.toml'
             }
             if (-not $AllowMissingAndroid) {
-                $requiredEntries += 'logs/last-run/android-app.log'
+                $requiredEntries += 'logs/last-run/collector-run/diagnostics/android/android-app.log'
             }
             foreach ($requiredEntry in $requiredEntries) {
                 if ($entryNames -notcontains $requiredEntry) {

@@ -283,7 +283,15 @@ async fn apply_platform_action(
             }),
     };
     match result {
-        Ok((onion_address, _local_port, virtual_port, generation)) => {
+        Ok((onion_address, local_port, virtual_port, generation)) => {
+            let _ = write_json_line(EngineEvent::Log {
+                log: torchat_client_engine::EngineLogEvent {
+                    level: "info".into(),
+                    message: format!(
+                        "peer onion service configured generation={generation} local_port={local_port} virtual_port={virtual_port}"
+                    ),
+                },
+            });
             engine
                 .submit_platform_fact(
                     format!("desktop-onion-service-{generation}"),

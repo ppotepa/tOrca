@@ -55,15 +55,22 @@ function Set-TorChatArtifactDeployed {
 
 function Clear-TorChatBuildState {
     param([Parameter(Mandatory = $true)][string]$RepositoryRoot, [switch]$Artifacts)
+    if ($Artifacts) {
+        Stop-TorChatBuildProcesses -RepositoryRoot $RepositoryRoot
+    }
     foreach ($path in @(
         (Join-Path $RepositoryRoot '.torchat\build-state'),
         (Join-Path $RepositoryRoot '.torchat\deployment-state')
     )) {
-        if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force }
+        if (Test-Path -LiteralPath $path) {
+            Remove-TorChatDirectoryRobust -Path $path -Description ([IO.Path]::GetFileName($path))
+        }
     }
     if ($Artifacts) {
         $mobileBuild = Join-Path $RepositoryRoot 'mobile\build'
-        if (Test-Path -LiteralPath $mobileBuild) { Remove-Item -LiteralPath $mobileBuild -Recurse -Force }
+        if (Test-Path -LiteralPath $mobileBuild) {
+            Remove-TorChatDirectoryRobust -Path $mobileBuild -Description 'mobile build directory'
+        }
     }
     [pscustomobject]@{ State = 'Ready'; Code = 'BUILD_STATE_CLEARED'; Message = if ($Artifacts) { 'Build state and mobile artifacts removed' } else { 'Build and deployment caches removed' } }
 }

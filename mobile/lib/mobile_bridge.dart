@@ -32,7 +32,7 @@ class MobileBridge extends Object
     unawaited(
       _channel
           .invokeMethod<Object?>(EngineContract.connect)
-          .then<void>((_) {}, onError: (Object _, StackTrace __) {}),
+          .then<void>((_) {}, onError: (Object _, StackTrace _) {}),
     );
     await _channel.invokeMethod<Object?>(EngineContract.getIdentity);
     return true;

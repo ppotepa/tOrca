@@ -1,0 +1,16 @@
+[workspace]
+resolver = "2"
+members = [
+    "common/torchat-core",
+    "common/torchat-client-runtime",
+    "common/torchat-client-engine",
+    "desktop",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+
+[workspace.dependencies]
+rusqlite = { version = "0.38", features = ["bundled-sqlcipher-vendored-openssl"] }

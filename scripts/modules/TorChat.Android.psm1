@@ -15,6 +15,24 @@ function Find-TorChatAndroidMdnsAddresses {
     } | Select-Object -Unique)
 }
 
+function Connect-TorChatAndroidMdnsDevices {
+    param(
+        [Parameter(Mandatory = $true)]$Context
+    )
+    Assert-TorChatTool -Name adb
+    $connected = New-Object System.Collections.Generic.List[string]
+    foreach ($address in @(Find-TorChatAndroidMdnsAddresses)) {
+        $output = @(& adb connect $address 2>&1)
+        if ($Context.Verbosity -eq 'trace' -and $output) {
+            $output | ForEach-Object { Write-TorChatInfo ([string]$_) }
+        }
+        if ($LASTEXITCODE -eq 0) {
+            [void]$connected.Add($address)
+        }
+    }
+    return @($connected)
+}
+
 function Resolve-TorChatAndroidDevice {
     param(
         [Parameter(Mandatory = $true)]$Context,
@@ -24,10 +42,16 @@ function Resolve-TorChatAndroidDevice {
     Assert-TorChatTool -Name adb
     if ($Device -and $Device -ne 'auto') {
         if ((Get-TorChatAndroidDevices) -notcontains $Device) {
-            [void](Invoke-TorChatNative -Context $Context -FilePath 'adb' -ArgumentList @('connect',$Device) -LogName 'adb-connect.log')
+            if ($Device -match '^\d{1,3}(?:\.\d{1,3}){3}:\d+$') {
+                [void](Invoke-TorChatNative -Context $Context -FilePath 'adb' -ArgumentList @('connect',$Device) -LogName 'adb-connect.log' -AllowedExitCodes @(0,1))
+            } else {
+                [void](Connect-TorChatAndroidMdnsDevices -Context $Context)
+            }
         }
-        if ((Get-TorChatAndroidDevices) -notcontains $Device) { throw "Android device is unavailable: $Device" }
-        return $Device
+        $devices = @(Get-TorChatAndroidDevices)
+        if ($devices -contains $Device) { return $Device }
+        if ($devices.Count -eq 1) { return $devices[0] }
+        throw "Android device is unavailable: $Device"
     }
 
     $devices = @(Get-TorChatAndroidDevices)
@@ -35,13 +59,7 @@ function Resolve-TorChatAndroidDevice {
 
     $deadline = [DateTimeOffset]::UtcNow.AddSeconds($DiscoveryTimeoutSeconds)
     do {
-        $discovered = @(Find-TorChatAndroidMdnsAddresses)
-        foreach ($address in $discovered) {
-            if ((Get-TorChatAndroidDevices) -contains $address) { return $address }
-            $output = @(& adb connect $address 2>&1)
-            if ($LASTEXITCODE -eq 0 -and (Get-TorChatAndroidDevices) -contains $address) { return $address }
-            if ($Context.Verbosity -eq 'trace' -and $output) { $output | ForEach-Object { Write-TorChatInfo ([string]$_) } }
-        }
+        [void](Connect-TorChatAndroidMdnsDevices -Context $Context)
         $devices = @(Get-TorChatAndroidDevices)
         if ($devices.Count -eq 1) { return $devices[0] }
         Start-Sleep -Seconds 2
@@ -146,10 +164,11 @@ function Start-TorChatAndroidClient {
         [int]$ReadyAttempts = 40
     )
     Assert-TorChatTool -Name adb
-    [void](Stop-TorChatAndroidClient -Context $Context -Device $Device)
-    & adb -s $Device logcat -c *> $null
+    $resolvedDevice = Resolve-TorChatAndroidDevice -Context $Context -Device $Device -DiscoveryTimeoutSeconds 20
+    [void](Stop-TorChatAndroidClient -Context $Context -Device $resolvedDevice)
+    & adb -s $resolvedDevice logcat -c *> $null
 
-    $args = @('-s',$Device,'shell','am','start','-W','-n','org.torchat.mobile/.MainActivity','--es','deploy_run_id',$Context.RunId)
+    $args = @('-s',$resolvedDevice,'shell','am','start','-W','-n','org.torchat.mobile/.MainActivity','--es','deploy_run_id',$Context.RunId)
     if ($ClientDataPolicy -eq 'reset') { $args += @('--ez','clean_state','true') }
     $launch = @(& adb @args 2>&1)
     $exitCode = $LASTEXITCODE
@@ -164,26 +183,26 @@ function Start-TorChatAndroidClient {
     $engineReady = $false
     for ($attempt = 1; $attempt -le $ReadyAttempts; $attempt++) {
         Start-Sleep -Milliseconds 500
-        $appPid = Get-TorChatAndroidAppPid -Device $Device
-        $activityReady = Test-TorChatAndroidActivityResumed -Device $Device
-        $serviceReady = Test-TorChatAndroidServiceRunning -Device $Device
-        $engineReady = if ($appPid) { Test-TorChatAndroidEngineReady -Device $Device -AppPid $appPid } else { $false }
+        $appPid = Get-TorChatAndroidAppPid -Device $resolvedDevice
+        $activityReady = Test-TorChatAndroidActivityResumed -Device $resolvedDevice
+        $serviceReady = Test-TorChatAndroidServiceRunning -Device $resolvedDevice
+        $engineReady = if ($appPid) { Test-TorChatAndroidEngineReady -Device $resolvedDevice -AppPid $appPid } else { $false }
         $percent = [Math]::Min(99, [int](100 * $attempt / [Math]::Max(1,$ReadyAttempts)))
         Write-TorChatStageProgress -Context $Context -Name 'Android runtime' -Percent $percent -Detail "pid=$appPid activity=$activityReady service=$serviceReady engine=$engineReady"
         if ($appPid -and $activityReady -and $serviceReady -and $engineReady) { break }
     }
     if (-not $appPid -or -not $activityReady -or -not $serviceReady -or -not $engineReady) {
-        $diagnostics = Save-TorChatAndroidDiagnostics -Context $Context -Device $Device
+        $diagnostics = Save-TorChatAndroidDiagnostics -Context $Context -Device $resolvedDevice
         throw "Android did not reach APP_READY/ENGINE_READY. Diagnostics: $diagnostics"
     }
     $initialPid = $appPid
     Start-Sleep -Seconds 5
-    $stablePid = Get-TorChatAndroidAppPid -Device $Device
+    $stablePid = Get-TorChatAndroidAppPid -Device $resolvedDevice
     if (-not $stablePid -or $stablePid -ne $initialPid) {
-        $diagnostics = Save-TorChatAndroidDiagnostics -Context $Context -Device $Device
+        $diagnostics = Save-TorChatAndroidDiagnostics -Context $Context -Device $resolvedDevice
         throw "Android process was not stable for five seconds. Diagnostics: $diagnostics"
     }
-    [pscustomobject]@{ State = 'Ready'; Code = 'ANDROID_READY'; Message = "Android ready on $Device (PID $stablePid)"; Device = $Device; Pid = $stablePid }
+    [pscustomobject]@{ State = 'Ready'; Code = 'ANDROID_READY'; Message = "Android ready on $resolvedDevice (PID $stablePid)"; Device = $resolvedDevice; Pid = $stablePid }
 }
 
 function Get-TorChatAndroidStatus {
@@ -205,5 +224,6 @@ function Get-TorChatAndroidStatus {
 
 Export-ModuleMember -Function @(
     'Get-TorChatAndroidDevices','Find-TorChatAndroidMdnsAddresses','Resolve-TorChatAndroidDevice','Pair-TorChatAndroidDevice',
-    'Install-TorChatAndroidClient','Start-TorChatAndroidClient','Stop-TorChatAndroidClient','Get-TorChatAndroidStatus','Save-TorChatAndroidDiagnostics'
+    'Install-TorChatAndroidClient','Start-TorChatAndroidClient','Stop-TorChatAndroidClient','Get-TorChatAndroidStatus','Save-TorChatAndroidDiagnostics',
+    'Connect-TorChatAndroidMdnsDevices'
 )

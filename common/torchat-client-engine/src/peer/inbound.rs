@@ -1,5 +1,5 @@
 use futures_util::{SinkExt, StreamExt};
-use tokio::{net::TcpStream, sync::mpsc, time::timeout};
+use tokio::{net::TcpStream, sync::mpsc, time::{Duration, timeout}};
 use tokio_tungstenite::{
     WebSocketStream, accept_hdr_async,
     tungstenite::{
@@ -86,6 +86,7 @@ pub(super) async fn serve_inbound(
             .await
             .map_err(|error| format!("write peer websocket: {error}"))?;
         }
+        let _ = timeout(Duration::from_secs(5), sink.close()).await;
         Ok::<(), String>(())
     });
 
@@ -164,7 +165,6 @@ pub(super) async fn serve_inbound(
     }
 
     drop(writer_tx);
-    writer.abort();
     let _ = writer.await;
     Ok(())
 }

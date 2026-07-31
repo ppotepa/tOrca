@@ -37,7 +37,27 @@ function Save-TorChatEnvironmentState {
     New-Item -ItemType Directory -Force -Path $EnvironmentState.Paths.RuntimeDirectory | Out-Null
     $utf8NoBom = New-Object Text.UTF8Encoding($false)
     $lines = @($EnvironmentState.Values.Keys | Sort-Object | ForEach-Object { "$_=$($EnvironmentState.Values[$_])" })
-    [IO.File]::WriteAllLines($EnvironmentState.Paths.RuntimeEnvironment, [string[]]$lines, $utf8NoBom)
+    $content = (($lines -join [Environment]::NewLine) + [Environment]::NewLine)
+    $path = [string]$EnvironmentState.Paths.RuntimeEnvironment
+    if (Test-Path -LiteralPath $path) {
+        try {
+            $existing = [IO.File]::ReadAllText($path, $utf8NoBom)
+            if ($existing -eq $content) { return }
+        } catch {
+            # Fall through to the guarded write path below.
+        }
+    }
+    $attempts = 0
+    while ($true) {
+        try {
+            [IO.File]::WriteAllText($path, $content, $utf8NoBom)
+            return
+        } catch [System.IO.IOException] {
+            $attempts += 1
+            if ($attempts -ge 5) { throw }
+            Start-Sleep -Milliseconds (40 * $attempts)
+        }
+    }
 }
 
 function Get-TorChatEnvironmentState {
@@ -68,6 +88,7 @@ function Get-TorChatEnvironmentState {
 
     if (-not $values['TORCHAT_DATABASE_PASSWORD']) { $values['TORCHAT_DATABASE_PASSWORD'] = New-TorChatSecret -Bytes 24 }
     if (-not $values['TORCHAT_PAIRING_SECRET']) { $values['TORCHAT_PAIRING_SECRET'] = New-TorChatSecret -Bytes 32 }
+    if (-not $values['TORCHAT_TORKA_PAIRING_CODE']) { $values['TORCHAT_TORKA_PAIRING_CODE'] = '42424242' }
     $values['TORCHAT_ENVIRONMENT'] = $Environment
 
     $state = [pscustomobject]@{ Paths = $paths; Values = $values }

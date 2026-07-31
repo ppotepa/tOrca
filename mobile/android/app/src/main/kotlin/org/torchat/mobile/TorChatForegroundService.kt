@@ -536,6 +536,14 @@ class TorChatForegroundService : Service() {
             EngineContract.EVENT_LOG -> {
                 val log = event.optJSONObject(EngineContract.LOG)
                 val message = log?.optString(EngineContract.MESSAGE).orEmpty()
+                startupLogger.write(
+                    level = log?.optString(EngineContract.LEVEL).ifNullOrBlank { "info" },
+                    component = "engine",
+                    eventCode = "engine_log",
+                    stage = null,
+                    message = message.ifBlank { event.toString() },
+                    state = null,
+                )
                 Log.i("TorChat-Engine", message.ifBlank { event.toString() })
             }
             EngineContract.EVENT_FATAL -> {
@@ -836,8 +844,8 @@ class TorChatForegroundService : Service() {
             }
         }
 
-        /** Flutter connect succeeds when the local engine is usable. */
-        suspend fun awaitReady() = withTimeout(10_000L) { engineReady.await() }
+        /** Flutter connect succeeds when the local encrypted client state is usable. */
+        suspend fun awaitReady() = withTimeout(10_000L) { localDataReady.await() }
 
         suspend fun awaitLocalReady() =
             withTimeout(10_000L) { localDataReady.await() }

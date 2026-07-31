@@ -100,7 +100,11 @@ class TorRuntime(private val context: Context) {
             check(socksPort > 0) { "Native Tor did not publish a SOCKS port" }
 
             Log.i("TorChat-Tor", "Tor SOCKS ready on port $socksPort; onion circuits are on demand")
-            onBootstrapProgress(100, "Tor gotowy · połączenia onion na żądanie")
+            // A listening SOCKS port proves that the local Tor process is
+            // usable, not that the first remote onion circuit has completed.
+            // Reporting 100 here made the UI show "Tor gotowy" and then
+            // regress while the shared engine was still connecting to relay.
+            onBootstrapProgress(85, "Tor SOCKS gotowy · rozgrzewanie obwodu relay")
             return prepared.copy(socksPort = socksPort)
         } catch (error: Throwable) {
             failure = error

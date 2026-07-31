@@ -62,6 +62,9 @@ function Ensure-TorChatEnvironment {
         try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
         $values['TORCHAT_PAIRING_SECRET'] = [Convert]::ToBase64String($bytes).Replace('+','A').Replace('/','B').Replace('=','')
     }
+    if (-not $values['TORCHAT_TORKA_PAIRING_CODE']) {
+        $values['TORCHAT_TORKA_PAIRING_CODE'] = '42424242'
+    }
     $values['TORCHAT_ENVIRONMENT'] = $Environment
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     $lines = @($values.Keys | Sort-Object | ForEach-Object { "$_=$($values[$_])" })

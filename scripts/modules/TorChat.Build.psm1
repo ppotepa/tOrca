@@ -319,7 +319,8 @@ function Build-TorChatAndroidClient {
     ) -ExtraValues @(
         "environment=$($Context.Environment)",
         "onion=$($EnvironmentState.Values['TORCHAT_ONION_URL'])",
-        "variant=$variant"
+        "variant=$variant",
+        "torkaPairingCode=$($EnvironmentState.Values['TORCHAT_TORKA_PAIRING_CODE'])"
     )
     if ($Policy -eq 'smart' -and (Test-TorChatBuildFresh -RepositoryRoot $Context.RepositoryRoot -Key "flutter-android-$variant" -Hash $hash -Artifacts @($artifact))) {
         return [pscustomobject]@{ State = 'Skipped'; Code = 'ANDROID_APK_FRESH'; Message = 'Android APK unchanged'; Artifact = $artifact }
@@ -327,11 +328,16 @@ function Build-TorChatAndroidClient {
     $previousConfig = $env:TORCHAT_CONFIG_FILE
     $previousProfile = $env:TORCHAT_DEV_PROFILE
     $previousPair = $env:TORCHAT_DEV_PAIR
+    $torkaPairingCode = [string]$EnvironmentState.Values['TORCHAT_TORKA_PAIRING_CODE']
     $env:TORCHAT_CONFIG_FILE = $EnvironmentState.Paths.RuntimeEnvironment
     $env:TORCHAT_DEV_PROFILE = ''
     $env:TORCHAT_DEV_PAIR = 'false'
     try {
-        [void](Invoke-TorChatNative -Context $Context -FilePath 'flutter' -ArgumentList @('build','apk',"--$variant") -WorkingDirectory (Join-Path $Context.RepositoryRoot 'mobile') -LogName 'flutter-android.log')
+        $arguments = @('build','apk',"--$variant")
+        if (-not [string]::IsNullOrWhiteSpace($torkaPairingCode)) {
+            $arguments += "--dart-define=TORCHAT_TORKA_PAIRING_CODE=$torkaPairingCode"
+        }
+        [void](Invoke-TorChatNative -Context $Context -FilePath 'flutter' -ArgumentList $arguments -WorkingDirectory (Join-Path $Context.RepositoryRoot 'mobile') -LogName 'flutter-android.log')
     } finally {
         $env:TORCHAT_CONFIG_FILE = $previousConfig
         $env:TORCHAT_DEV_PROFILE = $previousProfile
@@ -361,7 +367,8 @@ function Build-TorChatWindowsClient {
     ) -ExtraValues @(
         "environment=$($Context.Environment)",
         "onion=$($EnvironmentState.Values['TORCHAT_ONION_URL'])",
-        "variant=$variant"
+        "variant=$variant",
+        "torkaPairingCode=$($EnvironmentState.Values['TORCHAT_TORKA_PAIRING_CODE'])"
     )
     if ($Policy -eq 'smart' -and (Test-TorChatBuildFresh -RepositoryRoot $Context.RepositoryRoot -Key "flutter-windows-$variant" -Hash $hash -Artifacts @($artifact))) {
         return [pscustomobject]@{ State = 'Skipped'; Code = 'WINDOWS_CLIENT_FRESH'; Message = 'Windows client unchanged'; Artifact = $artifact }
@@ -389,9 +396,14 @@ function Build-TorChatWindowsClient {
         /XF '*.apk' '*.aab' '*.log' | Out-Null
     if ($LASTEXITCODE -gt 7) { throw "Windows Flutter staging copy failed with robocopy exit $LASTEXITCODE." }
     $previousConfig = $env:TORCHAT_CONFIG_FILE
+    $torkaPairingCode = [string]$EnvironmentState.Values['TORCHAT_TORKA_PAIRING_CODE']
     $env:TORCHAT_CONFIG_FILE = $EnvironmentState.Paths.RuntimeEnvironment
     try {
-        [void](Invoke-TorChatNative -Context $Context -FilePath 'flutter' -ArgumentList @('build','windows',$flutterVariant) -WorkingDirectory $stagingMobile -LogName 'flutter-windows.log')
+        $arguments = @('build','windows',$flutterVariant)
+        if (-not [string]::IsNullOrWhiteSpace($torkaPairingCode)) {
+            $arguments += "--dart-define=TORCHAT_TORKA_PAIRING_CODE=$torkaPairingCode"
+        }
+        [void](Invoke-TorChatNative -Context $Context -FilePath 'flutter' -ArgumentList $arguments -WorkingDirectory $stagingMobile -LogName 'flutter-windows.log')
     } finally {
         $env:TORCHAT_CONFIG_FILE = $previousConfig
     }
@@ -418,13 +430,30 @@ function Build-TorChatServerImage {
     [pscustomobject]@{ State = 'Ready'; Code = 'SERVER_IMAGE_BUILT'; Message = 'Relay server image built' }
 }
 
+function Build-TorChatTorkaImage {
+    param(
+        [Parameter(Mandatory = $true)]$Context,
+        [Parameter(Mandatory = $true)]$EnvironmentState,
+        [switch]$NoCache
+    )
+    Assert-TorChatTool -Name docker
+    $compose = Get-TorChatComposeContext -RepositoryRoot $Context.RepositoryRoot -EnvironmentState $EnvironmentState
+    $args = @($compose.Arguments + @('build','torka'))
+    if ($NoCache) { $args += '--no-cache' }
+    [void](Invoke-TorChatNative -Context $Context -FilePath 'docker' -ArgumentList $args -WorkingDirectory $Context.RepositoryRoot -LogName 'docker-build-torka.log')
+    [pscustomobject]@{ State = 'Ready'; Code = 'TORKA_IMAGE_BUILT'; Message = 'Torka P2P test peer image built' }
+}
+
 Export-ModuleMember -Function @(
     'Get-TorChatInputHash',
     'Test-TorChatBuildFresh',
     'Set-TorChatBuildFresh',
+    'Remove-TorChatDirectoryRobust',
+    'Stop-TorChatBuildProcesses',
     'Build-TorChatDesktopEngine',
     'Build-TorChatAndroidEngine',
     'Build-TorChatAndroidClient',
     'Build-TorChatWindowsClient',
-    'Build-TorChatServerImage'
+    'Build-TorChatServerImage',
+    'Build-TorChatTorkaImage'
 )

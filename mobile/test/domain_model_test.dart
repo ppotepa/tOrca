@@ -124,12 +124,13 @@ void main() {
       'retryInMs': 2500,
     }).runtimeEvent();
     expect(connectionEvent, isA<PeerConnectionChangedEvent>());
+    final typedEvent = connectionEvent as PeerConnectionChangedEvent;
     expect(
-      (connectionEvent as PeerConnectionChangedEvent).status,
+      typedEvent.status,
       PeerConnectionStatus.backoff,
     );
     expect(
-      (connectionEvent as PeerConnectionChangedEvent).retryInMs,
+      typedEvent.retryInMs,
       2500,
     );
   });

@@ -1,4 +1,5 @@
 import '../../client_runtime.dart';
+import 'generated/runtime_contract.g.dart';
 import 'refresh_coordinator.dart';
 
 final class RuntimeLocalSnapshot {
@@ -50,7 +51,12 @@ class RuntimeRepository {
   final Map<String, bool> _lastTyping = {};
   bool? _lastPresence;
 
-  Stream<RuntimeEvent> get events => _runtime.events;
+  late final Stream<RuntimeEvent> _events = _runtime.events.map((event) {
+    _invalidateCachesForEvent(event);
+    return event;
+  }).asBroadcastStream();
+
+  Stream<RuntimeEvent> get events => _events;
 
   Future<bool> connect() async {
     final connected = await _runtime.connect();
@@ -68,7 +74,17 @@ class RuntimeRepository {
       await _runtime.setNickname(value);
   Future<InviteCode?> refreshInviteCode() => _runtime.refreshPairingCode();
 
-  Future<RuntimeRefreshSnapshot> refresh({bool includePairing = false}) async {
+  Future<RuntimeRefreshSnapshot> refresh({
+    bool includePairing = false,
+    bool bypassCooldown = false,
+  }) async {
+    if (bypassCooldown) {
+      final local = await _loadLocalBatch(force: true);
+      final pairing = includePairing
+          ? await _loadPairingBatch(force: true)
+          : null;
+      return RuntimeRefreshSnapshot(local: local, pairing: pairing);
+    }
     await _refreshCoordinator.schedule(
       includeRemote: includePairing,
       local: (_) async {
@@ -164,6 +180,23 @@ class RuntimeRepository {
     _latestPairingSnapshot = null;
   }
 
+  void _invalidateCachesForEvent(RuntimeEvent event) {
+    switch (event) {
+      case ProfileReadyEvent():
+      case PeerEndpointChangedEvent():
+      case PeerConnectionChangedEvent():
+        invalidateLocalCache();
+      case DataChangedEvent(:final type):
+        invalidateLocalCache();
+        if (type == EngineContract.inviteReceived ||
+            type == EngineContract.inviteStateChanged) {
+          invalidatePairingCache();
+        }
+      default:
+        break;
+    }
+  }
+
   Future<PairingItem> submitPairingCode(String code) async {
     final item = await _runtime.submitPairingCode(code);
     invalidatePairingCache();
@@ -253,7 +286,10 @@ class RuntimeRepository {
     invalidateLocalCache();
   }
 
-  Future<void> openConversation(String id) => _runtime.openConversation(id);
+  Future<void> openConversation(String id) async {
+    await _runtime.openConversation(id);
+    invalidateLocalCache();
+  }
   Future<void> closeConversation() => _runtime.closeConversation();
 
   Future<void> startConversation(String id) async {

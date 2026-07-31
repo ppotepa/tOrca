@@ -697,14 +697,7 @@ impl ClientEngineActor {
                             | ConnectionState::Backoff { .. } => self.connection_state.clone(),
                             _ => ConnectionState::Disconnected,
                         };
-                        let phase = match &state {
-                            ConnectionState::Connected => RuntimeStatusPhase::Connected,
-                            ConnectionState::Backoff { .. } => RuntimeStatusPhase::Reconnecting,
-                            ConnectionState::Connecting
-                            | ConnectionState::Authenticating
-                            | ConnectionState::WaitingForReady => RuntimeStatusPhase::Connecting,
-                            _ => RuntimeStatusPhase::Offline,
-                        };
+                        let phase = runtime_phase_for_tor_ready(&state);
                         (state, phase, "tor ready")
                     }
                     crate::TorPhase::Failed => {
@@ -1028,9 +1021,14 @@ impl ClientEngineActor {
                 ])
             }
             PeerTransportEvent::IngressError { error } => {
+                let level = if is_expected_peer_shutdown(&error) {
+                    "info"
+                } else {
+                    "warn"
+                };
                 self.pending_engine_events.push(EngineEvent::Log {
                     log: EngineLogEvent {
-                        level: "warn".to_owned(),
+                        level: level.to_owned(),
                         message: format!("peer inbound connection failed: {error}"),
                     },
                 });
@@ -1680,6 +1678,8 @@ impl ClientEngineActor {
             return Ok(());
         };
         let profile = self.runtime_profile()?;
+        let protocol_nickname =
+            protocol_nickname(&self.identity.installation_id(), &profile.nickname);
         for contact in self.list_contacts()? {
             if self
                 .database
@@ -1690,7 +1690,7 @@ impl ClientEngineActor {
             }
             let payload = RelayPayloadV1::peer_endpoint_bootstrap(
                 &self.identity,
-                &profile.nickname,
+                &protocol_nickname,
                 contact.installation_id.clone(),
                 local_endpoint.clone(),
             )
@@ -1709,6 +1709,11 @@ impl ClientEngineActor {
                 next_attempt_at: 0,
                 last_error: None,
             }) {
+                self.database.record_peer_endpoint_bootstrap_error(
+                    &contact.installation_id,
+                    local_endpoint.sequence,
+                    &error.to_string(),
+                )?;
                 self.pending_engine_events.push(EngineEvent::Log {
                     log: EngineLogEvent {
                         level: "warn".to_owned(),
@@ -2038,6 +2043,21 @@ impl ClientEngineActor {
                 let (invite_id, welcome, tree) = payload
                     .decode_welcome()
                     .map_err(EngineError::InvalidCommand)?;
+                // A relay reconnect can replay a Welcome which has already
+                // been committed.  MLS key packages are intentionally
+                // one-time material, so accepting that duplicate would fail
+                // with the misleading "No matching key package" error.
+                if self.database.invite_used(&invite_id)? {
+                    self.pending_engine_events.push(EngineEvent::Log {
+                        log: EngineLogEvent {
+                            level: "info".to_owned(),
+                            message: format!(
+                                "ignoring duplicate Welcome for completed invite_id={invite_id}"
+                            ),
+                        },
+                    });
+                    return Ok(Vec::new());
+                }
                 let snapshot = self.snapshot_mls_inbox()?;
                 let fresh_member = self.fresh_mls_member()?;
                 let member = mem::replace(&mut self.mls_inbox, fresh_member);
@@ -2045,14 +2065,28 @@ impl ClientEngineActor {
                     Ok(value) => value,
                     Err(error) => {
                         self.restore_mls_inbox(&snapshot)?;
-                        return Err(EngineError::InvalidCommand(error));
+                        let detail = error.to_string();
+                        if detail.contains("No matching key package") {
+                            self.pending_engine_events.push(EngineEvent::Log {
+                                log: EngineLogEvent {
+                                    level: "warn".to_owned(),
+                                    message: format!(
+                                        "discarded stale Welcome invite_id={invite_id}; local MLS key package is no longer available"
+                                    ),
+                                },
+                            });
+                            return Ok(vec![torchat_client_runtime::RuntimeEvent::RuntimeError {
+                                message: "Nie można dokończyć starego zaproszenia. Poproś kontakt o wygenerowanie nowego kodu parowania.".to_owned(),
+                            }]);
+                        }
+                        return Err(EngineError::InvalidCommand(detail));
                     }
                 };
                 let inbox_snapshot_after = self.snapshot_mls_inbox()?;
                 let committed = self.commit_contact_with_conversation(
                     sender.clone(),
                     conversation,
-                    Some(&invite_id),
+                    None,
                     None,
                     None,
                     Some(&inbox_snapshot_after),
@@ -2060,6 +2094,10 @@ impl ClientEngineActor {
                 );
                 match committed {
                     Ok(mut runtime_events) => {
+                        let (_, mut reconcile_events) = self.with_runtime(|runtime| {
+                            runtime.reconcile_outbox_pairing_contact(&sender.installation_id)
+                        })?;
+                        runtime_events.append(&mut reconcile_events);
                         if let Some(peer_endpoint) = peer_endpoint {
                             self.database.put_contact_peer_endpoint(&peer_endpoint)?;
                             if let Some(transport) = &self.peer_transport {
@@ -2390,7 +2428,7 @@ impl ClientEngineActor {
         recipient_installation_id: Option<String>,
     ) -> EngineResult<String> {
         let profile = self.runtime_profile()?;
-        let nickname = profile.nickname.trim().chars().take(32).collect::<String>();
+        let nickname = protocol_nickname(&self.identity.installation_id(), &profile.nickname);
         let snapshot_before = self.snapshot_mls_inbox()?;
         let key_package = self
             .mls_inbox
@@ -2989,6 +3027,11 @@ impl ClientEngineActor {
                 continue;
             }
             if let Err(error) = self.send_peer_endpoint_bootstrap(record.clone()) {
+                self.database.record_peer_endpoint_bootstrap_error(
+                    &record.contact_installation_id,
+                    record.endpoint_sequence,
+                    &error.to_string(),
+                )?;
                 self.pending_engine_events.push(EngineEvent::Log {
                     log: EngineLogEvent {
                         level: "warn".to_owned(),
@@ -3017,6 +3060,10 @@ impl ClientEngineActor {
                 continue;
             }
             if let Err(error) = self.send_contact_confirmation(record.clone()) {
+                self.database.record_pending_contact_confirmation_error(
+                    &record.pairing_id,
+                    &error.to_string(),
+                )?;
                 self.pending_engine_events.push(EngineEvent::Log {
                     log: EngineLogEvent {
                         level: "warn".to_owned(),
@@ -3360,9 +3407,11 @@ impl ClientEngineActor {
             .invite(&key_package)
             .map_err(EngineError::InvalidCommand)?;
         let profile = self.runtime_profile()?;
+        let protocol_nickname =
+            protocol_nickname(&self.identity.installation_id(), &profile.nickname);
         let ciphertext = RelayPayloadV1::welcome_with_endpoint(
             &self.identity,
-            &profile.nickname,
+            &protocol_nickname,
             card.installation_id.clone(),
             invite.invite_id.clone(),
             &welcome,
@@ -3490,6 +3539,10 @@ impl ClientEngineActor {
                 next_attempt_at: 0,
                 last_error: None,
             }) {
+                self.database.record_pending_contact_confirmation_error(
+                    &confirm.pairing_id,
+                    &error.to_string(),
+                )?;
                 self.pending_engine_events.push(EngineEvent::Log {
                     log: EngineLogEvent {
                         level: "warn".to_owned(),
@@ -3596,6 +3649,21 @@ fn seed_runtime_identity(database: &mut ClientDatabase, identity: &Identity) -> 
     Ok(())
 }
 
+fn protocol_nickname(installation_id: &str, nickname: &str) -> String {
+    let trimmed = nickname.trim();
+    if trimmed.chars().count() >= 2 {
+        return trimmed.chars().take(32).collect();
+    }
+    let trimmed_installation_id = installation_id.trim();
+    if trimmed_installation_id.starts_with("peer-")
+        && trimmed_installation_id.chars().count() >= 2
+    {
+        return trimmed_installation_id.chars().take(32).collect();
+    }
+    let suffix = installation_id.chars().take(8).collect::<String>();
+    format!("peer-{suffix}")
+}
+
 fn load_engine_technical_state(
     database: &ClientDatabase,
     identity: &Identity,
@@ -3655,6 +3723,25 @@ fn retry_backoff_ms(attempt_count: u32) -> i64 {
     5_000_i64 * (1_i64 << shift)
 }
 
+fn runtime_phase_for_tor_ready(state: &ConnectionState) -> RuntimeStatusPhase {
+    match state {
+        ConnectionState::Connected => RuntimeStatusPhase::Connected,
+        ConnectionState::Backoff { .. } => RuntimeStatusPhase::Reconnecting,
+        ConnectionState::Connecting
+        | ConnectionState::Authenticating
+        | ConnectionState::WaitingForReady
+        | ConnectionState::Disconnected => RuntimeStatusPhase::Connecting,
+        _ => RuntimeStatusPhase::Connecting,
+    }
+}
+
+fn is_expected_peer_shutdown(error: &str) -> bool {
+    let normalized = error.to_ascii_lowercase();
+    normalized.contains("peer websocket closed")
+        || normalized.contains("connection reset without closing handshake")
+        || normalized.contains("connection reset by peer")
+}
+
 fn stable_message_sequence(message_id: uuid::Uuid) -> u64 {
     let bytes = message_id.as_bytes();
     let mut sequence = [0_u8; 8];
@@ -3711,5 +3798,58 @@ fn error_code(error: &EngineError) -> &'static str {
         EngineError::Serialization(_) => "serialization",
         EngineError::Storage(_) => "storage",
         EngineError::Transport(_) => "transport",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_expected_peer_shutdown, protocol_nickname, runtime_phase_for_tor_ready};
+    use crate::event::ConnectionState;
+    use torchat_client_runtime::RuntimeStatusPhase;
+
+    #[test]
+    fn protocol_nickname_uses_profile_when_present() {
+        assert_eq!(protocol_nickname("abcdefgh12345678", " Alice "), "Alice");
+    }
+
+    #[test]
+    fn protocol_nickname_falls_back_when_profile_is_missing() {
+        assert_eq!(
+            protocol_nickname("abcdefgh12345678", " "),
+            "peer-abcdefgh"
+        );
+    }
+
+    #[test]
+    fn protocol_nickname_keeps_existing_peer_prefix() {
+        assert_eq!(protocol_nickname("peer-1", " "), "peer-1");
+    }
+
+    #[test]
+    fn tor_ready_without_relay_connection_remains_connecting() {
+        assert_eq!(
+            runtime_phase_for_tor_ready(&ConnectionState::Disconnected),
+            RuntimeStatusPhase::Connecting
+        );
+    }
+
+    #[test]
+    fn tor_ready_with_backoff_reports_reconnecting() {
+        assert_eq!(
+            runtime_phase_for_tor_ready(&ConnectionState::Backoff {
+                attempt: 2,
+                retry_in_ms: 2_000,
+            }),
+            RuntimeStatusPhase::Reconnecting
+        );
+    }
+
+    #[test]
+    fn expected_peer_shutdowns_are_downgraded() {
+        assert!(is_expected_peer_shutdown(
+            "read peer frame: WebSocket protocol error: Connection reset without closing handshake"
+        ));
+        assert!(is_expected_peer_shutdown("peer websocket closed"));
+        assert!(!is_expected_peer_shutdown("peer client proof is invalid"));
     }
 }

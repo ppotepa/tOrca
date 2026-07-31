@@ -3,7 +3,7 @@ use crate::{
     ChatMessage, ContactRecord, ConversationSummary, InviteState, MessageSendEffect,
     MessageTransportOutcome, PairingItem, RuntimeClock, RuntimeError, RuntimeEvent,
     RuntimeIdentity, RuntimeProfile, RuntimeResult, RuntimeSendEffect, RuntimeSession,
-    RuntimeStorage, RuntimeTransport,
+    RuntimeStorage, RuntimeTransport, logic::fallback_contact_nickname,
 };
 use uuid::Uuid;
 
@@ -151,6 +151,7 @@ where
     }
 
     pub fn refresh_pairing_code(&mut self) -> RuntimeResult<crate::InviteCode> {
+        self.require_pairing_profile_ready()?;
         let code = self.transport.refresh_pairing_code()?;
         self.storage.put_pairing_code(code.clone())?;
         Ok(code)
@@ -166,6 +167,8 @@ where
                 "pairing code must contain exactly eight digits".to_owned(),
             ));
         }
+        let mut outbox = self.storage.pairing_outbox()?;
+        self.expire_pairing_items(&mut outbox, false)?;
         self.complete_outbox_pairings_for_existing_contacts()?;
         if self
             .storage
@@ -210,6 +213,54 @@ where
         Ok(())
     }
 
+    pub fn reconcile_outbox_pairing_contact(
+        &mut self,
+        installation_id: &str,
+    ) -> RuntimeResult<()> {
+        let contact = self
+            .storage
+            .contacts()?
+            .into_iter()
+            .find(|contact| contact.installation_id == installation_id)
+            .ok_or_else(|| RuntimeError::NotFound("contact does not exist".to_owned()))?;
+        let outstanding = self
+            .storage
+            .pairing_outbox()?
+            .into_iter()
+            .filter(|item| item.state.is_outstanding())
+            .collect::<Vec<_>>();
+        if outstanding.is_empty() {
+            return Ok(());
+        }
+        let explicit_matches = outstanding
+            .iter()
+            .filter(|item| {
+                item.sender
+                    .as_ref()
+                    .is_some_and(|sender| sender.installation_id == installation_id)
+            })
+            .count();
+        let allow_single_unbound_repair = explicit_matches == 0 && outstanding.len() == 1;
+        for mut item in outstanding {
+            let matches_contact = item
+                .sender
+                .as_ref()
+                .is_some_and(|sender| sender.installation_id == installation_id);
+            if !matches_contact && !allow_single_unbound_repair {
+                continue;
+            }
+            item.sender = Some(contact.clone());
+            item.state = InviteState::Completed;
+            item = normalize_pairing_item(item);
+            self.storage.put_pairing_outbox(item.clone())?;
+            self.session.push_event(RuntimeEvent::InviteStateChanged {
+                pairing_id: Some(item.pairing_id),
+                state: Some(InviteState::Completed),
+            });
+        }
+        Ok(())
+    }
+
     pub fn submit_pairing_code(&mut self, code: String) -> RuntimeResult<PairingItem> {
         let normalized = self.prepare_submit_pairing_code(code)?;
         let item = normalize_pairing_item(self.transport.submit_pairing_code(&normalized)?);
@@ -219,6 +270,19 @@ where
             state: Some(item.state),
         });
         Ok(item)
+    }
+
+    fn require_pairing_profile_ready(&self) -> RuntimeResult<()> {
+        let profile = self
+            .storage
+            .profile()?
+            .ok_or_else(|| RuntimeError::Unavailable("runtime profile is not ready".to_owned()))?;
+        if profile.nickname.trim().chars().count() < 2 {
+            return Err(RuntimeError::Conflict(
+                "set nickname before generating a pairing code".to_owned(),
+            ));
+        }
+        Ok(())
     }
 
     pub fn pairing_inbox(&mut self) -> RuntimeResult<crate::PairingSyncResult> {
@@ -538,6 +602,7 @@ where
     }
 
     pub fn pairing_outbox(&mut self) -> RuntimeResult<crate::PairingSyncResult> {
+        self.complete_outbox_pairings_for_existing_contacts()?;
         let mut items = self.storage.pairing_outbox()?;
         self.expire_pairing_items(&mut items, false)?;
         items.retain(|item| item.state != InviteState::Archived);
@@ -843,7 +908,7 @@ where
             }
         }
         if contact.nickname.trim().is_empty() {
-            contact.nickname = contact.installation_id.clone();
+            contact.nickname = fallback_contact_nickname(&contact.installation_id);
         }
         self.storage.put_contact(contact.clone())?;
         let existing_conversation =
@@ -1879,6 +1944,34 @@ mod tests {
     }
 
     #[test]
+    fn submit_pairing_code_ignores_expired_outbox_item() {
+        let mut runtime = runtime();
+        runtime.storage.put_pairing_outbox(PairingItem {
+            pairing_id: "expired-outbox".to_owned(),
+            sender: None,
+            capability: None,
+            expires_at: -1,
+            state: InviteState::Pending,
+            received: false,
+            available_actions: crate::pairing_available_actions(InviteState::Pending, false),
+            offer_invite_id: None,
+            offer_payload: None,
+        }).unwrap();
+
+        let item = runtime.submit_pairing_code("12345678".to_owned()).unwrap();
+
+        assert_eq!(item.pairing_id, "outbox-1");
+        let expired = runtime
+            .storage
+            .pairing_outbox()
+            .unwrap()
+            .into_iter()
+            .find(|value| value.pairing_id == "expired-outbox")
+            .expect("expired pairing must remain stored");
+        assert_eq!(expired.state, InviteState::Expired);
+    }
+
+    #[test]
     fn submitting_a_new_code_repairs_an_outbox_pairing_for_an_existing_contact() {
         let mut runtime = runtime();
         let mut stale = pairing("stale-pairing", InviteState::Pending);
@@ -1896,6 +1989,87 @@ mod tests {
             runtime.storage.pairing_outbox().unwrap()[0].state,
             InviteState::Completed
         );
+    }
+
+    #[test]
+    fn reading_pairing_outbox_repairs_an_outbox_pairing_for_an_existing_contact() {
+        let mut runtime = runtime();
+        let mut stale = pairing("stale-pairing", InviteState::Accepted);
+        stale.sender = Some(contact());
+        runtime.storage.put_contact(contact()).unwrap();
+        runtime.storage.put_pairing_outbox(stale).unwrap();
+
+        let items = runtime.pairing_outbox().unwrap().items;
+
+        assert_eq!(items[0].state, InviteState::Completed);
+        assert_eq!(
+            runtime.storage.pairing_outbox().unwrap()[0].state,
+            InviteState::Completed
+        );
+    }
+
+    #[test]
+    fn reconciling_outbox_pairing_contact_completes_single_unbound_request() {
+        let mut runtime = runtime();
+        runtime.storage.put_contact(contact()).unwrap();
+        runtime
+            .storage
+            .put_pairing_outbox(pairing("pairing-1", InviteState::Accepted))
+            .unwrap();
+
+        runtime.reconcile_outbox_pairing_contact("peer-1").unwrap();
+
+        let repaired = runtime.storage.pairing_outbox().unwrap()[0].clone();
+        assert_eq!(repaired.state, InviteState::Completed);
+        assert_eq!(
+            repaired.sender.as_ref().map(|value| value.installation_id.as_str()),
+            Some("peer-1")
+        );
+    }
+
+    #[test]
+    fn reconciling_outbox_pairing_contact_does_not_guess_when_multiple_requests_exist() {
+        let mut runtime = runtime();
+        runtime.storage.put_contact(contact()).unwrap();
+        runtime
+            .storage
+            .put_pairing_outbox(pairing("pairing-1", InviteState::Pending))
+            .unwrap();
+        runtime
+            .storage
+            .put_pairing_outbox(pairing("pairing-2", InviteState::Accepted))
+            .unwrap();
+
+        runtime.reconcile_outbox_pairing_contact("peer-1").unwrap();
+
+        let states = runtime
+            .storage
+            .pairing_outbox()
+            .unwrap()
+            .into_iter()
+            .map(|item| item.state)
+            .collect::<Vec<_>>();
+        assert_eq!(states, vec![InviteState::Pending, InviteState::Accepted]);
+    }
+
+    #[test]
+    fn refresh_pairing_code_requires_nickname() {
+        let mut runtime = runtime();
+        runtime
+            .storage
+            .put_profile(RuntimeProfile::from_parts(
+                "install-1".to_owned(),
+                String::new(),
+                "pk".to_owned(),
+                "fp".to_owned(),
+            ))
+            .unwrap();
+        let error = runtime.refresh_pairing_code().unwrap_err();
+        assert!(matches!(error, RuntimeError::Conflict(_)));
+
+        runtime.set_nickname("Alice".to_owned()).unwrap();
+        let code = runtime.refresh_pairing_code().unwrap();
+        assert_eq!(code.code, "12345678");
     }
 
     #[test]
@@ -2149,6 +2323,17 @@ mod tests {
             runtime.storage.pairing_inbox().unwrap()[0].state,
             InviteState::Completed
         );
+    }
+
+    #[test]
+    fn welcome_accepted_without_matching_inbox_still_promotes_contact() {
+        let mut runtime = runtime();
+
+        let result = runtime.welcome_accepted(contact(), true, None).unwrap();
+
+        assert_eq!(result.conversation.status, crate::ConversationState::Verifying);
+        assert!(result.confirm_contact.is_none());
+        assert_eq!(runtime.contacts().unwrap()[0].installation_id, "peer-1");
     }
 
     #[test]

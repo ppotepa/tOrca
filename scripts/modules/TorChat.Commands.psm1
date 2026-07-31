@@ -30,7 +30,8 @@ function Invoke-TorChatPreflight {
         $dockerVersion = ''
         if ($needsDocker) { $dockerVersion = Assert-TorChatDockerEngine -Context $Context }
 
-        if ($Command -eq 'build' -and $Target -eq 'desktop-runtime') {
+        if (($Command -eq 'build' -and $Target -eq 'desktop-runtime') -or
+            ($Command -eq 'test' -and $Target -in @('runtime','windows','all'))) {
             Assert-TorChatTool -Name cargo
         }
         if (($Command -in @('build','deploy')) -and $Target -in @('android','windows','clients','all')) {
@@ -39,6 +40,12 @@ function Invoke-TorChatPreflight {
                 Assert-TorChatTool -Name flutter
                 if ($Target -in @('android','clients','all')) { Assert-TorChatTool -Name rustup }
             }
+        }
+        if ($Command -eq 'test' -and $Target -in @('flutter','android','all')) {
+            Assert-TorChatTool -Name flutter
+        }
+        if ($Command -eq 'test' -and $Target -in @('android','all')) {
+            Assert-TorChatTool -Name (Join-Path $Context.RepositoryRoot 'mobile\\android\\gradlew.bat')
         }
 
         $needsAdb = ($Command -in @('deploy','run','stop','clean','device')) -and
@@ -160,6 +167,11 @@ function Invoke-TorChatBuildCommand {
             Build-TorChatServerImage -Context $Context -EnvironmentState $EnvironmentState -NoCache:$NoCache
         }
     }
+    if ($Target -eq 'all') {
+        Invoke-TorChatStage -Context $Context -Id 'build.torka' -Name 'Build Torka P2P test peer image' -Skip:($BuildPolicy -eq 'skip') -Action {
+            Build-TorChatTorkaImage -Context $Context -EnvironmentState $EnvironmentState -NoCache:$NoCache
+        }
+    }
     if ($Target -eq 'desktop-runtime') {
         Invoke-TorChatStage -Context $Context -Id 'build.windows.engine' -Name 'Build Windows Rust engine' -Skip:($BuildPolicy -eq 'skip') -Action {
             Build-TorChatDesktopEngine -Context $Context -EnvironmentState $EnvironmentState -Policy $BuildPolicy
@@ -228,6 +240,9 @@ function Invoke-TorChatDeployCommand {
     if ($Target -eq 'all') {
         Invoke-TorChatStage -Context $Context -Id 'build.server' -Name 'Build relay server image' -Skip:($BuildPolicy -eq 'skip') -Action {
             Build-TorChatServerImage -Context $Context -EnvironmentState $EnvironmentState -NoCache:$NoCache
+        }
+        Invoke-TorChatStage -Context $Context -Id 'build.torka' -Name 'Build Torka P2P test peer image' -Skip:($BuildPolicy -eq 'skip') -Action {
+            Build-TorChatTorkaImage -Context $Context -EnvironmentState $EnvironmentState -NoCache:$NoCache
         }
     }
 
@@ -322,8 +337,8 @@ function Invoke-TorChatRunCommand {
     }
     Import-TorChatEnvironmentState -EnvironmentState $EnvironmentState -RequireOnion
     if ($Target -in @('android','all')) {
-        $resolved = Resolve-TorChatAndroidDevice -Context $Context -Device $Device
         Invoke-TorChatStage -Context $Context -Id 'runtime.android' -Name 'Start Android client' -Action {
+            $resolved = Resolve-TorChatAndroidDevice -Context $Context -Device $Device
             $arguments = @{ Context = $Context; Device = $resolved; ClientDataPolicy = $ClientDataPolicy }
             if ($ReadyAttempts -gt 0) { $arguments.ReadyAttempts = $ReadyAttempts }
             Start-TorChatAndroidClient @arguments
@@ -346,8 +361,8 @@ function Invoke-TorChatStopCommand {
     )
     Assert-TorChatCommandTarget -Target $Target -Allowed @('android','windows','all')
     if ($Target -in @('android','all')) {
-        $resolved = Resolve-TorChatAndroidDevice -Context $Context -Device $Device
         Invoke-TorChatStage -Context $Context -Id 'runtime.android.stop' -Name 'Stop Android client' -Action {
+            $resolved = Resolve-TorChatAndroidDevice -Context $Context -Device $Device
             Stop-TorChatAndroidClient -Context $Context -Device $resolved
         }
     }
@@ -379,6 +394,43 @@ function Invoke-TorChatStatusCommand {
     if ($Target -in @('android','all')) {
         Invoke-TorChatStage -Context $Context -Id 'status.android' -Name 'Android status' -Required $false -Action {
             Get-TorChatAndroidStatus -Context $Context -Device $Device
+        }
+    }
+}
+
+function Invoke-TorChatTestCommand {
+    param(
+        [Parameter(Mandatory = $true)]$Context,
+        [Parameter(Mandatory = $true)]$EnvironmentState,
+        [Parameter(Mandatory = $true)][string]$Target
+    )
+    Assert-TorChatCommandTarget -Target $Target -Allowed @('runtime','flutter','android','windows','all')
+
+    if ($Target -in @('runtime','all')) {
+        Invoke-TorChatStage -Context $Context -Id 'test.runtime' -Name 'Test shared runtime' -Action {
+            [void](Invoke-TorChatNative -Context $Context -FilePath 'cargo' -ArgumentList @('test','-p','torchat-client-runtime') -WorkingDirectory $Context.RepositoryRoot -LogName 'cargo-test-runtime.log')
+            [pscustomobject]@{ State = 'Ready'; Code = 'TEST_RUNTIME_OK'; Message = 'torchat-client-runtime tests passed' }
+        }
+    }
+
+    if ($Target -in @('flutter','all')) {
+        Invoke-TorChatStage -Context $Context -Id 'test.flutter' -Name 'Analyze Flutter client' -Action {
+            [void](Invoke-TorChatNative -Context $Context -FilePath 'flutter' -ArgumentList @('analyze','lib') -WorkingDirectory (Join-Path $Context.RepositoryRoot 'mobile') -LogName 'flutter-analyze.log')
+            [pscustomobject]@{ State = 'Ready'; Code = 'TEST_FLUTTER_OK'; Message = 'Flutter analyze passed' }
+        }
+    }
+
+    if ($Target -in @('android','all')) {
+        Invoke-TorChatStage -Context $Context -Id 'test.android' -Name 'Compile Android Kotlin' -Action {
+            [void](Invoke-TorChatNative -Context $Context -FilePath (Join-Path $Context.RepositoryRoot 'mobile\\android\\gradlew.bat') -ArgumentList @(':app:compileDebugKotlin') -WorkingDirectory (Join-Path $Context.RepositoryRoot 'mobile\\android') -LogName 'android-compile-debug-kotlin.log')
+            [pscustomobject]@{ State = 'Ready'; Code = 'TEST_ANDROID_OK'; Message = 'Android Kotlin compile passed' }
+        }
+    }
+
+    if ($Target -in @('windows','all')) {
+        Invoke-TorChatStage -Context $Context -Id 'test.windows' -Name 'Check Windows Rust/Desktop' -Action {
+            [void](Invoke-TorChatNative -Context $Context -FilePath 'cargo' -ArgumentList @('check','-p','torchat-client-engine','-p','torchat-desktop') -WorkingDirectory $Context.RepositoryRoot -LogName 'cargo-check-windows-runtime.log')
+            [pscustomobject]@{ State = 'Ready'; Code = 'TEST_WINDOWS_OK'; Message = 'Windows Rust/Desktop check passed' }
         }
     }
 }
@@ -438,7 +490,10 @@ function Invoke-TorChatLogsCommand {
         Invoke-TorChatStage -Context $Context -Id 'logs.show' -Name 'Recent TorChat runs' -Action {
             $runs = @(Get-TorChatRecentRuns -RepositoryRoot $Context.RepositoryRoot -Limit 10)
             foreach ($run in $runs) {
-                Write-Host ("     {0}  {1}  {2} {3}" -f $run.runId, $run.state, $run.command, $run.target)
+                $command = if ($null -ne $run.PSObject.Properties['command'] -and $run.command) { $run.command } else { '-' }
+                $target = if ($null -ne $run.PSObject.Properties['target'] -and $run.target) { $run.target } else { '-' }
+                $state = if ($null -ne $run.PSObject.Properties['state'] -and $run.state) { $run.state } else { 'Unknown' }
+                Write-Host ("     {0}  {1}  {2} {3}" -f $run.runId, $state, $command, $target)
             }
             [pscustomobject]@{
                 State = 'Ready'
@@ -538,6 +593,9 @@ function Invoke-TorChatCommand {
         }
         'stop' {
             Invoke-TorChatStopCommand -Context $Context -Target $Target -Device $Options.Device
+        }
+        'test' {
+            Invoke-TorChatTestCommand -Context $Context -EnvironmentState $EnvironmentState -Target $Target
         }
         'status' {
             Invoke-TorChatStatusCommand -Context $Context -EnvironmentState $EnvironmentState -Target $Target -Device $Options.Device

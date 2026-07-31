@@ -9,6 +9,8 @@ services:
       RUST_LOG: info
       TORCHAT_ONION_URL: ${TORCHAT_ONION_URL:-}
       TORCHAT_PAIRING_SECRET: ${TORCHAT_PAIRING_SECRET:?TORCHAT_PAIRING_SECRET is required}
+      TORCHAT_DEV_RESERVED_PAIRING_NICKNAME: Torka
+      TORCHAT_DEV_RESERVED_PAIRING_CODE: ${TORCHAT_TORKA_PAIRING_CODE:-42424242}
     ports:
       - "127.0.0.1:${TORCHAT_HTTP_PORT:-8080}:8080"
     depends_on:
@@ -49,6 +51,24 @@ services:
       timeout: 5s
       retries: 30
 
+  # Development-only independent client. It owns its own identity, Tor data
+  # directory and onion service; it is never part of the relay server.
+  torka:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.torka
+    environment:
+      TORCHAT_ONION_URL: ${TORCHAT_ONION_URL:-}
+      TORCHAT_NICKNAME: Torka
+      TORCHAT_TORKA_PAIRING_CODE: ${TORCHAT_TORKA_PAIRING_CODE:-42424242}
+    depends_on:
+      tor:
+        condition: service_healthy
+    volumes:
+      - torka_dev:/var/lib/torchat
+    restart: unless-stopped
+
 volumes:
   postgres_dev:
   tor_dev:
+  torka_dev:

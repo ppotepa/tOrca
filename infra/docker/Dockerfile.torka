@@ -1,0 +1,22 @@
+FROM rust:1.94-bookworm AS builder
+WORKDIR /src
+COPY infra/docker/Cargo.torka.toml ./Cargo.toml
+COPY Cargo.lock ./
+COPY common ./common
+COPY desktop ./desktop
+RUN cargo build --release -p torchat-desktop
+
+FROM debian:bookworm-slim
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates python3 tor \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --system --uid 10002 --create-home torchat
+COPY --from=builder /src/target/release/torchat-desktop /usr/local/bin/torchat-desktop
+COPY infra/docker/torka.py /usr/local/bin/torka
+RUN chmod 0755 /usr/local/bin/torka \
+    && mkdir -p /var/lib/torchat \
+    && chown -R torchat:torchat /var/lib/torchat
+USER torchat
+ENV TORCHAT_NICKNAME=Torka
+VOLUME ["/var/lib/torchat"]
+ENTRYPOINT ["/usr/local/bin/torka"]

@@ -755,6 +755,42 @@ impl ClientDatabase {
         Ok(())
     }
 
+    pub fn record_peer_endpoint_bootstrap_error(
+        &self,
+        contact_installation_id: &str,
+        endpoint_sequence: u64,
+        error: &str,
+    ) -> EngineResult<()> {
+        self.connection
+            .execute(
+                "UPDATE peer_endpoint_bootstrap_outbox
+                 SET last_error = ?1,
+                     updated_at = unixepoch()
+                 WHERE contact_installation_id = ?2
+                   AND endpoint_sequence = ?3;",
+                params![error, contact_installation_id, endpoint_sequence as i64],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
+    pub fn record_pending_contact_confirmation_error(
+        &self,
+        pairing_id: &str,
+        error: &str,
+    ) -> EngineResult<()> {
+        self.connection
+            .execute(
+                "UPDATE pending_contact_confirmations
+                 SET last_error = ?1,
+                     updated_at = unixepoch()
+                 WHERE pairing_id = ?2;",
+                params![error, pairing_id],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
     pub fn next_pending_contact_confirmation_retry_deadline_ms(
         &self,
     ) -> EngineResult<Option<i64>> {
@@ -2288,6 +2324,69 @@ mod tests {
         assert_eq!(record.attempt_count, 0);
         assert_eq!(record.next_attempt_at, 0);
         assert_eq!(record.last_error, None);
+
+        drop(database);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn recording_peer_endpoint_bootstrap_error_updates_last_error() {
+        let path = temp_database_path("peer-endpoint-bootstrap-error");
+        let database = ClientDatabase::open(&path, &key(24)).expect("database opens");
+        database
+            .connection()
+            .execute(
+                "INSERT INTO contacts (
+                    installation_id, nickname, public_key, fingerprint,
+                    verification, source, created_at, updated_at, transport_policy
+                 ) VALUES (
+                    'contact-1', 'Alice', 'pk', 'fp',
+                    'VERIFIED', 'PAIRING', 1, 1, 'PEER_ONLY'
+                 );",
+                [],
+            )
+            .expect("contact inserts");
+
+        database
+            .put_peer_endpoint_bootstrap("contact-1", b"payload-a", 1)
+            .expect("bootstrap inserts");
+        database
+            .record_peer_endpoint_bootstrap_error("contact-1", 1, "relay unavailable")
+            .expect("error persists");
+
+        let record = database
+            .due_peer_endpoint_bootstraps(0)
+            .expect("bootstrap rows are readable")
+            .into_iter()
+            .find(|row| row.contact_installation_id == "contact-1")
+            .expect("bootstrap row exists");
+
+        assert_eq!(record.last_error.as_deref(), Some("relay unavailable"));
+
+        drop(database);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn recording_pending_contact_confirmation_error_updates_last_error() {
+        let path = temp_database_path("contact-confirmation-error");
+        let database = ClientDatabase::open(&path, &key(23)).expect("database opens");
+
+        database
+            .put_pending_contact_confirmation("pairing-1", "peer-1", "cap-a")
+            .expect("confirmation inserts");
+        database
+            .record_pending_contact_confirmation_error("pairing-1", "relay unavailable")
+            .expect("error persists");
+
+        let record = database
+            .due_pending_contact_confirmations(0)
+            .expect("confirmation rows are readable")
+            .into_iter()
+            .find(|row| row.pairing_id == "pairing-1")
+            .expect("confirmation row exists");
+
+        assert_eq!(record.last_error.as_deref(), Some("relay unavailable"));
 
         drop(database);
         let _ = std::fs::remove_file(path);

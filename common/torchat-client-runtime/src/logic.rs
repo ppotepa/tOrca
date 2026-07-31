@@ -36,7 +36,7 @@ pub fn runtime_status_event(
 pub fn contact_record_from_card(card: &ContactCard, verified: bool) -> ContactRecord {
     ContactRecord {
         installation_id: card.installation_id.clone(),
-        nickname: card.nickname.clone(),
+        nickname: normalized_contact_nickname(&card.installation_id, &card.nickname),
         public_key: card.public_key.clone(),
         fingerprint: card.fingerprint.clone(),
         local_alias: None,
@@ -60,11 +60,28 @@ pub fn contact_card_from_invite(invite: &ContactInvite) -> ContactCard {
         installation_id: invite.installation_id.clone(),
         public_key: invite.public_key.clone(),
         fingerprint: invite.fingerprint.clone(),
-        nickname: invite
-            .nickname
-            .clone()
-            .unwrap_or_else(|| invite.installation_id.clone()),
+        nickname: normalized_contact_nickname(
+            &invite.installation_id,
+            invite.nickname.as_deref().unwrap_or_default(),
+        ),
     }
+}
+
+pub fn fallback_contact_nickname(installation_id: &str) -> String {
+    let trimmed = installation_id.trim();
+    if trimmed.starts_with("peer-") && trimmed.chars().count() >= 2 {
+        return trimmed.chars().take(32).collect();
+    }
+    let suffix = installation_id.chars().take(8).collect::<String>();
+    format!("peer-{suffix}")
+}
+
+pub fn normalized_contact_nickname(installation_id: &str, nickname: &str) -> String {
+    let trimmed = nickname.trim();
+    if trimmed.chars().count() >= 2 {
+        return trimmed.chars().take(32).collect();
+    }
+    fallback_contact_nickname(installation_id)
 }
 
 pub fn runtime_message_state(state: &str) -> MessageState {
@@ -383,7 +400,7 @@ mod tests {
     }
 
     #[test]
-    fn invite_contact_card_uses_nickname_or_installation_id() {
+    fn invite_contact_card_uses_nickname_or_safe_fallback() {
         let identity = torchat_core::Identity::from_private_key_bytes([7; 32]);
         let invite = ContactInvite::from_identity(
             &identity,
@@ -405,6 +422,28 @@ mod tests {
             4_102_444_800,
         );
         let fallback = contact_card_from_invite(&fallback_invite);
-        assert_eq!(fallback.nickname, fallback_invite.installation_id);
+        assert_eq!(
+            fallback.nickname,
+            fallback_contact_nickname(&fallback_invite.installation_id)
+        );
+        assert!(fallback.nickname.chars().count() <= 32);
+    }
+
+    #[test]
+    fn contact_record_from_card_normalizes_empty_nickname() {
+        let card = ContactCard {
+            installation_id: "abcdefgh12345678".into(),
+            public_key: "pk".into(),
+            fingerprint: "fp".into(),
+            nickname: " ".into(),
+        };
+
+        let record = contact_record_from_card(&card, true);
+        assert_eq!(record.nickname, "peer-abcdefgh");
+    }
+
+    #[test]
+    fn fallback_contact_nickname_keeps_existing_peer_prefix() {
+        assert_eq!(fallback_contact_nickname("peer-1"), "peer-1");
     }
 }

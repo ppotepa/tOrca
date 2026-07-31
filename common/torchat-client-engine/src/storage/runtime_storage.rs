@@ -2,8 +2,8 @@ use rusqlite::{OptionalExtension, Transaction, params};
 use torchat_client_runtime::{
     ChatMessage, ContactRecord, ConversationState, ConversationSummary, InviteCode, InviteState,
     MessageState, PairingItem, PeerConnectionStatus, PeerEndpointStatus, ReceiptSendEffect,
-    RuntimeError, RuntimeIdentity, RuntimeProfile, RuntimeResult, RuntimeStorage,
-    VerificationState,
+    RuntimeError, RuntimeIdentity, RuntimeProfile, RuntimeResult, RuntimeStorage, VerificationState,
+    logic::{fallback_contact_nickname, normalized_contact_nickname},
 };
 
 use super::{
@@ -402,8 +402,8 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
             Ok(finalize_pairing_item(PairingItem {
                 pairing_id,
                 sender: Some(ContactRecord {
+                    nickname: normalized_contact_nickname(&sender_installation_id, &sender_nickname),
                     installation_id: sender_installation_id,
-                    nickname: sender_nickname,
                     public_key: sender_public_key,
                     fingerprint: sender_fingerprint,
                     local_alias: None,
@@ -523,7 +523,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
             Ok(finalize_pairing_item(PairingItem {
                 pairing_id,
                 sender: recipient_installation_id.map(|installation_id| ContactRecord {
-                    nickname: installation_id.clone(),
+                    nickname: fallback_contact_nickname(&installation_id),
                     public_key: String::new(),
                     fingerprint: String::new(),
                     local_alias: None,

@@ -175,8 +175,17 @@ function Invoke-TorChatNative {
 
     $logPath = Join-Path $Context.LogDirectory $LogName
     $previousLocation = Get-Location
+    $previousErrorActionPreference = $ErrorActionPreference
+    $nativeErrorPreferenceDefined = $false
+    $previousNativeErrorPreference = $null
     try {
         if ($WorkingDirectory) { Set-Location -LiteralPath $WorkingDirectory }
+        $ErrorActionPreference = 'Continue'
+        if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
+            $nativeErrorPreferenceDefined = $true
+            $previousNativeErrorPreference = $PSNativeCommandUseErrorActionPreference
+            $PSNativeCommandUseErrorActionPreference = $false
+        }
         $output = @(& $FilePath @ArgumentList 2>&1)
         $exitCode = $LASTEXITCODE
         $text = ($output | Out-String).TrimEnd()
@@ -197,6 +206,10 @@ function Invoke-TorChatNative {
             LogPath = $logPath
         }
     } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+        if ($nativeErrorPreferenceDefined) {
+            $PSNativeCommandUseErrorActionPreference = $previousNativeErrorPreference
+        }
         Set-Location -LiteralPath $previousLocation
     }
 }

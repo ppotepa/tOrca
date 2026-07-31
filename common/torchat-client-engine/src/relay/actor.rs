@@ -390,7 +390,21 @@ impl EngineRelay for SharedRelayActor {
         })?;
         Ok(PairingItem {
             pairing_id: response.pairing_id.to_string(),
-            sender: None,
+            sender: response.sender.map(|sender| ContactRecord {
+                installation_id: sender.installation_id,
+                nickname: sender.nickname,
+                public_key: sender.public_key,
+                fingerprint: sender.fingerprint,
+                local_alias: None,
+                muted: false,
+                blocked: false,
+                verification: VerificationState::Unverified,
+                peer_endpoint_status: torchat_client_runtime::PeerEndpointStatus::Missing,
+                peer_connection_status: torchat_client_runtime::PeerConnectionStatus::Offline,
+                last_peer_connected_at: None,
+                transport_policy: Default::default(),
+                dev: None,
+            }),
             capability: None,
             expires_at: response.expires_at,
             state: response.state,
@@ -573,6 +587,9 @@ async fn run_writer_loop(
             }
             tokio::select! {
                 _ = heartbeat_tick.tick() => {
+                    if writer.send(relay_ping_message()).await.is_err() {
+                        break "relay ping failed".to_owned();
+                    }
                     if writer.send(Message::Ping(Vec::new().into())).await.is_err() {
                         break "relay ping failed".to_owned();
                     }
@@ -596,10 +613,12 @@ async fn run_writer_loop(
                     let Ok(message) = incoming else {
                         break "relay receive failed".to_owned();
                     };
+                    if relay_message_confirms_liveness(&message) {
+                        last_pong_at = Instant::now();
+                    }
                     match message {
                         Message::Text(text) => match serde_json::from_str::<RelayServerFrame>(&text) {
                             Ok(RelayServerFrame::Pong) => {
-                                last_pong_at = Instant::now();
                             }
                             Ok(RelayServerFrame::Envelope(envelope)) => {
                                 let _ = event_tx.send(RelayEvent::Envelope(envelope));
@@ -636,7 +655,6 @@ async fn run_writer_loop(
                             }
                         }
                         Message::Pong(_) => {
-                            last_pong_at = Instant::now();
                         }
                         Message::Close(_) => break "relay closed".to_owned(),
                         _ => {}
@@ -780,6 +798,19 @@ async fn connect_relay(
     }
 }
 
+fn relay_ping_message() -> Message {
+    let payload = serde_json::to_string(&RelayClientFrame::Ping)
+        .expect("relay ping frame must serialize");
+    Message::Text(payload.into())
+}
+
+fn relay_message_confirms_liveness(message: &Message) -> bool {
+    matches!(
+        message,
+        Message::Text(_) | Message::Ping(_) | Message::Pong(_) | Message::Binary(_)
+    )
+}
+
 fn validate_relay_url(base_url: &Url) -> RuntimeResult<()> {
     let host = base_url
         .host_str()
@@ -849,6 +880,8 @@ struct PairingRequestResponse {
     expires_at: i64,
     #[serde(default)]
     state: InviteState,
+    #[serde(default)]
+    sender: Option<ContactCard>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -943,5 +976,45 @@ mod tests {
             Ok(())
         });
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn relay_ping_message_uses_application_ping_frame() {
+        let message = relay_ping_message();
+        let Message::Text(payload) = message else {
+            panic!("relay ping must use a text frame");
+        };
+        let decoded: RelayClientFrame =
+            serde_json::from_str(payload.as_ref()).expect("relay ping payload must decode");
+        assert!(matches!(decoded, RelayClientFrame::Ping));
+    }
+
+    #[test]
+    fn incoming_relay_traffic_counts_as_liveness() {
+        assert!(relay_message_confirms_liveness(&Message::Text("{}".into())));
+        assert!(relay_message_confirms_liveness(&Message::Ping(vec![1].into())));
+        assert!(relay_message_confirms_liveness(&Message::Pong(vec![2].into())));
+        assert!(!relay_message_confirms_liveness(&Message::Close(None)));
+    }
+
+    #[test]
+    fn pairing_request_response_can_include_peer_hint() {
+        let decoded: PairingRequestResponse = serde_json::from_value(serde_json::json!({
+            "pairing_id": Uuid::nil(),
+            "expires_at": 1,
+            "state": "PENDING",
+            "sender": {
+                "installation_id": "installation-torka",
+                "nickname": "Torka",
+                "public_key": "public-key",
+                "fingerprint": "fingerprint"
+            }
+        }))
+        .expect("response should decode");
+
+        assert_eq!(
+            decoded.sender.as_ref().map(|value| value.installation_id.as_str()),
+            Some("installation-torka")
+        );
     }
 }

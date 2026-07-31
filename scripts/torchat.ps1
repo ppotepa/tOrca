@@ -51,6 +51,7 @@ Commands:
   deploy  [android|windows|all]
   run     [android|windows|all]
   stop    [android|windows|all]
+  test    [runtime|flutter|android|windows|all]
   clean   [build|server-data|client-data|all]
   logs    [show|collect|export]
   device  [list|pair|connect|status]
@@ -103,21 +104,40 @@ switch ($Command) {
     'run-android' { $Command = 'run'; $Target = 'android' }
     'run-windows' { $Command = 'run'; $Target = 'windows' }
     'run-desktop' { $Command = 'run'; $Target = 'windows' }
-    'full-deploy' { $Command = 'deploy'; $Target = 'all'; $BuildPolicy = 'rebuild' }
-    'redeploy' { $Command = 'deploy'; $Target = 'all' }
+    'full-deploy' {
+        $Command = 'deploy'
+        $Target = 'all'
+        if ($BuildPolicy -eq 'smart') { $BuildPolicy = 'rebuild' }
+        if ($InstallPolicy -eq 'if-changed') { $InstallPolicy = 'always' }
+        if ($RunPolicy -eq 'restart') { $RunPolicy = 'start' }
+    }
+    'redeploy' {
+        $Command = 'deploy'
+        $Target = 'all'
+        $BuildPolicy = 'rebuild'
+        $OnionPolicy = 'rotate'
+        $DatabasePolicy = 'reset'
+        $ClientDataPolicy = 'reset'
+        $InstallPolicy = 'always'
+        $RunPolicy = 'restart'
+        $StackPolicy = 'ensure'
+        $Confirm = $true
+    }
     'reset-client-state' { $Command = 'clean'; $Target = 'client-data' }
 }
 
 if ($Command -eq 'logs' -and $Target -eq 'all') { $Target = 'show' }
 if ($Command -eq 'stack' -and $Target -eq 'all') { $Target = 'status' }
 if ($Command -eq 'device' -and $Target -eq 'all') { $Target = 'list' }
-if ($Command -eq 'clean' -and $Target -eq 'all' -and -not $Confirm) { $Target = 'build' }
+if ($Command -eq 'clean' -and $Target -eq 'all' -and -not $Confirm -and -not $DryRun) {
+    throw 'clean all requires -Confirm.'
+}
 if ($Release) { $Configuration = 'release' }
 if ($Incremental) { $BuildPolicy = 'smart' }
 if ($Clean -or $ClientDataPolicy -eq 'clean') { $ClientDataPolicy = 'reset' }
 if ($SkipEnvironmentStart) { $StackPolicy = 'skip' }
 
-$allowedCommands = @('status','stack','build','deploy','run','stop','clean','logs','device')
+$allowedCommands = @('status','stack','build','deploy','run','stop','test','clean','logs','device')
 if ($allowedCommands -notcontains $Command) {
     Show-TorChatHelp
     throw "Unsupported command '$Command'."
@@ -141,7 +161,7 @@ if ($Ui -ne 'json') {
 
 $mutex = $null
 $mutexAcquired = $false
-$mutating = $Command -in @('stack','build','deploy','run','stop','clean')
+$mutating = -not $DryRun -and $Command -in @('stack','build','deploy','run','stop','clean')
 if ($mutating) {
     $mutexName = if ($env:OS -eq 'Windows_NT') { 'Global\TorChat-Cli' } else { 'TorChat-Cli' }
     $mutex = New-Object System.Threading.Mutex($false, $mutexName)

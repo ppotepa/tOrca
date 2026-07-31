@@ -399,64 +399,71 @@ class BootScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Scaffold(
     body: SafeArea(
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: Padding(
-            padding: const EdgeInsets.all(28),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                ThemedIcon(
-                  Icons.eco,
-                  size: 72,
-                  color: Theme.of(context).colorScheme.primary,
+      child: LayoutBuilder(
+        builder: (context, constraints) => SingleChildScrollView(
+          padding: const EdgeInsets.all(28),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              minHeight: constraints.maxHeight - 56,
+            ),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 420),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    ThemedIcon(
+                      Icons.eco,
+                      size: 72,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'TorChat',
+                      style: Theme.of(context).textTheme.headlineMedium,
+                    ),
+                    const SizedBox(height: 8),
+                    const Text('Prywatne wiadomości przez Tor'),
+                    const SizedBox(height: 30),
+                    Text(
+                      switch (phase) {
+                        TransportPhase.starting ||
+                        TransportPhase.bootstrapping => 'Rozgrzewanie sieci Tor',
+                        TransportPhase.connecting || TransportPhase.reconnecting =>
+                          'Łączenie z serwerem TorChat',
+                        TransportPhase.connected => 'Połączono',
+                        _ => 'Sprawdzanie połączenia',
+                      },
+                      style: Theme.of(context).textTheme.titleMedium,
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 14),
+                    StartupTimeline(steps: steps),
+                    if (status.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      Text(status, textAlign: TextAlign.center),
+                    ],
+                    if (detail.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(detail, textAlign: TextAlign.center),
+                    ],
+                    if (error.isNotEmpty) ...[
+                      const SizedBox(height: 18),
+                      Text(
+                        error,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: context.statusTheme.danger),
+                      ),
+                      const SizedBox(height: 12),
+                      FilledButton.icon(
+                        onPressed: retry,
+                        icon: const ThemedIcon(Icons.refresh),
+                        label: const Text('Spróbuj ponownie'),
+                      ),
+                    ],
+                  ],
                 ),
-                const SizedBox(height: 16),
-                Text(
-                  'TorChat',
-                  style: Theme.of(context).textTheme.headlineMedium,
-                ),
-                const SizedBox(height: 8),
-                const Text('Prywatne wiadomości przez Tor'),
-                const SizedBox(height: 30),
-                Text(
-                  switch (phase) {
-                    TransportPhase.starting ||
-                    TransportPhase.bootstrapping => 'Rozgrzewanie sieci Tor',
-                    TransportPhase.connecting || TransportPhase.reconnecting =>
-                      'Łączenie z serwerem TorChat',
-                    TransportPhase.connected => 'Połączono',
-                    _ => 'Sprawdzanie połączenia',
-                  },
-                  style: Theme.of(context).textTheme.titleMedium,
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 14),
-                StartupTimeline(steps: steps),
-                if (status.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  Text(status, textAlign: TextAlign.center),
-                ],
-                if (detail.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Text(detail, textAlign: TextAlign.center),
-                ],
-                if (error.isNotEmpty) ...[
-                  const SizedBox(height: 18),
-                  Text(
-                    error,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: context.statusTheme.danger),
-                  ),
-                  const SizedBox(height: 12),
-                  FilledButton.icon(
-                    onPressed: retry,
-                    icon: const ThemedIcon(Icons.refresh),
-                    label: const Text('Spróbuj ponownie'),
-                  ),
-                ],
-              ],
+              ),
             ),
           ),
         ),
@@ -553,92 +560,94 @@ class _StartupTimelineRowState extends State<_StartupTimelineRow>
       StartupStepState.error => Icons.close,
       StartupStepState.blocked => Icons.remove,
     };
-    return SizedBox(
-      height: widget.last ? 58 : 68,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 28,
-            child: Column(
-              children: [
-                AnimatedBuilder(
-                  animation: _pulse,
-                  builder: (context, child) => Transform.scale(
-                    scale: busy ? .92 + (_pulse.value * .12) : 1,
-                    child: Opacity(
-                      opacity: busy ? .55 + (_pulse.value * .45) : 1,
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          boxShadow: busy
-                              ? [
-                                  BoxShadow(
-                                    color: color.withValues(
-                                      alpha: .12 + (_pulse.value * .28),
+    return IntrinsicHeight(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(minHeight: widget.last ? 58 : 68),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: 28,
+              child: Column(
+                children: [
+                  AnimatedBuilder(
+                    animation: _pulse,
+                    builder: (context, child) => Transform.scale(
+                      scale: busy ? .92 + (_pulse.value * .12) : 1,
+                      child: Opacity(
+                        opacity: busy ? .55 + (_pulse.value * .45) : 1,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            boxShadow: busy
+                                ? [
+                                    BoxShadow(
+                                      color: color.withValues(
+                                        alpha: .12 + (_pulse.value * .28),
+                                      ),
+                                      blurRadius: 5 + (_pulse.value * 9),
+                                      spreadRadius: _pulse.value * 2,
                                     ),
-                                    blurRadius: 5 + (_pulse.value * 9),
-                                    spreadRadius: _pulse.value * 2,
-                                  ),
-                                ]
-                              : const [],
+                                  ]
+                                : const [],
+                          ),
+                          child: child,
                         ),
-                        child: child,
                       ),
                     ),
-                  ),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 220),
-                    width: 22,
-                    height: 22,
-                    decoration: BoxDecoration(
-                      color: color.withValues(alpha: .16),
-                      shape: BoxShape.circle,
-                      border: Border.all(color: color.withValues(alpha: .75)),
-                    ),
-                    child: Icon(icon, size: 14, color: color),
-                  ),
-                ),
-                if (!widget.last)
-                  Expanded(
-                    child: Container(
-                      width: 1,
-                      color:
-                          (step.state == StartupStepState.ready
-                                  ? theme.success
-                                  : Theme.of(context).colorScheme.outline)
-                              .withValues(alpha: .42),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 220),
+                      width: 22,
+                      height: 22,
+                      decoration: BoxDecoration(
+                        color: color.withValues(alpha: .16),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: color.withValues(alpha: .75)),
+                      ),
+                      child: Icon(icon, size: 14, color: color),
                     ),
                   ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.only(top: 1),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    step.title,
-                    style: TextStyle(
-                      color: color,
-                      fontWeight: FontWeight.w600,
+                  if (!widget.last)
+                    Expanded(
+                      child: Container(
+                        width: 1,
+                        color:
+                            (step.state == StartupStepState.ready
+                                    ? theme.success
+                                    : Theme.of(context).colorScheme.outline)
+                                .withValues(alpha: .42),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    step.detail.isEmpty ? step.description : step.detail,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
                 ],
               ),
             ),
-          ),
-        ],
+            const SizedBox(width: 12),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.only(top: 1),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      step.title,
+                      style: TextStyle(
+                        color: color,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      step.detail.isEmpty ? step.description : step.detail,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

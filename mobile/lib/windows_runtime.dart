@@ -226,9 +226,6 @@ class WindowsRuntime extends Object
     return runs.last + 1;
   }
 
-  void _log(String message) =>
-      _writeLog(_logSink, _processGeneration, message);
-
   void _writeLog(IOSink? sink, int generation, String message) {
     if (sink == null) return;
     final deployRunId =

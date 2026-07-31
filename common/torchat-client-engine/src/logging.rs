@@ -104,6 +104,39 @@ impl StartupJournal {
             EngineEvent::Runtime {
                 event: torchat_client_runtime::RuntimeEvent::RuntimeLog { message },
             } => self.write("info", "engine", "runtime_log", None, message),
+            EngineEvent::Runtime {
+                event:
+                    torchat_client_runtime::RuntimeEvent::PeerEndpointChanged {
+                        contact_id,
+                        status,
+                    },
+            } => self.write(
+                if matches!(status, torchat_client_runtime::PeerEndpointStatus::Verified) {
+                    "info"
+                } else {
+                    "warn"
+                },
+                "peer",
+                "peer_endpoint_changed",
+                Some("ONION_SERVICE"),
+                &format!("contact={contact_id} status={status:?}"),
+            ),
+            EngineEvent::Runtime {
+                event:
+                    torchat_client_runtime::RuntimeEvent::PeerConnectionChanged {
+                        contact_id,
+                        status,
+                        retry_in_ms,
+                    },
+            } => self.write(
+                "info",
+                "peer",
+                "peer_connection_changed",
+                Some("PEER_TRANSPORT"),
+                &format!(
+                    "contact={contact_id} status={status:?} retry_in_ms={retry_in_ms:?}"
+                ),
+            ),
             EngineEvent::PlatformAction { action } => self.write(
                 "info",
                 "onion",

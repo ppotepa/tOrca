@@ -92,6 +92,8 @@ struct AppState {
     connections: Arc<RwLock<HashMap<String, Connection>>>,
     pairing_secret: Arc<String>,
     pairing_attempts: Arc<RwLock<HashMap<String, PairingAttemptWindow>>>,
+    dev_reserved_pairing_nickname: Arc<Option<String>>,
+    dev_reserved_pairing_code: Arc<Option<String>>,
 }
 
 #[derive(Clone, Copy)]
@@ -196,6 +198,8 @@ struct PairingRequestCreated {
     pairing_id: Uuid,
     expires_at: i64,
     state: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sender: Option<ContactCardView>,
 }
 
 #[derive(Serialize)]
@@ -283,6 +287,18 @@ async fn main() {
             env::var("TORCHAT_PAIRING_SECRET").expect("TORCHAT_PAIRING_SECRET is required"),
         ),
         pairing_attempts: Arc::new(RwLock::new(HashMap::new())),
+        dev_reserved_pairing_nickname: Arc::new(
+            env::var("TORCHAT_DEV_RESERVED_PAIRING_NICKNAME")
+                .ok()
+                .map(|value| value.trim().to_owned())
+                .filter(|value| !value.is_empty()),
+        ),
+        dev_reserved_pairing_code: Arc::new(
+            env::var("TORCHAT_DEV_RESERVED_PAIRING_CODE")
+                .ok()
+                .map(|value| value.trim().to_owned())
+                .filter(|value| value.len() == 8 && value.chars().all(|ch| ch.is_ascii_digit())),
+        ),
     };
     let cleanup_state = state.clone();
     tokio::spawn(async move {
@@ -562,6 +578,25 @@ async fn refresh_pairing_code(
         .await
         .map_err(|_| error(StatusCode::INTERNAL_SERVER_ERROR, "database error"))?;
     let expires_at = now() + PAIRING_CODE_TTL_SECONDS;
+    if let Some(code) = reserved_pairing_code_for_installation(&state, &installation_id).await {
+        let hash = pairing_code_hash(&state, &code);
+        state
+            .db
+            .execute(
+                SQL_PAIRING_CODE_INSERT,
+                &[&hash, &installation_id, &(expires_at as f64)],
+            )
+            .await
+            .map_err(|db_error| {
+                tracing::error!(
+                    installation_id = %installation_id,
+                    error = %db_error,
+                    "reserved pairing code insert failed"
+                );
+                error(StatusCode::INTERNAL_SERVER_ERROR, "database error")
+            })?;
+        return Ok(Json(PairingCodeResponse { code, expires_at }));
+    }
     for _ in 0..8 {
         let code = format!("{:08}", random::<u32>() % 100_000_000);
         let hash = pairing_code_hash(&state, &code);
@@ -597,19 +632,27 @@ async fn create_pairing_request(
     let code = torchat_core::Identity::pairing_code_digits(&request.code)
         .map_err(|message| error(StatusCode::BAD_REQUEST, &message))?;
     take_pairing_attempt(&state, &sender).await?;
+    let reserved_recipient = reserved_pairing_recipient(&state, &code).await;
+    let use_reserved_recipient = reserved_recipient.is_some();
     let hash = pairing_code_hash(&state, &code);
-    let row = state
-        .db
-        .query_opt(SQL_PAIRING_CODE_LOOKUP, &[&hash])
-        .await
-        .map_err(|_| error(StatusCode::INTERNAL_SERVER_ERROR, "database error"))?;
-    let Some(row) = row else {
+    let stored_row = if reserved_recipient.is_none() {
+        state
+            .db
+            .query_opt(SQL_PAIRING_CODE_LOOKUP, &[&hash])
+            .await
+            .map_err(|_| error(StatusCode::INTERNAL_SERVER_ERROR, "database error"))?
+    } else {
+        None
+    };
+    let Some(recipient) = reserved_recipient
+        .clone()
+        .or_else(|| stored_row.map(|row| row.get(0)))
+    else {
         return Err(error(
             StatusCode::NOT_FOUND,
             "pairing code expired or invalid",
         ));
     };
-    let recipient: String = row.get(0);
     if recipient == sender {
         return Err(error(StatusCode::BAD_REQUEST, "cannot pair with yourself"));
     }
@@ -624,16 +667,18 @@ async fn create_pairing_request(
             "a pending invitation to this user already exists",
         ));
     }
-    let consumed = state
-        .db
-        .execute(SQL_PAIRING_CODE_CONSUME, &[&hash])
-        .await
-        .map_err(|_| error(StatusCode::INTERNAL_SERVER_ERROR, "database error"))?;
-    if consumed != 1 {
-        return Err(error(
-            StatusCode::NOT_FOUND,
-            "pairing code expired or invalid",
-        ));
+    if !use_reserved_recipient {
+        let consumed = state
+            .db
+            .execute(SQL_PAIRING_CODE_CONSUME, &[&hash])
+            .await
+            .map_err(|_| error(StatusCode::INTERNAL_SERVER_ERROR, "database error"))?;
+        if consumed != 1 {
+            return Err(error(
+                StatusCode::NOT_FOUND,
+                "pairing code expired or invalid",
+            ));
+        }
     }
     let pairing_id = Uuid::new_v4();
     let expires_at = now() + PAIRING_REQUEST_TTL_SECONDS;
@@ -667,12 +712,14 @@ async fn create_pairing_request(
         pairing_id = %pairing_id,
         "create_pairing_request ok"
     );
+    let recipient_card = contact_card(&state, &recipient).await?;
     Ok((
         StatusCode::CREATED,
         Json(PairingRequestCreated {
             pairing_id,
             expires_at: expires_at as i64,
             state: "PENDING",
+            sender: Some(recipient_card),
         }),
     ))
 }
@@ -804,6 +851,78 @@ fn pairing_code_hash(state: &AppState, code: &str) -> String {
     )
 }
 
+async fn reserved_pairing_code_for_installation(
+    state: &AppState,
+    installation_id: &str,
+) -> Option<String> {
+    let nickname = state.dev_reserved_pairing_nickname.as_ref().as_ref()?;
+    let code = state.dev_reserved_pairing_code.as_ref().as_ref()?;
+    if installation_matches_reserved_nickname(state, installation_id, nickname).await {
+        return Some(code.clone());
+    }
+    None
+}
+
+async fn reserved_pairing_recipient(state: &AppState, code: &str) -> Option<String> {
+    let reserved_code = state.dev_reserved_pairing_code.as_ref().as_ref()?;
+    if reserved_code != code {
+        return None;
+    }
+    let nickname = state.dev_reserved_pairing_nickname.as_ref().as_ref()?;
+    if let Some(found) = state.installations.read().await.iter().find_map(|(installation_id, installation)| {
+        installation
+            .nickname
+            .as_ref()
+            .filter(|value| value.trim().eq_ignore_ascii_case(nickname))
+            .map(|_| installation_id.clone())
+    }) {
+        return Some(found);
+    }
+    installation_id_for_reserved_nickname(state, nickname).await
+}
+
+async fn installation_matches_reserved_nickname(
+    state: &AppState,
+    installation_id: &str,
+    nickname: &str,
+) -> bool {
+    if state
+        .installations
+        .read()
+        .await
+        .get(installation_id)
+        .and_then(|installation| installation.nickname.as_ref())
+        .is_some_and(|value| value.trim().eq_ignore_ascii_case(nickname))
+    {
+        return true;
+    }
+    state
+        .db
+        .query_opt(SQL_INSTALLATION_NICKNAME, &[&installation_id])
+        .await
+        .ok()
+        .flatten()
+        .and_then(|row| row.get::<_, Option<String>>(0))
+        .is_some_and(|value| value.trim().eq_ignore_ascii_case(nickname))
+}
+
+async fn installation_id_for_reserved_nickname(state: &AppState, nickname: &str) -> Option<String> {
+    state
+        .db
+        .query_opt(
+            "SELECT installation_id
+             FROM installations
+             WHERE LOWER(TRIM(COALESCE(nickname, ''))) = LOWER(TRIM(?1))
+             ORDER BY updated_at DESC, installation_id ASC
+             LIMIT 1;",
+            &[&nickname],
+        )
+        .await
+        .ok()
+        .flatten()
+        .and_then(|row| row.try_get::<_, String>(0).ok())
+}
+
 fn pairing_capability(
     state: &AppState,
     pairing_id: Uuid,
@@ -859,7 +978,7 @@ async fn contact_card(
         installation_id: installation_id.to_owned(),
         public_key: public_key.clone(),
         fingerprint: fingerprint_for_public_key(&public_key)?,
-        nickname: nickname.unwrap_or_else(|| installation_id.to_owned()),
+        nickname: nickname.unwrap_or_else(|| fallback_contact_nickname(installation_id)),
     })
 }
 
@@ -937,6 +1056,15 @@ fn validate_nickname(value: String) -> Result<String, (StatusCode, Json<serde_js
         ));
     }
     Ok(value)
+}
+
+fn fallback_contact_nickname(installation_id: &str) -> String {
+    let trimmed = installation_id.trim();
+    if trimmed.starts_with("peer-") && trimmed.chars().count() >= 2 {
+        return trimmed.chars().take(32).collect();
+    }
+    let suffix = installation_id.chars().take(8).collect::<String>();
+    format!("peer-{suffix}")
 }
 
 fn fingerprint_for_public_key(
@@ -1397,10 +1525,17 @@ mod tests {
             pairing_id: Uuid::nil(),
             expires_at: 1,
             state: "PENDING",
+            sender: Some(ContactCardView {
+                installation_id: "installation-torka".into(),
+                nickname: "Torka".into(),
+                public_key: "public-key".into(),
+                fingerprint: "fingerprint".into(),
+            }),
         })
         .unwrap();
 
         assert_eq!(value["state"], "PENDING");
+        assert_eq!(value["sender"]["nickname"], "Torka");
     }
 
     #[test]
@@ -1420,6 +1555,20 @@ mod tests {
         .unwrap();
 
         assert_eq!(value["state"], "PENDING");
+    }
+
+    #[test]
+    fn fallback_contact_nickname_stays_within_protocol_limit() {
+        let nickname = super::fallback_contact_nickname(
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+        );
+        assert!(nickname.chars().count() <= 32);
+        assert!(nickname.chars().count() >= 2);
+    }
+
+    #[test]
+    fn fallback_contact_nickname_keeps_existing_peer_prefix() {
+        assert_eq!(super::fallback_contact_nickname("peer-1"), "peer-1");
     }
 
     #[test]

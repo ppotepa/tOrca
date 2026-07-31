@@ -26,6 +26,14 @@ class _SplashRuntime implements ClientRuntime {
   @override
   Future<List<PairingItem>> pairingOutbox() async => const [];
   @override
+  Future<PeerEndpoint?> peerEndpoint() async => null;
+  @override
+  Future<bool> peerEndpointAvailable() async => false;
+  @override
+  Future<void> retryPeerConnection(String installationId) async {}
+  @override
+  Future<void> rotatePeerEndpoint() async {}
+  @override
   Future<void> acceptPairing(String pairingId) async {}
   @override
   Future<void> rejectPairing(String pairingId) async {}
@@ -42,6 +50,7 @@ class _SplashRuntime implements ClientRuntime {
     String? localAlias,
     required bool muted,
     required bool blocked,
+    ContactTransportPolicy? transportPolicy,
   }) async => const ContactRecord(
     id: '',
     nickname: '',

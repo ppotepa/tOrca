@@ -126,7 +126,7 @@ function Wait-TorChatBootstrap {
     $last = $null
     do {
         $snapshot = Get-TorChatBootstrapSnapshot -ComposeContext $ComposeContext
-        Write-TorChatStageProgress -Context $Context -Name 'Tor bootstrap' -Percent ([Math]::Min(100, $snapshot.Progress)) -Detail "$($snapshot.Phase) · $($snapshot.Detail)"
+        Write-TorChatStageProgress -Context $Context -Name 'Tor bootstrap' -Percent ([Math]::Min(100, $snapshot.Progress)) -Detail "$($snapshot.Phase) - $($snapshot.Detail)"
         if ($snapshot.Ready) {
             return [pscustomobject]@{
                 State = 'Ready'
@@ -197,11 +197,11 @@ function Test-TorChatOnionReachability {
                 97 { 'SOCKS handshake failed' }
                 default { "curl exit $exitCode" }
             }
-            $lastFailure = if ($text) { "$classification · $text" } else { $classification }
+            $lastFailure = if ($text) { "$classification - $text" } else { $classification }
         }
         $elapsed = $TimeoutSeconds - [Math]::Max(0, [Math]::Ceiling(($deadline - [DateTimeOffset]::UtcNow).TotalSeconds))
         $percent = [Math]::Min(99, [Math]::Max(0, [int](100 * $elapsed / [Math]::Max(1, $TimeoutSeconds))))
-        Write-TorChatStageProgress -Context $Context -Name 'Onion reachability' -Percent $percent -Detail "attempt $attempt · $lastFailure"
+        Write-TorChatStageProgress -Context $Context -Name 'Onion reachability' -Percent $percent -Detail "attempt $attempt - $lastFailure"
         if ([DateTimeOffset]::UtcNow -lt $deadline) { Start-Sleep -Seconds 3 }
     } while ([DateTimeOffset]::UtcNow -lt $deadline)
 
@@ -224,8 +224,10 @@ function Reset-TorChatStackState {
     )
     if ($DatabasePolicy -eq 'preserve' -and $OnionPolicy -eq 'preserve') { return }
 
-    [void](Invoke-TorChatCompose -Context $Context -ComposeContext $ComposeContext -Arguments @('stop','server','postgres','tor') -LogName 'docker-reset-stop.log' -AllowedExitCodes @(0))
-    [void](Invoke-TorChatCompose -Context $Context -ComposeContext $ComposeContext -Arguments @('rm','-f','server','postgres','tor') -LogName 'docker-reset-rm.log' -AllowedExitCodes @(0))
+    # Torka is an independent development client, but it must be recreated
+    # when the local control-plane state or its onion URL changes.
+    [void](Invoke-TorChatCompose -Context $Context -ComposeContext $ComposeContext -Arguments @('stop','server','postgres','tor','torka') -LogName 'docker-reset-stop.log' -AllowedExitCodes @(0))
+    [void](Invoke-TorChatCompose -Context $Context -ComposeContext $ComposeContext -Arguments @('rm','-f','server','postgres','tor','torka') -LogName 'docker-reset-rm.log' -AllowedExitCodes @(0))
     if ($DatabasePolicy -eq 'reset') {
         [void](Invoke-TorChatNative -Context $Context -FilePath 'docker' -ArgumentList @('volume','rm','-f',"$($ComposeContext.Project)_postgres_dev") -LogName 'docker-reset-postgres.log' -AllowedExitCodes @(0,1))
     }
@@ -241,7 +243,7 @@ function Start-TorChatStack {
         [ValidateSet('use','rebuild')][string]$ImagePolicy = 'use',
         [ValidateSet('preserve','reset')][string]$DatabasePolicy = 'preserve',
         [ValidateSet('preserve','rotate')][string]$OnionPolicy = 'preserve',
-        [ValidateSet('local','bootstrap','onion','strict')][string]$Readiness = 'local',
+        [ValidateSet('local','development','bootstrap','onion','strict')][string]$Readiness = 'local',
         [switch]$NoCache
     )
     Assert-TorChatTool -Name docker
@@ -255,7 +257,10 @@ function Start-TorChatStack {
         [void](Invoke-TorChatCompose -Context $Context -ComposeContext $compose -Arguments $buildArgs -LogName 'docker-build.log')
     }
 
-    [void](Invoke-TorChatCompose -Context $Context -ComposeContext $compose -Arguments @('up','-d','--remove-orphans') -LogName 'docker-up.log')
+    # Resolve the relay onion before starting Torka. A compose environment is
+    # fixed at container creation time, so starting the peer before this point
+    # would give it an empty or stale TORCHAT_ONION_URL after an onion rotate.
+    [void](Invoke-TorChatCompose -Context $Context -ComposeContext $compose -Arguments @('up','-d','--remove-orphans','server','postgres','tor') -LogName 'docker-up.log')
     [void](Wait-TorChatHttpHealth -Context $Context -Url ("http://127.0.0.1:{0}/health" -f $EnvironmentState.Values['TORCHAT_HTTP_PORT']) -TimeoutSeconds 90)
 
     $previousOnion = [string]$EnvironmentState.Values['TORCHAT_ONION_URL']
@@ -265,8 +270,10 @@ function Start-TorChatStack {
     Import-TorChatEnvironmentState -EnvironmentState $EnvironmentState -RequireOnion
 
     if ($previousOnion -ne $onionUrl) {
-        [void](Invoke-TorChatCompose -Context $Context -ComposeContext $compose -Arguments @('up','-d','--force-recreate','server') -LogName 'docker-server-recreate.log')
+        [void](Invoke-TorChatCompose -Context $Context -ComposeContext $compose -Arguments @('up','-d','--force-recreate','server','torka') -LogName 'docker-server-recreate.log')
         [void](Wait-TorChatHttpHealth -Context $Context -Url ("http://127.0.0.1:{0}/health" -f $EnvironmentState.Values['TORCHAT_HTTP_PORT']) -TimeoutSeconds 90)
+    } else {
+        [void](Invoke-TorChatCompose -Context $Context -ComposeContext $compose -Arguments @('up','-d','torka') -LogName 'docker-torka-up.log')
     }
 
     if ($Readiness -in @('bootstrap','onion','strict')) {
@@ -305,7 +312,7 @@ function Restart-TorChatStack {
     param(
         [Parameter(Mandatory = $true)]$Context,
         [Parameter(Mandatory = $true)]$EnvironmentState,
-        [ValidateSet('local','bootstrap','onion','strict')][string]$Readiness = 'local'
+        [ValidateSet('local','development','bootstrap','onion','strict')][string]$Readiness = 'local'
     )
     [void](Stop-TorChatStack -Context $Context -EnvironmentState $EnvironmentState)
     Start-TorChatStack -Context $Context -EnvironmentState $EnvironmentState -Readiness $Readiness
