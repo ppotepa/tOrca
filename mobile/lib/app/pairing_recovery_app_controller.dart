@@ -18,9 +18,11 @@ class PairingRecoveryAppController extends SequentialAppController {
 
   Timer? _pairingWatchdog;
   Future<void>? _pairingSyncInFlight;
+  Future<void>? _autoTrustInFlight;
   bool _pairingSyncQueued = false;
   bool _sanitizingProblem = false;
   DateTime? _lastPairingSync;
+  String? _lastAutoOpenedContactId;
 
   @override
   legacy.AppState build() {
@@ -312,13 +314,66 @@ class PairingRecoveryAppController extends SequentialAppController {
         DateTime.now().difference(last) < _minimumSyncInterval) {
       return;
     }
+    final knownContactIds = state.contacts.map((contact) => contact.id).toSet();
     try {
       await refreshData(forcePairing: true, allowAutoTorka: false);
       _lastPairingSync = DateTime.now();
+      final newContact = state.contacts.cast<ContactRecord?>().firstWhere(
+            (contact) =>
+                contact != null && !knownContactIds.contains(contact.id),
+            orElse: () => null,
+          );
+      await _promoteTrustedPairingContacts(
+        openContactId: newContact?.id,
+      );
     } catch (_) {
       // Connection recovery and the watchdog will retry. A transport outage is
       // not a global user-facing pairing error.
     }
+  }
+
+  Future<void> _promoteTrustedPairingContacts({String? openContactId}) {
+    final current = _autoTrustInFlight;
+    if (current != null) return current;
+
+    late final Future<void> run;
+    run = _runTrustedContactPromotion(openContactId).whenComplete(() {
+      if (identical(_autoTrustInFlight, run)) _autoTrustInFlight = null;
+    });
+    _autoTrustInFlight = run;
+    return run;
+  }
+
+  Future<void> _runTrustedContactPromotion(String? openContactId) async {
+    var changed = false;
+    for (final contact in state.contacts.where((contact) => !contact.verified)) {
+      try {
+        await super.verifyContact(contact.id);
+        changed = true;
+      } catch (_) {
+        // The next pairing reconciliation retries an interrupted local promote.
+      }
+    }
+    if (changed) {
+      await super.refreshData(forcePairing: false, allowAutoTorka: false);
+    }
+
+    if (openContactId == null ||
+        openContactId.isEmpty ||
+        _lastAutoOpenedContactId == openContactId) {
+      return;
+    }
+    ContactRecord? contact;
+    for (final candidate in state.contacts) {
+      if (candidate.id == openContactId) {
+        contact = candidate;
+        break;
+      }
+    }
+    if (contact == null || !contact.verified) return;
+
+    _lastAutoOpenedContactId = openContactId;
+    await super.openOrStartConversation(contact);
   }
 
   void _updatePairingNotice() {
