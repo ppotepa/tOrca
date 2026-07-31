@@ -75,7 +75,7 @@ class EncryptedImageStore {
         if (!await file.exists()) return null;
         try {
           final payload = await file.readAsBytes();
-          return await _decrypt(payload);
+          return await _decrypt(payload, messageId);
         } catch (_) {
           // A restored backup may contain files encrypted with an unavailable
           // platform key. Treat such files as disposable cache, never as chat
@@ -97,7 +97,7 @@ class EncryptedImageStore {
           throw const FormatException('Obraz jest pusty.');
         }
         final file = await _file(messageId);
-        final encrypted = await _encrypt(bytes);
+        final encrypted = await _encrypt(bytes, messageId);
         final temporary = File('${file.path}.tmp');
         await temporary.writeAsBytes(encrypted, flush: true);
         if (await file.exists()) await file.delete();
@@ -153,12 +153,13 @@ class EncryptedImageStore {
     return directory;
   }
 
-  Future<Uint8List> _encrypt(Uint8List bytes) async {
+  Future<Uint8List> _encrypt(Uint8List bytes, String messageId) async {
     final nonce = _randomBytes(12);
     final box = await _cipher.encrypt(
       bytes,
       secretKey: await _keyProvider(),
       nonce: nonce,
+      aad: utf8.encode(messageId),
     );
     final builder = BytesBuilder(copy: false)
       ..add(_magic)
@@ -170,7 +171,7 @@ class EncryptedImageStore {
     return builder.takeBytes();
   }
 
-  Future<Uint8List> _decrypt(Uint8List payload) async {
+  Future<Uint8List> _decrypt(Uint8List payload, String messageId) async {
     if (payload.length < _magic.length + 2) {
       throw const FormatException('Uszkodzony magazyn obrazów.');
     }
@@ -198,6 +199,7 @@ class EncryptedImageStore {
     final cleartext = await _cipher.decrypt(
       box,
       secretKey: await _keyProvider(),
+      aad: utf8.encode(messageId),
     );
     return Uint8List.fromList(cleartext);
   }
