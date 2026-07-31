@@ -8,6 +8,8 @@ extension AppStateConnection on AppState {
         transport: transport,
         peerServerStatus: peerServerStatus,
         startupSteps: startupSteps,
+        localDataReady:
+            !isLoading && identity.installationId.trim().isNotEmpty,
       );
 
   ConnectionSummary get connectionSummary => ConnectionSummary.fromReadiness(
