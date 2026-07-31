@@ -14,6 +14,9 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
   static const _legacyPairingNoticePrefix = 'Oczekujące zaproszenia:';
   static const _relationshipActiveSincePrefix =
       'torchat.relationship.activeSince.';
+  static const _activeNotificationConversationKey =
+      'torchat.notifications.activeConversationId';
+
   bool _clearingLegacyNotice = false;
   bool _reconcilingRelationshipRemoval = false;
   StreamSubscription<RuntimeEvent>? _notificationEvents;
@@ -40,7 +43,10 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
       );
     });
     ref.onDispose(() => _notificationEvents?.cancel());
-    listenSelf((_, next) {
+    listenSelf((previous, next) {
+      if (previous?.selectedConversationId != next.selectedConversationId) {
+        unawaited(_persistActiveConversation(next.selectedConversationId));
+      }
       if (_clearingLegacyNotice ||
           !next.notice.startsWith(_legacyPairingNoticePrefix)) {
         return;
@@ -61,6 +67,7 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
       await preferences.setBool('torchat.privacy.readReceipts', false);
     }
     await super.initialize();
+    await _persistActiveConversation(state.selectedConversationId);
     await _reconcileRelationshipRemovals();
     _hideRemovedRelationships();
   }
@@ -204,6 +211,16 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
       );
     } else if (!realConversationExists) {
       state = state.copyWith(conversations: [optimistic, ...state.conversations]);
+    }
+  }
+
+  Future<void> _persistActiveConversation(String? conversationId) async {
+    final preferences = await SharedPreferences.getInstance();
+    final id = conversationId?.trim() ?? '';
+    if (id.isEmpty) {
+      await preferences.remove(_activeNotificationConversationKey);
+    } else {
+      await preferences.setString(_activeNotificationConversationKey, id);
     }
   }
 
