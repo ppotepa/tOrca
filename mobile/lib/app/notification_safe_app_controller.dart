@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../client_runtime.dart';
 import '../core/models/domain.dart';
 import '../core/relationships/relationship_message.dart';
+import '../core/runtime/message_paging.dart';
 import 'app_controller_legacy.dart' as legacy;
 import 'conversation_navigation_intent.dart';
 import 'desktop_notification_service.dart';
@@ -83,6 +84,30 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
     );
     await _reconcileRelationshipRemovals();
     _hideRemovedRelationships();
+  }
+
+  Future<int> loadOlderMessages(String conversationId) async {
+    if (conversationId.isEmpty || state.selectedConversationId != conversationId) {
+      return 0;
+    }
+    final repository = ref.read(legacy.runtimeRepositoryProvider);
+    final before = state.messages.isEmpty ? null : state.messages.first;
+    final page = await repository.messagePage(
+      conversationId,
+      before: before,
+      limit: defaultMessagePageSize,
+    );
+    if (page.messages.isEmpty) return 0;
+
+    final existingIds = state.messages.map((message) => message.id).toSet();
+    final added = page.messages
+        .where((message) => existingIds.add(message.id))
+        .toList(growable: false);
+    if (added.isEmpty) return 0;
+    final merged = <ChatMessage>[...added, ...state.messages]
+      ..sort(_compareMessages);
+    state = state.copyWith(messages: merged);
+    return added.length;
   }
 
   @override
@@ -295,7 +320,7 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
   Future<void> _cancelPendingOrdinaryMessages(String conversationId) async {
     final repository = ref.read(legacy.runtimeRepositoryProvider);
     try {
-      final messages = await repository.messages(conversationId);
+      final messages = await repository.allMessages(conversationId);
       for (final message in messages) {
         final pending = message.state == MessageState.queued ||
             message.state == MessageState.sending;
@@ -311,7 +336,7 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
 
   Future<void> _deleteHistoryExceptRemoval(String conversationId) async {
     final repository = ref.read(legacy.runtimeRepositoryProvider);
-    final messages = await repository.messages(conversationId);
+    final messages = await repository.allMessages(conversationId);
     for (final message in messages) {
       if (isRelationshipRemovedMessage(message.text)) continue;
       await repository.deleteMessageLocal(message.id);
@@ -345,4 +370,11 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
           : state.notice,
     );
   }
+}
+
+int _compareMessages(ChatMessage left, ChatMessage right) {
+  final leftAt = DateTime.tryParse(left.createdAt)?.millisecondsSinceEpoch ?? 0;
+  final rightAt = DateTime.tryParse(right.createdAt)?.millisecondsSinceEpoch ?? 0;
+  final time = leftAt.compareTo(rightAt);
+  return time != 0 ? time : left.id.compareTo(right.id);
 }

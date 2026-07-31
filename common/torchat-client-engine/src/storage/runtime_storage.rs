@@ -146,15 +146,10 @@ impl<'db> SqliteRuntimeStorage<'db> {
         }
     }
 
-    /// Persists the MLS member inbox inside the same SQL transaction as the
-    /// runtime mutation that consumed it.
     pub fn put_mls_inbox_snapshot(&mut self, snapshot: &[u8]) -> RuntimeResult<()> {
         self.put_setting_blob("mls_inbox_snapshot_v1", snapshot)
     }
 
-    /// Persists a direct-conversation MLS snapshot in the active runtime
-    /// transaction. Engine-owned cryptographic state must never be committed
-    /// separately from the message/contact/conversation rows it protects.
     pub fn put_conversation_mls_snapshot(
         &mut self,
         conversation_id: &str,
@@ -804,66 +799,75 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
     }
 
     fn messages(&self, conversation_id: &str) -> RuntimeResult<Vec<ChatMessage>> {
-        let mut statement = self
-            .tx()
-            .prepare(
-                "SELECT id, conversation_id, outgoing, body, reply_to_json, state, created_at,
-                        attempt_count, last_attempt_at, next_attempt_at,
-                        ack_deadline, last_transport_error
-                 FROM messages
-                 WHERE conversation_id = ?1
-                 ORDER BY created_at ASC, id ASC;",
-            )
-            .map_err(storage_error)?;
-        let rows = statement
-            .query_map([conversation_id], |row| {
-                Ok((
-                    row.get::<_, String>("id")?,
-                    row.get::<_, String>("conversation_id")?,
-                    row.get::<_, i64>("outgoing")?,
-                    row.get::<_, String>("body")?,
-                    row.get::<_, Option<String>>("reply_to_json")?,
-                    row.get::<_, String>("state")?,
-                    row.get::<_, i64>("created_at")?,
-                    row.get::<_, i64>("attempt_count")?,
-                    row.get::<_, Option<i64>>("last_attempt_at")?,
-                    row.get::<_, i64>("next_attempt_at")?,
-                    row.get::<_, Option<i64>>("ack_deadline")?,
-                    row.get::<_, Option<String>>("last_transport_error")?,
-                ))
-            })
-            .map_err(storage_error)?;
-        rows.map(|row| {
-            let (
-                id,
+        match parse_message_query(conversation_id)? {
+            MessageQuery::All { conversation_id } => {
+                let mut statement = self
+                    .tx()
+                    .prepare(
+                        "SELECT id, conversation_id, outgoing, body, reply_to_json, state, created_at,
+                                attempt_count, last_attempt_at, next_attempt_at,
+                                ack_deadline, last_transport_error
+                         FROM messages
+                         WHERE conversation_id = ?1
+                         ORDER BY created_at ASC, id ASC;",
+                    )
+                    .map_err(storage_error)?;
+                let rows = statement
+                    .query_map([conversation_id], stored_message_row)
+                    .map_err(storage_error)?;
+                rows.map(|row| decode_stored_message(row.map_err(storage_error)?))
+                    .collect()
+            }
+            MessageQuery::Page {
                 conversation_id,
-                outgoing,
-                body,
-                reply_to_json,
-                state,
-                created_at,
-                attempt_count,
-                last_attempt_at,
-                next_attempt_at,
-                ack_deadline,
-                last_transport_error,
-            ) = row.map_err(storage_error)?;
-            Ok(ChatMessage {
-                id,
-                conversation_id,
-                outgoing: outgoing != 0,
-                body,
-                reply_to: decode_reply(reply_to_json)?,
-                state: Self::decode_message_state(state)?,
-                created_at,
-                attempt_count: attempt_count as u32,
-                last_attempt_at,
-                next_attempt_at,
-                ack_deadline,
-                last_transport_error,
-            })
-        })
-        .collect()
+                limit,
+                before,
+            } => {
+                let mut messages = if let Some((before_created_at, before_id)) = before {
+                    let mut statement = self
+                        .tx()
+                        .prepare(
+                            "SELECT id, conversation_id, outgoing, body, reply_to_json, state, created_at,
+                                    attempt_count, last_attempt_at, next_attempt_at,
+                                    ack_deadline, last_transport_error
+                             FROM messages
+                             WHERE conversation_id = ?1
+                               AND (created_at < ?2 OR (created_at = ?2 AND id < ?3))
+                             ORDER BY created_at DESC, id DESC
+                             LIMIT ?4;",
+                        )
+                        .map_err(storage_error)?;
+                    let rows = statement
+                        .query_map(
+                            params![conversation_id, before_created_at, before_id, limit as i64],
+                            stored_message_row,
+                        )
+                        .map_err(storage_error)?;
+                    rows.map(|row| decode_stored_message(row.map_err(storage_error)?))
+                        .collect::<RuntimeResult<Vec<_>>>()?
+                } else {
+                    let mut statement = self
+                        .tx()
+                        .prepare(
+                            "SELECT id, conversation_id, outgoing, body, reply_to_json, state, created_at,
+                                    attempt_count, last_attempt_at, next_attempt_at,
+                                    ack_deadline, last_transport_error
+                             FROM messages
+                             WHERE conversation_id = ?1
+                             ORDER BY created_at DESC, id DESC
+                             LIMIT ?2;",
+                        )
+                        .map_err(storage_error)?;
+                    let rows = statement
+                        .query_map(params![conversation_id, limit as i64], stored_message_row)
+                        .map_err(storage_error)?;
+                    rows.map(|row| decode_stored_message(row.map_err(storage_error)?))
+                        .collect::<RuntimeResult<Vec<_>>>()?
+                };
+                messages.reverse();
+                Ok(messages)
+            }
+        }
     }
 
     fn put_message(&mut self, message: ChatMessage) -> RuntimeResult<()> {
@@ -1144,6 +1148,145 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
 const SETTING_IDENTITY: &str = "runtime_identity_v1";
 const SETTING_PROFILE: &str = "runtime_profile_v1";
 const SETTING_PAIRING_CODE: &str = "pairing_code_v1";
+const MESSAGE_PAGE_PREFIX: &str = "torchat-page-v1\t";
+const MESSAGE_ALL_PREFIX: &str = "torchat-all-v1\t";
+const DEFAULT_MESSAGE_PAGE_SIZE: usize = 50;
+const MAX_MESSAGE_PAGE_SIZE: usize = 200;
+
+type StoredMessageRow = (
+    String,
+    String,
+    i64,
+    String,
+    Option<String>,
+    String,
+    i64,
+    i64,
+    Option<i64>,
+    i64,
+    Option<i64>,
+    Option<String>,
+);
+
+enum MessageQuery {
+    All {
+        conversation_id: String,
+    },
+    Page {
+        conversation_id: String,
+        limit: usize,
+        before: Option<(i64, String)>,
+    },
+}
+
+fn parse_message_query(value: &str) -> RuntimeResult<MessageQuery> {
+    if let Some(conversation_id) = value.strip_prefix(MESSAGE_ALL_PREFIX) {
+        if conversation_id.trim().is_empty() || conversation_id.contains('\t') {
+            return Err(RuntimeError::Storage(
+                "invalid full-history conversation id".to_owned(),
+            ));
+        }
+        return Ok(MessageQuery::All {
+            conversation_id: conversation_id.to_owned(),
+        });
+    }
+
+    if let Some(encoded) = value.strip_prefix(MESSAGE_PAGE_PREFIX) {
+        let mut parts = encoded.splitn(4, '\t');
+        let conversation_id = parts.next().unwrap_or_default().trim();
+        let limit = parts
+            .next()
+            .unwrap_or_default()
+            .parse::<usize>()
+            .map_err(|_| RuntimeError::Storage("invalid message page limit".to_owned()))?
+            .clamp(1, MAX_MESSAGE_PAGE_SIZE);
+        let before_created_at = parts.next().unwrap_or_default();
+        let before_id = parts.next().unwrap_or_default();
+        if conversation_id.is_empty() || before_id.contains('\t') {
+            return Err(RuntimeError::Storage(
+                "invalid message page conversation id".to_owned(),
+            ));
+        }
+        let before = match (before_created_at.is_empty(), before_id.is_empty()) {
+            (true, true) => None,
+            (false, false) => Some((
+                before_created_at.parse::<i64>().map_err(|_| {
+                    RuntimeError::Storage("invalid message page cursor timestamp".to_owned())
+                })?,
+                before_id.to_owned(),
+            )),
+            _ => {
+                return Err(RuntimeError::Storage(
+                    "incomplete message page cursor".to_owned(),
+                ));
+            }
+        };
+        return Ok(MessageQuery::Page {
+            conversation_id: conversation_id.to_owned(),
+            limit,
+            before,
+        });
+    }
+
+    if value.trim().is_empty() || value.contains('\t') {
+        return Err(RuntimeError::Storage(
+            "invalid conversation id for message query".to_owned(),
+        ));
+    }
+    Ok(MessageQuery::Page {
+        conversation_id: value.to_owned(),
+        limit: DEFAULT_MESSAGE_PAGE_SIZE,
+        before: None,
+    })
+}
+
+fn stored_message_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredMessageRow> {
+    Ok((
+        row.get::<_, String>("id")?,
+        row.get::<_, String>("conversation_id")?,
+        row.get::<_, i64>("outgoing")?,
+        row.get::<_, String>("body")?,
+        row.get::<_, Option<String>>("reply_to_json")?,
+        row.get::<_, String>("state")?,
+        row.get::<_, i64>("created_at")?,
+        row.get::<_, i64>("attempt_count")?,
+        row.get::<_, Option<i64>>("last_attempt_at")?,
+        row.get::<_, i64>("next_attempt_at")?,
+        row.get::<_, Option<i64>>("ack_deadline")?,
+        row.get::<_, Option<String>>("last_transport_error")?,
+    ))
+}
+
+fn decode_stored_message(row: StoredMessageRow) -> RuntimeResult<ChatMessage> {
+    let (
+        id,
+        conversation_id,
+        outgoing,
+        body,
+        reply_to_json,
+        state,
+        created_at,
+        attempt_count,
+        last_attempt_at,
+        next_attempt_at,
+        ack_deadline,
+        last_transport_error,
+    ) = row;
+    Ok(ChatMessage {
+        id,
+        conversation_id,
+        outgoing: outgoing != 0,
+        body,
+        reply_to: decode_reply(reply_to_json)?,
+        state: SqliteRuntimeStorage::decode_message_state(state)?,
+        created_at,
+        attempt_count: attempt_count as u32,
+        last_attempt_at,
+        next_attempt_at,
+        ack_deadline,
+        last_transport_error,
+    })
+}
 
 fn encode_reply(
     reply: Option<torchat_client_runtime::MessageReply>,

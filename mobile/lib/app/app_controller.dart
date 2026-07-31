@@ -9,7 +9,7 @@ import 'notification_safe_app_controller.dart';
 export 'app_controller_legacy.dart' hide appControllerProvider;
 
 final appControllerProvider =
-    NotifierProvider<legacy.AppController, legacy.AppState>(() {
+    NotifierProvider<NotificationSafeAppController, legacy.AppState>(() {
   unawaited(DesktopWindowLifecycle.initialize());
   return NotificationSafeAppController();
 });
