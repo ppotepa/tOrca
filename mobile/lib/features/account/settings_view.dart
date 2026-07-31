@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -42,6 +44,7 @@ class SettingsView extends ConsumerStatefulWidget {
 }
 
 class _SettingsViewState extends ConsumerState<SettingsView> {
+  static const _reducedMotionKey = 'torchat.accessibility.reducedMotion';
   static const _autostartOperationKey = 'torchat.desktop.autostart';
 
   late TorChatThemePreferences _themePreferences;
@@ -74,9 +77,14 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
 
   Future<void> _loadPreferences() async {
     final store = await SharedPreferences.getInstance();
-    final autostart = DesktopAutostart.isSupported
-        ? await DesktopAutostart.isEnabled()
-        : false;
+    var autostart = false;
+    if (Platform.isWindows) {
+      try {
+        autostart = await DesktopAutostart.isEnabled();
+      } catch (_) {
+        autostart = false;
+      }
+    }
     if (!mounted) return;
     setState(() {
       _notifications = store.getBool('torchat.notifications.enabled') ?? true;
@@ -118,6 +126,30 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     }
   }
 
+  Future<void> _setReducedMotion(bool value) async {
+    final previous = _themePreferences.reducedMotion;
+    setState(() {
+      _themePreferences = _themePreferences.copyWith(reducedMotion: value);
+      _saving.add(_reducedMotionKey);
+    });
+    try {
+      await ref
+          .read(themeControllerProvider.notifier)
+          .setReducedMotion(value);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _themePreferences =
+            _themePreferences.copyWith(reducedMotion: previous);
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.toString())),
+      );
+    } finally {
+      if (mounted) setState(() => _saving.remove(_reducedMotionKey));
+    }
+  }
+
   Future<void> _setAutostart(bool value) async {
     final previous = _autostart;
     setState(() {
@@ -126,10 +158,11 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     });
     try {
       await DesktopAutostart.setEnabled(value);
-      final effective = await DesktopAutostart.isEnabled();
-      if (effective != value) {
+      final actual = await DesktopAutostart.isEnabled();
+      if (actual != value) {
         throw StateError('System Windows nie potwierdził zmiany autostartu.');
       }
+      if (mounted) setState(() => _autostart = actual);
     } catch (error) {
       if (!mounted) return;
       setState(() => _autostart = previous);
@@ -137,9 +170,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
         SnackBar(content: Text(error.toString())),
       );
     } finally {
-      if (mounted) {
-        setState(() => _saving.remove(_autostartOperationKey));
-      }
+      if (mounted) setState(() => _saving.remove(_autostartOperationKey));
     }
   }
 
@@ -266,28 +297,41 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                     widget.onBrightnessChanged(mode);
                   },
                 ),
+                const SizedBox(height: 8),
+                BusySurface(
+                  state: _preferenceState(_reducedMotionKey),
+                  label: 'Zapisywanie…',
+                  child: ThemedSwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Ogranicz animacje'),
+                    subtitle: const Text(
+                      'Wyłącza animacje i płynne przejścia w całej aplikacji',
+                    ),
+                    value: _themePreferences.reducedMotion,
+                    onChanged: _saving.contains(_reducedMotionKey)
+                        ? null
+                        : _setReducedMotion,
+                  ),
+                ),
+                if (Platform.isWindows)
+                  BusySurface(
+                    state: _preferenceState(_autostartOperationKey),
+                    label: 'Zapisywanie…',
+                    child: ThemedSwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Uruchamiaj z systemem Windows'),
+                      subtitle: const Text(
+                        'Uruchamia TorChat automatycznie po zalogowaniu',
+                      ),
+                      value: _autostart,
+                      onChanged: _saving.contains(_autostartOperationKey)
+                          ? null
+                          : _setAutostart,
+                    ),
+                  ),
               ],
             ),
           ),
-          if (DesktopAutostart.isSupported)
-            ActionSection(
-              title: 'SYSTEM WINDOWS',
-              child: BusySurface(
-                state: _preferenceState(_autostartOperationKey),
-                label: 'Aktualizowanie autostartu…',
-                child: ThemedSwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Uruchamiaj TorChat przy starcie'),
-                  subtitle: const Text(
-                    'Rejestruje aplikację w systemowym autostarcie Windows',
-                  ),
-                  value: _autostart,
-                  onChanged: _saving.contains(_autostartOperationKey)
-                      ? null
-                      : _setAutostart,
-                ),
-              ),
-            ),
           ActionSection(
             title: 'POWIADOMIENIA',
             child: Column(
