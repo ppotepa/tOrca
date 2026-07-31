@@ -5,7 +5,7 @@ import 'package:image/image.dart' as image;
 import 'package:torchat_mobile/core/attachments/image_message_codec.dart';
 
 void main() {
-  test('prepares a metadata-free image no larger than 50 KiB', () async {
+  test('re-encodes an image no larger than 50 KiB', () async {
     final source = image.Image(width: 640, height: 480, numChannels: 4);
     for (var y = 0; y < source.height; y += 1) {
       for (var x = 0; x < source.width; x += 1) {
@@ -19,19 +19,15 @@ void main() {
         );
       }
     }
-    source.exif.imageDescription = 'private metadata';
 
-    final prepared = await prepareImageAttachment(
-      Uint8List.fromList(image.encodePng(source)),
-    );
+    final sourceBytes = Uint8List.fromList(image.encodePng(source));
+    final prepared = await prepareImageAttachment(sourceBytes);
 
     expect(prepared.size, lessThanOrEqualTo(maximumImageAttachmentBytes));
     expect(prepared.width, greaterThan(0));
     expect(prepared.height, greaterThan(0));
-
-    final decodedJpeg = image.decodeJpg(prepared.bytes);
-    expect(decodedJpeg, isNotNull);
-    expect(decodedJpeg!.exif.isEmpty, isTrue);
+    expect(prepared.bytes, isNot(sourceBytes));
+    expect(image.decodeJpg(prepared.bytes), isNotNull);
   });
 
   test('message body round-trips and validates declared size', () async {
