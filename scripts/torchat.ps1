@@ -59,7 +59,10 @@ Commands:
 Examples:
   .\scripts\torchat.ps1 deploy all
   .\scripts\torchat.ps1 deploy android -Device auto
+  .\scripts\torchat.ps1 deploy all -Device all
+  .\scripts\torchat.ps1 run android -Device auto
   .\scripts\torchat.ps1 stack restart -OnionPolicy preserve
+  .\scripts\torchat.ps1 stop all -Device all
   .\scripts\torchat.ps1 stack reset -DatabasePolicy reset -Confirm
   .\scripts\torchat.ps1 stack reset -OnionPolicy rotate -Confirm
   .\scripts\torchat.ps1 logs export

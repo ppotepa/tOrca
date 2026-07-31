@@ -1,8 +1,38 @@
 Set-StrictMode -Version Latest
 
+function Get-TorChatAndroidWifiDeviceRegex {
+    return '^\\d{1,3}(?:\\.\\d{1,3}){3}:\\d+$'
+}
+
+function Test-TorChatAndroidDeviceIsWifi {
+    param(
+        [Parameter(Mandatory = $true)][string]$Device
+    )
+    return $Device -match (Get-TorChatAndroidWifiDeviceRegex)
+}
+
+function Format-TorChatAndroidDeviceSummary {
+    param(
+        [string[]]$Devices
+    )
+    $wifiRegex = Get-TorChatAndroidWifiDeviceRegex
+    $wifiDevices = @($Devices | Where-Object { $_ -match $wifiRegex })
+    $usbDevices = @($Devices | Where-Object { $_ -notmatch $wifiRegex })
+    $parts = @()
+    if ($wifiDevices.Count -gt 0) { $parts += ('Wi-Fi: ' + ($wifiDevices -join ', ')) }
+    if ($usbDevices.Count -gt 0) { $parts += ('USB: ' + ($usbDevices -join ', ')) }
+    if ($parts.Count -eq 0) { return 'none' }
+    return ($parts -join '; ')
+}
+
 function Get-TorChatAndroidDevices {
     Assert-TorChatTool -Name adb
-    return @(adb devices 2>$null | Where-Object { $_ -match '^\S+\s+device$' } | ForEach-Object { ($_ -split '\s+')[0] })
+    return @(
+        adb devices 2>$null |
+            Where-Object { $_ -match '^\S+\s+device$' } |
+            ForEach-Object { ($_ -split '\s+')[0] } |
+            Where-Object { $_ -notmatch '\._adb-tls-connect\._tcp$' }
+    )
 }
 
 function Find-TorChatAndroidMdnsAddresses {
@@ -37,12 +67,19 @@ function Resolve-TorChatAndroidDevice {
     param(
         [Parameter(Mandatory = $true)]$Context,
         [string]$Device,
-        [int]$DiscoveryTimeoutSeconds = 20
+        [int]$DiscoveryTimeoutSeconds = 20,
+        [switch]$AllowMultiple
     )
     Assert-TorChatTool -Name adb
+    $wifiRegex = Get-TorChatAndroidWifiDeviceRegex
+
+    if ($Device -eq 'all' -and -not $AllowMultiple) {
+        throw "Use -AllowMultiple with -Device all."
+    }
+
     if ($Device -and $Device -ne 'auto') {
         if ((Get-TorChatAndroidDevices) -notcontains $Device) {
-            if ($Device -match '^\d{1,3}(?:\.\d{1,3}){3}:\d+$') {
+            if ($Device -match $wifiRegex) {
                 [void](Invoke-TorChatNative -Context $Context -FilePath 'adb' -ArgumentList @('connect',$Device) -LogName 'adb-connect.log' -AllowedExitCodes @(0,1))
             } else {
                 [void](Connect-TorChatAndroidMdnsDevices -Context $Context)
@@ -50,6 +87,7 @@ function Resolve-TorChatAndroidDevice {
         }
         $devices = @(Get-TorChatAndroidDevices)
         if ($devices -contains $Device) { return $Device }
+        if ($AllowMultiple -and $Device -eq 'all') { return $devices }
         if ($devices.Count -eq 1) { return $devices[0] }
         throw "Android device is unavailable: $Device"
     }
@@ -62,11 +100,30 @@ function Resolve-TorChatAndroidDevice {
         [void](Connect-TorChatAndroidMdnsDevices -Context $Context)
         $devices = @(Get-TorChatAndroidDevices)
         if ($devices.Count -eq 1) { return $devices[0] }
+        if ($AllowMultiple) { return $devices }
+
+        $wifiDevices = @($devices | Where-Object { $_ -match $wifiRegex })
+        $usbDevices = @($devices | Where-Object { $_ -notmatch $wifiRegex })
+        if ($wifiDevices.Count -eq 1) {
+            return $wifiDevices[0]
+        }
+
         Start-Sleep -Seconds 2
     } while ([DateTimeOffset]::UtcNow -lt $deadline)
 
+    $wifiDevices = @($devices | Where-Object { $_ -match $wifiRegex })
+    $usbDevices = @($devices | Where-Object { $_ -notmatch $wifiRegex })
+    if ($wifiDevices.Count -gt 1 -and $usbDevices.Count -eq 0) {
+        throw "Multiple Wi-Fi devices are connected. Provide -Device <serial-or-host:port> to select one explicitly. Available: $($wifiDevices -join ', ')"
+    }
+    if ($wifiDevices.Count -ge 1 -and $usbDevices.Count -ge 1) {
+        throw "Multiple Android devices are connected (multiple transports). Prefer Wi-Fi one for default. Select one with -Device <serial-or-host:port>. Detected: $(Format-TorChatAndroidDeviceSummary -Devices $devices)"
+    }
     if ($devices.Count -gt 1) { throw 'Multiple Android devices are connected. Select one with -Device <serial-or-host:port>.' }
-    throw 'No Android device is available. Enable USB or Wireless debugging and pair the device first.'
+    if ($devices.Count -eq 0) {
+        throw 'No Android device is available. Enable USB or Wireless debugging and pair the device first.'
+    }
+    throw "Unable to resolve Android device. Available devices: $(Format-TorChatAndroidDeviceSummary -Devices $devices)"
 }
 
 function Pair-TorChatAndroidDevice {

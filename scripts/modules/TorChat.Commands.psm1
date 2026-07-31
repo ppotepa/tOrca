@@ -292,40 +292,63 @@ function Invoke-TorChatDeployCommand {
     if ($Context.DryRun) { return }
 
     if ($Target -in @('android','all')) {
-        $deviceStage = Invoke-TorChatStage -Context $Context -Id 'device.android.resolve' -Name 'Resolve Android device' -Action {
-            $resolved = Resolve-TorChatAndroidDevice -Context $Context -Device $Device
+        $resolveResult = Invoke-TorChatStage -Context $Context -Id 'device.android.resolve' -Name 'Resolve Android device' -Action {
+            $resolved = Resolve-TorChatAndroidDevice -Context $Context -Device $Device -AllowMultiple:($Device -eq 'all')
+            [string[]]$devices = @($resolved)
+            if ($devices.Count -eq 0) {
+                throw 'No Android devices resolved.'
+            }
             [pscustomobject]@{
                 State = 'Ready'
                 Code = 'ANDROID_DEVICE_RESOLVED'
-                Message = $resolved
-                Device = $resolved
+                Message = if ($Device -eq 'all') { "all: $($devices -join ', ')" } else { $devices[0] }
+                Devices = $devices
+                Device = if ($Device -eq 'all') { 'all' } else { $devices[0] }
             }
         }
-        $resolvedDevice = [string]$deviceStage.Data.Device
-        $Context.Metadata['AndroidDevice'] = $resolvedDevice
+        $devices = @([string[]]$resolveResult.Data.Devices)
+        $Context.Metadata['AndroidDevice'] = if ($Device -eq 'all') { 'all' } else { $devices[0] }
 
         $artifact = Join-Path $Context.RepositoryRoot "mobile\build\app\outputs\flutter-apk\app-$($Context.Configuration).apk"
-        $skipInstall = $InstallPolicy -eq 'skip'
-        if ($InstallPolicy -eq 'if-changed') {
-            $skipInstall = -not (Test-TorChatArtifactDeploymentRequired -RepositoryRoot $Context.RepositoryRoot -Platform 'android' -Target $resolvedDevice -Artifact $artifact)
-        }
-        $installResult = Invoke-TorChatStage -Context $Context -Id 'deploy.android.install' -Name 'Install Android APK' -Skip:$skipInstall -Action {
-            Install-TorChatAndroidClient -Context $Context -Device $resolvedDevice -Artifact $artifact
-        }
-        if ($installResult.State -eq 'Ready') {
-            Set-TorChatArtifactDeployed -RepositoryRoot $Context.RepositoryRoot -Platform 'android' -Target $resolvedDevice -Artifact $artifact -RunId $Context.RunId
-        }
-
-        $skipRun = $RunPolicy -eq 'skip'
-        if ($RunPolicy -eq 'start' -and $ClientDataPolicy -eq 'preserve' -and -not $skipRun) {
-            try {
-                $skipRun = (Get-TorChatAndroidStatus -Context $Context -Device $resolvedDevice).State -eq 'Ready'
-            } catch {
-                $skipRun = $false
+        foreach ($resolvedDevice in $devices) {
+            $safeDevice = ($resolvedDevice -replace '[^A-Za-z0-9]', '_')
+            $Context.Metadata['AndroidDevice'] = $resolvedDevice
+            $skipInstall = $InstallPolicy -eq 'skip'
+            if ($InstallPolicy -eq 'if-changed') {
+                $skipInstall = -not (Test-TorChatArtifactDeploymentRequired -RepositoryRoot $Context.RepositoryRoot -Platform 'android' -Target $resolvedDevice -Artifact $artifact)
+            }
+            $installResult = Invoke-TorChatStage -Context $Context -Id "deploy.android.install.$safeDevice" -Name "Install Android APK ($resolvedDevice)" -Skip:$skipInstall -Action {
+                Install-TorChatAndroidClient -Context $Context -Device $resolvedDevice -Artifact $artifact
+            }
+            if ($installResult.State -eq 'Ready') {
+                Set-TorChatArtifactDeployed -RepositoryRoot $Context.RepositoryRoot -Platform 'android' -Target $resolvedDevice -Artifact $artifact -RunId $Context.RunId
             }
         }
-        Invoke-TorChatStage -Context $Context -Id 'runtime.android' -Name 'Start Android client' -Skip:$skipRun -Action {
-            Start-TorChatAndroidClient -Context $Context -Device $resolvedDevice -ClientDataPolicy $ClientDataPolicy
+
+        if ($RunPolicy -ne 'skip') {
+            $shouldAvoidRestart = $RunPolicy -eq 'start' -and $ClientDataPolicy -eq 'preserve'
+            foreach ($resolvedDevice in $devices) {
+                $safeDevice = ($resolvedDevice -replace '[^A-Za-z0-9]', '_')
+                $skipRunForDevice = $false
+                if ($shouldAvoidRestart) {
+                    try {
+                        $skipRunForDevice = (Get-TorChatAndroidStatus -Context $Context -Device $resolvedDevice).State -eq 'Ready'
+                    } catch {
+                        $skipRunForDevice = $false
+                    }
+                }
+
+                if ($skipRunForDevice) {
+                    Invoke-TorChatStage -Context $Context -Id "runtime.android.$safeDevice" -Name "Start Android client ($resolvedDevice)" -Skip:$true -Action {
+                        [pscustomobject]@{ State = 'Ready'; Code = 'ANDROID_ALREADY_READY'; Message = "Android already ready on $resolvedDevice"; Device = $resolvedDevice }
+                    }
+                    continue
+                }
+
+                Invoke-TorChatStage -Context $Context -Id "runtime.android.$safeDevice" -Name "Start Android client ($resolvedDevice)" -Action {
+                    Start-TorChatAndroidClient -Context $Context -Device $resolvedDevice -ClientDataPolicy $ClientDataPolicy
+                }
+            }
         }
     }
 
@@ -360,11 +383,16 @@ function Invoke-TorChatRunCommand {
     }
     Import-TorChatEnvironmentState -EnvironmentState $EnvironmentState -RequireOnion
     if ($Target -in @('android','all')) {
-        Invoke-TorChatStage -Context $Context -Id 'runtime.android' -Name 'Start Android client' -Action {
-            $resolved = Resolve-TorChatAndroidDevice -Context $Context -Device $Device
-            $arguments = @{ Context = $Context; Device = $resolved; ClientDataPolicy = $ClientDataPolicy }
-            if ($ReadyAttempts -gt 0) { $arguments.ReadyAttempts = $ReadyAttempts }
-            Start-TorChatAndroidClient @arguments
+        $resolved = Resolve-TorChatAndroidDevice -Context $Context -Device $Device -AllowMultiple:($Device -eq 'all')
+        $devices = @([string[]]$resolved)
+        if ($devices.Count -eq 0) { throw 'No Android device is available to start.' }
+        foreach ($resolvedDevice in $devices) {
+            $safeDevice = ($resolvedDevice -replace '[^A-Za-z0-9]', '_')
+            Invoke-TorChatStage -Context $Context -Id "runtime.android.$safeDevice" -Name "Start Android client ($resolvedDevice)" -Action {
+                $arguments = @{ Context = $Context; Device = $resolvedDevice; ClientDataPolicy = $ClientDataPolicy }
+                if ($ReadyAttempts -gt 0) { $arguments.ReadyAttempts = $ReadyAttempts }
+                Start-TorChatAndroidClient @arguments
+            }
         }
     }
     if ($Target -in @('windows','all')) {
@@ -384,9 +412,14 @@ function Invoke-TorChatStopCommand {
     )
     Assert-TorChatCommandTarget -Target $Target -Allowed @('android','windows','all')
     if ($Target -in @('android','all')) {
-        Invoke-TorChatStage -Context $Context -Id 'runtime.android.stop' -Name 'Stop Android client' -Action {
-            $resolved = Resolve-TorChatAndroidDevice -Context $Context -Device $Device
-            Stop-TorChatAndroidClient -Context $Context -Device $resolved
+        $resolved = Resolve-TorChatAndroidDevice -Context $Context -Device $Device -AllowMultiple:($Device -eq 'all')
+        $devices = @([string[]]$resolved)
+        if ($devices.Count -eq 0) { throw 'No Android device is available to stop.' }
+        foreach ($resolvedDevice in $devices) {
+            $safeDevice = ($resolvedDevice -replace '[^A-Za-z0-9]', '_')
+            Invoke-TorChatStage -Context $Context -Id "runtime.android.stop.$safeDevice" -Name "Stop Android client ($resolvedDevice)" -Action {
+                Stop-TorChatAndroidClient -Context $Context -Device $resolvedDevice
+            }
         }
     }
     if ($Target -in @('windows','all')) {
@@ -415,8 +448,20 @@ function Invoke-TorChatStatusCommand {
         }
     }
     if ($Target -in @('android','all')) {
-        Invoke-TorChatStage -Context $Context -Id 'status.android' -Name 'Android status' -Required $false -Action {
-            Get-TorChatAndroidStatus -Context $Context -Device $Device
+        if ($Device -eq 'all') {
+            $resolved = Resolve-TorChatAndroidDevice -Context $Context -Device $Device -AllowMultiple:($Device -eq 'all')
+            $devices = @([string[]]$resolved)
+            if ($devices.Count -eq 0) { throw 'No Android device is available to check status.' }
+            foreach ($resolvedDevice in $devices) {
+                $safeDevice = ($resolvedDevice -replace '[^A-Za-z0-9]', '_')
+                Invoke-TorChatStage -Context $Context -Id "status.android.$safeDevice" -Name "Android status ($resolvedDevice)" -Required $false -Action {
+                    Get-TorChatAndroidStatus -Context $Context -Device $resolvedDevice
+                }
+            }
+        } else {
+            Invoke-TorChatStage -Context $Context -Id 'status.android' -Name 'Android status' -Required $false -Action {
+                Get-TorChatAndroidStatus -Context $Context -Device $Device
+            }
         }
     }
 }
@@ -486,16 +531,21 @@ function Invoke-TorChatCleanCommand {
         Invoke-TorChatStage -Context $Context -Id 'clean.windows' -Name 'Reset Windows client state' -Required $false -Action {
             Reset-TorChatWindowsClientState -Context $Context
         }
-        Invoke-TorChatStage -Context $Context -Id 'clean.android' -Name 'Reset Android client state' -Required $false -Action {
-            $resolved = Resolve-TorChatAndroidDevice -Context $Context -Device $Device
-            $output = @(& adb -s $resolved shell pm clear org.torchat.mobile 2>&1)
-            if ($LASTEXITCODE -ne 0 -or (($output | Out-String) -notmatch 'Success')) {
-                throw "Android state reset failed: $(($output -join ' ').Trim())"
-            }
-            [pscustomobject]@{
-                State = 'Ready'
-                Code = 'ANDROID_STATE_RESET'
-                Message = "Android app data reset on $resolved"
+        $resolved = Resolve-TorChatAndroidDevice -Context $Context -Device $Device -AllowMultiple:($Device -eq 'all')
+        $devices = @([string[]]$resolved)
+        if ($devices.Count -eq 0) { throw 'No Android device is available to reset state.' }
+        foreach ($resolved in $devices) {
+            $safeDevice = ($resolved -replace '[^A-Za-z0-9]', '_')
+            Invoke-TorChatStage -Context $Context -Id "clean.android.$safeDevice" -Name "Reset Android client state ($resolved)" -Required $false -Action {
+                $output = @(& adb -s $resolved shell pm clear org.torchat.mobile 2>&1)
+                if ($LASTEXITCODE -ne 0 -or (($output | Out-String) -notmatch 'Success')) {
+                    throw "Android state reset failed on ${resolved}: $(($output -join ' ').Trim())"
+                }
+                [pscustomobject]@{
+                    State = 'Ready'
+                    Code = 'ANDROID_STATE_RESET'
+                    Message = "Android app data reset on $resolved"
+                }
             }
         }
     }
