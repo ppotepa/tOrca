@@ -9,6 +9,12 @@ import 'core/models/domain.dart';
 abstract interface class ClientRuntime {
   Stream<RuntimeEvent> get events;
   Future<bool> connect();
+
+  /// Returns process-owned runtime state when the platform keeps the engine
+  /// alive independently from Flutter. Desktop and test runtimes may return
+  /// null and use the normal cold-start path.
+  Future<Map<String, dynamic>?> runtimeSnapshot() async => null;
+
   Future<RuntimeIdentity?> identity();
   Future<RuntimeProfile?> profile();
   Future<InviteCode?> refreshPairingCode();
@@ -72,6 +78,9 @@ final class _SerializedClientRuntime implements ClientRuntime {
   Stream<RuntimeEvent> get events => _delegate.events;
   @override
   Future<bool> connect() => _run(_delegate.connect);
+  @override
+  Future<Map<String, dynamic>?> runtimeSnapshot() =>
+      _run(_delegate.runtimeSnapshot);
   @override
   Future<RuntimeIdentity?> identity() => _run(_delegate.identity);
   @override
