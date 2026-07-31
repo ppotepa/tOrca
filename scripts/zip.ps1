@@ -186,9 +186,18 @@ function Invoke-GitText {
     $result.Output
 }
 
+function Invoke-GitChecked {
+    param([Parameter(Mandatory = $true)][string[]]$Arguments)
+    $result = Invoke-GitCapture $Arguments
+    if ($result.ExitCode -ne 0) {
+        throw "git $($Arguments -join ' ') failed.`n$($result.Output)"
+    }
+}
+
 function Get-SafeGitRemote {
-    $remote = (& git remote get-url origin 2>$null | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($remote)) { return $null }
+    $remote = Invoke-GitCapture @('remote', 'get-url', 'origin')
+    if ($remote.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($remote.Output)) { return $null }
+    $remote = $remote.Output.Trim()
     # Do not put an embedded username/password or token into a diagnostic
     # archive. Keep the host, path and revision information useful instead.
     try {
@@ -307,8 +316,7 @@ function Copy-RepositorySnapshot {
     # caches and local diagnostics that previously caused huge snapshots.
     New-Item -ItemType Directory -Force -Path $stagedRepository | Out-Null
     $sourceArchive = Join-Path $temporaryRoot 'source.zip'
-    & git archive --format=zip --output=$sourceArchive HEAD
-    Assert-LastExitCode 'git archive failed.'
+    Invoke-GitChecked @('archive', '--format=zip', "--output=$sourceArchive", 'HEAD')
     Expand-Archive -LiteralPath $sourceArchive -DestinationPath $stagedRepository -Force
     Remove-Item -LiteralPath $sourceArchive -Force -ErrorAction SilentlyContinue
 
@@ -588,15 +596,13 @@ try {
             Write-SnapshotStage 2 8 'Creating or reusing the checkpoint commit...'
             $pendingChanges = Invoke-GitText @('status', '--porcelain=v1', '--untracked-files=all')
             if ($pendingChanges) {
-                & git add --all
-                Assert-LastExitCode 'git add --all failed.'
+                Invoke-GitChecked @('add', '--all')
                 $message = if ($CommitMessage) {
                     $CommitMessage
                 } else {
                     "snapshot: $timestamp"
                 }
-                & git commit -m $message
-                Assert-LastExitCode 'Automatic snapshot commit failed.'
+                Invoke-GitChecked @('commit', '-m', $message)
             } else {
                 Write-Host '[torchat] Worktree is already clean; reusing the current checkpoint commit.'
             }
