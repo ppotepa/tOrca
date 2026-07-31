@@ -97,9 +97,20 @@ class RuntimeRepository {
     _lastTyping.clear();
     _lastPresence = null;
 
-    // A retained process can render from the shared snapshot immediately.
-    // Refresh it in the background. A cold process builds the snapshot once
-    // before the controller starts requesting the same local resources.
+    final nativeIdentity = await _runtime.identity();
+    final retained = applicationState.current;
+    final identityChanged =
+        retained != null &&
+        nativeIdentity != null &&
+        nativeIdentity.installationId.isNotEmpty &&
+        retained.identity.installationId != nativeIdentity.installationId;
+    if (identityChanged) {
+      applicationState.clear();
+      _latestLocalSnapshot = null;
+      _latestPairingSnapshot = null;
+      _messageCache.clear();
+    }
+
     if (applicationState.hasSnapshot) {
       _refreshApplicationSnapshotInBackground();
     } else {
@@ -188,9 +199,8 @@ class RuntimeRepository {
       ..sort((left, right) {
         final leftName = left.displayName.toLowerCase();
         final rightName = right.displayName.toLowerCase();
-        return leftName.compareTo(rightName) != 0
-            ? leftName.compareTo(rightName)
-            : left.id.compareTo(right.id);
+        final byName = leftName.compareTo(rightName);
+        return byName != 0 ? byName : left.id.compareTo(right.id);
       });
     final conversations = [...local.conversations]
       ..sort((left, right) {
@@ -482,9 +492,12 @@ class RuntimeRepository {
       (await _loadLocalBatch()).conversations;
 
   Future<List<ChatMessage>> messages(String id, {bool force = false}) {
-    if (!force && _messageCache.remove(id) case final cached?) {
-      _messageCache[id] = cached;
-      return Future.value(cached);
+    if (!force) {
+      final cached = _messageCache.remove(id);
+      if (cached != null) {
+        _messageCache[id] = cached;
+        return Future.value(cached);
+      }
     }
     final current = _messagesInFlight[id];
     if (current != null) return current;
@@ -495,7 +508,18 @@ class RuntimeRepository {
         phase: ConversationMessagesPhase.loading,
       ),
     );
-    final request = _runtime.messages(id).then((messages) {
+    final request = _loadMessages(id);
+    _messagesInFlight[id] = request;
+    return request.whenComplete(() {
+      if (identical(_messagesInFlight[id], request)) {
+        _messagesInFlight.remove(id);
+      }
+    });
+  }
+
+  Future<List<ChatMessage>> _loadMessages(String id) async {
+    try {
+      final messages = await _runtime.messages(id);
       final immutable = List<ChatMessage>.unmodifiable(messages);
       _messageCache[id] = immutable;
       while (_messageCache.length > _messageCacheLimit) {
@@ -508,7 +532,7 @@ class RuntimeRepository {
         ),
       );
       return immutable;
-    }).catchError((Object error, StackTrace stackTrace) {
+    } catch (error, stackTrace) {
       _messageLoadController.add(
         ConversationMessagesLoadState(
           conversationId: id,
@@ -517,13 +541,7 @@ class RuntimeRepository {
         ),
       );
       Error.throwWithStackTrace(error, stackTrace);
-    });
-    _messagesInFlight[id] = request;
-    return request.whenComplete(() {
-      if (identical(_messagesInFlight[id], request)) {
-        _messagesInFlight.remove(id);
-      }
-    });
+    }
   }
 
   void invalidateMessages([String? conversationId]) {
