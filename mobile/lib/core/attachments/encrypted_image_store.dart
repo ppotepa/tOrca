@@ -77,7 +77,11 @@ class EncryptedImageStore {
           // A restored backup may contain files encrypted with an unavailable
           // platform key. Treat such files as disposable cache, never as chat
           // history, and let the inline encrypted message repopulate them.
-          await file.delete().catchError((_) => file);
+          try {
+            await file.delete();
+          } catch (_) {
+            // Cache cleanup is best effort. The failed read still returns null.
+          }
           return null;
         }
       });
