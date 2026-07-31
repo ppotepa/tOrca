@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../client_runtime.dart';
 import '../core/models/domain.dart';
 import '../core/relationships/relationship_message.dart';
 import 'app_controller_legacy.dart' as legacy;
+import 'desktop_notification_service.dart';
 import 'pairing_recovery_app_controller.dart';
 
 class NotificationSafeAppController extends PairingRecoveryAppController {
@@ -11,11 +15,23 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
       'torchat.relationship.activeSince.';
   bool _clearingLegacyNotice = false;
   bool _reconcilingRelationshipRemoval = false;
+  StreamSubscription<RuntimeEvent>? _notificationEvents;
   final Set<String> _appliedRelationshipRemovalMessageIds = <String>{};
 
   @override
   legacy.AppState build() {
     final initial = super.build();
+    final repository = ref.watch(legacy.runtimeRepositoryProvider);
+    _notificationEvents ??= repository.events.listen((event) {
+      if (event is! NotificationRequestedEvent) return;
+      unawaited(
+        DesktopNotificationService.show(
+          event,
+          selectedConversationId: state.selectedConversationId,
+        ),
+      );
+    });
+    ref.onDispose(() => _notificationEvents?.cancel());
     listenSelf((_, next) {
       if (_clearingLegacyNotice ||
           !next.notice.startsWith(_legacyPairingNoticePrefix)) {
