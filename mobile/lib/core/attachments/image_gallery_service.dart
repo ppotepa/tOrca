@@ -23,7 +23,7 @@ class ImageGalleryService {
     await Gal.putImageBytes(
       bytes,
       album: 'TorChat',
-      name: 'torchat-$safeId.jpg',
+      name: 'torchat-$safeId',
     );
   }
 }
