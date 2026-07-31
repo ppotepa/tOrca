@@ -12,8 +12,9 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10002 --create-home torchat
 COPY --from=builder /src/target/release/torchat-desktop /usr/local/bin/torchat-desktop
-COPY infra/docker/torka.py /usr/local/bin/torka
-RUN chmod 0755 /usr/local/bin/torka \
+COPY infra/docker/torka.py /usr/local/bin/torka-client
+COPY infra/docker/torka-supervisor.py /usr/local/bin/torka
+RUN chmod 0755 /usr/local/bin/torka /usr/local/bin/torka-client \
     && mkdir -p /var/lib/torchat \
     && chown -R torchat:torchat /var/lib/torchat
 USER torchat
