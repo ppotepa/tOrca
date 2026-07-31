@@ -63,7 +63,7 @@ The desktop lifecycle is now initialized before the Flutter application starts. 
 | Preserve/delete history choice | BLOCKED |
 | Fresh re-pair and MLS state after removal | BLOCKED |
 
-Removal remains blocked on the relationship tombstone migration and fresh conversation identity. It must not be faked by hiding a contact only in UI.
+`ApplicationPayloadV1` now contains a native, versioned and encrypted `ContactRemoved` payload with a stable message ID, removal timestamp and history policy. Engine routing, transactional tombstone application and fresh re-pair isolation remain in progress. Removal must not be faked by hiding a contact only in UI.
 
 ## Epic 4 — conversations
 
