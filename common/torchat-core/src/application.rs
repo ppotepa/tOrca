@@ -37,6 +37,19 @@ pub enum ApplicationPayloadV1 {
         received_at: i64,
     },
 
+    ContactRemoved {
+        version: u16,
+
+        #[serde(rename = "messageId")]
+        message_id: Uuid,
+
+        #[serde(rename = "removedAt")]
+        removed_at: i64,
+
+        #[serde(rename = "preserveHistory")]
+        preserve_history: bool,
+    },
+
     Typing {
         version: u16,
         #[serde(rename = "sentAt")]
@@ -100,20 +113,26 @@ mod tests {
         assert_eq!(ApplicationPayloadV1::decode(&encoded).unwrap(), receipt);
 
         for payload in [
+            ApplicationPayloadV1::ContactRemoved {
+                version: 1,
+                message_id: Uuid::from_u128(8),
+                removed_at: 44,
+                preserve_history: true,
+            },
             ApplicationPayloadV1::Typing {
                 version: 1,
-                sent_at: 44,
+                sent_at: 45,
                 typing: true,
             },
             ApplicationPayloadV1::Presence {
                 version: 1,
-                sent_at: 45,
+                sent_at: 46,
                 online: true,
             },
             ApplicationPayloadV1::ReadReceipt {
                 version: 1,
                 message_ids: vec![Uuid::from_u128(9)],
-                read_at: 46,
+                read_at: 47,
             },
         ] {
             let encoded = payload.encode().unwrap();
