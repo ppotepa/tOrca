@@ -12,6 +12,7 @@ import 'features/account/account_view.dart';
 import 'features/account/settings_view.dart';
 import 'features/connection/connection_center_sheet.dart';
 import 'features/invites/invite_scanner.dart';
+import 'features/onboarding/connection_warmup_screen.dart';
 import 'features/onboarding/nickname_onboarding_screen.dart';
 import 'features/onboarding/onboarding_views.dart';
 import 'features/shell/main_shell.dart';
@@ -344,14 +345,11 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
         : resolvedPhase;
 
     if (launchPhase == AppLaunchPhase.warming) {
-      return BootScreen(
-        phase: summary.phase,
-        status: summary.status,
-        detail: summary.detail,
+      return ConnectionWarmupScreen(
+        connection: connection,
+        summary: summary,
         error: state.error,
         retry: controller.retryTor,
-        connecting: connection.busy,
-        steps: connection.startupSteps,
       );
     }
     if (launchPhase == AppLaunchPhase.onboarding) {
