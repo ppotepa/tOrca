@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:torchat_mobile/core/models/domain.dart';
 import 'package:torchat_mobile/features/shell/main_shell.dart';
@@ -11,46 +12,52 @@ void main() {
     var account = 0;
     var reconnect = 0;
     var back = 0;
+    final search = TextEditingController();
+    final composer = TextEditingController();
+    addTearDown(search.dispose);
+    addTearDown(composer.dispose);
 
     await tester.pumpWidget(
-      MaterialApp(
-        home: MainShell(
-          tab: tab,
-          nickname: 'Alice',
-          fingerprint: 'aa bb',
-          ownInvite: '',
-          status: 'Połączono',
-          phase: TransportPhase.connected,
-          latencyMs: 10,
-          peerServerStatus: PeerServerStatus.ready,
-          contacts: const [],
-          conversations: const [],
-          messages: const [],
-          selectedConversation: 'conversation-1',
-          selectedContact: null,
-          search: TextEditingController(),
-          composer: TextEditingController(),
-          error: '',
-          notice: '',
-          action: '',
-          onTab: (value) => tab = value,
-          onSearch: () {},
-          onOpenConversation: (_) {},
-          onStartConversation: (_) {},
-          onScanInvite: () {},
-          onShowInvite: () {},
-          onSend: (_) {},
-          onTypingChanged: (_) {},
-          onRetryMessage: (_) {},
-          onDeleteMessage: (_) {},
-          onVerifyContact: (_) {},
-          onUpdateContactSettings: (_, _, _, _, _) async {},
-          onBack: () => back += 1,
-          onOpenAccount: () => account += 1,
-          onOpenSettings: () => settings += 1,
-          onRetryTor: () => reconnect += 1,
-          typingContacts: const {},
-          onlineContacts: const {},
+      ProviderScope(
+        child: MaterialApp(
+          home: MainShell(
+            tab: tab,
+            nickname: 'Alice',
+            fingerprint: 'aa bb',
+            ownInvite: '',
+            status: 'Połączono',
+            phase: TransportPhase.connected,
+            latencyMs: 10,
+            peerServerStatus: PeerServerStatus.ready,
+            contacts: const [],
+            conversations: const [],
+            messages: const [],
+            selectedConversation: 'conversation-1',
+            selectedContact: null,
+            search: search,
+            composer: composer,
+            error: '',
+            notice: '',
+            action: '',
+            onTab: (value) => tab = value,
+            onSearch: () {},
+            onOpenConversation: (_) {},
+            onStartConversation: (_) {},
+            onScanInvite: () {},
+            onShowInvite: () {},
+            onSend: (_) {},
+            onTypingChanged: (_) {},
+            onRetryMessage: (_) {},
+            onDeleteMessage: (_) {},
+            onVerifyContact: (_) {},
+            onUpdateContactSettings: (_, _, _, _, _) async {},
+            onBack: () => back += 1,
+            onOpenAccount: () => account += 1,
+            onOpenSettings: () => settings += 1,
+            onRetryTor: () => reconnect += 1,
+            typingContacts: const {},
+            onlineContacts: const {},
+          ),
         ),
       ),
     );
