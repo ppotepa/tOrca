@@ -33,7 +33,7 @@ Entering a pairing code and explicitly accepting the request establishes trust. 
 | Desktop autostart setting | IN_PROGRESS |
 | Desktop lifecycle verified on Windows | NOT_STARTED |
 
-The desktop lifecycle is now initialized before the Flutter application starts. A loopback activation socket prevents a second process from starting a competing Tor/storage runtime and restores the existing window instead. Closing the window hides it only after the tray is ready. These paths remain unverified until Windows CI or user-provided local results are available.
+The desktop lifecycle is initialized before the Flutter application starts. A loopback activation socket prevents a second process from starting a competing Tor/storage runtime and restores the existing window instead. Closing the window hides it only after the tray is ready. These paths remain unverified until Windows CI or user-provided local results are available.
 
 ## Epic 2 — pairing
 
@@ -41,13 +41,15 @@ The desktop lifecycle is now initialized before the Flutter application starts. 
 |---|---|
 | Generate, enter and scan pairing code | IMPLEMENTED |
 | Accept, reject and cancel pairing | IMPLEMENTED |
-| Persist control-plane state across reconnect | IN_PROGRESS |
+| Persist control-plane state across reconnect | IMPLEMENTED |
 | Automatically trust newly paired contacts | IMPLEMENTED |
 | Automatically activate conversation | IMPLEMENTED |
 | Automatically open new conversation | IMPLEMENTED |
-| Prevent duplicate acceptance and contacts | IN_PROGRESS |
+| Prevent duplicate acceptance and contacts | IMPLEMENTED |
 | Deterministic local connection system event | IN_PROGRESS |
 | Twenty symmetric pairing runs per direction | NOT_STARTED |
+
+Accepted pairing responses, relay acknowledgements, retry counters, deadlines and errors are persisted in SQLCipher. Restart coverage confirms that each public pairing ID owns one retry record, that a duplicate acknowledgement updates rather than duplicates it, and that confirmed delivery atomically removes further retry work. The runtime merges inbox items by pairing ID, rejects a second active outbox request and permits idempotent re-acceptance only when the retained invite artifacts match exactly. Platform and twenty-run verification remain outstanding.
 
 ## Epic 3 — contact lifecycle
 
@@ -57,13 +59,15 @@ The desktop lifecycle is now initialized before the Flutter application starts. 
 | Contact details and transport controls | IMPLEMENTED |
 | Contact context menu | IN_PROGRESS |
 | Versioned ContactRemoved wire payload | IMPLEMENTED |
-| Transactional local relationship removal | IN_PROGRESS |
-| Remote relationship removal | IN_PROGRESS |
-| Block sending after removal | IN_PROGRESS |
-| Preserve/delete history choice | IN_PROGRESS |
-| Fresh re-pair and MLS state after removal | IN_PROGRESS |
+| Transactional local relationship removal | IMPLEMENTED |
+| Remote relationship removal | IMPLEMENTED |
+| Block sending after removal | IMPLEMENTED |
+| Preserve/delete history choice | IMPLEMENTED |
+| Fresh re-pair and MLS state after removal | IMPLEMENTED |
 
-The core exposes a dedicated versioned `ContactRemovedPayloadV1` contract with a stable message ID, removal timestamp and history policy. It remains transported inside the existing encrypted durable message channel so older clients and intermediate commits keep an exhaustive `ApplicationPayloadV1` contract. Relationship storage atomically writes the tombstone, disables the contact, stops all ordinary queued messages, removes MLS and peer endpoint state, and applies the local history policy while preserving only the durable removal delivery. The application additionally deletes every ordinary `QUEUED` or `SENDING` message through the existing runtime API after either local or remote removal, preventing older runtime implementations from resuming stale traffic after reconnect. Remote reconciliation reads the real durable message list instead of relying on conversation preview. A newly completed and verified pairing records a fresh relationship boundary, so retained removal events from an older relationship cannot terminate the new conversation. Engine-level tombstone routing and Windows/Android verification remain in progress.
+The core exposes a dedicated versioned `ContactRemovedPayloadV1` contract with a stable message ID, removal timestamp and history policy. Local removal atomically writes the tombstone, disables the contact, stops ordinary queued messages, removes MLS and peer endpoint state and applies the selected local-history policy while preserving only the durable removal delivery.
+
+Incoming removal messages are recognized at the encrypted SQLCipher persistence boundary before a new application snapshot can be exposed. A current tombstone blocks the contact, marks the conversation offline, fails queued or sending traffic, removes delivery/MLS/endpoint state and optionally removes ordinary history in one database transaction. Relationship boundaries are advanced when a relationship is created or reactivated; a delayed tombstone from an older relationship is consumed without mutating the fresh pairing. Integration coverage verifies atomic remote removal, MLS suppression, history policy, fresh re-pair and stale replay isolation. Windows and Android verification remain outstanding.
 
 ## Epic 4 — conversations
 
@@ -78,21 +82,23 @@ The core exposes a dedicated versioned `ContactRemovedPayloadV1` contract with a
 | Clear local history | IMPLEMENTED |
 | Local system events | IN_PROGRESS |
 
-Local history clearing now uses the runtime delete operation for every persisted message in the selected conversation, clears the repository page/cache state and keeps the contact relationship intact. Platform verification remains outstanding.
+Local history clearing uses the runtime delete operation for every persisted message in the selected conversation, clears the repository page/cache state and keeps the contact relationship intact. Platform verification remains outstanding.
 
 ## Epic 5 — text messaging
 
 | Item | Status |
 |---|---|
-| Durable outgoing queue | IN_PROGRESS |
+| Durable outgoing queue | IMPLEMENTED |
 | Offline and reconnect delivery | IN_PROGRESS |
-| Idempotent inbound processing | IN_PROGRESS |
+| Idempotent inbound processing | IMPLEMENTED |
 | Queued/sending/sent/delivered/read/failed states | IMPLEMENTED |
 | Reply, copy, retry and local delete | IMPLEMENTED |
 | Local search in current conversation | IMPLEMENTED |
 | Persist sent/delivered/read timestamps | IMPLEMENTED |
 
-Message state transitions are now recorded in a dedicated `message_state_timestamps` table inside the encrypted SQLCipher client database. Idempotent insert/update triggers preserve the first `sent_at`, `delivered_at` and `read_at` values, a projection view exposes them beside the canonical message row, and integration coverage checks monotonic transitions, restart persistence and cascading deletion. The fields are intentionally storage-side for 0.1 and do not expand the public wire payload.
+The encrypted client store owns one outbound-delivery row per public message ID. Restart recovery requeues `IN_FLIGHT` work without resetting the attempt count or creating duplicates. Inbound peer envelopes are keyed by authenticated sender and message ID; an identical replay is classified as a duplicate after restart, while the same ID with a different ciphertext hash is rejected. End-to-end offline/reconnect delivery across real Windows and Android processes remains unverified.
+
+Message state transitions are recorded in a dedicated `message_state_timestamps` table inside the encrypted SQLCipher client database. Idempotent insert/update triggers preserve the first `sent_at`, `delivered_at` and `read_at` values, a projection view exposes them beside the canonical message row, and integration coverage checks monotonic transitions, restart persistence and cascading deletion. The fields remain storage-side for 0.1 and do not expand the public wire payload.
 
 ## Epic 6 — timeline and scrolling
 
@@ -107,7 +113,7 @@ Message state transitions are now recorded in a dedicated `message_state_timesta
 | SQLite pagination and prepend preservation | IMPLEMENTED |
 | Restore per-conversation scroll position | IMPLEMENTED |
 
-The runtime now reads the newest 50 SQLite rows by default and exposes older pages through a stable `(created_at, id)` cursor using bounded `LIMIT` queries. Flutter requests those pages only when the reader reaches the top, merges them idempotently, preserves the pixel anchor across prepend, and restores the saved visible page count and scroll offset per conversation. Relationship cleanup uses an explicit full-history storage mode so pagination cannot leave queued messages or retained history behind. This path remains unverified until Rust/Flutter CI or user-provided local results are available.
+The runtime reads the newest 50 SQLite rows by default and exposes older pages through a stable `(created_at, id)` cursor using bounded `LIMIT` queries. Flutter requests those pages only when the reader reaches the top, merges them idempotently, preserves the pixel anchor across prepend, and restores the saved visible page count and scroll offset per conversation. Relationship cleanup uses an explicit full-history storage mode so pagination cannot leave queued messages or retained history behind. This path remains unverified until Rust/Flutter CI or user-provided local results are available.
 
 ## Epic 7 — images
 
@@ -139,20 +145,22 @@ The runtime now reads the newest 50 SQLite rows by default and exposes older pag
 | Clear notification after opening | IMPLEMENTED |
 | Desktop native notification and restore window | IMPLEMENTED |
 
-Desktop notifications use persistent ID deduplication, suppress a toast when its conversation is already selected, respect master/message/preview preferences, restore the window, open the exact conversation and close the selected alert. Android now applies the same category preferences and persistent deduplication in the foreground service, reads the active Flutter conversation from shared preferences, embeds the conversation and notification identifiers in `PendingIntent`, buffers cold-start clicks until the event channel attaches, opens the exact conversation and clears the native alert. These paths remain unverified until Windows and Android builds or user-provided local results are available.
+Desktop notifications use persistent ID deduplication, suppress a toast when its conversation is already selected, respect master/message/preview preferences, restore the window, open the exact conversation and close the selected alert. Android applies the same category preferences and persistent deduplication in the foreground service, reads the active Flutter conversation from shared preferences, embeds the conversation and notification identifiers in `PendingIntent`, buffers cold-start clicks until the event channel attaches, opens the exact conversation and clears the native alert. These paths remain unverified until Windows and Android builds or user-provided local results are available.
 
 ## Epic 9 — settings and privacy
 
 | Item | Status |
 |---|---|
 | Current/retro and light/dark/system themes | IMPLEMENTED |
-| Reduced motion | IN_PROGRESS |
+| Reduced motion | IMPLEMENTED |
 | Read receipts switch, private default off | IMPLEMENTED |
 | Typing and presence switches | IMPLEMENTED |
 | Notification settings | IMPLEMENTED |
 | Desktop tray/autostart settings | IN_PROGRESS |
 | Automatic image download switch | NOT_STARTED |
 | Local data/cache usage and clear image cache | NOT_STARTED |
+
+Reduced motion is a durable theme preference with optimistic UI rollback. The controller reapplies the preference during application startup and changes Flutter's global scheduler multiplier so existing transitions complete effectively immediately without requiring per-widget forks. Store recreation and `copyWith` behavior are covered by Flutter tests. Platform verification remains outstanding.
 
 ## Epic 10 — release quality
 
@@ -169,19 +177,20 @@ Desktop notifications use persistent ID deduplication, suppress a toast when its
 | Windows end-to-end matrix | NOT_STARTED |
 | Android end-to-end matrix | NOT_STARTED |
 
-Diagnostic export now copies only text diagnostics into a temporary staging directory, excludes databases, key stores, private-key files and executable/binary artifacts, and redacts structured message bodies, attachment payloads, ciphertexts, tokens, credentials, onion addresses, PEM blocks and large base64/hex values before creating the ZIP. The archive includes a sanitization manifest and an integration test asserts that representative secrets cannot survive export.
+Diagnostic export copies only text diagnostics into a temporary staging directory, excludes databases, key stores, private-key files and executable/binary artifacts, and redacts structured message bodies, attachment payloads, ciphertexts, tokens, credentials, onion addresses, PEM blocks and large base64/hex values before creating the ZIP. The archive includes a sanitization manifest and an integration test asserts that representative secrets cannot survive export.
 
-The SQLCipher migration suite now verifies that a fresh database applies every registered migration and that reopening an existing encrypted database preserves contacts, conversations, messages and settings. It also verifies durable message-state timestamps across restart. Actual application-upgrade validation remains a separate release-matrix requirement.
+The SQLCipher migration suite verifies that a fresh database applies every registered migration and that reopening an existing encrypted database preserves contacts, conversations, messages and settings. It also verifies durable message-state timestamps across restart. Actual application-upgrade validation remains a separate release-matrix requirement.
 
 ## Release blockers
 
 0.1 must not be tagged until these blockers are resolved and verified:
 
-1. Complete engine-level relationship tombstone routing and verify fresh re-pair on both platforms.
-2. Verify durable and idempotent message/pairing delivery through offline periods, reconnects and process restarts.
+1. Verify relationship removal, history policy and fresh re-pair on Windows and Android.
+2. Verify durable message and pairing delivery through offline periods, reconnects and real process restarts.
 3. Verify cursor pagination, notification routing and database migrations on Windows and Android builds.
 4. Complete clean-install, upgrade, cold-start and recovery matrices for Windows and Android.
 5. Run compilation, static analysis and all automated tests for newly added Flutter, Kotlin, PowerShell and Rust code.
+6. Complete the remaining image-storage, image-save, cache/settings, keyboard and accessibility scope listed above.
 
 GitHub Actions currently creates the release jobs but fails before assigning executable steps, so no `VERIFIED_WINDOWS`, `VERIFIED_ANDROID` or `DONE` status may be inferred from the implementation commits alone.
 
