@@ -245,7 +245,7 @@ function Invoke-TorChatDeployCommand {
         $profile = if ($Context.Configuration -eq 'release') { 'release' } else { 'debug' }
         $engine = Join-Path $Context.RepositoryRoot "target\$profile\torchat-desktop.exe"
         $runner = Join-Path $Context.RepositoryRoot "mobile\build\windows\x64\runner\$variant\torchat_mobile.exe"
-        if (Test-Path -LiteralPath $engine -and Test-Path -LiteralPath $runner) { return }
+        if ((Test-Path -LiteralPath $engine) -and (Test-Path -LiteralPath $runner)) { return }
 
         if ($BuildPolicy -eq 'skip') {
             throw "Windows artifacts are missing (engine: $engine, runner: $runner) and BuildPolicy=skip; rerun with -BuildPolicy smart or -BuildPolicy rebuild."
