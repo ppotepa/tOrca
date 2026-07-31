@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../app/app_theme.dart';
 import '../../core/attachments/image_message_codec.dart';
 import '../../core/models/domain.dart';
+import '../../core/relationships/relationship_message.dart';
 import 'chats_view.dart' show MessageBubble;
 
 class ReleaseMessageBubble extends StatelessWidget {
@@ -29,6 +30,14 @@ class ReleaseMessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final removed = RelationshipRemovedMessage.tryDecode(message.text);
+    if (removed != null) {
+      return _RelationshipRemovedEvent(
+        message: message,
+        contactName: contactName,
+        removed: removed,
+      );
+    }
     if (!isImageMessageBody(message.text)) {
       return MessageBubble(
         message: message,
@@ -207,6 +216,54 @@ class ReleaseMessageBubble extends StatelessWidget {
     if (action == 'retry') onRetry(message.id);
     if (action == 'delete') onDelete(message.id);
   }
+}
+
+class _RelationshipRemovedEvent extends StatelessWidget {
+  const _RelationshipRemovedEvent({
+    required this.message,
+    required this.contactName,
+    required this.removed,
+  });
+
+  final ChatMessage message;
+  final String contactName;
+  final RelationshipRemovedMessage removed;
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: context.statusTheme.warning.withValues(alpha: .10),
+            border: Border.all(
+              color: context.statusTheme.warning.withValues(alpha: .55),
+            ),
+            borderRadius: context.effectsTheme.pixelated
+                ? BorderRadius.zero
+                : BorderRadius.circular(10),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ThemedIcon(
+                Icons.person_remove_outlined,
+                size: 18,
+                color: context.statusTheme.warning,
+              ),
+              const SizedBox(width: 9),
+              Flexible(
+                child: Text(
+                  message.outgoing
+                      ? 'Zakończono relację z kontaktem $contactName.'
+                      : '$contactName zakończył relację.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
 }
 
 IconData _stateIcon(MessageState state) => switch (state) {
