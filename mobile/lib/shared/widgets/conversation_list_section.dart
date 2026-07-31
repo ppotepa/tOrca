@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/conversation_messages_state.dart';
 import '../../app/conversation_preferences.dart';
 import '../../app/ui_operation_registry.dart';
+import '../../core/attachments/image_message_codec.dart';
 import '../../core/models/domain.dart';
 import '../../core/runtime/runtime_repository.dart';
 import '../async/busy_surface.dart';
@@ -96,7 +97,7 @@ class ConversationListSection extends ConsumerWidget {
               final loading = opening || explicitOpen.busy;
               final tile = ConversationListTile(
                 contactName: name,
-                preview: conversation.preview,
+                preview: _previewLabel(conversation.preview),
                 lastMessageAt: conversation.lastMessageAt,
                 unread: conversation.unread,
                 lastSeen: lastSeen,
@@ -281,4 +282,9 @@ class ConversationListSection extends ConsumerWidget {
         return;
     }
   }
+}
+
+String _previewLabel(String preview) {
+  if (preview.isEmpty) return '';
+  return isImageMessageBody(preview) ? 'Obraz' : preview;
 }
