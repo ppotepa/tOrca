@@ -124,6 +124,20 @@ def conversation_for_message(engine, message_id):
     return None
 
 
+def verified_messaging_ready(engine):
+    contacts = engine.command({"type": "list_contacts"}, timeout=15)
+    if not any(
+        contact.get("verified") is True
+        for contact in contacts if isinstance(contact, dict)
+    ):
+        return False
+    conversations = engine.command({"type": "list_conversations"}, timeout=15)
+    return any(
+        conversation.get("id")
+        for conversation in conversations if isinstance(conversation, dict)
+    )
+
+
 def queued_command_messages(engine, handled_message_ids):
     seen = set()
 
@@ -221,6 +235,7 @@ def main():
         next_pairing_poll = 0.0
         next_message_poll = 0.0
         next_code_refresh = 0.0
+        message_wait_logged = False
         handled_message_ids = set()
 
         while True:
@@ -249,7 +264,12 @@ def main():
             if now >= next_message_poll:
                 next_message_poll = now + message_interval
                 try:
-                    respond_to_commands(engine, handled_message_ids)
+                    if verified_messaging_ready(engine):
+                        message_wait_logged = False
+                        respond_to_commands(engine, handled_message_ids)
+                    elif not message_wait_logged:
+                        message_wait_logged = True
+                        log("message polling paused until a verified contact and MLS conversation exist")
                 except Exception as error:
                     log(f"message poll deferred: {error}")
 
