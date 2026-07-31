@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/conversation_messages_state.dart';
 import '../../core/models/domain.dart';
+import '../../core/runtime/runtime_repository.dart';
 import '../formatters/conversation_display.dart';
 import 'empty_state.dart';
 import 'feature_header.dart';
 import 'list_items.dart';
+import 'retro_activity_indicator.dart';
 
-class ConversationListSection extends StatelessWidget {
+class ConversationListSection extends ConsumerWidget {
   const ConversationListSection({
     super.key,
     required this.title,
@@ -32,52 +36,78 @@ class ConversationListSection extends StatelessWidget {
   final bool showHeader;
 
   @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      if (showHeader) ...[
-        FeatureHeader(title: title, subtitle: subtitle),
-        const SizedBox(height: 12),
+  Widget build(BuildContext context, WidgetRef ref) {
+    final loadState = ref.watch(conversationMessagesLoadEventsProvider).valueOrNull;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (showHeader) ...[
+          FeatureHeader(title: title, subtitle: subtitle),
+          const SizedBox(height: 12),
+        ],
+        Expanded(
+          child: conversations.isEmpty
+              ? EmptyState(icon: Icons.chat_bubble_outline, message: emptyMessage)
+              : ListView.separated(
+                  itemCount: conversations.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 6),
+                  itemBuilder: (context, index) {
+                    final conversation = conversations[index];
+                    final contact = contacts
+                        .where((item) => item.id == conversation.contactId)
+                        .firstOrNull;
+                    final name = contact?.nickname.trim().isNotEmpty == true
+                        ? contact!.nickname
+                        : 'Nieznany kontakt';
+                    final lastSeen = conversationLastSeenLabel(
+                      conversation.id,
+                      conversations,
+                    );
+                    final loading =
+                        loadState?.conversationId == conversation.id &&
+                        loadState?.phase == ConversationMessagesPhase.loading;
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        ConversationListTile(
+                          contactName: name,
+                          preview: conversation.preview,
+                          lastMessageAt: conversation.lastMessageAt,
+                          unread: conversation.unread,
+                          lastSeen: lastSeen,
+                          peerConnectionStatus:
+                              contact?.peerConnectionStatus ??
+                              PeerConnectionStatus.offline,
+                          transportPolicy:
+                              contact?.transportPolicy ??
+                              ContactTransportPolicy.peerWithRelayFallback,
+                          peerEndpointStatus:
+                              contact?.peerEndpointStatus ??
+                              PeerEndpointStatus.missing,
+                          selected: selectedConversation == conversation.id,
+                          onTap: loading
+                              ? null
+                              : () => onOpenConversation(conversation.id),
+                          asCard: asCard,
+                        ),
+                        if (loading)
+                          const Padding(
+                            padding: EdgeInsets.fromLTRB(12, 4, 12, 2),
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: RetroActivityIndicator(
+                                style: RetroActivityStyle.hourglass,
+                                label: 'Otwieranie rozmowy',
+                                compact: true,
+                              ),
+                            ),
+                          ),
+                      ],
+                    );
+                  },
+                ),
+        ),
       ],
-      Expanded(
-        child: conversations.isEmpty
-            ? EmptyState(icon: Icons.chat_bubble_outline, message: emptyMessage)
-            : ListView.separated(
-                itemCount: conversations.length,
-                separatorBuilder: (_, _) => const SizedBox(height: 6),
-                itemBuilder: (context, index) {
-                  final conversation = conversations[index];
-                  final contact = contacts
-                      .where((item) => item.id == conversation.contactId)
-                      .firstOrNull;
-                  final name = contact?.nickname.trim().isNotEmpty == true
-                      ? contact!.nickname
-                      : 'Nieznany kontakt';
-                  final lastSeen = conversationLastSeenLabel(
-                    conversation.id,
-                    conversations,
-                  );
-                  return ConversationListTile(
-                    contactName: name,
-                    preview: conversation.preview,
-                    lastMessageAt: conversation.lastMessageAt,
-                    unread: conversation.unread,
-                    lastSeen: lastSeen,
-                    peerConnectionStatus:
-                        contact?.peerConnectionStatus ??
-                        PeerConnectionStatus.offline,
-                    transportPolicy:
-                        contact?.transportPolicy ??
-                        ContactTransportPolicy.peerWithRelayFallback,
-                    peerEndpointStatus:
-                        contact?.peerEndpointStatus ?? PeerEndpointStatus.missing,
-                    selected: selectedConversation == conversation.id,
-                    onTap: () => onOpenConversation(conversation.id),
-                    asCard: asCard,
-                  );
-                },
-              ),
-      ),
-    ],
-  );
+    );
+  }
 }
