@@ -11,18 +11,23 @@ import 'sequential_app_controller.dart';
 import 'ui_operation_registry.dart';
 
 class PairingRecoveryAppController extends SequentialAppController {
-  static const _pollInterval = Duration(seconds: 2);
+  static const _watchdogInterval = Duration(seconds: 20);
+  static const _minimumSyncInterval = Duration(seconds: 3);
   static const _pairingNoticePrefix = 'Oczekujące zaproszenia:';
 
-  Timer? _pairingPoll;
-  Future<void>? _pairingPollInFlight;
+  Timer? _pairingWatchdog;
+  Future<void>? _pairingSyncInFlight;
+  bool _pairingSyncQueued = false;
   DateTime? _lastPairingSync;
 
   @override
   legacy.AppState build() {
     final initial = super.build();
-    _pairingPoll = Timer.periodic(_pollInterval, (_) => _pollPairing());
-    ref.onDispose(() => _pairingPoll?.cancel());
+    _pairingWatchdog = Timer.periodic(
+      _watchdogInterval,
+      (_) => _schedulePairingSync(force: false),
+    );
+    ref.onDispose(() => _pairingWatchdog?.cancel());
     return initial;
   }
 
@@ -37,11 +42,8 @@ class PairingRecoveryAppController extends SequentialAppController {
       UiOperationKey.conversationsLoad,
       'Ładowanie rozmów',
     );
-    if (!state.transport.connected) return;
-    try {
-      await refreshData(forcePairing: true, allowAutoTorka: false);
-    } catch (_) {
-      // Startup remains usable; periodic reconciliation retries pairing sync.
+    if (state.transport.connected) {
+      await _synchronizePairing(force: true);
     }
   }
 
@@ -51,12 +53,8 @@ class PairingRecoveryAppController extends SequentialAppController {
     bool allowAutoTorka = true,
   }) async {
     final repository = ref.read(legacy.runtimeRepositoryProvider);
-    final lastSync = _lastPairingSync;
-    final pairingDue =
-        lastSync == null || DateTime.now().difference(lastSync) >= _pollInterval;
     final effectiveForcePairing =
         forcePairing ||
-        pairingDue ||
         repository.applicationState.isStale ||
         _isPairingAction(state.action);
 
@@ -134,7 +132,7 @@ class PairingRecoveryAppController extends SequentialAppController {
   );
 
   @override
-  Future<void> submitPairingCode(String code) => _runVoid(
+  Future<void> submitPairingCode(String code) => _runPairingMutation(
     UiOperationKey.pairingSubmit,
     'Przetwarzanie kodu parowania',
     () => super.submitPairingCode(code),
@@ -150,7 +148,7 @@ class PairingRecoveryAppController extends SequentialAppController {
   }
 
   @override
-  Future<void> acceptPairing(String id) => _runVoid(
+  Future<void> acceptPairing(String id) => _runPairingMutation(
     UiOperationKey.pairingAccept(id),
     'Akceptowanie zaproszenia',
     () => super.acceptPairing(id),
@@ -158,7 +156,7 @@ class PairingRecoveryAppController extends SequentialAppController {
   );
 
   @override
-  Future<void> rejectPairing(String id) => _runVoid(
+  Future<void> rejectPairing(String id) => _runPairingMutation(
     UiOperationKey.pairingReject(id),
     'Odrzucanie zaproszenia',
     () => super.rejectPairing(id),
@@ -166,7 +164,7 @@ class PairingRecoveryAppController extends SequentialAppController {
   );
 
   @override
-  Future<void> cancelPairing(String id) => _runVoid(
+  Future<void> cancelPairing(String id) => _runPairingMutation(
     UiOperationKey.pairingCancel(id),
     'Anulowanie zaproszenia',
     () => super.cancelPairing(id),
@@ -174,7 +172,7 @@ class PairingRecoveryAppController extends SequentialAppController {
   );
 
   @override
-  Future<void> archiveInvite(String id) => _runVoid(
+  Future<void> archiveInvite(String id) => _runPairingMutation(
     UiOperationKey.pairingArchive(id),
     'Archiwizowanie zaproszenia',
     () => super.archiveInvite(id),
@@ -212,12 +210,17 @@ class PairingRecoveryAppController extends SequentialAppController {
   @override
   Future<void> updateVisibility(bool foreground) async {
     await super.updateVisibility(foreground);
-    if (!foreground) return;
-    try {
-      await refreshData(forcePairing: true, allowAutoTorka: false);
-    } catch (_) {
-      // Foreground reconciliation is best-effort; the periodic poll retries it.
-    }
+    if (foreground) await _synchronizePairing(force: true);
+  }
+
+  Future<void> _runPairingMutation(
+    String key,
+    String label,
+    Future<void> Function() operation, {
+    String? targetId,
+  }) async {
+    await _runVoid(key, label, operation, targetId: targetId);
+    await _synchronizePairing(force: true);
   }
 
   bool _isPairingAction(String action) => switch (action) {
@@ -237,8 +240,11 @@ class PairingRecoveryAppController extends SequentialAppController {
     String? targetId,
   }) async {
     _begin(key, label, targetId);
-    await operation();
-    _finishFromController(key, label, targetId);
+    try {
+      await operation();
+    } finally {
+      _finishFromController(key, label, targetId);
+    }
   }
 
   void _begin(String key, String label, [String? targetId]) {
@@ -261,20 +267,44 @@ class PairingRecoveryAppController extends SequentialAppController {
     );
   }
 
-  void _pollPairing() {
-    if (!state.transport.connected ||
-        state.isLoading ||
-        _pairingPollInFlight != null ||
-        _isPairingAction(state.action)) {
-      return;
-    }
+  void _schedulePairingSync({required bool force}) {
+    if (!state.transport.connected || state.isLoading) return;
+    _pairingSyncQueued = true;
+    if (_pairingSyncInFlight != null) return;
 
     late final Future<void> run;
-    run = refreshData(allowAutoTorka: false).whenComplete(() {
-      if (identical(_pairingPollInFlight, run)) _pairingPollInFlight = null;
+    run = _drainPairingSync(force: force).whenComplete(() {
+      if (identical(_pairingSyncInFlight, run)) _pairingSyncInFlight = null;
+      if (_pairingSyncQueued) _schedulePairingSync(force: false);
     });
-    _pairingPollInFlight = run;
+    _pairingSyncInFlight = run;
     unawaited(run.catchError((Object _, StackTrace __) {}));
+  }
+
+  Future<void> _drainPairingSync({required bool force}) async {
+    var forceNext = force;
+    while (_pairingSyncQueued) {
+      _pairingSyncQueued = false;
+      await _synchronizePairing(force: forceNext);
+      forceNext = false;
+    }
+  }
+
+  Future<void> _synchronizePairing({required bool force}) async {
+    if (!state.transport.connected) return;
+    final last = _lastPairingSync;
+    if (!force &&
+        last != null &&
+        DateTime.now().difference(last) < _minimumSyncInterval) {
+      return;
+    }
+    try {
+      await refreshData(forcePairing: true, allowAutoTorka: false);
+      _lastPairingSync = DateTime.now();
+    } catch (_) {
+      // Connection recovery and the watchdog will retry. A transport outage is
+      // not a global user-facing pairing error.
+    }
   }
 
   void _updatePairingNotice() {
