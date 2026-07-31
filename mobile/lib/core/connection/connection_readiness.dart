@@ -19,14 +19,15 @@ class ConnectionReadiness {
     required bool localDataReady,
   }) {
     final engineStep = _step(startupSteps, StartupStepKind.engine);
+    final torStep = _step(startupSteps, StartupStepKind.tor);
+    final relayStep = _step(startupSteps, StartupStepKind.relay);
     final peerListenerStep = _step(
       startupSteps,
       StartupStepKind.peerListener,
     );
     final onionStep = _step(startupSteps, StartupStepKind.onionService);
 
-    // Local data cannot be available before the engine has opened its state.
-    // Treat a successful identity read as authoritative even if the earlier
+    // A successful identity read is authoritative even when the earlier
     // runtime-ready event arrived before Flutter attached to the event stream.
     final engineState = localDataReady
         ? ConnectionComponentState.ready
@@ -56,19 +57,25 @@ class ConnectionReadiness {
             ? engineStep.detail
             : 'Odczytywanie tożsamości, profilu i lokalnego snapshotu',
       ),
-      _torStatus(transport),
-      _relayStatus(transport),
-      _peerStatus(
-        component: ConnectionComponent.peerListener,
-        aggregate: peerServerStatus,
-        step: peerListenerStep,
-        allowReadyWhileAggregateStarts: true,
+      _gateByStartupStep(_torStatus(transport), torStep),
+      _gateByStartupStep(_relayStatus(transport), relayStep),
+      _gateByStartupStep(
+        _peerStatus(
+          component: ConnectionComponent.peerListener,
+          aggregate: peerServerStatus,
+          step: peerListenerStep,
+          allowReadyWhileAggregateStarts: true,
+        ),
+        peerListenerStep,
       ),
-      _peerStatus(
-        component: ConnectionComponent.onionService,
-        aggregate: peerServerStatus,
-        step: onionStep,
-        allowReadyWhileAggregateStarts: false,
+      _gateByStartupStep(
+        _peerStatus(
+          component: ConnectionComponent.onionService,
+          aggregate: peerServerStatus,
+          step: onionStep,
+          allowReadyWhileAggregateStarts: false,
+        ),
+        onionStep,
       ),
     ];
     final sequential = sequentialConnectionStatuses(raw);
@@ -189,6 +196,37 @@ class ConnectionReadiness {
     }
     return 'Oczekiwanie: ${firstBlocking.component.title.toLowerCase()}';
   }
+}
+
+ConnectionComponentStatus _gateByStartupStep(
+  ConnectionComponentStatus raw,
+  StartupStep step,
+) {
+  final detail = step.detail.isEmpty ? raw.detail : step.detail;
+  return switch (step.state) {
+    StartupStepState.pending || StartupStepState.blocked => raw.copyWith(
+      state: ConnectionComponentState.pending,
+      detail: detail,
+      clearProgress: true,
+      clearErrorCode: true,
+    ),
+    StartupStepState.running => raw.state == ConnectionComponentState.failed
+        ? raw
+        : raw.copyWith(
+            state: ConnectionComponentState.starting,
+            detail: detail,
+            clearErrorCode: true,
+          ),
+    StartupStepState.ready => raw,
+    StartupStepState.warning => raw.copyWith(
+      state: ConnectionComponentState.degraded,
+      detail: detail,
+    ),
+    StartupStepState.error => raw.copyWith(
+      state: ConnectionComponentState.failed,
+      detail: detail,
+    ),
+  };
 }
 
 ConnectionComponentStatus _torStatus(RuntimeTorStatus transport) {
