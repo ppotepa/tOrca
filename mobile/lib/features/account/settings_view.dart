@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../app/app_theme.dart';
+import '../../app/desktop_autostart.dart';
 import '../../app/ui_operation_registry.dart';
 import '../../shared/async/async_operation_state.dart';
 import '../../shared/async/busy_surface.dart';
@@ -41,6 +42,8 @@ class SettingsView extends ConsumerStatefulWidget {
 }
 
 class _SettingsViewState extends ConsumerState<SettingsView> {
+  static const _autostartOperationKey = 'torchat.desktop.autostart';
+
   late TorChatThemePreferences _themePreferences;
   final Set<String> _saving = <String>{};
   bool _notifications = true;
@@ -52,6 +55,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
   bool _readReceipts = false;
   bool _typing = true;
   bool _presence = true;
+  bool _autostart = false;
 
   @override
   void initState() {
@@ -70,6 +74,9 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
 
   Future<void> _loadPreferences() async {
     final store = await SharedPreferences.getInstance();
+    final autostart = DesktopAutostart.isSupported
+        ? await DesktopAutostart.isEnabled()
+        : false;
     if (!mounted) return;
     setState(() {
       _notifications = store.getBool('torchat.notifications.enabled') ?? true;
@@ -82,6 +89,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
       _readReceipts = store.getBool('torchat.privacy.readReceipts') ?? false;
       _typing = store.getBool('torchat.privacy.typing') ?? true;
       _presence = store.getBool('torchat.privacy.presence') ?? true;
+      _autostart = autostart;
     });
   }
 
@@ -107,6 +115,31 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
       );
     } finally {
       if (mounted) setState(() => _saving.remove(key));
+    }
+  }
+
+  Future<void> _setAutostart(bool value) async {
+    final previous = _autostart;
+    setState(() {
+      _autostart = value;
+      _saving.add(_autostartOperationKey);
+    });
+    try {
+      await DesktopAutostart.setEnabled(value);
+      final effective = await DesktopAutostart.isEnabled();
+      if (effective != value) {
+        throw StateError('System Windows nie potwierdził zmiany autostartu.');
+      }
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _autostart = previous);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.toString())),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _saving.remove(_autostartOperationKey));
+      }
     }
   }
 
@@ -236,6 +269,25 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
               ],
             ),
           ),
+          if (DesktopAutostart.isSupported)
+            ActionSection(
+              title: 'SYSTEM WINDOWS',
+              child: BusySurface(
+                state: _preferenceState(_autostartOperationKey),
+                label: 'Aktualizowanie autostartu…',
+                child: ThemedSwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Uruchamiaj TorChat przy starcie'),
+                  subtitle: const Text(
+                    'Rejestruje aplikację w systemowym autostarcie Windows',
+                  ),
+                  value: _autostart,
+                  onChanged: _saving.contains(_autostartOperationKey)
+                      ? null
+                      : _setAutostart,
+                ),
+              ),
+            ),
           ActionSection(
             title: 'POWIADOMIENIA',
             child: Column(
