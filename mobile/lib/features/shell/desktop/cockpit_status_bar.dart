@@ -26,59 +26,64 @@ class CockpitStatusBar extends StatelessWidget {
     final shell = context.shellTheme;
     return Material(
       color: shell.surface,
-      child: InkWell(
-        onTap: onOpenConnectionCenter,
-        child: Container(
-          height: 44,
-          padding: const EdgeInsets.symmetric(horizontal: 14),
-          decoration: BoxDecoration(
-            border: Border(
-              bottom: BorderSide(
-                color: shell.border,
-                width: shell.borderWidth,
+      child: Semantics(
+        button: true,
+        label: 'Centrum połączenia TorChat',
+        hint: 'Otwiera szczegóły połączenia i diagnostykę transportu',
+        child: InkWell(
+          onTap: onOpenConnectionCenter,
+          child: Container(
+            height: 44,
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(
+                  color: shell.border,
+                  width: shell.borderWidth,
+                ),
               ),
             ),
-          ),
-          child: Row(
-            children: [
-              const ThemedIcon(Icons.shield_outlined, size: 18),
-              const SizedBox(width: 8),
-              Text('TorChat', style: Theme.of(context).textTheme.titleSmall),
-              const Spacer(),
-              const CockpitIndicator(
-                label: 'ENGINE',
-                state: CockpitIndicatorState.ready,
-                detail: 'Lokalny engine i baza są gotowe',
-              ),
-              const SizedBox(width: 10),
-              CockpitIndicator(
-                label: 'TOR RELAY',
-                state: cockpitRelayState(phase),
-                detail: latencyMs == null
-                    ? 'Połączenie z relayem przez Tor'
-                    : 'Połączenie z relayem · $latencyMs ms',
-              ),
-              const SizedBox(width: 10),
-              CockpitIndicator(
-                label: 'TOR P2P',
-                state: cockpitP2pState(peerServerStatus),
-                detail: peerServerStatus.label,
-              ),
-              const Spacer(),
-              if (nickname.trim().isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: Text(
-                    '@$nickname',
-                    style: Theme.of(context).textTheme.labelMedium,
-                  ),
+            child: Row(
+              children: [
+                const ThemedIcon(Icons.shield_outlined, size: 18),
+                const SizedBox(width: 8),
+                Text('TorChat', style: Theme.of(context).textTheme.titleSmall),
+                const Spacer(),
+                const CockpitIndicator(
+                  label: 'ENGINE',
+                  state: CockpitIndicatorState.ready,
+                  detail: 'Lokalny engine i baza są gotowe',
                 ),
-              IconButton(
-                tooltip: 'Ustawienia',
-                onPressed: onOpenSettings,
-                icon: const ThemedIcon(Icons.settings_outlined, size: 18),
-              ),
-            ],
+                const SizedBox(width: 10),
+                CockpitIndicator(
+                  label: 'TOR RELAY',
+                  state: cockpitRelayState(phase),
+                  detail: latencyMs == null
+                      ? 'Połączenie z relayem przez Tor'
+                      : 'Połączenie z relayem · $latencyMs ms',
+                ),
+                const SizedBox(width: 10),
+                CockpitIndicator(
+                  label: 'TOR P2P',
+                  state: cockpitP2pState(peerServerStatus),
+                  detail: peerServerStatus.label,
+                ),
+                const Spacer(),
+                if (nickname.trim().isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: Text(
+                      '@$nickname',
+                      style: Theme.of(context).textTheme.labelMedium,
+                    ),
+                  ),
+                IconButton(
+                  tooltip: 'Ustawienia',
+                  onPressed: onOpenSettings,
+                  icon: const ThemedIcon(Icons.settings_outlined, size: 18),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -105,45 +110,50 @@ class CompactCockpitStatusBar extends StatelessWidget {
     final shell = context.shellTheme;
     return Material(
       color: shell.surface,
-      child: InkWell(
-        onTap: onOpenConnectionCenter,
-        child: Container(
-          height: 34,
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          decoration: BoxDecoration(
-            border: Border(
-              bottom: BorderSide(
-                color: shell.border,
-                width: shell.borderWidth,
+      child: Semantics(
+        button: true,
+        label: 'Centrum połączenia TorChat',
+        hint: 'Otwiera szczegóły połączenia i diagnostykę transportu',
+        child: InkWell(
+          onTap: onOpenConnectionCenter,
+          child: Container(
+            height: 34,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(
+                  color: shell.border,
+                  width: shell.borderWidth,
+                ),
               ),
             ),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const CockpitIndicator(
-                label: 'ENG',
-                state: CockpitIndicatorState.ready,
-                detail: 'Engine gotowy',
-                compact: true,
-              ),
-              const SizedBox(width: 6),
-              CockpitIndicator(
-                label: 'RELAY',
-                state: cockpitRelayState(phase),
-                detail: latencyMs == null
-                    ? phase.label
-                    : '${phase.label} · $latencyMs ms',
-                compact: true,
-              ),
-              const SizedBox(width: 6),
-              CockpitIndicator(
-                label: 'P2P',
-                state: cockpitP2pState(peerServerStatus),
-                detail: peerServerStatus.label,
-                compact: true,
-              ),
-            ],
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const CockpitIndicator(
+                  label: 'ENG',
+                  state: CockpitIndicatorState.ready,
+                  detail: 'Engine gotowy',
+                  compact: true,
+                ),
+                const SizedBox(width: 6),
+                CockpitIndicator(
+                  label: 'RELAY',
+                  state: cockpitRelayState(phase),
+                  detail: latencyMs == null
+                      ? phase.label
+                      : '${phase.label} · $latencyMs ms',
+                  compact: true,
+                ),
+                const SizedBox(width: 6),
+                CockpitIndicator(
+                  label: 'P2P',
+                  state: cockpitP2pState(peerServerStatus),
+                  detail: peerServerStatus.label,
+                  compact: true,
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -187,6 +197,10 @@ class CockpitIndicator extends StatefulWidget {
 class _CockpitIndicatorState extends State<CockpitIndicator>
     with SingleTickerProviderStateMixin {
   late final AnimationController _pulse;
+  bool _systemReducedMotion = false;
+
+  bool get _reduceMotion =>
+      _systemReducedMotion || TorChatMotionPolicy.enabled;
 
   @override
   void initState() {
@@ -197,7 +211,18 @@ class _CockpitIndicatorState extends State<CockpitIndicator>
       lowerBound: .35,
       upperBound: 1,
     );
+    TorChatMotionPolicy.reducedMotion.addListener(_syncAnimation);
     _syncAnimation();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final reduced = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    if (_systemReducedMotion != reduced) {
+      _systemReducedMotion = reduced;
+      _syncAnimation();
+    }
   }
 
   @override
@@ -207,8 +232,9 @@ class _CockpitIndicatorState extends State<CockpitIndicator>
   }
 
   void _syncAnimation() {
-    if (widget.state == CockpitIndicatorState.transitioning) {
-      _pulse.repeat(reverse: true);
+    if (!mounted) return;
+    if (widget.state == CockpitIndicatorState.transitioning && !_reduceMotion) {
+      if (!_pulse.isAnimating) _pulse.repeat(reverse: true);
     } else {
       _pulse.stop();
       _pulse.value = 1;
@@ -217,6 +243,7 @@ class _CockpitIndicatorState extends State<CockpitIndicator>
 
   @override
   void dispose() {
+    TorChatMotionPolicy.reducedMotion.removeListener(_syncAnimation);
     _pulse.dispose();
     super.dispose();
   }
@@ -231,57 +258,69 @@ class _CockpitIndicatorState extends State<CockpitIndicator>
       CockpitIndicatorState.inactive => status.offline,
       CockpitIndicatorState.error => status.danger,
     };
-    final reduceMotion = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    final semanticState = switch (widget.state) {
+      CockpitIndicatorState.ready => 'gotowy',
+      CockpitIndicatorState.transitioning => 'łączenie',
+      CockpitIndicatorState.inactive => 'nieaktywny',
+      CockpitIndicatorState.error => 'błąd',
+    };
 
-    return Tooltip(
-      message: '${widget.label}\n${widget.detail}',
-      child: Container(
-        padding: EdgeInsets.symmetric(
-          horizontal: widget.compact ? 7 : 10,
-          vertical: widget.compact ? 3 : 5,
-        ),
-        decoration: BoxDecoration(
-          color: shell.raisedSurface,
-          border: Border.all(color: shell.border, width: shell.borderWidth),
-          borderRadius: context.effectsTheme.pixelated
-              ? BorderRadius.zero
-              : BorderRadius.circular(999),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            AnimatedBuilder(
-              animation: _pulse,
-              builder: (context, _) => Opacity(
-                opacity: reduceMotion ? 1 : _pulse.value,
-                child: Container(
-                  width: widget.compact ? 6 : 8,
-                  height: widget.compact ? 6 : 8,
-                  decoration: BoxDecoration(
-                    color: color,
-                    shape: BoxShape.circle,
-                    boxShadow: context.effectsTheme.pixelated
-                        ? null
-                        : [
-                            BoxShadow(
-                              color: color.withValues(alpha: .45),
-                              blurRadius: widget.compact ? 5 : 8,
-                            ),
-                          ],
+    return Semantics(
+      label: '${widget.label}: $semanticState. ${widget.detail}',
+      liveRegion: widget.state == CockpitIndicatorState.error ||
+          widget.state == CockpitIndicatorState.transitioning,
+      child: ExcludeSemantics(
+        child: Tooltip(
+          message: '${widget.label}\n${widget.detail}',
+          child: Container(
+            padding: EdgeInsets.symmetric(
+              horizontal: widget.compact ? 7 : 10,
+              vertical: widget.compact ? 3 : 5,
+            ),
+            decoration: BoxDecoration(
+              color: shell.raisedSurface,
+              border: Border.all(color: shell.border, width: shell.borderWidth),
+              borderRadius: context.effectsTheme.pixelated
+                  ? BorderRadius.zero
+                  : BorderRadius.circular(999),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                AnimatedBuilder(
+                  animation: _pulse,
+                  builder: (context, _) => Opacity(
+                    opacity: _reduceMotion ? 1 : _pulse.value,
+                    child: Container(
+                      width: widget.compact ? 6 : 8,
+                      height: widget.compact ? 6 : 8,
+                      decoration: BoxDecoration(
+                        color: color,
+                        shape: BoxShape.circle,
+                        boxShadow: context.effectsTheme.pixelated
+                            ? null
+                            : [
+                                BoxShadow(
+                                  color: color.withValues(alpha: .45),
+                                  blurRadius: widget.compact ? 5 : 8,
+                                ),
+                              ],
+                      ),
+                    ),
                   ),
                 ),
-              ),
+                SizedBox(width: widget.compact ? 5 : 7),
+                Text(
+                  widget.label,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        fontSize: widget.compact ? 9 : null,
+                        letterSpacing: widget.compact ? .3 : .7,
+                        fontWeight: FontWeight.w700,
+                      ),
+                ),
+              ],
             ),
-            SizedBox(width: widget.compact ? 5 : 7),
-            Text(
-              widget.label,
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    fontSize: widget.compact ? 9 : null,
-                    letterSpacing: widget.compact ? .3 : .7,
-                    fontWeight: FontWeight.w700,
-                  ),
-            ),
-          ],
+          ),
         ),
       ),
     );
