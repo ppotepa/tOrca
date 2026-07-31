@@ -17,6 +17,7 @@ class MobileBridge extends Object
 
   static const _channel = MethodChannel('org.torchat/mobile');
   static const _eventsChannel = EventChannel('org.torchat/mobile/events');
+  static const _reattachBudget = Duration(milliseconds: 750);
 
   @override
   Stream<RuntimeEvent> get events => _eventsChannel
@@ -31,7 +32,7 @@ class MobileBridge extends Object
         _channel.invokeMethod<Object?>(EngineContract.getProfile),
         _channel.invokeMethod<Object?>(EngineContract.listContacts),
         _channel.invokeMethod<Object?>(EngineContract.listConversations),
-      ]);
+      ]).timeout(_reattachBudget);
       final identity = values[0];
       final profile = values[1];
       if (identity is! Map || profile is! Map) return null;
@@ -39,10 +40,14 @@ class MobileBridge extends Object
       var peerEndpointAvailable = false;
       try {
         peerEndpointAvailable =
-            await _channel.invokeMethod<Object?>(EngineContract.getPeerEndpoint) !=
+            await _channel
+                .invokeMethod<Object?>(EngineContract.getPeerEndpoint)
+                .timeout(_reattachBudget) !=
             null;
       } on PlatformException {
         // A missing endpoint is a normal warmup state, not attach failure.
+      } on TimeoutException {
+        // The shell snapshot remains useful while onion state catches up.
       }
 
       final now = DateTime.now();
@@ -58,6 +63,8 @@ class MobileBridge extends Object
         'peerEndpointAvailable': peerEndpointAvailable,
       };
     } on PlatformException {
+      return null;
+    } on TimeoutException {
       return null;
     }
   }
