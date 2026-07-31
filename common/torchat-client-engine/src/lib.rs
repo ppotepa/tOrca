@@ -3,6 +3,7 @@ pub mod application;
 pub mod command;
 pub mod config;
 pub mod delivery;
+pub mod domain;
 pub mod engine;
 pub mod error;
 pub mod event;
@@ -23,10 +24,15 @@ pub use command::{
 };
 pub use config::EngineConfig;
 pub use delivery::{
-    AggregateType, DeliveryAttempt, DeliveryDurability, DeliveryJob, DeliveryJobRepository,
-    DeliveryJobState, DeliveryKind, DeliveryLease, DeliveryOutcome, DeliveryOutcomeClass,
-    DeliveryScheduler, RoutingContext, RoutingDecision, SchedulerDecision, SelectedRoute,
+    AggregateType, CircuitBreaker, CircuitState, DeliveryAttempt, DeliveryDurability, DeliveryJob,
+    DeliveryJobRepository, DeliveryJobState, DeliveryKind, DeliveryLease, DeliveryOutcome,
+    DeliveryOutcomeClass, DeliveryScheduler, ExponentialRetryPolicy, RetryContext, RetryDecision,
+    RetryPolicy, RoutingContext, RoutingDecision, SchedulerDecision, SelectedRoute,
     TransportRouter,
+};
+pub use domain::{
+    transition_connection, transition_message, ConnectionEvent, EngineConnectionState,
+    InvalidConnectionTransition, InvalidMessageTransition, MessageDeliveryEvent,
 };
 pub use engine::ClientEngine;
 pub use error::{EngineError, EngineResult};
