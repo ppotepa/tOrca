@@ -23,8 +23,10 @@ pub use command::{
 };
 pub use config::EngineConfig;
 pub use delivery::{
-    AggregateType, DeliveryDurability, DeliveryJob, DeliveryJobRepository, DeliveryJobState,
-    DeliveryKind, DeliveryLease, SelectedRoute,
+    AggregateType, DeliveryAttempt, DeliveryDurability, DeliveryJob, DeliveryJobRepository,
+    DeliveryJobState, DeliveryKind, DeliveryLease, DeliveryOutcome, DeliveryOutcomeClass,
+    DeliveryScheduler, RoutingContext, RoutingDecision, SchedulerDecision, SelectedRoute,
+    TransportRouter,
 };
 pub use engine::ClientEngine;
 pub use error::{EngineError, EngineResult};
