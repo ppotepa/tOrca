@@ -2,6 +2,7 @@ pub mod actor;
 pub mod application;
 pub mod command;
 pub mod config;
+pub mod delivery;
 pub mod engine;
 pub mod error;
 pub mod event;
@@ -21,6 +22,10 @@ pub use command::{
     TorPhase,
 };
 pub use config::EngineConfig;
+pub use delivery::{
+    AggregateType, DeliveryDurability, DeliveryJob, DeliveryJobRepository, DeliveryJobState,
+    DeliveryKind, DeliveryLease, SelectedRoute,
+};
 pub use engine::ClientEngine;
 pub use error::{EngineError, EngineResult};
 pub use event::{
