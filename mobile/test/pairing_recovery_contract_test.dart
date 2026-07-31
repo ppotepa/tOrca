@@ -52,4 +52,15 @@ void main() {
     expect(source, contains('EngineContract.inviteStateChanged'));
     expect(source, contains('_repository.invalidatePairingCache()'));
   });
+
+  test('pairing dialog never auto-rejects a valid pending request', () {
+    final dialog = File(
+      'lib/features/onboarding/onboarding_views.dart',
+    ).readAsStringSync();
+
+    expect(dialog, contains('Zaproszenie oczekuje na Twoją decyzję'));
+    expect(dialog, contains('RetroActivityIndicator'));
+    expect(dialog, isNot(contains('_approvalRemaining')));
+    expect(dialog, isNot(contains('_reject(expired: true)')));
+  });
 }
