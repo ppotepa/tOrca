@@ -1,6 +1,6 @@
 use std::{fs, path::PathBuf};
 
-use rusqlite::params;
+use rusqlite::{OptionalExtension, params};
 use torchat_client_engine::{
     ClientDatabase,
     config::SecretBytes,
