@@ -34,7 +34,10 @@ class ImageAttachmentPreferences {
 
   static Future<void> setAutomaticDownloadEnabled(bool value) async {
     final preferences = await SharedPreferences.getInstance();
-    final saved = await preferences.setBool(imageAutoDownloadPreferenceKey, value);
+    final saved = await preferences.setBool(
+      imageAutoDownloadPreferenceKey,
+      value,
+    );
     if (!saved) {
       throw StateError('Nie udało się zapisać ustawienia obrazów.');
     }
@@ -48,8 +51,8 @@ class EncryptedImageStore {
   EncryptedImageStore({
     ImageStoreDirectoryProvider? directoryProvider,
     ImageStoreKeyProvider? keyProvider,
-  })  : _directoryProvider = directoryProvider ?? _defaultDirectory,
-        _keyProvider = keyProvider ?? _defaultKey;
+  }) : _directoryProvider = directoryProvider ?? _defaultDirectory,
+       _keyProvider = keyProvider ?? _defaultKey;
 
   static final EncryptedImageStore instance = EncryptedImageStore();
 
