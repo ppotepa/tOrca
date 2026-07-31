@@ -73,7 +73,7 @@ class ConversationPreferencesController
 
   Future<void> setTitle(String conversationId, String? title) async {
     final normalized = title?.trim();
-    if (normalized != null && normalized.characters.length > 48) {
+    if (normalized != null && normalized.runes.length > 48) {
       throw ArgumentError.value(title, 'title', 'Maximum length is 48 characters');
     }
     _put(
