@@ -9,10 +9,12 @@ class ThemedActivityIndicator extends StatefulWidget {
     super.key,
     this.label = '',
     this.compact = false,
+    this.color,
   });
 
   final String label;
   final bool compact;
+  final Color? color;
 
   @override
   State<ThemedActivityIndicator> createState() =>
@@ -46,7 +48,7 @@ class _ThemedActivityIndicatorState extends State<ThemedActivityIndicator> {
   Widget build(BuildContext context) {
     final activity = context.activityTheme;
     final reduceMotion = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
-    final color = Theme.of(context).colorScheme.primary;
+    final color = widget.color ?? Theme.of(context).colorScheme.primary;
     final labelStyle = Theme.of(context).textTheme.labelMedium?.copyWith(
       color: color,
       fontFamily: activity.fontFamily,
