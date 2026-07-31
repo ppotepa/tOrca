@@ -27,6 +27,23 @@ void main() {
     expect(source, contains('updateVisibility(bool foreground)'));
   });
 
+  test('pairing events trigger immediate reconciliation', () {
+    final source = File(
+      'lib/app/pairing_recovery_app_controller.dart',
+    ).readAsStringSync();
+
+    expect(source, contains('runtime.events.listen(_handleRecoveryEvent)'));
+    expect(source, contains('EngineContract.inviteReceived'));
+    expect(source, contains('EngineContract.inviteStateChanged'));
+    expect(source, contains("'duplicate invite has no pending welcome'"));
+    expect(
+      source,
+      contains('Anuluj stare zaproszenie i użyj nowego kodu parowania'),
+    );
+    expect(source, contains('_lastPairingSync = null'));
+    expect(source, contains('_pollPairing()'));
+  });
+
   test('pairing actions expose persistent per-button busy feedback', () {
     final source = File(
       'lib/shared/widgets/action_status_strip.dart',
