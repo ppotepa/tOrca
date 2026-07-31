@@ -17,16 +17,22 @@ class MobileBridge extends Object
 
   static const _channel = MethodChannel('org.torchat/mobile');
   static const _eventsChannel = EventChannel('org.torchat/mobile/events');
+  static const _runtimeSnapshotMethod = 'runtimeSnapshot';
 
   @override
   Stream<RuntimeEvent> get events => _eventsChannel
       .receiveBroadcastStream()
       .map((value) => RuntimePayload.fromDynamic(value).runtimeEvent());
 
-  /// Android owns relay retries in the foreground service. The Flutter startup
-  /// barrier is local engine readiness, not remote relay availability. Start
-  /// the long-running connect request once, then wait on a local query whose
-  /// native implementation is guarded by `localReady`.
+  @override
+  Future<Map<String, dynamic>?> runtimeSnapshot() async {
+    final value = await _channel.invokeMethod<Object?>(_runtimeSnapshotMethod);
+    if (value is! Map) return null;
+    return Map<String, dynamic>.from(value);
+  }
+
+  /// Android owns the process and shared engine. Calling connect is idempotent:
+  /// on UI reattach it observes the existing service instead of rebuilding it.
   @override
   Future<bool> connect() async {
     unawaited(
