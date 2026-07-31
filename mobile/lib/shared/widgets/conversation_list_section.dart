@@ -86,7 +86,7 @@ class ConversationListSection extends ConsumerWidget {
                               PeerEndpointStatus.missing,
                           selected: selectedConversation == conversation.id,
                           onTap: loading
-                              ? null
+                              ? () {}
                               : () => onOpenConversation(conversation.id),
                           asCard: asCard,
                         ),
