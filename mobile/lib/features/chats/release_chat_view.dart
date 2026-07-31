@@ -6,12 +6,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/app_theme.dart';
 import '../../app/ui_operation_registry.dart';
+import '../../core/attachments/image_attachment_picker.dart';
+import '../../core/attachments/image_message_codec.dart';
 import '../../core/models/domain.dart';
 import '../../shared/async/busy_surface.dart';
 import '../../shared/async/themed_activity_indicator.dart';
 import '../../shared/formatters/message_timestamps.dart';
 import '../../shared/widgets/identity_avatar.dart';
-import 'chats_view.dart' show MessageBubble;
+import 'release_message_bubble.dart';
 
 class ReleaseChatView extends ConsumerStatefulWidget {
   const ReleaseChatView({
@@ -65,9 +67,11 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
   Timer? _typingTimer;
   ChatMessage? _replyingTo;
   String? _activeConversationId;
+  String _attachmentError = '';
   bool _searching = false;
   bool _nearBottom = true;
   bool _initialScrollApplied = false;
+  bool _preparingImage = false;
   int _unseenMessageCount = 0;
 
   @override
@@ -92,6 +96,7 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
       _nearBottom = true;
       _unseenMessageCount = 0;
       _replyingTo = null;
+      _attachmentError = '';
       _scheduleInitialBottomJump();
       return;
     }
@@ -108,8 +113,7 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
         .toList(growable: false);
     if (added.isEmpty) return;
 
-    final ownMessageAdded = added.any((message) => message.outgoing);
-    if (ownMessageAdded || _nearBottom) {
+    if (added.any((message) => message.outgoing) || _nearBottom) {
       _scheduleAnimatedBottomScroll();
     } else {
       setState(() => _unseenMessageCount += added.length);
@@ -138,9 +142,10 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
   List<ChatMessage> get _visibleMessages {
     final query = _search.text.trim().toLowerCase();
     if (query.isEmpty) return widget.messages;
-    return widget.messages
-        .where((message) => message.text.toLowerCase().contains(query))
-        .toList(growable: false);
+    return widget.messages.where((message) {
+      if (isImageMessageBody(message.text)) return query == 'obraz';
+      return message.text.toLowerCase().contains(query);
+    }).toList(growable: false);
   }
 
   void _composerChanged() {
@@ -199,6 +204,34 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
         const Duration(seconds: 2),
         () => widget.onTypingChanged(false),
       );
+    }
+  }
+
+  Future<void> _pickAndSendImage() async {
+    if (_preparingImage || !widget.canSend) return;
+    setState(() {
+      _preparingImage = true;
+      _attachmentError = '';
+    });
+    try {
+      final prepared = await pickPreparedImageAttachment();
+      if (prepared == null || !mounted) return;
+      final draft = widget.composer.text;
+      widget.composer.text = prepared.toMessageBody();
+      widget.onSend(null);
+      widget.composer.text = draft;
+      _scheduleAnimatedBottomScroll();
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _attachmentError = error
+              .toString()
+              .replaceFirst('Exception: ', '')
+              .replaceFirst('Bad state: ', '');
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _preparingImage = false);
     }
   }
 
@@ -324,6 +357,8 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
               _InlineStatus(message: widget.notice),
             if (widget.error.trim().isNotEmpty)
               _InlineStatus(message: widget.error, error: true),
+            if (_attachmentError.isNotEmpty)
+              _InlineStatus(message: _attachmentError, error: true),
             Expanded(
               child: Stack(
                 children: [
@@ -361,6 +396,8 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
               replyTo: _replyingTo,
               enabled: widget.canSend && !sendState.busy,
               sending: sendState.busy,
+              preparingImage: _preparingImage,
+              onAttach: _pickAndSendImage,
               onChanged: _typingChanged,
               onCancelReply: () => setState(() => _replyingTo = null),
               onSend: () {
@@ -411,9 +448,7 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
                       _contactName(conversation.contactId, widget.contacts),
                     ),
                     subtitle: Text(
-                      conversation.preview.isEmpty
-                          ? 'Oczekiwanie na wiadomość'
-                          : conversation.preview,
+                      _previewLabel(conversation.preview),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -491,7 +526,7 @@ class _MessageTimeline extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 if (showDay) _DayDivider(date: message.createdAt),
-                MessageBubble(
+                ReleaseMessageBubble(
                   message: message,
                   contactName: contact.displayName,
                   startsGroup: startsGroup,
@@ -516,6 +551,8 @@ class _Composer extends StatelessWidget {
     required this.replyTo,
     required this.enabled,
     required this.sending,
+    required this.preparingImage,
+    required this.onAttach,
     required this.onChanged,
     required this.onCancelReply,
     required this.onSend,
@@ -525,6 +562,8 @@ class _Composer extends StatelessWidget {
   final ChatMessage? replyTo;
   final bool enabled;
   final bool sending;
+  final bool preparingImage;
+  final VoidCallback onAttach;
   final ValueChanged<String> onChanged;
   final VoidCallback onCancelReply;
   final VoidCallback onSend;
@@ -580,36 +619,57 @@ class _Composer extends StatelessWidget {
                       ],
                     ),
                   ),
-                CallbackShortcuts(
-                  bindings: {
-                    const SingleActivator(LogicalKeyboardKey.enter): () {
-                      if (enabled && controller.text.trim().isNotEmpty) onSend();
-                    },
-                  },
-                  child: TextField(
-                    controller: controller,
-                    enabled: enabled,
-                    minLines: 1,
-                    maxLines: 5,
-                    onChanged: onChanged,
-                    onSubmitted: (_) {
-                      if (enabled && controller.text.trim().isNotEmpty) onSend();
-                    },
-                    decoration: InputDecoration(
-                      hintText: enabled
-                          ? 'Napisz wiadomość…'
-                          : 'Rozmowa nie jest jeszcze gotowa',
-                      prefixIcon: const ThemedIcon(Icons.lock_outline, size: 18),
-                      suffixIcon: FilledButton(
-                        onPressed: enabled && controller.text.trim().isNotEmpty
-                            ? onSend
-                            : null,
-                        child: sending
-                            ? const ThemedActivityIndicator(compact: true)
-                            : const ThemedIcon(Icons.send, size: 19),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    IconButton.filledTonal(
+                      tooltip: preparingImage
+                          ? 'Kompresowanie obrazu…'
+                          : 'Wyślij obraz (maks. 50 KiB)',
+                      onPressed: enabled && !preparingImage ? onAttach : null,
+                      icon: preparingImage
+                          ? const ThemedActivityIndicator(compact: true)
+                          : const ThemedIcon(Icons.image_outlined, size: 19),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: CallbackShortcuts(
+                        bindings: {
+                          const SingleActivator(LogicalKeyboardKey.enter): () {
+                            if (enabled && controller.text.trim().isNotEmpty) {
+                              onSend();
+                            }
+                          },
+                        },
+                        child: TextField(
+                          controller: controller,
+                          enabled: enabled,
+                          minLines: 1,
+                          maxLines: 5,
+                          onChanged: onChanged,
+                          onSubmitted: (_) {
+                            if (enabled && controller.text.trim().isNotEmpty) {
+                              onSend();
+                            }
+                          },
+                          decoration: InputDecoration(
+                            hintText: enabled
+                                ? 'Napisz wiadomość…'
+                                : 'Rozmowa nie jest jeszcze gotowa',
+                            suffixIcon: FilledButton(
+                              onPressed:
+                                  enabled && controller.text.trim().isNotEmpty
+                                      ? onSend
+                                      : null,
+                              child: sending
+                                  ? const ThemedActivityIndicator(compact: true)
+                                  : const ThemedIcon(Icons.send, size: 19),
+                            ),
+                          ),
+                        ),
                       ),
                     ),
-                  ),
+                  ],
                 ),
               ],
             ),
@@ -679,4 +739,9 @@ String _contactName(String id, List<ContactRecord> contacts) {
     if (contact.id == id) return contact.displayName;
   }
   return 'Kontakt';
+}
+
+String _previewLabel(String preview) {
+  if (preview.isEmpty) return 'Oczekiwanie na wiadomość';
+  return isImageMessageBody(preview) ? 'Obraz' : preview;
 }
