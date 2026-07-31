@@ -100,10 +100,10 @@ The core exposes a dedicated versioned `ContactRemovedPayloadV1` contract with a
 | New-message counter and jump to bottom | IMPLEMENTED |
 | Own sent message scrolls to bottom | IMPLEMENTED |
 | Status updates do not force scroll | IMPLEMENTED |
-| SQLite pagination and prepend preservation | IN_PROGRESS |
+| SQLite pagination and prepend preservation | IMPLEMENTED |
 | Restore per-conversation scroll position | IMPLEMENTED |
 
-The timeline now exposes messages in 50-row pages, loads an older page near the top, preserves the current pixel anchor across prepend, and stores both the visible page limit and scroll offset per conversation. The presentation and restoration layer is complete. The runtime still returns the full SQLite result to Flutter, so the storage query must be converted to a `(created_at, id)` cursor before the pagination item can advance to `IMPLEMENTED`.
+The runtime now reads the newest 50 SQLite rows by default and exposes older pages through a stable `(created_at, id)` cursor using bounded `LIMIT` queries. Flutter requests those pages only when the reader reaches the top, merges them idempotently, preserves the pixel anchor across prepend, and restores the saved visible page count and scroll offset per conversation. Relationship cleanup uses an explicit full-history storage mode so pagination cannot leave queued messages or retained history behind. This path remains unverified until Rust/Flutter CI or user-provided local results are available.
 
 ## Epic 7 — images
 
