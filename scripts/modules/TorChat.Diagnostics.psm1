@@ -70,6 +70,110 @@ function Collect-TorChatDiagnostics {
     [pscustomobject]@{ State = 'Ready'; Code = 'DIAGNOSTICS_COLLECTED'; Message = "Diagnostics collected in $root"; Path = $root }
 }
 
+function Test-TorChatSensitiveDiagnosticFile {
+    param([Parameter(Mandatory = $true)][System.IO.FileInfo]$File)
+
+    $name = $File.Name.ToLowerInvariant()
+    if ($name -in @('.env','hostname','private_key','secret_key')) { return $true }
+    if ($name -match '(^|[._-])(secret|secrets|private|identity|keystore|keyring)([._-]|$)') { return $true }
+    if ($name -match 'hs_ed25519_(secret_key|public_key)') { return $true }
+    return $File.Extension.ToLowerInvariant() -in @(
+        '.db', '.sqlite', '.sqlite3', '.key', '.pem', '.p12', '.pfx',
+        '.jks', '.keystore', '.der', '.bin', '.apk', '.exe', '.dll'
+    )
+}
+
+function Protect-TorChatDiagnosticText {
+    param([AllowEmptyString()][string]$Text)
+
+    if ($null -eq $Text) { return '' }
+    $protected = $Text
+
+    # Explicit structured fields are redacted before generic token patterns so
+    # surrounding JSON/log syntax stays useful for debugging.
+    $protected = [regex]::Replace(
+        $protected,
+        '(?i)("(?:body|text|messageBody|offerPayload|payload|imageBase64|attachmentData|ciphertext|databaseKey|identityPrivateKey|sessionToken|capability|proof)"\s*:\s*")((?:\\.|[^"\\])*)(")',
+        '$1<redacted>$3'
+    )
+    $protected = [regex]::Replace(
+        $protected,
+        '(?im)^\s*(TORCHAT_(?:DATABASE_KEY|IDENTITY_PRIVATE_KEY|PAIRING_SECRET|SESSION_TOKEN|CAPABILITY|PROOF)|DATABASE_URL|POSTGRES_PASSWORD)\s*=\s*.*$',
+        '$1=<redacted>'
+    )
+    $protected = [regex]::Replace(
+        $protected,
+        '(?i)(authorization\s*[:=]\s*bearer\s+)[A-Za-z0-9._~+/=-]+',
+        '$1<redacted>'
+    )
+    $protected = [regex]::Replace(
+        $protected,
+        '(?i)(session[_-]?token|database[_-]?key|identity[_-]?private[_-]?key|pairing[_-]?secret|private[_-]?key|capability|proof)(\s*[:=]\s*)[^\s,;]+',
+        '$1$2<redacted>'
+    )
+    $protected = [regex]::Replace(
+        $protected,
+        '(?i)\b[a-z2-7]{56}\.onion\b',
+        '<redacted-onion>'
+    )
+    $protected = [regex]::Replace(
+        $protected,
+        '-----BEGIN [^-]+-----[\s\S]*?-----END [^-]+-----',
+        '<redacted-key-material>'
+    )
+    # Image/message payloads are frequently emitted as long base64 or hex
+    # strings. Preserve short identifiers and hashes, redact only large blobs.
+    $protected = [regex]::Replace(
+        $protected,
+        '(?<![A-Za-z0-9+/=])[A-Za-z0-9+/]{160,}={0,2}(?![A-Za-z0-9+/=])',
+        '<redacted-binary-payload>'
+    )
+    $protected = [regex]::Replace(
+        $protected,
+        '(?i)(?<![0-9a-f])[0-9a-f]{512,}(?![0-9a-f])',
+        '<redacted-binary-payload>'
+    )
+
+    return $protected
+}
+
+function Copy-TorChatSanitizedDiagnostics {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourceDirectory,
+        [Parameter(Mandatory = $true)][string]$DestinationDirectory
+    )
+
+    New-Item -ItemType Directory -Force -Path $DestinationDirectory | Out-Null
+    $copied = 0
+    $excluded = 0
+    $unreadable = 0
+
+    foreach ($file in Get-ChildItem -LiteralPath $SourceDirectory -File -Recurse -Force) {
+        $relative = [System.IO.Path]::GetRelativePath($SourceDirectory, $file.FullName)
+        if (Test-TorChatSensitiveDiagnosticFile -File $file) {
+            $excluded += 1
+            continue
+        }
+
+        $destination = Join-Path $DestinationDirectory $relative
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $destination) | Out-Null
+        try {
+            $text = Get-Content -LiteralPath $file.FullName -Raw -ErrorAction Stop
+            Protect-TorChatDiagnosticText -Text $text |
+                Set-Content -LiteralPath $destination -Encoding UTF8
+            $copied += 1
+        } catch {
+            $unreadable += 1
+        }
+    }
+
+    [pscustomobject]@{
+        Copied = $copied
+        Excluded = $excluded
+        Unreadable = $unreadable
+    }
+}
+
 function Export-TorChatDiagnostics {
     param(
         [Parameter(Mandatory = $true)]$Context,
@@ -80,7 +184,23 @@ function Export-TorChatDiagnostics {
     if (-not $Destination) { $Destination = Join-Path $Context.RepositoryRoot ".torchat\exports\torchat-$($Context.RunId).zip" }
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Destination) | Out-Null
     if (Test-Path -LiteralPath $Destination) { Remove-Item -LiteralPath $Destination -Force }
-    Compress-Archive -Path (Join-Path $SourceDirectory '*') -DestinationPath $Destination -CompressionLevel Optimal
+
+    $staging = Join-Path $Context.RunDirectory 'sanitized-diagnostics'
+    if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
+    try {
+        $summary = Copy-TorChatSanitizedDiagnostics -SourceDirectory $SourceDirectory -DestinationDirectory $staging
+        @{
+            schema = 1
+            sanitized = $true
+            copiedFiles = $summary.Copied
+            excludedSensitiveFiles = $summary.Excluded
+            unreadableFiles = $summary.Unreadable
+            createdAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
+        } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $staging 'sanitization-manifest.json') -Encoding UTF8
+        Compress-Archive -Path (Join-Path $staging '*') -DestinationPath $Destination -CompressionLevel Optimal
+    } finally {
+        if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
+    }
     [pscustomobject]@{ State = 'Ready'; Code = 'DIAGNOSTICS_EXPORTED'; Message = $Destination; Path = $Destination }
 }
 
@@ -96,4 +216,9 @@ function Get-TorChatRecentRuns {
     })
 }
 
-Export-ModuleMember -Function @('Collect-TorChatDiagnostics','Export-TorChatDiagnostics','Get-TorChatRecentRuns')
+Export-ModuleMember -Function @(
+    'Collect-TorChatDiagnostics',
+    'Export-TorChatDiagnostics',
+    'Get-TorChatRecentRuns',
+    'Protect-TorChatDiagnosticText'
+)
