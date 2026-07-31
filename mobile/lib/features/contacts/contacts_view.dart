@@ -1,13 +1,14 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../app/app_theme.dart';
 import '../../app/ui_operation_registry.dart';
 import '../../core/models/domain.dart';
 import '../../shared/async/busy_action_button.dart';
-import '../../shared/async/busy_surface.dart';
 import '../../shared/async/busy_action_button.dart' show BusyIconButton;
+import '../../shared/async/busy_surface.dart';
 import '../../shared/formatters/invite_code.dart';
 import '../../shared/widgets/contact_list_section.dart';
 import '../../shared/widgets/feature_header.dart';
@@ -37,7 +38,8 @@ class ContactsView extends ConsumerWidget {
   final TextEditingController search;
   final VoidCallback onSearch;
   final ValueChanged<ContactRecord> onSelect;
-  final VoidCallback onScanInvite, onShowInvite;
+  final VoidCallback onScanInvite;
+  final VoidCallback onShowInvite;
   final Future<void> Function(
     ContactRecord,
     String?,
@@ -45,8 +47,10 @@ class ContactsView extends ConsumerWidget {
     bool,
     ContactTransportPolicy,
   ) onUpdateContactSettings;
-  final String fingerprint, ownInvite;
-  final String error, notice;
+  final String fingerprint;
+  final String ownInvite;
+  final String error;
+  final String notice;
   @Deprecated('Busy is derived from component-scoped operation providers.')
   final bool busy;
   final bool showContactList;
@@ -175,7 +179,6 @@ class ContactsView extends ConsumerWidget {
   ) {
     final alias = TextEditingController(text: contact.localAlias ?? '');
     var muted = contact.muted;
-    var blocked = contact.blocked;
     var transportPolicy = contact.transportPolicy;
     return showDialog<void>(
       context: context,
@@ -195,36 +198,63 @@ class ContactsView extends ConsumerWidget {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(contact.verified
-                          ? 'Kontakt zweryfikowany'
-                          : 'Brak weryfikacji'),
+                      const Text('Relacja ustanowiona przez zaakceptowany kod'),
                       const SizedBox(height: 6),
-                      Text('P2P przez Tor: ${_peerEndpointLabel(contact.peerEndpointStatus)}'),
-                      Text('Połączenie bezpośrednie: ${_peerConnectionLabel(contact.peerConnectionStatus)}'),
+                      Text(
+                        'P2P przez Tor: '
+                        '${_peerEndpointLabel(contact.peerEndpointStatus)}',
+                      ),
+                      Text(
+                        'Połączenie bezpośrednie: '
+                        '${_peerConnectionLabel(contact.peerConnectionStatus)}',
+                      ),
                       Text('Aktualna trasa: ${_effectiveRouteLabel(contact)}'),
                       if (kDebugMode) ...[
                         const SizedBox(height: 12),
                         const Divider(),
-                        Text('Diagnostyka transportu DEV',
-                            style: Theme.of(context).textTheme.titleSmall),
+                        Text(
+                          'Diagnostyka transportu DEV',
+                          style: Theme.of(context).textTheme.titleSmall,
+                        ),
                         const SizedBox(height: 6),
-                        _DiagnosticLine(label: 'Polityka', value: _transportPolicyLabel(contact.transportPolicy)),
-                        _DiagnosticLine(label: 'Efektywna trasa', value: _effectiveRouteLabel(contact)),
-                        _DiagnosticLine(label: 'Stan endpointu', value: _peerEndpointLabel(contact.peerEndpointStatus)),
-                        _DiagnosticLine(label: 'Stan sesji P2P', value: _peerConnectionLabel(contact.peerConnectionStatus)),
+                        _DiagnosticLine(
+                          label: 'Polityka',
+                          value: _transportPolicyLabel(contact.transportPolicy),
+                        ),
+                        _DiagnosticLine(
+                          label: 'Efektywna trasa',
+                          value: _effectiveRouteLabel(contact),
+                        ),
+                        _DiagnosticLine(
+                          label: 'Stan endpointu',
+                          value: _peerEndpointLabel(contact.peerEndpointStatus),
+                        ),
+                        _DiagnosticLine(
+                          label: 'Stan sesji P2P',
+                          value: _peerConnectionLabel(
+                            contact.peerConnectionStatus,
+                          ),
+                        ),
                       ],
                       const SizedBox(height: 12),
                       DropdownButtonFormField<ContactTransportPolicy>(
                         initialValue: transportPolicy,
-                        decoration: const InputDecoration(labelText: 'Polityka transportu'),
+                        decoration: const InputDecoration(
+                          labelText: 'Polityka transportu',
+                        ),
                         items: [
                           for (final policy in ContactTransportPolicy.values)
-                            DropdownMenuItem(value: policy, child: Text(_transportPolicyLabel(policy))),
+                            DropdownMenuItem(
+                              value: policy,
+                              child: Text(_transportPolicyLabel(policy)),
+                            ),
                         ],
                         onChanged: saveState.busy
                             ? null
                             : (value) {
-                                if (value != null) setDialogState(() => transportPolicy = value);
+                                if (value != null) {
+                                  setDialogState(() => transportPolicy = value);
+                                }
                               },
                       ),
                       const SizedBox(height: 12),
@@ -232,7 +262,9 @@ class ContactsView extends ConsumerWidget {
                         controller: alias,
                         enabled: !saveState.busy,
                         maxLength: 32,
-                        decoration: const InputDecoration(labelText: 'Lokalny alias'),
+                        decoration: const InputDecoration(
+                          labelText: 'Lokalny alias',
+                        ),
                       ),
                       ThemedSwitchListTile(
                         contentPadding: EdgeInsets.zero,
@@ -242,23 +274,48 @@ class ContactsView extends ConsumerWidget {
                             ? null
                             : (value) => setDialogState(() => muted = value),
                       ),
-                      ThemedSwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('Zablokuj kontakt'),
-                        subtitle: const Text('Nie odbieraj ani nie wysyłaj wiadomości'),
-                        value: blocked,
-                        onChanged: saveState.busy
-                            ? null
-                            : (value) => setDialogState(() => blocked = value),
-                      ),
                       const SizedBox(height: 16),
-                      Text('Installation ID', style: Theme.of(context).textTheme.labelLarge),
+                      Text(
+                        'Installation ID',
+                        style: Theme.of(context).textTheme.labelLarge,
+                      ),
                       SelectableText(contact.id),
                       const SizedBox(height: 12),
-                      Text('Fingerprint', style: Theme.of(context).textTheme.labelLarge),
+                      Text(
+                        'Fingerprint',
+                        style: Theme.of(context).textTheme.labelLarge,
+                      ),
                       SelectableText(
-                        contact.fingerprint.isEmpty ? 'Fingerprint niedostępny' : contact.fingerprint,
+                        contact.fingerprint.isEmpty
+                            ? 'Fingerprint niedostępny'
+                            : contact.fingerprint,
                         style: const TextStyle(fontFamily: 'monospace'),
+                      ),
+                      const SizedBox(height: 20),
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Theme.of(context).colorScheme.error,
+                          side: BorderSide(
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                        ),
+                        onPressed: saveState.busy
+                            ? null
+                            : () => _confirmRelationshipRemoval(
+                                  context,
+                                  dialogRef,
+                                  contact,
+                                  alias.text.trim().isEmpty
+                                      ? null
+                                      : alias.text.trim(),
+                                  muted,
+                                  transportPolicy,
+                                ),
+                        icon: const ThemedIcon(
+                          Icons.person_remove_outlined,
+                          size: 18,
+                        ),
+                        label: const Text('Zakończ relację'),
                       ),
                     ],
                   ),
@@ -274,13 +331,17 @@ class ContactsView extends ConsumerWidget {
                       contact,
                       alias.text.trim().isEmpty ? null : alias.text.trim(),
                       muted,
-                      blocked,
+                      false,
                       transportPolicy,
                     );
                     final result = dialogRef.read(
-                      uiOperationProvider(UiOperationKey.contactSettingsFor(contact.id)),
+                      uiOperationProvider(
+                        UiOperationKey.contactSettingsFor(contact.id),
+                      ),
                     );
-                    if (context.mounted && !result.failed) Navigator.pop(context);
+                    if (context.mounted && !result.failed) {
+                      Navigator.pop(context);
+                    }
                   },
                 ),
                 TextButton(
@@ -294,51 +355,138 @@ class ContactsView extends ConsumerWidget {
       ),
     ).whenComplete(alias.dispose);
   }
+
+  Future<void> _confirmRelationshipRemoval(
+    BuildContext context,
+    WidgetRef ref,
+    ContactRecord contact,
+    String? localAlias,
+    bool muted,
+    ContactTransportPolicy transportPolicy,
+  ) async {
+    var preserveHistory = true;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (confirmContext) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: const Text('Zakończyć relację?'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Kontakt ${contact.displayName} utraci możliwość wysyłania '
+                'wiadomości. Ponowne dodanie będzie wymagało nowego kodu.',
+              ),
+              const SizedBox(height: 12),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Zachowaj historię na tym urządzeniu'),
+                subtitle: const Text(
+                  'Historia pozostanie lokalna i nie przywróci relacji.',
+                ),
+                value: preserveHistory,
+                onChanged: (value) =>
+                    setState(() => preserveHistory = value ?? true),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(confirmContext, false),
+              child: const Text('Anuluj'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.error,
+              ),
+              onPressed: () => Navigator.pop(confirmContext, true),
+              child: const Text('Zakończ relację'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setBool(
+      'torchat.relationship.preserveHistory.${contact.id}',
+      preserveHistory,
+    );
+    await onUpdateContactSettings(
+      contact,
+      localAlias,
+      muted,
+      true,
+      transportPolicy,
+    );
+    final result = ref.read(
+      uiOperationProvider(UiOperationKey.contactSettingsFor(contact.id)),
+    );
+    if (context.mounted && !result.failed) {
+      Navigator.of(context).pop();
+    }
+  }
 }
 
 class _DiagnosticLine extends StatelessWidget {
   const _DiagnosticLine({required this.label, required this.value});
+
   final String label;
   final String value;
+
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: 4),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(width: 126, child: Text(label, style: Theme.of(context).textTheme.labelMedium)),
-        Expanded(child: SelectableText(value)),
-      ],
-    ),
-  );
+        padding: const EdgeInsets.only(bottom: 4),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: 126,
+              child: Text(
+                label,
+                style: Theme.of(context).textTheme.labelMedium,
+              ),
+            ),
+            Expanded(child: SelectableText(value)),
+          ],
+        ),
+      );
 }
 
 String _effectiveRouteLabel(ContactRecord contact) {
-  if (contact.transportPolicy == ContactTransportPolicy.relayOnly) return 'relay';
-  if (contact.peerConnectionStatus == PeerConnectionStatus.connected) return 'P2P onion';
-  if (contact.transportPolicy == ContactTransportPolicy.peerWithRelayFallback) {
+  if (contact.transportPolicy == ContactTransportPolicy.relayOnly) {
+    return 'relay';
+  }
+  if (contact.peerConnectionStatus == PeerConnectionStatus.connected) {
+    return 'P2P onion';
+  }
+  if (contact.transportPolicy ==
+      ContactTransportPolicy.peerWithRelayFallback) {
     return 'relay fallback (P2P nieaktywne)';
   }
   return 'P2P oczekuje / offline';
 }
 
 String _peerEndpointLabel(PeerEndpointStatus status) => switch (status) {
-  PeerEndpointStatus.verified => 'endpoint zweryfikowany',
-  PeerEndpointStatus.pendingExchange => 'oczekuje na wymianę endpointu',
-  PeerEndpointStatus.invalid => 'endpoint nieprawidłowy',
-  PeerEndpointStatus.missing => 'endpoint niedostępny',
-};
+      PeerEndpointStatus.verified => 'endpoint zweryfikowany',
+      PeerEndpointStatus.pendingExchange => 'oczekuje na wymianę endpointu',
+      PeerEndpointStatus.invalid => 'endpoint nieprawidłowy',
+      PeerEndpointStatus.missing => 'endpoint niedostępny',
+    };
 
 String _peerConnectionLabel(PeerConnectionStatus status) => switch (status) {
-  PeerConnectionStatus.connected => 'połączono',
-  PeerConnectionStatus.connecting => 'łączenie',
-  PeerConnectionStatus.authenticating => 'uwierzytelnianie',
-  PeerConnectionStatus.backoff => 'oczekiwanie na ponowienie',
-  PeerConnectionStatus.offline => 'offline',
-};
+      PeerConnectionStatus.connected => 'połączono',
+      PeerConnectionStatus.connecting => 'łączenie',
+      PeerConnectionStatus.authenticating => 'uwierzytelnianie',
+      PeerConnectionStatus.backoff => 'oczekiwanie na ponowienie',
+      PeerConnectionStatus.offline => 'offline',
+    };
 
 String _transportPolicyLabel(ContactTransportPolicy policy) => switch (policy) {
-  ContactTransportPolicy.peerOnly => 'Tylko P2P',
-  ContactTransportPolicy.peerWithRelayFallback => 'P2P z fallbackiem relay',
-  ContactTransportPolicy.relayOnly => 'Tylko relay',
-};
+      ContactTransportPolicy.peerOnly => 'Tylko P2P',
+      ContactTransportPolicy.peerWithRelayFallback =>
+        'P2P z fallbackiem relay',
+      ContactTransportPolicy.relayOnly => 'Tylko relay',
+    };
