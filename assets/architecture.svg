@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="980" viewBox="0 0 1600 980" role="img" aria-labelledby="title desc">
+  <title id="title">tOrca architecture</title>
+  <desc id="desc">Two TorChat clients use shared Flutter and Rust layers, local Tor runtimes, and an untrusted Tor onion relay.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/>
+    </marker>
+    <marker id="arrow-muted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/>
+    </marker>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="5" stdDeviation="8" flood-color="#0f172a" flood-opacity="0.12"/>
+    </filter>
+    <style>
+      .bg { fill: #f8fafc; }
+      .panel { fill: #ffffff; stroke: #cbd5e1; stroke-width: 2; }
+      .panel-title { font: 700 26px system-ui, -apple-system, "Segoe UI", sans-serif; fill: #0f172a; }
+      .layer { fill: #f1f5f9; stroke: #94a3b8; stroke-width: 1.5; }
+      .layer-accent { fill: #ede9fe; stroke: #8b5cf6; stroke-width: 1.5; }
+      .layer-tor { fill: #f3e8ff; stroke: #7e22ce; stroke-width: 1.5; }
+      .relay { fill: #fff7ed; stroke: #f97316; stroke-width: 2; }
+      .text { font: 600 20px system-ui, -apple-system, "Segoe UI", sans-serif; fill: #1e293b; }
+      .small { font: 500 16px system-ui, -apple-system, "Segoe UI", sans-serif; fill: #475569; }
+      .tiny { font: 500 14px system-ui, -apple-system, "Segoe UI", sans-serif; fill: #64748b; }
+      .network { fill: none; stroke: #334155; stroke-width: 3; marker-end: url(#arrow); }
+      .network-bidi { fill: none; stroke: #334155; stroke-width: 3; marker-start: url(#arrow); marker-end: url(#arrow); }
+      .future { fill: none; stroke: #94a3b8; stroke-width: 2.5; stroke-dasharray: 10 9; marker-start: url(#arrow-muted); marker-end: url(#arrow-muted); }
+      .boundary { fill: none; stroke: #cbd5e1; stroke-width: 2; stroke-dasharray: 8 8; }
+      .label { font: 700 15px system-ui, -apple-system, "Segoe UI", sans-serif; fill: #334155; letter-spacing: 0.04em; }
+    </style>
+  </defs>
+
+  <rect class="bg" width="1600" height="980"/>
+  <text x="800" y="62" text-anchor="middle" class="panel-title" style="font-size:34px">tOrca / TorChat architecture</text>
+  <text x="800" y="94" text-anchor="middle" class="small">Shared client logic, local-first state, Tor v3 transport, untrusted relay</text>
+
+  <rect x="65" y="135" width="540" height="700" rx="24" class="panel" filter="url(#shadow)"/>
+  <rect x="995" y="135" width="540" height="700" rx="24" class="panel" filter="url(#shadow)"/>
+  <text x="335" y="184" text-anchor="middle" class="panel-title">Client A</text>
+  <text x="1265" y="184" text-anchor="middle" class="panel-title">Client B</text>
+
+  <g>
+    <rect x="115" y="220" width="440" height="82" rx="16" class="layer-accent"/>
+    <text x="335" y="255" text-anchor="middle" class="text">Flutter UI</text>
+    <text x="335" y="280" text-anchor="middle" class="small">shared Android and desktop presentation</text>
+
+    <rect x="115" y="325" width="440" height="82" rx="16" class="layer"/>
+    <text x="335" y="360" text-anchor="middle" class="text">ClientRuntime contract</text>
+    <text x="335" y="385" text-anchor="middle" class="small">typed commands, snapshots and runtime events</text>
+
+    <rect x="115" y="430" width="440" height="192" rx="16" class="layer"/>
+    <text x="335" y="466" text-anchor="middle" class="text">Shared Rust client</text>
+    <text x="335" y="497" text-anchor="middle" class="small">domain runtime · contact and message state</text>
+    <text x="335" y="526" text-anchor="middle" class="small">client engine · queue, persistence and transport</text>
+    <text x="335" y="555" text-anchor="middle" class="small">core · identity, protocol, Ed25519 and MLS</text>
+    <text x="335" y="589" text-anchor="middle" class="tiny">local identity, history and keys remain on device</text>
+
+    <rect x="115" y="645" width="440" height="72" rx="16" class="layer"/>
+    <text x="335" y="678" text-anchor="middle" class="text">Platform adapter</text>
+    <text x="335" y="702" text-anchor="middle" class="small">Android service or desktop process</text>
+
+    <rect x="115" y="740" width="440" height="62" rx="16" class="layer-tor"/>
+    <text x="335" y="779" text-anchor="middle" class="text">Local Tor runtime</text>
+  </g>
+
+  <g>
+    <rect x="1045" y="220" width="440" height="82" rx="16" class="layer-accent"/>
+    <text x="1265" y="255" text-anchor="middle" class="text">Flutter UI</text>
+    <text x="1265" y="280" text-anchor="middle" class="small">shared Android and desktop presentation</text>
+
+    <rect x="1045" y="325" width="440" height="82" rx="16" class="layer"/>
+    <text x="1265" y="360" text-anchor="middle" class="text">ClientRuntime contract</text>
+    <text x="1265" y="385" text-anchor="middle" class="small">typed commands, snapshots and runtime events</text>
+
+    <rect x="1045" y="430" width="440" height="192" rx="16" class="layer"/>
+    <text x="1265" y="466" text-anchor="middle" class="text">Shared Rust client</text>
+    <text x="1265" y="497" text-anchor="middle" class="small">domain runtime · contact and message state</text>
+    <text x="1265" y="526" text-anchor="middle" class="small">client engine · queue, persistence and transport</text>
+    <text x="1265" y="555" text-anchor="middle" class="small">core · identity, protocol, Ed25519 and MLS</text>
+    <text x="1265" y="589" text-anchor="middle" class="tiny">local identity, history and keys remain on device</text>
+
+    <rect x="1045" y="645" width="440" height="72" rx="16" class="layer"/>
+    <text x="1265" y="678" text-anchor="middle" class="text">Platform adapter</text>
+    <text x="1265" y="702" text-anchor="middle" class="small">Android service or desktop process</text>
+
+    <rect x="1045" y="740" width="440" height="62" rx="16" class="layer-tor"/>
+    <text x="1265" y="779" text-anchor="middle" class="text">Local Tor runtime</text>
+  </g>
+
+  <rect x="670" y="310" width="260" height="250" rx="24" class="relay" filter="url(#shadow)"/>
+  <text x="800" y="360" text-anchor="middle" class="panel-title">Tor v3 onion relay</text>
+  <text x="800" y="399" text-anchor="middle" class="text">Untrusted delivery layer</text>
+  <text x="800" y="438" text-anchor="middle" class="small">pairing coordination</text>
+  <text x="800" y="466" text-anchor="middle" class="small">session authentication</text>
+  <text x="800" y="494" text-anchor="middle" class="small">opaque envelope routing</text>
+  <text x="800" y="530" text-anchor="middle" class="tiny">no client private keys or plaintext</text>
+
+  <path d="M 555 771 C 640 771, 625 510, 670 475" class="network-bidi"/>
+  <path d="M 930 475 C 975 510, 960 771, 1045 771" class="network-bidi"/>
+  <text x="615" y="680" text-anchor="middle" class="label">TOR</text>
+  <text x="985" y="680" text-anchor="middle" class="label">TOR</text>
+
+  <path d="M 555 815 C 760 910, 840 910, 1045 815" class="future"/>
+  <text x="800" y="905" text-anchor="middle" class="small">future optional direct onion transport — not a current release guarantee</text>
+
+  <rect x="90" y="205" width="490" height="612" rx="18" class="boundary"/>
+  <rect x="1020" y="205" width="490" height="612" rx="18" class="boundary"/>
+  <text x="103" y="199" class="label">LOCAL TRUST BOUNDARY</text>
+  <text x="1033" y="199" class="label">LOCAL TRUST BOUNDARY</text>
+
+  <text x="800" y="955" text-anchor="middle" class="tiny">Current transport: relay onion. The client architecture keeps UI and domain logic independent of the transport strategy.</text>
+</svg>
