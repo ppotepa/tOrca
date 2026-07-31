@@ -128,10 +128,12 @@ The core exposes a dedicated versioned `ContactRemovedPayloadV1` contract with a
 | Master, sound, vibration and preview switches | IMPLEMENTED |
 | Android native preference enforcement | IMPLEMENTED |
 | Deduplicate by message/pairing ID | IN_PROGRESS |
-| Suppress current-conversation notification | NOT_STARTED |
-| Open exact conversation from alert | NOT_STARTED |
-| Clear notification after opening | NOT_STARTED |
-| Desktop native notification and restore window | IN_PROGRESS |
+| Suppress current-conversation notification | IN_PROGRESS |
+| Open exact conversation from alert | IN_PROGRESS |
+| Clear notification after opening | IN_PROGRESS |
+| Desktop native notification and restore window | IMPLEMENTED |
+
+Desktop notifications now use persistent ID deduplication, suppress a toast when its conversation is already selected, respect master/message/preview preferences, restore the window, open the exact conversation and close the selected alert. The existing controller remains the single owner of the configured desktop sound to avoid duplicate audio. Android still needs its native notification `PendingIntent` to carry the same conversation and notification identifiers before the cross-platform items can advance beyond `IN_PROGRESS`.
 
 ## Epic 9 — settings and privacy
 
