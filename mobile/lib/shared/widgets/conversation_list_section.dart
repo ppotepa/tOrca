@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/app_controller.dart';
 import '../../app/conversation_messages_state.dart';
 import '../../app/conversation_preferences.dart';
 import '../../app/ui_operation_registry.dart';
 import '../../core/attachments/image_message_codec.dart';
 import '../../core/models/domain.dart';
+import '../../core/runtime/message_paging.dart';
 import '../../core/runtime/runtime_repository.dart';
 import '../async/busy_surface.dart';
 import '../async/themed_activity_indicator.dart';
@@ -226,6 +228,10 @@ class ConversationListSection extends ConsumerWidget {
           child: Text(preference.muted ? 'Włącz powiadomienia' : 'Wycisz'),
         ),
         const PopupMenuDivider(),
+        const PopupMenuItem(
+          value: 'clear_history',
+          child: Text('Wyczyść lokalną historię'),
+        ),
         const PopupMenuItem(value: 'archive', child: Text('Archiwizuj lokalnie')),
       ],
     );
@@ -275,11 +281,58 @@ class ConversationListSection extends ConsumerWidget {
       case 'mute':
         await controller.toggleMuted(conversation.id);
         return;
+      case 'clear_history':
+        await _clearHistory(context, ref, conversation);
+        return;
       case 'archive':
         await controller.setArchived(conversation.id, true);
         return;
       default:
         return;
+    }
+  }
+
+  Future<void> _clearHistory(
+    BuildContext context,
+    WidgetRef ref,
+    ConversationSummary conversation,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Wyczyścić lokalną historię?'),
+        content: const Text(
+          'Wiadomości zostaną usunięte wyłącznie z tego urządzenia. '
+          'Kontakt nie otrzyma informacji o tej operacji.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Anuluj'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Wyczyść'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+
+    final runtime = ref.read(runtimeRepositoryProvider);
+    final messages = await runtime.allMessages(conversation.id);
+    for (final message in messages) {
+      await runtime.deleteMessageLocal(message.id);
+    }
+    final appController = ref.read(appControllerProvider.notifier);
+    await appController.refreshData(forcePairing: false, allowAutoTorka: false);
+    if (selectedConversation == conversation.id) {
+      await appController.openConversation(conversation.id);
+    }
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Lokalna historia została wyczyszczona.')),
+      );
     }
   }
 }
