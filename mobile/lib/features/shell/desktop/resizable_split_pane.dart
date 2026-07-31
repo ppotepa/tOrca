@@ -40,10 +40,9 @@ class _ResizableSplitPaneState extends State<ResizableSplitPane> {
     final stored = preferences.getDouble(widget.storageKey);
     if (!mounted || stored == null) return;
     setState(() {
-      _sidebarWidth = stored.clamp(
-        widget.minimumSidebarWidth,
-        widget.maximumSidebarWidth,
-      );
+      _sidebarWidth = stored
+          .clamp(widget.minimumSidebarWidth, widget.maximumSidebarWidth)
+          .toDouble();
     });
   }
 
@@ -52,16 +51,16 @@ class _ResizableSplitPaneState extends State<ResizableSplitPane> {
     await preferences.setDouble(widget.storageKey, _sidebarWidth);
   }
 
+  double _dynamicMaximum(double availableWidth) => (availableWidth * .48)
+      .clamp(widget.minimumSidebarWidth, widget.maximumSidebarWidth)
+      .toDouble();
+
   void _resize(double delta, double availableWidth) {
-    final dynamicMaximum = (availableWidth * .48).clamp(
-      widget.minimumSidebarWidth,
-      widget.maximumSidebarWidth,
-    );
+    final dynamicMaximum = _dynamicMaximum(availableWidth);
     setState(() {
-      _sidebarWidth = (_sidebarWidth + delta).clamp(
-        widget.minimumSidebarWidth,
-        dynamicMaximum,
-      );
+      _sidebarWidth = (_sidebarWidth + delta)
+          .clamp(widget.minimumSidebarWidth, dynamicMaximum)
+          .toDouble();
     });
   }
 
@@ -69,21 +68,21 @@ class _ResizableSplitPaneState extends State<ResizableSplitPane> {
   Widget build(BuildContext context) => LayoutBuilder(
         builder: (context, constraints) {
           final availableWidth = constraints.maxWidth;
-          final dynamicMaximum = (availableWidth * .48).clamp(
-            widget.minimumSidebarWidth,
-            widget.maximumSidebarWidth,
-          );
-          final width = _sidebarWidth.clamp(
-            widget.minimumSidebarWidth,
-            dynamicMaximum,
-          );
+          final dynamicMaximum = _dynamicMaximum(availableWidth);
+          final width = _sidebarWidth
+              .clamp(widget.minimumSidebarWidth, dynamicMaximum)
+              .toDouble();
           return Row(
             children: [
               SizedBox(width: width, child: widget.sidebar),
               _ResizeHandle(
                 dragging: _dragging,
                 onDoubleTap: () {
-                  setState(() => _sidebarWidth = widget.initialSidebarWidth);
+                  setState(() {
+                    _sidebarWidth = widget.initialSidebarWidth
+                        .clamp(widget.minimumSidebarWidth, dynamicMaximum)
+                        .toDouble();
+                  });
                   _persistWidth();
                 },
                 onDragStart: () => setState(() => _dragging = true),
