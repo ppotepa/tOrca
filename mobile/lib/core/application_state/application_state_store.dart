@@ -24,7 +24,16 @@ class ApplicationStateStore {
 
   bool hydrate(ApplicationSnapshot snapshot) {
     final current = _current;
-    if (current != null && snapshot.generation < current.generation) {
+    final currentIdentity = current?.identity.installationId.trim() ?? '';
+    final nextIdentity = snapshot.identity.installationId.trim();
+    if (current != null &&
+        currentIdentity.isNotEmpty &&
+        nextIdentity.isNotEmpty &&
+        currentIdentity != nextIdentity) {
+      _current = null;
+      _stale = false;
+      _changes.add(null);
+    } else if (current != null && snapshot.generation < current.generation) {
       return false;
     }
     _current = snapshot;
