@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../../app/app_theme.dart';
 import '../../core/models/domain.dart';
 import '../../shared/widgets/counter_badge.dart';
-import '../../shared/widgets/tor_status_bar.dart';
 import '../chats/chats_view.dart';
 import '../contacts/contacts_view.dart';
 import 'desktop/cockpit_status_bar.dart';
@@ -95,6 +94,9 @@ class MainShell extends StatelessWidget {
   final Map<String, bool> typingContacts;
   final Map<String, bool> onlineContacts;
 
+  VoidCallback get _openConnectionCenter =>
+      onOpenConnectionCenter ?? onRetryTor;
+
   Widget _content(BuildContext context, {required bool desktop}) =>
       tab == MobileTab.chats
           ? ChatsView(
@@ -155,8 +157,7 @@ class MainShell extends StatelessWidget {
                     peerServerStatus: peerServerStatus,
                     nickname: nickname,
                     latencyMs: latencyMs,
-                    onOpenConnectionCenter:
-                        onOpenConnectionCenter ?? onRetryTor,
+                    onOpenConnectionCenter: _openConnectionCenter,
                     onOpenSettings: onOpenSettings,
                   ),
                   Expanded(
@@ -197,11 +198,6 @@ class MainShell extends StatelessWidget {
               ),
               actions: [
                 IconButton(
-                  tooltip: peerServerStatus.label,
-                  onPressed: onOpenConnectionCenter ?? onRetryTor,
-                  icon: PeerServerIndicator(status: peerServerStatus),
-                ),
-                IconButton(
                   tooltip: 'Konto',
                   onPressed: onOpenAccount,
                   icon: const ThemedIcon(Icons.person_outline, size: 18),
@@ -216,11 +212,11 @@ class MainShell extends StatelessWidget {
             body: SafeArea(
               child: Column(
                 children: [
-                  TorStatusBar(
-                    status: status,
+                  CompactCockpitStatusBar(
                     phase: phase,
-                    peerStatus: peerServerStatus,
+                    peerServerStatus: peerServerStatus,
                     latencyMs: latencyMs,
+                    onOpenConnectionCenter: _openConnectionCenter,
                   ),
                   Expanded(
                     child: Padding(
@@ -256,24 +252,4 @@ class MainShell extends StatelessWidget {
           );
         },
       );
-}
-
-class PeerServerIndicator extends StatelessWidget {
-  const PeerServerIndicator({super.key, required this.status});
-
-  final PeerServerStatus status;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = switch (status) {
-      PeerServerStatus.ready => context.statusTheme.success,
-      PeerServerStatus.starting => context.statusTheme.warning,
-      PeerServerStatus.offline => context.statusTheme.offline,
-      PeerServerStatus.error => context.statusTheme.danger,
-    };
-    return Tooltip(
-      message: status.label,
-      child: Icon(Icons.settings_input_antenna, color: color, size: 20),
-    );
-  }
 }
