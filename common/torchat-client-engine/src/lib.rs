@@ -10,6 +10,7 @@ pub mod event;
 pub mod inbound;
 mod logging;
 pub mod peer;
+pub mod processes;
 pub mod relay;
 pub mod storage;
 
@@ -45,6 +46,10 @@ pub use inbound::{
     AcknowledgementPlan, BasicInboundValidator, DedupDecision, InboundDedupKey,
     InboundDeduplicator, InboundEnvelope, InboundPipeline, InboundPreparation, InboundTransport,
     InboundValidator, TransportMetadata, ValidatedInbound,
+};
+pub use processes::{
+    InvalidPairingTransition, PairingProcess, PairingProcessAction, PairingProcessEvent,
+    PairingProcessRepository, PairingProcessState,
 };
 pub use relay::{EngineRelay, NoopEngineRelay};
 pub use storage::{
