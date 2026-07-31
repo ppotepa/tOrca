@@ -4,10 +4,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/app_controller.dart';
 import '../../app/application_snapshot_provider.dart';
+import '../../app/ui_operation_registry.dart';
 import '../../core/application_state/application_snapshot.dart';
 import '../../core/connection/app_state_connection.dart';
 import '../../core/connection/connection_component.dart';
 import '../../core/models/domain.dart';
+import '../../shared/async/busy_action_button.dart';
 
 class ConnectionCenterSheet extends ConsumerWidget {
   const ConnectionCenterSheet({super.key});
@@ -17,6 +19,9 @@ class ConnectionCenterSheet extends ConsumerWidget {
     final state = ref.watch(appControllerProvider);
     final snapshot = ref.watch(applicationSnapshotProvider).valueOrNull;
     final controller = ref.read(appControllerProvider.notifier);
+    final retryState = ref.watch(
+      uiOperationProvider(UiOperationKey.connectionRetry),
+    );
     final readiness = state.connectionReadiness;
     final summary = state.connectionSummary;
     final contacts = snapshot?.contacts ?? state.contacts;
@@ -138,10 +143,12 @@ class ConnectionCenterSheet extends ConsumerWidget {
                     icon: const Icon(Icons.copy_all_outlined),
                     label: const Text('Kopiuj diagnostykę'),
                   ),
-                  FilledButton.icon(
-                    onPressed: state.isLoading ? null : controller.retryTor,
+                  BusyActionButton(
+                    busy: retryState.busy,
+                    label: 'Ponów połączenie',
+                    busyLabel: 'Ponawianie…',
                     icon: const Icon(Icons.refresh),
-                    label: const Text('Ponów połączenie'),
+                    onPressed: state.isLoading ? null : controller.retryTor,
                   ),
                 ],
               ),
