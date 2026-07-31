@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'core/application_state/application_snapshot.dart';
+import 'core/application_state/application_state_store.dart';
 import 'windows_runtime.dart';
 export 'core/models/domain.dart';
 import 'core/models/domain.dart';
@@ -71,18 +73,16 @@ final class _SessionAwareClientRuntime
 
   @override
   Future<Map<String, dynamic>?> runtimeSnapshot() async {
+    Map<String, dynamic>? snapshot;
     if (_delegate case final RuntimeAttachmentProvider provider) {
-      final native = await provider.runtimeSnapshot();
-      final profile = native?['profile'];
-      if (profile is Map) {
-        final nickname = profile['nickname']?.toString().trim() ?? '';
-        if (nickname.length >= 2) {
-          final preferences = await SharedPreferences.getInstance();
-          await preferences.setString(_sessionNicknameKey, nickname);
-          return native;
-        }
-      }
+      snapshot = await provider.runtimeSnapshot();
     }
+    snapshot ??= await _composeSnapshotFromDelegate();
+    if (snapshot != null) {
+      await _hydrateSnapshot(snapshot);
+      return snapshot;
+    }
+
     final preferences = await SharedPreferences.getInstance();
     final nickname = preferences.getString(_sessionNicknameKey)?.trim() ?? '';
     if (nickname.length < 2) return null;
@@ -92,6 +92,78 @@ final class _SessionAwareClientRuntime
       'checkpointOnly': true,
       'profile': <String, dynamic>{'nickname': nickname},
     };
+  }
+
+  Future<Map<String, dynamic>?> _composeSnapshotFromDelegate() async {
+    try {
+      final values = await Future.wait<Object?>([
+        _delegate.identity(),
+        _delegate.profile(),
+        _delegate.contacts(),
+        _delegate.conversations(),
+        _delegate.peerEndpointAvailable(),
+      ]);
+      final identity = values[0] as RuntimeIdentity?;
+      final profile = values[1] as RuntimeProfile?;
+      if (identity == null || profile == null) return null;
+      final contacts = values[2] as List<ContactRecord>;
+      final conversations = values[3] as List<ConversationSummary>;
+      return <String, dynamic>{
+        'serviceAlive': true,
+        'localDataReady': true,
+        'generation': DateTime.now().microsecondsSinceEpoch,
+        'createdAtMs': DateTime.now().millisecondsSinceEpoch,
+        'identity': _identityMap(identity),
+        'profile': _profileMap(profile),
+        'contacts': contacts.map(_contactMap).toList(growable: false),
+        'conversations': conversations
+            .map(_conversationMap)
+            .toList(growable: false),
+        'peerEndpointAvailable': values[4] as bool,
+      };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _hydrateSnapshot(Map<String, dynamic> raw) async {
+    final identityMap = _map(raw['identity']);
+    final profileMap = _map(raw['profile']);
+    if (identityMap == null || profileMap == null) return;
+
+    final identity = RuntimeIdentity.fromMap(identityMap);
+    final profile = RuntimeProfile.fromMap(profileMap);
+    final contacts = _mapList(raw['contacts'])
+        .map(ContactRecord.fromMap)
+        .toList(growable: false);
+    final conversations = _mapList(raw['conversations'])
+        .map(ConversationSummary.fromMap)
+        .toList(growable: false);
+    final generation = _intValue(raw['generation']) == 0
+        ? DateTime.now().microsecondsSinceEpoch
+        : _intValue(raw['generation']);
+
+    final current = ApplicationStateStore.shared.current;
+    if (current != null &&
+        current.identity.installationId.isNotEmpty &&
+        identity.installationId.isNotEmpty &&
+        current.identity.installationId != identity.installationId) {
+      ApplicationStateStore.shared.clear();
+    }
+    ApplicationStateStore.shared.hydrate(
+      ApplicationSnapshot(
+        generation: generation,
+        createdAtMs: _intValue(raw['createdAtMs']),
+        identity: identity,
+        profile: profile,
+        contacts: List.unmodifiable(contacts),
+        conversations: List.unmodifiable(conversations),
+        pendingInbox: _intValue(raw['pendingInbox']),
+        pendingOutbox: _intValue(raw['pendingOutbox']),
+        peerEndpointAvailable: raw['peerEndpointAvailable'] == true,
+      ),
+    );
+    await _checkpoint(profile);
   }
 
   @override
@@ -256,13 +328,15 @@ final class _SerializedClientRuntime implements ClientRuntime {
     required bool muted,
     required bool blocked,
     ContactTransportPolicy? transportPolicy,
-  }) => _run(() => _delegate.updateContactSettings(
-    installationId,
-    localAlias: localAlias,
-    muted: muted,
-    blocked: blocked,
-    transportPolicy: transportPolicy,
-  ));
+  }) => _run(
+    () => _delegate.updateContactSettings(
+      installationId,
+      localAlias: localAlias,
+      muted: muted,
+      blocked: blocked,
+      transportPolicy: transportPolicy,
+    ),
+  );
   @override
   Future<List<ContactRecord>> contacts() => _run(_delegate.contacts);
   @override
@@ -322,6 +396,60 @@ final class _SerializedClientRuntime implements ClientRuntime {
   Future<void> updateAppVisibility(bool foreground) =>
       _run(() => _delegate.updateAppVisibility(foreground));
 }
+
+Map<String, dynamic>? _map(Object? value) =>
+    value is Map ? Map<String, dynamic>.from(value) : null;
+
+List<Map<String, dynamic>> _mapList(Object? value) =>
+    (value as List? ?? const [])
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .toList(growable: false);
+
+int _intValue(Object? value) {
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  return int.tryParse(value?.toString() ?? '') ?? 0;
+}
+
+Map<String, dynamic> _identityMap(RuntimeIdentity value) => {
+  'installationId': value.installationId,
+  'publicKey': value.publicKey,
+  'fingerprint': value.fingerprint,
+};
+
+Map<String, dynamic> _profileMap(RuntimeProfile value) => {
+  'installationId': value.installationId,
+  'nickname': value.nickname,
+  'publicKey': value.publicKey,
+  'fingerprint': value.fingerprint,
+};
+
+Map<String, dynamic> _contactMap(ContactRecord value) => {
+  'installationId': value.id,
+  'nickname': value.nickname,
+  'publicKey': value.publicKey,
+  'fingerprint': value.fingerprint,
+  'localAlias': value.localAlias,
+  'muted': value.muted,
+  'blocked': value.blocked,
+  'verification': value.verified ? 'VERIFIED' : 'UNVERIFIED',
+  'peerEndpointStatus': value.peerEndpointStatus.name
+      .replaceAllMapped(RegExp(r'([A-Z])'), (match) => '_${match[1]}')
+      .toUpperCase(),
+  'peerConnectionStatus': value.peerConnectionStatus.name.toUpperCase(),
+  'lastPeerConnectedAt': value.lastPeerConnectedAt,
+  'transportPolicy': value.transportPolicy.wireValue,
+};
+
+Map<String, dynamic> _conversationMap(ConversationSummary value) => {
+  'id': value.id,
+  'contactInstallationId': value.contactId,
+  'status': value.state.wireValue,
+  'lastMessagePreview': value.preview,
+  'lastMessageAt': value.lastMessageAt,
+  'unreadCount': value.unread,
+};
 
 ClientRuntime createClientRuntime() {
   final platform = createPlatformRuntime();
