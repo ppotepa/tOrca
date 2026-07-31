@@ -60,10 +60,10 @@ The desktop lifecycle is now initialized before the Flutter application starts. 
 | Transactional local relationship removal | IN_PROGRESS |
 | Remote relationship removal | IN_PROGRESS |
 | Block sending after removal | IN_PROGRESS |
-| Preserve/delete history choice | BLOCKED |
+| Preserve/delete history choice | IN_PROGRESS |
 | Fresh re-pair and MLS state after removal | BLOCKED |
 
-`ApplicationPayloadV1` now contains a native, versioned and encrypted `ContactRemoved` payload with a stable message ID, removal timestamp and history policy. Engine routing, transactional tombstone application and fresh re-pair isolation remain in progress. Removal must not be faked by hiding a contact only in UI.
+`ApplicationPayloadV1` now contains a native, versioned and encrypted `ContactRemoved` payload with a stable message ID, removal timestamp and history policy. Relationship storage now atomically writes the tombstone, disables the contact, stops all ordinary queued messages, removes MLS and peer endpoint state, and applies the local history policy while preserving only the durable removal delivery. Engine routing and fresh re-pair isolation remain in progress. Removal must not be faked by hiding a contact only in UI.
 
 ## Epic 4 — conversations
 
