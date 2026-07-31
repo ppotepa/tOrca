@@ -42,4 +42,17 @@ void main() {
     expect(application, contains('activity_resumed'));
     expect(application, contains('activity_destroyed'));
   });
+
+  test('Android UI reattach restores the complete lightweight shell', () {
+    final bridge = File('lib/mobile_bridge.dart').readAsStringSync();
+    final runtime = File('lib/client_runtime.dart').readAsStringSync();
+
+    expect(bridge, contains('EngineContract.listContacts'));
+    expect(bridge, contains('EngineContract.listConversations'));
+    expect(bridge, contains('peerEndpointAvailable'));
+    expect(bridge, isNot(contains('EngineContract.listMessages')));
+    expect(runtime, contains('ApplicationStateStore.shared.hydrate'));
+    expect(runtime, contains("'contacts'"));
+    expect(runtime, contains("'conversations'"));
+  });
 }
