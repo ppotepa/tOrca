@@ -1,3 +1,5 @@
+import 'package:shared_preferences/shared_preferences.dart';
+
 import '../core/models/domain.dart';
 import 'app_controller_legacy.dart' as legacy;
 import 'pairing_recovery_app_controller.dart';
@@ -24,6 +26,15 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
   }
 
   @override
+  Future<void> initialize() async {
+    final preferences = await SharedPreferences.getInstance();
+    if (!preferences.containsKey('torchat.privacy.readReceipts')) {
+      await preferences.setBool('torchat.privacy.readReceipts', false);
+    }
+    await super.initialize();
+  }
+
+  @override
   Future<void> openOrStartConversation(ContactRecord contact) async {
     final alreadyExists = state.conversations.any(
       (conversation) => conversation.contactId == contact.id,
@@ -33,8 +44,6 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
       return;
     }
 
-    // Start the real operation first. Its synchronous prefix selects the
-    // contact and enters the MLS-starting state before the first await.
     final operation = super.openOrStartConversation(contact);
     final optimistic = ConversationSummary(
       id: contact.id,
