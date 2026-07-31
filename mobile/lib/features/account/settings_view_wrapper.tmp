@@ -1,0 +1,49 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../app/app_theme.dart';
+import 'nickname_edit_dialog.dart';
+import 'settings_view_legacy.dart' as legacy;
+
+export 'settings_view_legacy.dart' hide SettingsView;
+
+class SettingsView extends ConsumerWidget {
+  const SettingsView({
+    super.key,
+    required this.nickname,
+    required this.torStatus,
+    required this.themePreferences,
+    required this.onThemeFamilyChanged,
+    required this.onBrightnessChanged,
+    required this.onRetroPaletteChanged,
+    required this.onOpenTor,
+    required this.onEditProfile,
+    required this.onReset,
+  });
+
+  final String nickname;
+  final String torStatus;
+  final TorChatThemePreferences themePreferences;
+  final ValueChanged<TorChatThemeFamily> onThemeFamilyChanged;
+  final ValueChanged<TorChatBrightnessMode> onBrightnessChanged;
+  final ValueChanged<TorChatRetroPalette> onRetroPaletteChanged;
+  final VoidCallback onOpenTor;
+  final VoidCallback onEditProfile;
+  final VoidCallback onReset;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) => legacy.SettingsView(
+    nickname: nickname,
+    torStatus: torStatus,
+    themePreferences: themePreferences,
+    onThemeFamilyChanged: onThemeFamilyChanged,
+    onBrightnessChanged: onBrightnessChanged,
+    onRetroPaletteChanged: onRetroPaletteChanged,
+    onOpenTor: onOpenTor,
+    onEditProfile: () => showDialog<void>(
+      context: context,
+      builder: (_) => NicknameEditDialog(initialNickname: nickname),
+    ),
+    onReset: onReset,
+  );
+}
