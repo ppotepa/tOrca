@@ -156,3 +156,145 @@ impl ClientDatabase {
 fn storage_error(error: rusqlite::Error) -> EngineError {
     EngineError::Storage(format!("{error:#}"))
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, path::PathBuf};
+
+    use rusqlite::params;
+    use uuid::Uuid;
+
+    use crate::{ClientDatabase, config::SecretBytes};
+
+    fn database() -> (ClientDatabase, PathBuf) {
+        let path = std::env::temp_dir().join(format!(
+            "torchat-relationship-{}.sqlite",
+            Uuid::new_v4()
+        ));
+        let database = ClientDatabase::open(&path, &SecretBytes(vec![7; 32]))
+            .expect("temporary encrypted database should open");
+        (database, path)
+    }
+
+    fn seed_relationship(database: &mut ClientDatabase) {
+        let transaction = database.transaction().unwrap();
+        let tx = transaction.as_ref();
+        tx.execute(
+            "INSERT INTO contacts (
+                installation_id, nickname, public_key, fingerprint,
+                verification, source
+             ) VALUES ('peer-1', 'Alice', 'public', 'fingerprint',
+                       'VERIFIED', 'PAIRING');",
+            [],
+        )
+        .unwrap();
+        tx.execute(
+            "INSERT INTO conversations (
+                id, contact_installation_id, state, unread_count,
+                last_message_preview, last_message_at
+             ) VALUES ('peer-1', 'peer-1', 'ACTIVE', 0, 'hello', 1);",
+            [],
+        )
+        .unwrap();
+        tx.execute(
+            "INSERT INTO conversation_mls (conversation_id, snapshot)
+             VALUES ('peer-1', X'010203');",
+            [],
+        )
+        .unwrap();
+        tx.execute(
+            "INSERT INTO messages (
+                id, conversation_id, outgoing, body, state,
+                created_at, next_attempt_at
+             ) VALUES ('message-1', 'peer-1', 0, 'hello', 'DELIVERED', 1, 0);",
+            [],
+        )
+        .unwrap();
+        transaction.commit().unwrap();
+    }
+
+    fn scalar(database: &mut ClientDatabase, sql: &str) -> i64 {
+        let transaction = database.transaction().unwrap();
+        let value = transaction
+            .as_ref()
+            .query_row(sql, [], |row| row.get(0))
+            .unwrap();
+        transaction.rollback().unwrap();
+        value
+    }
+
+    #[test]
+    fn removal_preserves_history_but_disables_relationship() {
+        let (mut database, path) = database();
+        seed_relationship(&mut database);
+
+        database
+            .apply_relationship_removal("peer-1", 42, true)
+            .unwrap();
+
+        let tombstone = database
+            .relationship_tombstone("peer-1")
+            .unwrap()
+            .expect("tombstone should exist");
+        assert_eq!(tombstone.removed_at, 42);
+        assert!(tombstone.preserve_history);
+        assert_eq!(
+            scalar(
+                &mut database,
+                "SELECT blocked FROM contacts WHERE installation_id = 'peer-1';"
+            ),
+            1
+        );
+        assert_eq!(
+            scalar(
+                &mut database,
+                "SELECT COUNT(*) FROM conversations
+                 WHERE id = 'peer-1' AND state = 'OFFLINE';"
+            ),
+            1
+        );
+        assert_eq!(scalar(&mut database, "SELECT COUNT(*) FROM messages;"), 1);
+        assert_eq!(
+            scalar(&mut database, "SELECT COUNT(*) FROM conversation_mls;"),
+            0
+        );
+
+        drop(database);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn removal_can_delete_local_history() {
+        let (mut database, path) = database();
+        seed_relationship(&mut database);
+
+        database
+            .apply_relationship_removal("peer-1", 43, false)
+            .unwrap();
+
+        assert_eq!(scalar(&mut database, "SELECT COUNT(*) FROM messages;"), 0);
+        let tombstone = database
+            .relationship_tombstone("peer-1")
+            .unwrap()
+            .expect("tombstone should exist");
+        assert!(!tombstone.preserve_history);
+
+        drop(database);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn tombstone_can_be_cleared_for_fresh_pairing() {
+        let (mut database, path) = database();
+        seed_relationship(&mut database);
+        database
+            .apply_relationship_removal("peer-1", 44, true)
+            .unwrap();
+
+        database.clear_relationship_tombstone("peer-1").unwrap();
+        assert!(database.relationship_tombstone("peer-1").unwrap().is_none());
+
+        drop(database);
+        let _ = fs::remove_file(path);
+    }
+}
