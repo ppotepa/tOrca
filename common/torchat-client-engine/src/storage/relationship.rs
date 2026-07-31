@@ -4,6 +4,8 @@ use crate::{EngineError, EngineResult};
 
 use super::ClientDatabase;
 
+pub const RELATIONSHIP_REMOVED_BODY_PREFIX: &str = "torchat-relationship-removed-v1:";
+
 const ENSURE_TABLE: &str = "CREATE TABLE IF NOT EXISTS relationship_tombstones (
     contact_installation_id TEXT PRIMARY KEY,
     removed_at INTEGER NOT NULL,
@@ -37,7 +39,7 @@ impl ClientDatabase {
                 contact_installation_id, removed_at, preserve_history
              ) VALUES (?1, ?2, ?3)
              ON CONFLICT(contact_installation_id) DO UPDATE SET
-                removed_at = excluded.removed_at,
+                removed_at = MAX(relationship_tombstones.removed_at, excluded.removed_at),
                 preserve_history = excluded.preserve_history;",
             rusqlite::params![
                 contact_installation_id,
@@ -58,12 +60,63 @@ impl ClientDatabase {
             [contact_installation_id],
         )
         .map_err(storage_error)?;
+
+        // Ordinary queued messages must never escape after a tombstone. The
+        // encrypted relationship-removal message is the sole exception: its
+        // already persisted ciphertext may continue through the durable retry
+        // path after the local MLS snapshot has been destroyed.
+        tx.execute(
+            "UPDATE messages
+             SET state = 'FAILED',
+                 next_attempt_at = 0,
+                 ack_deadline = NULL,
+                 last_transport_error = 'relationship removed'
+             WHERE conversation_id IN (
+                    SELECT id FROM conversations WHERE contact_installation_id = ?1
+                  )
+               AND outgoing = 1
+               AND UPPER(state) IN ('QUEUED', 'SENDING')
+               AND body NOT LIKE ?2;",
+            rusqlite::params![
+                contact_installation_id,
+                format!("{RELATIONSHIP_REMOVED_BODY_PREFIX}%"),
+            ],
+        )
+        .map_err(storage_error)?;
+
+        tx.execute(
+            "DELETE FROM outbound_deliveries
+             WHERE contact_installation_id = ?1
+               AND message_id NOT IN (
+                    SELECT id FROM messages
+                    WHERE body LIKE ?2
+               );",
+            rusqlite::params![
+                contact_installation_id,
+                format!("{RELATIONSHIP_REMOVED_BODY_PREFIX}%"),
+            ],
+        )
+        .map_err(storage_error)?;
+        tx.execute(
+            "DELETE FROM delivery_receipts
+             WHERE conversation_id IN (
+                SELECT id FROM conversations WHERE contact_installation_id = ?1
+             );",
+            [contact_installation_id],
+        )
+        .map_err(storage_error)?;
+
         if !preserve_history {
             tx.execute(
-                "DELETE FROM messages WHERE conversation_id IN (
+                "DELETE FROM messages
+                 WHERE conversation_id IN (
                     SELECT id FROM conversations WHERE contact_installation_id = ?1
-                 );",
-                [contact_installation_id],
+                 )
+                   AND body NOT LIKE ?2;",
+                rusqlite::params![
+                    contact_installation_id,
+                    format!("{RELATIONSHIP_REMOVED_BODY_PREFIX}%"),
+                ],
             )
             .map_err(storage_error)?;
         }
@@ -71,9 +124,11 @@ impl ClientDatabase {
             "DELETE FROM conversation_mls WHERE conversation_id IN (
                 SELECT id FROM conversations WHERE contact_installation_id = ?1
              );",
-            "DELETE FROM outbound_deliveries WHERE contact_installation_id = ?1;",
             "DELETE FROM contact_peer_endpoints WHERE contact_installation_id = ?1;",
             "DELETE FROM endpoint_update_outbox WHERE contact_installation_id = ?1;",
+            "DELETE FROM peer_endpoint_bootstrap_outbox WHERE contact_installation_id = ?1;",
+            "DELETE FROM pending_contact_confirmations WHERE peer_installation_id = ?1;",
+            "DELETE FROM pending_peer_endpoint_inbox WHERE contact_installation_id = ?1;",
         ] {
             tx.execute(sql, [contact_installation_id])
                 .map_err(storage_error)?;
@@ -112,13 +167,44 @@ impl ClientDatabase {
         contact_installation_id: &str,
     ) -> EngineResult<()> {
         let transaction = self.transaction()?;
-        transaction
-            .as_ref()
-            .execute(
-                "DELETE FROM relationship_tombstones WHERE contact_installation_id = ?1;",
-                [contact_installation_id],
-            )
-            .map_err(storage_error)?;
+        let tx = transaction.as_ref();
+        tx.execute_batch(ENSURE_TABLE).map_err(storage_error)?;
+        tx.execute(
+            "DELETE FROM relationship_tombstones WHERE contact_installation_id = ?1;",
+            [contact_installation_id],
+        )
+        .map_err(storage_error)?;
+        tx.execute(
+            "UPDATE contacts SET blocked = 0, updated_at = unixepoch()
+             WHERE installation_id = ?1;",
+            [contact_installation_id],
+        )
+        .map_err(storage_error)?;
+        tx.execute(
+            "DELETE FROM outbound_deliveries
+             WHERE message_id IN (
+                SELECT id FROM messages
+                WHERE conversation_id IN (
+                    SELECT id FROM conversations WHERE contact_installation_id = ?1
+                ) AND body LIKE ?2
+             );",
+            rusqlite::params![
+                contact_installation_id,
+                format!("{RELATIONSHIP_REMOVED_BODY_PREFIX}%"),
+            ],
+        )
+        .map_err(storage_error)?;
+        tx.execute(
+            "DELETE FROM messages
+             WHERE conversation_id IN (
+                SELECT id FROM conversations WHERE contact_installation_id = ?1
+             ) AND body LIKE ?2;",
+            rusqlite::params![
+                contact_installation_id,
+                format!("{RELATIONSHIP_REMOVED_BODY_PREFIX}%"),
+            ],
+        )
+        .map_err(storage_error)?;
         transaction.commit()
     }
 }
@@ -240,6 +326,13 @@ mod tests {
             .unwrap();
         database.clear_relationship_tombstone("peer-1").unwrap();
         assert!(database.relationship_tombstone("peer-1").unwrap().is_none());
+        assert_eq!(
+            scalar(
+                &mut database,
+                "SELECT blocked FROM contacts WHERE installation_id = 'peer-1';"
+            ),
+            0
+        );
         drop(database);
         let _ = fs::remove_file(path);
     }
