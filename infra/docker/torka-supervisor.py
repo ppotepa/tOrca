@@ -39,7 +39,9 @@ def main():
     while not STOPPING:
         started_at = time.monotonic()
         log("TORCHAT_TORKA_START")
-        CHILD = subprocess.Popen(["/usr/local/bin/torka-client"])
+        # Invoke Python explicitly so a checkout with CRLF cannot turn the
+        # client shebang into the invalid interpreter name `python3\r`.
+        CHILD = subprocess.Popen(["python3", "/usr/local/bin/torka-client"])
         exit_code = CHILD.wait()
         CHILD = None
         if STOPPING:
