@@ -107,6 +107,7 @@
   "events": [
     "runtime_ready",
     "tor_status",
+    "transport_status_changed",
     "profile_ready",
     "invite_received",
     "invite_state_changed",

@@ -52,6 +52,7 @@ class AppState {
     this.ownInvite,
     this.transport = const RuntimeTorStatus(),
     this.peerServerStatus = PeerServerStatus.starting,
+    this.transportStatuses = const {},
     this.startupSteps = const [],
     this.selectedConversationId,
     this.isLoading = false,
@@ -73,6 +74,7 @@ class AppState {
   final InviteCode? ownInvite;
   final RuntimeTorStatus transport;
   final PeerServerStatus peerServerStatus;
+  final Map<TransportComponent, TransportStatusSnapshot> transportStatuses;
   final List<StartupStep> startupSteps;
   final String? selectedConversationId;
   final bool isLoading;
@@ -125,6 +127,7 @@ class AppState {
     InviteCode? ownInvite,
     RuntimeTorStatus? transport,
     PeerServerStatus? peerServerStatus,
+    Map<TransportComponent, TransportStatusSnapshot>? transportStatuses,
     List<StartupStep>? startupSteps,
     String? selectedConversationId,
     bool clearSelection = false,
@@ -147,6 +150,7 @@ class AppState {
     ownInvite: ownInvite ?? this.ownInvite,
     transport: transport ?? this.transport,
     peerServerStatus: peerServerStatus ?? this.peerServerStatus,
+    transportStatuses: transportStatuses ?? this.transportStatuses,
     startupSteps: startupSteps ?? this.startupSteps,
     selectedConversationId: clearSelection
         ? null
@@ -914,6 +918,13 @@ class AppController extends Notifier<AppState> {
           _introPlayed = true;
           unawaited(_playIntro());
         }
+      case TransportStatusChangedEvent(:final snapshot):
+        state = state.copyWith(
+          transportStatuses: {
+            ...state.transportStatuses,
+            snapshot.component: snapshot,
+          },
+        );
       case ProfileReadyEvent(:final profile):
         final nextProfile =
             profile.nickname.trim().isEmpty &&

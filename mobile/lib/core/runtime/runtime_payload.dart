@@ -84,6 +84,25 @@ class RuntimePayload {
                 0,
           ),
         );
+      case EngineContract.transportStatusChanged:
+        return TransportStatusChangedEvent(
+          TransportStatusSnapshot(
+            component: TransportComponent.fromValue(
+              string(EngineContract.transportComponent),
+            ),
+            state: TransportProbeState.fromValue(
+              string(EngineContract.transportState),
+            ),
+            detail: string(EngineContract.detail) ?? '',
+            progress: intValue(EngineContract.progress),
+            latencyMs: intValue(EngineContract.latencyMs),
+            retryAttempt: intValue(EngineContract.retryAttempt) ?? 0,
+            retryInMs: intValue(EngineContract.retryInMs),
+            generation: intValue(EngineContract.generation) ?? 0,
+            endpoint: string(EngineContract.endpoint),
+            updatedAt: intValue(EngineContract.updatedAt),
+          ),
+        );
       case EngineContract.profileReady:
         return ProfileReadyEvent(
           RuntimePayload.fromDynamicOrNull(

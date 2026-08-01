@@ -77,8 +77,7 @@ class SequentialAppController extends legacy.AppController {
     final generation = _startup.begin(
       transport: state.transport,
       runtimeReady: state.identity.installationId.isNotEmpty,
-      peerEndpointAvailable:
-          state.peerServerStatus == PeerServerStatus.ready,
+      peerEndpointAvailable: state.peerServerStatus == PeerServerStatus.ready,
     );
     final retainedIdentity =
         _repository.applicationState.current?.identity.installationId ?? '';
@@ -173,10 +172,7 @@ class SequentialAppController extends legacy.AppController {
         isLoading: false,
         action: '',
         error: _message(error),
-        startupSteps: _startup.stepsFor(
-          _phase,
-          error: _message(error),
-        ),
+        startupSteps: _startup.stepsFor(_phase, error: _message(error)),
         screen: state.profile.nickname.trim().isNotEmpty
             ? legacy.ControllerScreen.main
             : legacy.ControllerScreen.boot,
@@ -233,10 +229,7 @@ class SequentialAppController extends legacy.AppController {
 
   void _applyPhase(SequentialStartupPhase phase) {
     _phase = phase;
-    state = state.copyWith(
-      startupSteps: _startup.stepsFor(phase),
-      error: '',
-    );
+    state = state.copyWith(startupSteps: _startup.stepsFor(phase), error: '');
   }
 
   @override
@@ -312,10 +305,18 @@ class SequentialAppController extends legacy.AppController {
           _introPlayed = true;
           unawaited(_playIntro());
         }
+      case TransportStatusChangedEvent(:final snapshot):
+        state = state.copyWith(
+          transportStatuses: {
+            ...state.transportStatuses,
+            snapshot.component: snapshot,
+          },
+        );
       case ProfileReadyEvent(:final profile):
         _repository.invalidateLocalCache();
         final current = state.profile;
-        final next = profile.nickname.trim().isEmpty &&
+        final next =
+            profile.nickname.trim().isEmpty &&
                 current.nickname.trim().isNotEmpty
             ? current
             : profile;

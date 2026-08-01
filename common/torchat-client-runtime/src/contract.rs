@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 pub enum RuntimeType {
     RuntimeReady,
     TorStatus,
+    TransportStatusChanged,
     ProfileReady,
     InviteReceived,
     InviteStateChanged,
@@ -36,6 +37,25 @@ pub enum RuntimeEvent {
         latency_ms: Option<u64>,
         #[serde(default, rename = "retryAttempt")]
         retry_attempt: u32,
+    },
+    TransportStatusChanged {
+        component: TransportComponent,
+        state: TransportProbeState,
+        detail: String,
+        #[serde(default)]
+        progress: Option<i32>,
+        #[serde(default, rename = "latencyMs")]
+        latency_ms: Option<u64>,
+        #[serde(default, rename = "retryAttempt")]
+        retry_attempt: u32,
+        #[serde(default, rename = "retryInMs")]
+        retry_in_ms: Option<u64>,
+        #[serde(default)]
+        generation: u64,
+        #[serde(default)]
+        endpoint: Option<String>,
+        #[serde(default, rename = "updatedAt")]
+        updated_at: i64,
     },
     ProfileReady {
         profile: crate::models::RuntimeProfile,
@@ -106,6 +126,25 @@ pub enum RuntimeEvent {
     RuntimeLog {
         message: String,
     },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum TransportComponent {
+    Engine,
+    Relay,
+    Peer,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum TransportProbeState {
+    Idle,
+    Starting,
+    Ready,
+    Degraded,
+    Error,
+    Offline,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

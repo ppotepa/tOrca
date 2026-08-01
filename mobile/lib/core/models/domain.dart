@@ -83,8 +83,8 @@ class PeerEndpoint {
         : _intFrom(map[EngineContract.expiresAt]),
     capabilities:
         (map[EngineContract.capabilities] as List<dynamic>? ?? const [])
-        .map((value) => value.toString())
-        .toList(growable: false),
+            .map((value) => value.toString())
+            .toList(growable: false),
   );
 }
 
@@ -128,11 +128,12 @@ class StartupStep {
     StartupStepKind.communication => 'Kolejki i odbieranie wiadomości',
   };
 
-  StartupStep copyWith({StartupStepState? state, String? detail}) => StartupStep(
-    kind: kind,
-    state: state ?? this.state,
-    detail: detail ?? this.detail,
-  );
+  StartupStep copyWith({StartupStepState? state, String? detail}) =>
+      StartupStep(
+        kind: kind,
+        state: state ?? this.state,
+        detail: detail ?? this.detail,
+      );
 }
 
 List<StartupStep> initialStartupSteps() => [
@@ -355,6 +356,62 @@ class RuntimeTorStatus {
     latencyMs: latencyMs ?? this.latencyMs,
     retryAttempt: retryAttempt ?? this.retryAttempt,
   );
+}
+
+enum TransportComponent {
+  engine,
+  relay,
+  peer;
+
+  static TransportComponent fromValue(String? value) => switch (value) {
+    'ENGINE' => engine,
+    'PEER' => peer,
+    _ => relay,
+  };
+}
+
+enum TransportProbeState {
+  idle,
+  starting,
+  ready,
+  degraded,
+  error,
+  offline;
+
+  static TransportProbeState fromValue(String? value) => switch (value) {
+    'IDLE' => idle,
+    'STARTING' => starting,
+    'READY' => ready,
+    'DEGRADED' => degraded,
+    'OFFLINE' => offline,
+    _ => error,
+  };
+}
+
+class TransportStatusSnapshot {
+  const TransportStatusSnapshot({
+    required this.component,
+    required this.state,
+    required this.detail,
+    this.progress,
+    this.latencyMs,
+    this.retryAttempt = 0,
+    this.retryInMs,
+    this.generation = 0,
+    this.endpoint,
+    this.updatedAt,
+  });
+
+  final TransportComponent component;
+  final TransportProbeState state;
+  final String detail;
+  final int? progress;
+  final int? latencyMs;
+  final int retryAttempt;
+  final int? retryInMs;
+  final int generation;
+  final String? endpoint;
+  final int? updatedAt;
 }
 
 class RuntimeIdentity {
@@ -812,6 +869,12 @@ extension InviteListMetrics on Iterable<PairingItem> {
 
 sealed class RuntimeEvent {
   const RuntimeEvent();
+}
+
+class TransportStatusChangedEvent extends RuntimeEvent {
+  const TransportStatusChangedEvent(this.snapshot);
+
+  final TransportStatusSnapshot snapshot;
 }
 
 class TorStatusEvent extends RuntimeEvent {

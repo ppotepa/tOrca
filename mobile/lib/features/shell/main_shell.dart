@@ -22,6 +22,7 @@ class MainShell extends StatelessWidget {
     required this.latencyMs,
     required this.peerServerStatus,
     this.readiness,
+    this.transportStatuses = const {},
     required this.contacts,
     required this.conversations,
     required this.messages,
@@ -64,6 +65,7 @@ class MainShell extends StatelessWidget {
   final TransportPhase phase;
   final PeerServerStatus peerServerStatus;
   final ConnectionReadiness? readiness;
+  final Map<TransportComponent, TransportStatusSnapshot> transportStatuses;
   final int? latencyMs;
   final List<ContactRecord> contacts;
   final List<ConversationSummary> conversations;
@@ -187,6 +189,7 @@ class MainShell extends StatelessWidget {
                       phase: phase,
                       peerStatus: peerServerStatus,
                       readiness: readiness,
+                      transportStatuses: transportStatuses,
                       latencyMs: latencyMs,
                       onOpenConnectionCenter: _openConnectionCenter,
                     ),
@@ -247,6 +250,7 @@ class MainShell extends StatelessWidget {
                     phase: phase,
                     peerStatus: peerServerStatus,
                     readiness: readiness,
+                    transportStatuses: transportStatuses,
                     latencyMs: latencyMs,
                     onOpenConnectionCenter: _openConnectionCenter,
                   ),

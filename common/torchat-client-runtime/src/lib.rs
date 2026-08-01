@@ -23,7 +23,9 @@ pub use collections::{
     RuntimeMessageLike, RuntimePairingItemLike, runtime_contacts_from_iter,
     runtime_messages_from_iter, runtime_pairing_items_from_iter,
 };
-pub use contract::{RuntimeEvent, RuntimeStatusPhase, RuntimeType};
+pub use contract::{
+    RuntimeEvent, RuntimeStatusPhase, RuntimeType, TransportComponent, TransportProbeState,
+};
 pub use error::{RuntimeError, RuntimeResult};
 pub use logic::RuntimeConversationUpdate;
 pub use logic::{

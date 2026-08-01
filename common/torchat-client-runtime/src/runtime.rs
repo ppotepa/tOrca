@@ -97,6 +97,33 @@ where
         self.session.publish_tor_status(status);
     }
 
+    pub fn report_transport_status(
+        &mut self,
+        component: crate::TransportComponent,
+        state: crate::TransportProbeState,
+        detail: impl Into<String>,
+        progress: Option<i32>,
+        latency_ms: Option<u64>,
+        retry_attempt: u32,
+        retry_in_ms: Option<u64>,
+        generation: u64,
+        endpoint: Option<String>,
+        updated_at: i64,
+    ) {
+        self.session.push_event(crate::RuntimeEvent::TransportStatusChanged {
+            component,
+            state,
+            detail: detail.into(),
+            progress,
+            latency_ms,
+            retry_attempt,
+            retry_in_ms,
+            generation,
+            endpoint,
+            updated_at,
+        });
+    }
+
     pub fn apply_remote_profile(
         &mut self,
         profile: RuntimeProfile,

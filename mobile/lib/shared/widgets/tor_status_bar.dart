@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../../app/app_theme.dart';
-import '../../core/connection/connection_component.dart';
 import '../../core/connection/connection_readiness.dart';
 import '../../core/models/domain.dart';
+import 'status_probe.dart';
 
 /// One compact, transport-agnostic connection rail.
 ///
@@ -16,6 +16,8 @@ class TransportStatusDock extends StatefulWidget {
     super.key,
     this.status = '',
     this.readiness,
+    this.transportStatuses = const {},
+    this.probeRegistry = StatusProbeRegistry.standard,
     this.phase = TransportPhase.starting,
     this.peerStatus = PeerServerStatus.starting,
     this.desktop = false,
@@ -25,6 +27,8 @@ class TransportStatusDock extends StatefulWidget {
 
   final String status;
   final ConnectionReadiness? readiness;
+  final Map<TransportComponent, TransportStatusSnapshot> transportStatuses;
+  final StatusProbeRegistry probeRegistry;
   final TransportPhase phase;
   final PeerServerStatus peerStatus;
   final bool desktop;
@@ -45,14 +49,25 @@ class _TransportStatusDockState extends State<TransportStatusDock>
     duration: const Duration(milliseconds: 1800),
   );
 
-  bool get _hasBusySegment =>
-      widget.phase.isConnecting ||
-      widget.peerStatus == PeerServerStatus.starting;
+  bool get _hasBusySegment => widget.probeRegistry
+      .read(_diagnostics)
+      .any((probe) => probe.state == StatusProbeState.starting);
 
-  bool get _hasErrorSegment =>
-      widget.phase.isError || widget.peerStatus == PeerServerStatus.error;
+  bool get _hasErrorSegment => widget.probeRegistry
+      .read(_diagnostics)
+      .any((probe) => probe.state == StatusProbeState.error);
 
-  bool get _hasWarningSegment => widget.phase.isWarning;
+  bool get _hasWarningSegment => widget.probeRegistry
+      .read(_diagnostics)
+      .any((probe) => probe.state == StatusProbeState.degraded);
+
+  TransportDiagnosticsSnapshot get _diagnostics => TransportDiagnosticsSnapshot(
+    phase: widget.phase,
+    peerStatus: widget.peerStatus,
+    readiness: widget.readiness,
+    statuses: widget.transportStatuses,
+    latencyMs: widget.latencyMs,
+  );
 
   bool _expanded = false;
 
@@ -106,25 +121,10 @@ class _TransportStatusDockState extends State<TransportStatusDock>
   Widget build(BuildContext context) {
     final animationsDisabled = MediaQuery.disableAnimationsOf(context);
     final phase = animationsDisabled ? 0.0 : _breathing.value;
-    final engine = _SegmentState(
-      label: 'Silnik',
-      detail: _engineDetail,
-      icon: Icons.memory_rounded,
-      state: _engineState,
-    );
-    final relay = _SegmentState(
-      label: 'Tor relay',
-      detail: _relayDetail,
-      icon: Icons.hub_outlined,
-      state: _stateFromTransport(widget.phase),
-    );
-    final peer = _SegmentState(
-      label: 'Tor P2P',
-      detail: _peerDetail,
-      icon: Icons.settings_input_antenna_rounded,
-      state: _stateFromPeer(widget.peerStatus),
-    );
-    final segments = [engine, relay, peer];
+    final segments = widget.probeRegistry
+        .read(_diagnostics)
+        .map(_segmentFromProbe)
+        .toList(growable: false);
 
     final theme = Theme.of(context);
     return Semantics(
@@ -183,48 +183,21 @@ class _TransportStatusDockState extends State<TransportStatusDock>
     );
   }
 
-  _SegmentActivity get _engineState {
-    final readiness = widget.readiness;
-    if (readiness != null) {
-      final state = readiness.engine.state;
-      return switch (state) {
-        ConnectionComponentState.failed => _SegmentActivity.error,
-        ConnectionComponentState.degraded => _SegmentActivity.warning,
-        ConnectionComponentState.pending ||
-        ConnectionComponentState.starting => _SegmentActivity.busy,
-        ConnectionComponentState.ready => _SegmentActivity.ready,
-      };
-    }
-    if (widget.phase.isError) return _SegmentActivity.error;
-    if (widget.phase.isConnecting) return _SegmentActivity.busy;
-    return _SegmentActivity.ready;
-  }
-
-  String get _engineDetail => switch (_engineState) {
-    _SegmentActivity.ready => 'gotowy',
-    _SegmentActivity.busy => 'rozgrzewanie',
-    _SegmentActivity.warning => 'ograniczony',
-    _SegmentActivity.error => 'wymaga uwagi',
-    _SegmentActivity.idle => 'oczekuje',
-  };
-
-  String get _relayDetail =>
-      widget.phase.isConnected && widget.latencyMs != null
-      ? '${widget.latencyMs} ms'
-      : widget.phase.isConnecting
-      ? 'łączenie'
-      : widget.phase.isWarning
-      ? 'ograniczony'
-      : widget.phase.isError
-      ? 'offline'
-      : 'gotowy';
-
-  String get _peerDetail => switch (widget.peerStatus) {
-    PeerServerStatus.ready => 'aktywny',
-    PeerServerStatus.starting => 'uruchamianie',
-    PeerServerStatus.offline => 'offline',
-    PeerServerStatus.error => 'błąd',
-  };
+  _SegmentState _segmentFromProbe(StatusProbeSnapshot probe) => _SegmentState(
+    label: probe.label,
+    detail: probe.latencyMs == null
+        ? probe.detail
+        : '${probe.detail} · ${probe.latencyMs} ms',
+    icon: probe.icon,
+    state: switch (probe.state) {
+      StatusProbeState.idle => _SegmentActivity.idle,
+      StatusProbeState.starting => _SegmentActivity.busy,
+      StatusProbeState.ready => _SegmentActivity.ready,
+      StatusProbeState.degraded => _SegmentActivity.warning,
+      StatusProbeState.error ||
+      StatusProbeState.offline => _SegmentActivity.error,
+    },
+  );
 }
 
 class _ConnectionSegment extends StatelessWidget {
@@ -368,23 +341,6 @@ class _SegmentState {
   final IconData icon;
   final _SegmentActivity state;
 }
-
-_SegmentActivity _stateFromTransport(TransportPhase phase) => switch (phase) {
-  TransportPhase.connected => _SegmentActivity.ready,
-  TransportPhase.degraded => _SegmentActivity.warning,
-  TransportPhase.offline || TransportPhase.error => _SegmentActivity.error,
-  TransportPhase.starting ||
-  TransportPhase.bootstrapping ||
-  TransportPhase.connecting ||
-  TransportPhase.reconnecting => _SegmentActivity.busy,
-};
-
-_SegmentActivity _stateFromPeer(PeerServerStatus status) => switch (status) {
-  PeerServerStatus.ready => _SegmentActivity.ready,
-  PeerServerStatus.starting => _SegmentActivity.busy,
-  PeerServerStatus.offline => _SegmentActivity.idle,
-  PeerServerStatus.error => _SegmentActivity.error,
-};
 
 Color _toneFor(BuildContext context, _SegmentActivity state) {
   final theme = context.statusTheme;

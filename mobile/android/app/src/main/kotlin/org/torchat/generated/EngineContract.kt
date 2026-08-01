@@ -213,6 +213,11 @@ object EngineContract {
 
     const val RUNTIME_READY = "runtime_ready"
     const val TOR_STATUS = "tor_status"
+    const val TRANSPORT_STATUS_CHANGED = "transport_status_changed"
+    const val TRANSPORT_COMPONENT = "component"
+    const val TRANSPORT_STATE = "state"
+    const val ENDPOINT = "endpoint"
+    const val UPDATED_AT = "updatedAt"
     const val PROFILE_READY = "profile_ready"
     const val INVITE_RECEIVED = "invite_received"
     const val INVITE_STATE_CHANGED = "invite_state_changed"

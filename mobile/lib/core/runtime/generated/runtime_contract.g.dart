@@ -199,7 +199,8 @@ abstract final class EngineContract {
   static const factAppVisibilityChanged = 'app_visibility_changed';
   static const factNetworkChanged = 'network_changed';
   static const factPowerModeChanged = 'power_mode_changed';
-  static const factBackgroundExecutionRestricted = 'background_execution_restricted';
+  static const factBackgroundExecutionRestricted =
+      'background_execution_restricted';
 
   static const torPhaseStarting = 'starting';
   static const torPhaseBootstrapping = 'bootstrapping';
@@ -208,6 +209,11 @@ abstract final class EngineContract {
 
   static const runtimeReady = 'runtime_ready';
   static const torStatus = 'tor_status';
+  static const transportStatusChanged = 'transport_status_changed';
+  static const transportComponent = 'component';
+  static const transportState = 'state';
+  static const endpoint = 'endpoint';
+  static const updatedAt = 'updatedAt';
   static const profileReady = 'profile_ready';
   static const inviteReceived = 'invite_received';
   static const inviteStateChanged = 'invite_state_changed';
@@ -278,7 +284,8 @@ abstract final class EngineContract {
   static const outcomePermanentFailure = 'PERMANENT_FAILURE';
 
   static const contactTransportPolicyPeerOnly = 'PEER_ONLY';
-  static const contactTransportPolicyPeerWithRelayFallback = 'PEER_WITH_RELAY_FALLBACK';
+  static const contactTransportPolicyPeerWithRelayFallback =
+      'PEER_WITH_RELAY_FALLBACK';
   static const contactTransportPolicyRelayOnly = 'RELAY_ONLY';
 
   static const pairingOutcomeOfferReceived = 'OFFER_RECEIVED';

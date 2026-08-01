@@ -481,6 +481,7 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
       latencyMs: summary.latencyMs,
       peerServerStatus: summary.peerServerStatus,
       readiness: connection,
+      transportStatuses: state.transportStatuses,
       contacts: contacts,
       conversations: conversations,
       messages: state.messages,

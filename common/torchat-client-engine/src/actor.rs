@@ -301,8 +301,19 @@ impl ClientEngineActor {
     )> {
         match command {
             EngineCommand::Bootstrap => {
-                let (bootstrapped, runtime_events) =
+                let (bootstrapped, mut runtime_events) =
                     self.with_runtime(|runtime| runtime.bootstrap_runtime())?;
+                runtime_events.push(transport_status_event(
+                    torchat_client_runtime::TransportComponent::Engine,
+                    torchat_client_runtime::TransportProbeState::Ready,
+                    "engine and local storage ready",
+                    None,
+                    None,
+                    0,
+                    None,
+                    self.connection_generation,
+                    None,
+                ));
                 Ok((json_response(bootstrapped)?, runtime_events, None))
             }
             EngineCommand::GetIdentity => {
@@ -722,8 +733,19 @@ impl ClientEngineActor {
                     retry_attempt: 0,
                 };
                 let status = self.tor_status.clone();
-                let (_, runtime_events) =
+                let (_, mut runtime_events) =
                     self.with_runtime(|runtime| Ok(runtime.report_tor_status(status)))?;
+                runtime_events.push(transport_status_event(
+                    torchat_client_runtime::TransportComponent::Relay,
+                    relay_probe_state(&self.tor_status.phase),
+                    self.tor_status.detail.clone(),
+                    self.tor_status.progress,
+                    self.tor_status.latency_ms,
+                    self.tor_status.retry_attempt,
+                    None,
+                    self.connection_generation,
+                    None,
+                ));
                 Ok(runtime_events)
             }
             PlatformFact::TorEndpointAvailable { socks5_url } => {
@@ -744,8 +766,19 @@ impl ClientEngineActor {
                     self.tor_status.progress = self.tor_status.progress.or(Some(0));
                 }
                 let status = self.tor_status.clone();
-                let (_, runtime_events) =
+                let (_, mut runtime_events) =
                     self.with_runtime(|runtime| Ok(runtime.report_tor_status(status)))?;
+                runtime_events.push(transport_status_event(
+                    torchat_client_runtime::TransportComponent::Relay,
+                    relay_probe_state(&self.tor_status.phase),
+                    self.tor_status.detail.clone(),
+                    self.tor_status.progress,
+                    self.tor_status.latency_ms,
+                    self.tor_status.retry_attempt,
+                    None,
+                    self.connection_generation,
+                    self.socks5_url.clone(),
+                ));
                 Ok(runtime_events)
             }
             PlatformFact::TorEndpointLost { reason } => {
@@ -759,8 +792,19 @@ impl ClientEngineActor {
                 self.tor_status.phase = RuntimeStatusPhase::Offline;
                 self.tor_status.progress = None;
                 let status = self.tor_status.clone();
-                let (_, runtime_events) =
+                let (_, mut runtime_events) =
                     self.with_runtime(|runtime| Ok(runtime.report_tor_status(status)))?;
+                runtime_events.push(transport_status_event(
+                    torchat_client_runtime::TransportComponent::Relay,
+                    torchat_client_runtime::TransportProbeState::Offline,
+                    self.tor_status.detail.clone(),
+                    None,
+                    None,
+                    self.tor_status.retry_attempt,
+                    None,
+                    self.connection_generation,
+                    None,
+                ));
                 Ok(runtime_events)
             }
             PlatformFact::OnionServiceAvailable {
@@ -817,12 +861,26 @@ impl ClientEngineActor {
                 self.local_peer_endpoint = Some(endpoint);
                 let _ = self.queue_endpoint_update_probes();
                 let _ = self.queue_relay_endpoint_bootstraps();
-                Ok(vec![
+                let mut events = vec![
                     torchat_client_runtime::RuntimeEvent::PeerEndpointChanged {
                         contact_id: self.identity.installation_id(),
                         status: torchat_client_runtime::PeerEndpointStatus::Verified,
                     },
-                ])
+                ];
+                events.push(transport_status_event(
+                    torchat_client_runtime::TransportComponent::Peer,
+                    torchat_client_runtime::TransportProbeState::Ready,
+                    "local onion service ready",
+                    Some(100),
+                    None,
+                    0,
+                    None,
+                    generation,
+                    self.local_peer_endpoint
+                        .as_ref()
+                        .map(|endpoint| endpoint.onion_address.clone()),
+                ));
+                Ok(events)
             }
             PlatformFact::OnionServiceLost { reason } => {
                 self.local_peer_endpoint = None;
@@ -836,6 +894,17 @@ impl ClientEngineActor {
                     torchat_client_runtime::RuntimeEvent::RuntimeLog {
                         message: format!("onion service unavailable: {reason}"),
                     },
+                    transport_status_event(
+                        torchat_client_runtime::TransportComponent::Peer,
+                        torchat_client_runtime::TransportProbeState::Offline,
+                        reason,
+                        None,
+                        None,
+                        0,
+                        None,
+                        self.expected_onion_generation,
+                        None,
+                    ),
                 ])
             }
             PlatformFact::AppVisibilityChanged { foreground } => {
@@ -1466,8 +1535,19 @@ impl ClientEngineActor {
         match event {
             RelayEvent::Connected => {
                 self.connection_state = ConnectionState::Connected;
-                let (_, runtime_events) =
+                let (_, mut runtime_events) =
                     self.with_runtime(|runtime| runtime.expedite_retry_after_ready())?;
+                runtime_events.push(transport_status_event(
+                    torchat_client_runtime::TransportComponent::Relay,
+                    torchat_client_runtime::TransportProbeState::Ready,
+                    "relay connected",
+                    Some(100),
+                    self.tor_status.latency_ms,
+                    0,
+                    None,
+                    self.connection_generation,
+                    self.socks5_url.clone(),
+                ));
                 self.flush_pending_send_effects()?;
                 self.flush_pending_receipt_effects()?;
                 self.retry_pending_welcomes()?;
@@ -1491,8 +1571,19 @@ impl ClientEngineActor {
                     attempt,
                     retry_in_ms,
                 };
+                let runtime_events = vec![transport_status_event(
+                    torchat_client_runtime::TransportComponent::Relay,
+                    torchat_client_runtime::TransportProbeState::Degraded,
+                    detail.clone(),
+                    None,
+                    None,
+                    attempt,
+                    Some(retry_in_ms),
+                    self.connection_generation,
+                    None,
+                )];
                 Ok((
-                    Vec::new(),
+                    runtime_events,
                     Some(self.connection_snapshot("relay reconnect backoff")),
                     Some(EngineLogEvent {
                         level: "info".to_owned(),
@@ -1506,7 +1597,17 @@ impl ClientEngineActor {
                 self.connection_state = ConnectionState::Disconnected;
                 self.requeue_after_disconnect()?;
                 Ok((
-                    Vec::new(),
+                    vec![transport_status_event(
+                        torchat_client_runtime::TransportComponent::Relay,
+                        torchat_client_runtime::TransportProbeState::Offline,
+                        detail.clone(),
+                        None,
+                        None,
+                        self.relay_retry_attempt,
+                        None,
+                        self.connection_generation,
+                        None,
+                    )],
                     Some(self.connection_snapshot("relay disconnected")),
                     Some(EngineLogEvent {
                         level: "warn".to_owned(),
@@ -3795,6 +3896,54 @@ fn error_code(error: &EngineError) -> &'static str {
         EngineError::Serialization(_) => "serialization",
         EngineError::Storage(_) => "storage",
         EngineError::Transport(_) => "transport",
+    }
+}
+
+fn relay_probe_state(
+    phase: &torchat_client_runtime::RuntimeStatusPhase,
+) -> torchat_client_runtime::TransportProbeState {
+    match phase {
+        torchat_client_runtime::RuntimeStatusPhase::Starting
+        | torchat_client_runtime::RuntimeStatusPhase::Bootstrapping
+        | torchat_client_runtime::RuntimeStatusPhase::Connecting
+        | torchat_client_runtime::RuntimeStatusPhase::Reconnecting => {
+            torchat_client_runtime::TransportProbeState::Starting
+        }
+        torchat_client_runtime::RuntimeStatusPhase::Connected => {
+            torchat_client_runtime::TransportProbeState::Ready
+        }
+        torchat_client_runtime::RuntimeStatusPhase::Degraded => {
+            torchat_client_runtime::TransportProbeState::Degraded
+        }
+        torchat_client_runtime::RuntimeStatusPhase::Offline
+        | torchat_client_runtime::RuntimeStatusPhase::Error => {
+            torchat_client_runtime::TransportProbeState::Error
+        }
+    }
+}
+
+fn transport_status_event(
+    component: torchat_client_runtime::TransportComponent,
+    state: torchat_client_runtime::TransportProbeState,
+    detail: impl Into<String>,
+    progress: Option<i32>,
+    latency_ms: Option<u64>,
+    retry_attempt: u32,
+    retry_in_ms: Option<u64>,
+    generation: u64,
+    endpoint: Option<String>,
+) -> torchat_client_runtime::RuntimeEvent {
+    torchat_client_runtime::RuntimeEvent::TransportStatusChanged {
+        component,
+        state,
+        detail: detail.into(),
+        progress,
+        latency_ms,
+        retry_attempt,
+        retry_in_ms,
+        generation,
+        endpoint,
+        updated_at: unix_ms(),
     }
 }
 
