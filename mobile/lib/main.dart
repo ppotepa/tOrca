@@ -92,27 +92,27 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
   Timer? _backgroundDebounce;
   StreamSubscription<DesktopNavigationIntent>? _desktopNavigationSubscription;
   StreamSubscription<ConversationNavigationIntent>?
-      _conversationNavigationSubscription;
+  _conversationNavigationSubscription;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     if (isDesktopPlatform) {
-      _desktopNavigationSubscription = DesktopNavigationIntents.stream.listen(
-        (intent) {
-          if (!mounted) return;
-          switch (intent) {
-            case DesktopNavigationIntent.openSettings:
-              _openSettings();
-          }
-        },
-      );
+      _desktopNavigationSubscription = DesktopNavigationIntents.stream.listen((
+        intent,
+      ) {
+        if (!mounted) return;
+        switch (intent) {
+          case DesktopNavigationIntent.openSettings:
+            _openSettings();
+        }
+      });
     }
-    _conversationNavigationSubscription =
-        ConversationNavigationIntents.stream.listen((intent) {
-      if (mounted) unawaited(_openConversationFromNotification(intent));
-    });
+    _conversationNavigationSubscription = ConversationNavigationIntents.stream
+        .listen((intent) {
+          if (mounted) unawaited(_openConversationFromNotification(intent));
+        });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_attachAndInitialize());
     });
@@ -247,10 +247,8 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
           if (peerId == null || peerId.isEmpty) return false;
           for (var attempt = 0; attempt < 15; attempt += 1) {
             await controller.refreshData();
-            final contacts = ref
-                    .read(applicationSnapshotProvider)
-                    .valueOrNull
-                    ?.contacts ??
+            final contacts =
+                ref.read(applicationSnapshotProvider).valueOrNull?.contacts ??
                 ref.read(appControllerProvider).contacts;
             if (contacts.any((contact) => contact.id == peerId)) return true;
             await Future<void>.delayed(const Duration(seconds: 1));
@@ -482,6 +480,7 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
       phase: summary.phase,
       latencyMs: summary.latencyMs,
       peerServerStatus: summary.peerServerStatus,
+      readiness: connection,
       contacts: contacts,
       conversations: conversations,
       messages: state.messages,

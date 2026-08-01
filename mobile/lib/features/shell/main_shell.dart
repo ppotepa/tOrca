@@ -2,12 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../app/app_theme.dart';
+import '../../core/connection/connection_readiness.dart';
 import '../../core/models/domain.dart';
 import '../../shared/widgets/counter_badge.dart';
 import '../chats/release_chat_view.dart';
 import '../contacts/contacts_view.dart';
-import 'desktop/cockpit_status_bar.dart';
 import 'desktop/desktop_workspace.dart';
+import '../../shared/widgets/tor_status_bar.dart';
 
 class MainShell extends StatelessWidget {
   const MainShell({
@@ -20,6 +21,7 @@ class MainShell extends StatelessWidget {
     required this.phase,
     required this.latencyMs,
     required this.peerServerStatus,
+    this.readiness,
     required this.contacts,
     required this.conversations,
     required this.messages,
@@ -61,6 +63,7 @@ class MainShell extends StatelessWidget {
   final String action;
   final TransportPhase phase;
   final PeerServerStatus peerServerStatus;
+  final ConnectionReadiness? readiness;
   final int? latencyMs;
   final List<ContactRecord> contacts;
   final List<ConversationSummary> conversations;
@@ -83,7 +86,8 @@ class MainShell extends StatelessWidget {
     bool,
     bool,
     ContactTransportPolicy,
-  ) onUpdateContactSettings;
+  )
+  onUpdateContactSettings;
   final ValueChanged<String> onOpenConversation;
   final ValueChanged<ContactRecord> onStartConversation;
   final VoidCallback onScanInvite;
@@ -99,190 +103,187 @@ class MainShell extends StatelessWidget {
       onOpenConnectionCenter ?? onRetryTor;
 
   Map<ShortcutActivator, VoidCallback> get _shortcuts => {
-        const SingleActivator(LogicalKeyboardKey.digit1, control: true):
-            () => onTab(MobileTab.chats),
-        const SingleActivator(LogicalKeyboardKey.digit2, control: true):
-            () => onTab(MobileTab.contacts),
-        const SingleActivator(LogicalKeyboardKey.comma, control: true):
-            onOpenSettings,
-        const SingleActivator(
-          LogicalKeyboardKey.keyA,
-          control: true,
-          shift: true,
-        ): onOpenAccount,
-        const SingleActivator(
-          LogicalKeyboardKey.keyR,
-          control: true,
-          shift: true,
-        ): onRetryTor,
-        const SingleActivator(LogicalKeyboardKey.escape): () {
-          if (selectedConversation != null) onBack();
-        },
-      };
+    const SingleActivator(LogicalKeyboardKey.digit1, control: true): () =>
+        onTab(MobileTab.chats),
+    const SingleActivator(LogicalKeyboardKey.digit2, control: true): () =>
+        onTab(MobileTab.contacts),
+    const SingleActivator(LogicalKeyboardKey.comma, control: true):
+        onOpenSettings,
+    const SingleActivator(LogicalKeyboardKey.keyA, control: true, shift: true):
+        onOpenAccount,
+    const SingleActivator(LogicalKeyboardKey.keyR, control: true, shift: true):
+        onRetryTor,
+    const SingleActivator(LogicalKeyboardKey.escape): () {
+      if (selectedConversation != null) onBack();
+    },
+  };
 
   Widget _content(BuildContext context, {required bool desktop}) =>
       tab == MobileTab.chats
-          ? ReleaseChatView(
-              selected: selectedContact,
-              contacts: contacts,
-              conversations: conversations,
-              messages: messages,
-              composer: composer,
-              onOpenConversation: onOpenConversation,
-              onSend: onSend,
-              onTypingChanged: onTypingChanged,
-              onRetryMessage: onRetryMessage,
-              onDeleteMessage: onDeleteMessage,
-              onBack: onBack,
-              error: error,
-              notice: notice,
-              showConversationListWhenEmpty: !desktop,
-              canSend: selectedConversation != null &&
-                  selectedContact?.verified == true &&
-                  conversations.any(
-                    (item) => item.id == selectedConversation &&
-                        item.state == ConversationState.active,
-                  ),
-              peerTyping: selectedConversation != null &&
-                  (typingContacts[selectedConversation] ?? false),
-              peerOnline: selectedContact != null &&
-                  (onlineContacts[selectedContact!.id] ?? false),
-            )
-          : ContactsView(
-              saved: contacts,
-              search: search,
-              onSearch: onSearch,
-              onSelect: onStartConversation,
-              onScanInvite: onScanInvite,
-              onShowInvite: onShowInvite,
-              onUpdateContactSettings: onUpdateContactSettings,
-              fingerprint: fingerprint,
-              ownInvite: ownInvite,
-              error: error,
-              notice: notice,
-              busy: false,
-              showContactList: !desktop,
-            );
+      ? ReleaseChatView(
+          selected: selectedContact,
+          contacts: contacts,
+          conversations: conversations,
+          messages: messages,
+          composer: composer,
+          onOpenConversation: onOpenConversation,
+          onSend: onSend,
+          onTypingChanged: onTypingChanged,
+          onRetryMessage: onRetryMessage,
+          onDeleteMessage: onDeleteMessage,
+          onBack: onBack,
+          error: error,
+          notice: notice,
+          showConversationListWhenEmpty: !desktop,
+          canSend:
+              selectedConversation != null &&
+              selectedContact?.verified == true &&
+              conversations.any(
+                (item) =>
+                    item.id == selectedConversation &&
+                    item.state == ConversationState.active,
+              ),
+          peerTyping:
+              selectedConversation != null &&
+              (typingContacts[selectedConversation] ?? false),
+          peerOnline:
+              selectedContact != null &&
+              (onlineContacts[selectedContact!.id] ?? false),
+        )
+      : ContactsView(
+          saved: contacts,
+          search: search,
+          onSearch: onSearch,
+          onSelect: onStartConversation,
+          onScanInvite: onScanInvite,
+          onShowInvite: onShowInvite,
+          onUpdateContactSettings: onUpdateContactSettings,
+          fingerprint: fingerprint,
+          ownInvite: ownInvite,
+          error: error,
+          notice: notice,
+          busy: false,
+          showContactList: !desktop,
+        );
 
   int get unreadTotal => conversations.totalUnread;
 
   @override
   Widget build(BuildContext context) => CallbackShortcuts(
-        bindings: _shortcuts,
-        child: Focus(
-          autofocus: true,
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final desktop = constraints.maxWidth >= 900;
-              if (desktop) {
-                return Scaffold(
-                  body: Semantics(
-                    label: 'Główna przestrzeń TorChat',
-                    container: true,
-                    child: Column(
-                      children: [
-                        CockpitStatusBar(
-                          phase: phase,
-                          peerServerStatus: peerServerStatus,
-                          nickname: nickname,
-                          latencyMs: latencyMs,
-                          onOpenConnectionCenter: _openConnectionCenter,
-                          onOpenSettings: onOpenSettings,
-                        ),
-                        Expanded(
-                          child: DesktopWorkspace(
-                            tab: tab,
-                            nickname: nickname,
-                            contacts: contacts,
-                            conversations: conversations,
-                            selectedConversation: selectedConversation,
-                            selectedContact: selectedContact,
-                            onlineContacts: onlineContacts,
-                            content: _content(context, desktop: true),
-                            onTab: onTab,
-                            onOpenConversation: onOpenConversation,
-                            onStartConversation: onStartConversation,
-                            onVerifyContact: onVerifyContact,
-                            onBack: onBack,
-                            onAccount: onOpenAccount,
-                            onSettings: onOpenSettings,
-                          ),
-                        ),
-                      ],
+    bindings: _shortcuts,
+    child: Focus(
+      autofocus: true,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final desktop = constraints.maxWidth >= 900;
+          if (desktop) {
+            return Scaffold(
+              body: Semantics(
+                label: 'Główna przestrzeń TorChat',
+                container: true,
+                child: Column(
+                  children: [
+                    TransportStatusDock(
+                      phase: phase,
+                      peerStatus: peerServerStatus,
+                      readiness: readiness,
+                      latencyMs: latencyMs,
+                      onOpenConnectionCenter: _openConnectionCenter,
                     ),
-                  ),
-                );
-              }
-
-              return Scaffold(
-                appBar: AppBar(
-                  title: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('TorChat'),
-                      Text(
-                        '@$nickname',
-                        style: Theme.of(context).textTheme.labelSmall,
+                    Expanded(
+                      child: DesktopWorkspace(
+                        tab: tab,
+                        nickname: nickname,
+                        contacts: contacts,
+                        conversations: conversations,
+                        selectedConversation: selectedConversation,
+                        selectedContact: selectedContact,
+                        onlineContacts: onlineContacts,
+                        content: _content(context, desktop: true),
+                        onTab: onTab,
+                        onOpenConversation: onOpenConversation,
+                        onStartConversation: onStartConversation,
+                        onVerifyContact: onVerifyContact,
+                        onBack: onBack,
+                        onAccount: onOpenAccount,
+                        onSettings: onOpenSettings,
                       ),
-                    ],
-                  ),
-                  actions: [
-                    IconButton(
-                      tooltip: 'Konto',
-                      onPressed: onOpenAccount,
-                      icon: const ThemedIcon(Icons.person_outline, size: 18),
-                    ),
-                    IconButton(
-                      tooltip: 'Ustawienia',
-                      onPressed: onOpenSettings,
-                      icon: const ThemedIcon(Icons.settings_outlined, size: 18),
                     ),
                   ],
                 ),
-                body: SafeArea(
-                  child: Column(
-                    children: [
-                      CompactCockpitStatusBar(
-                        phase: phase,
-                        peerServerStatus: peerServerStatus,
-                        latencyMs: latencyMs,
-                        onOpenConnectionCenter: _openConnectionCenter,
-                      ),
-                      Expanded(
-                        child: Padding(
-                          padding: selectedConversation == null
-                              ? const EdgeInsets.fromLTRB(16, 4, 16, 0)
-                              : EdgeInsets.zero,
-                          child: _content(context, desktop: false),
+              ),
+            );
+          }
+
+          return Scaffold(
+            appBar: AppBar(
+              title: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('TorChat'),
+                  Text(
+                    '@$nickname',
+                    style: Theme.of(context).textTheme.labelSmall,
+                  ),
+                ],
+              ),
+              actions: [
+                IconButton(
+                  tooltip: 'Konto',
+                  onPressed: onOpenAccount,
+                  icon: const ThemedIcon(Icons.person_outline, size: 18),
+                ),
+                IconButton(
+                  tooltip: 'Ustawienia',
+                  onPressed: onOpenSettings,
+                  icon: const ThemedIcon(Icons.settings_outlined, size: 18),
+                ),
+              ],
+            ),
+            body: SafeArea(
+              child: Column(
+                children: [
+                  TransportStatusDock(
+                    phase: phase,
+                    peerStatus: peerServerStatus,
+                    readiness: readiness,
+                    latencyMs: latencyMs,
+                    onOpenConnectionCenter: _openConnectionCenter,
+                  ),
+                  Expanded(
+                    child: Padding(
+                      padding: selectedConversation == null
+                          ? const EdgeInsets.fromLTRB(16, 4, 16, 0)
+                          : EdgeInsets.zero,
+                      child: _content(context, desktop: false),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            bottomNavigationBar: selectedConversation == null
+                ? NavigationBar(
+                    selectedIndex: tab.index,
+                    onDestinationSelected: (index) =>
+                        onTab(MobileTab.values[index]),
+                    destinations: [
+                      NavigationDestination(
+                        icon: CounterBadge(
+                          count: unreadTotal,
+                          child: const ThemedIcon(Icons.chat_bubble_outline),
                         ),
+                        label: 'Czaty',
+                      ),
+                      const NavigationDestination(
+                        icon: ThemedIcon(Icons.people_outline),
+                        label: 'Kontakty',
                       ),
                     ],
-                  ),
-                ),
-                bottomNavigationBar: selectedConversation == null
-                    ? NavigationBar(
-                        selectedIndex: tab.index,
-                        onDestinationSelected: (index) =>
-                            onTab(MobileTab.values[index]),
-                        destinations: [
-                          NavigationDestination(
-                            icon: CounterBadge(
-                              count: unreadTotal,
-                              child:
-                                  const ThemedIcon(Icons.chat_bubble_outline),
-                            ),
-                            label: 'Czaty',
-                          ),
-                          const NavigationDestination(
-                            icon: ThemedIcon(Icons.people_outline),
-                            label: 'Kontakty',
-                          ),
-                        ],
-                      )
-                    : null,
-              );
-            },
-          ),
-        ),
-      );
+                  )
+                : null,
+          );
+        },
+      ),
+    ),
+  );
 }

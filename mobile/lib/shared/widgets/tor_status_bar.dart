@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../app/app_theme.dart';
+import '../../core/connection/connection_component.dart';
+import '../../core/connection/connection_readiness.dart';
 import '../../core/models/domain.dart';
 
 /// One compact, transport-agnostic connection rail.
@@ -9,27 +11,34 @@ import '../../core/models/domain.dart';
 /// local engine, Tor/control relay, and the locally published P2P endpoint.
 /// Keeping them together avoids implying that one healthy Tor connection also
 /// means that inbound P2P delivery is ready.
-class TorStatusBar extends StatefulWidget {
-  const TorStatusBar({
+class TransportStatusDock extends StatefulWidget {
+  const TransportStatusDock({
     super.key,
-    required this.status,
+    this.status = '',
+    this.readiness,
     this.phase = TransportPhase.starting,
     this.peerStatus = PeerServerStatus.starting,
     this.desktop = false,
     this.latencyMs,
+    this.onOpenConnectionCenter,
   });
 
   final String status;
+  final ConnectionReadiness? readiness;
   final TransportPhase phase;
   final PeerServerStatus peerStatus;
   final bool desktop;
   final int? latencyMs;
+  final VoidCallback? onOpenConnectionCenter;
 
   @override
-  State<TorStatusBar> createState() => _TorStatusBarState();
+  State<TransportStatusDock> createState() => _TransportStatusDockState();
 }
 
-class _TorStatusBarState extends State<TorStatusBar>
+/// Backwards-compatible name for older onboarding call sites.
+typedef TorStatusBar = TransportStatusDock;
+
+class _TransportStatusDockState extends State<TransportStatusDock>
     with SingleTickerProviderStateMixin {
   late final AnimationController _breathing = AnimationController(
     vsync: this,
@@ -37,10 +46,18 @@ class _TorStatusBarState extends State<TorStatusBar>
   );
 
   bool get _hasBusySegment =>
-      widget.phase.isConnecting || widget.peerStatus == PeerServerStatus.starting;
+      widget.phase.isConnecting ||
+      widget.peerStatus == PeerServerStatus.starting;
 
   bool get _hasErrorSegment =>
       widget.phase.isError || widget.peerStatus == PeerServerStatus.error;
+
+  bool get _hasWarningSegment => widget.phase.isWarning;
+
+  bool _expanded = false;
+
+  bool get _showDetails =>
+      _expanded || _hasBusySegment || _hasWarningSegment || _hasErrorSegment;
 
   @override
   void initState() {
@@ -54,16 +71,23 @@ class _TorStatusBarState extends State<TorStatusBar>
   }
 
   @override
-  void didUpdateWidget(covariant TorStatusBar oldWidget) {
+  void didUpdateWidget(covariant TransportStatusDock oldWidget) {
     super.didUpdateWidget(oldWidget);
     _syncAnimation();
   }
 
   void _syncAnimation() {
     _breathing.duration = Duration(
-      milliseconds: _hasErrorSegment ? 1050 : _hasBusySegment ? 1450 : 3200,
+      milliseconds: _hasErrorSegment
+          ? 1050
+          : _hasBusySegment
+          ? 1450
+          : 3200,
     );
-    if (_hasBusySegment || _hasErrorSegment || widget.phase.isConnected || widget.peerStatus == PeerServerStatus.ready) {
+    if (_hasBusySegment ||
+        _hasErrorSegment ||
+        widget.phase.isConnected ||
+        widget.peerStatus == PeerServerStatus.ready) {
       _breathing.repeat(reverse: true);
     } else {
       _breathing.stop();
@@ -102,44 +126,75 @@ class _TorStatusBarState extends State<TorStatusBar>
     );
     final segments = [engine, relay, peer];
 
+    final theme = Theme.of(context);
     return Semantics(
-      label: 'Stan komunikacji: ${segments.map((segment) => '${segment.label}: ${segment.detail}').join(', ')}',
-      child: Container(
-        height: widget.desktop ? 48 : 58,
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surfaceContainerLowest,
-          border: Border(
-            bottom: BorderSide(
-              color: Theme.of(context).dividerColor.withValues(alpha: .55),
+      label:
+          'Stan komunikacji: ${segments.map((segment) => '${segment.label}: ${segment.detail}').join(', ')}',
+      button: true,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+          widget.desktop ? 10 : 8,
+          6,
+          widget.desktop ? 10 : 8,
+          4,
+        ),
+        child: Material(
+          color: theme.colorScheme.surfaceContainerLowest,
+          elevation: 5,
+          shadowColor: theme.colorScheme.shadow.withValues(alpha: .28),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: theme.dividerColor.withValues(alpha: .7)),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap:
+                widget.onOpenConnectionCenter ??
+                () => setState(() => _expanded = !_expanded),
+            child: AnimatedSize(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              child: Row(
+                children: [
+                  for (var index = 0; index < segments.length; index++) ...[
+                    Expanded(
+                      child: _ConnectionSegment(
+                        segment: segments[index],
+                        desktop: widget.desktop,
+                        phase: phase,
+                        showDetails: _showDetails,
+                      ),
+                    ),
+                    if (index < segments.length - 1)
+                      VerticalDivider(
+                        width: 1,
+                        thickness: 1,
+                        indent: 9,
+                        endIndent: 9,
+                        color: theme.dividerColor.withValues(alpha: .62),
+                      ),
+                  ],
+                ],
+              ),
             ),
           ),
-        ),
-        child: Row(
-          children: [
-            for (var index = 0; index < segments.length; index++) ...[
-              Expanded(
-                child: _ConnectionSegment(
-                  segment: segments[index],
-                  desktop: widget.desktop,
-                  phase: phase,
-                ),
-              ),
-              if (index < segments.length - 1)
-                VerticalDivider(
-                  width: 1,
-                  thickness: 1,
-                  indent: 9,
-                  endIndent: 9,
-                  color: Theme.of(context).dividerColor.withValues(alpha: .62),
-                ),
-            ],
-          ],
         ),
       ),
     );
   }
 
   _SegmentActivity get _engineState {
+    final readiness = widget.readiness;
+    if (readiness != null) {
+      final state = readiness.engine.state;
+      return switch (state) {
+        ConnectionComponentState.failed => _SegmentActivity.error,
+        ConnectionComponentState.degraded => _SegmentActivity.warning,
+        ConnectionComponentState.pending ||
+        ConnectionComponentState.starting => _SegmentActivity.busy,
+        ConnectionComponentState.ready => _SegmentActivity.ready,
+      };
+    }
     if (widget.phase.isError) return _SegmentActivity.error;
     if (widget.phase.isConnecting) return _SegmentActivity.busy;
     return _SegmentActivity.ready;
@@ -153,7 +208,8 @@ class _TorStatusBarState extends State<TorStatusBar>
     _SegmentActivity.idle => 'oczekuje',
   };
 
-  String get _relayDetail => widget.phase.isConnected && widget.latencyMs != null
+  String get _relayDetail =>
+      widget.phase.isConnected && widget.latencyMs != null
       ? '${widget.latencyMs} ms'
       : widget.phase.isConnecting
       ? 'łączenie'
@@ -176,11 +232,13 @@ class _ConnectionSegment extends StatelessWidget {
     required this.segment,
     required this.desktop,
     required this.phase,
+    required this.showDetails,
   });
 
   final _SegmentState segment;
   final bool desktop;
   final double phase;
+  final bool showDetails;
 
   @override
   Widget build(BuildContext context) {
@@ -204,7 +262,10 @@ class _ConnectionSegment extends StatelessWidget {
     return Semantics(
       label: '${segment.label}: ${segment.detail}',
       child: Padding(
-        padding: EdgeInsets.symmetric(horizontal: desktop ? 12 : 10),
+        padding: EdgeInsets.symmetric(
+          horizontal: desktop ? 12 : 10,
+          vertical: showDetails ? 8 : 6,
+        ),
         child: Stack(
           alignment: Alignment.centerLeft,
           children: [
@@ -264,16 +325,18 @@ class _ConnectionSegment extends StatelessWidget {
                           fontWeight: FontWeight.w700,
                         ),
                       ),
-                      const SizedBox(height: 1),
-                      Text(
-                        segment.detail,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: tone.withValues(alpha: .82),
-                          fontSize: desktop ? 10 : 11,
+                      if (showDetails) ...[
+                        const SizedBox(height: 1),
+                        Text(
+                          segment.detail,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: tone.withValues(alpha: .82),
+                            fontSize: desktop ? 10 : 11,
+                          ),
                         ),
-                      ),
+                      ],
                     ],
                   ),
                 ),

@@ -4,6 +4,7 @@ import '../../app/app_theme.dart';
 import '../../core/connection/connection_component.dart';
 import '../../core/connection/connection_readiness.dart';
 import '../../core/connection/connection_summary.dart';
+import '../../shared/widgets/tor_status_bar.dart';
 
 class ConnectionWarmupScreen extends StatelessWidget {
   const ConnectionWarmupScreen({
@@ -40,80 +41,98 @@ class ConnectionWarmupScreen extends StatelessWidget {
 
     return Scaffold(
       body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) => SingleChildScrollView(
-            padding: const EdgeInsets.all(28),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                minHeight: constraints.maxHeight - 56,
-              ),
-              child: Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 460),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      ThemedIcon(
-                        Icons.eco,
-                        size: 72,
-                        color: Theme.of(context).colorScheme.primary,
-                      ),
-                      const SizedBox(height: 14),
-                      Text(
-                        'Rozgrzewanie TorChat',
-                        style: Theme.of(context).textTheme.headlineMedium,
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 4),
-                      const Text(
-                        'Prywatne wiadomości przez Tor',
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        summary.status,
-                        style: Theme.of(context).textTheme.titleSmall,
-                        textAlign: TextAlign.center,
-                      ),
-                      if (summary.detail.isNotEmpty) ...[
-                        const SizedBox(height: 4),
-                        Text(
-                          summary.detail,
-                          style: Theme.of(context).textTheme.bodySmall,
-                          textAlign: TextAlign.center,
+        child: Column(
+          children: [
+            TransportStatusDock(
+              phase: summary.phase,
+              peerStatus: summary.peerServerStatus,
+              latencyMs: summary.latencyMs,
+              readiness: connection,
+            ),
+            Expanded(
+              child: LayoutBuilder(
+                builder: (context, constraints) => SingleChildScrollView(
+                  padding: const EdgeInsets.all(28),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      minHeight: constraints.maxHeight - 56,
+                    ),
+                    child: Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 460),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            ThemedIcon(
+                              Icons.eco,
+                              size: 72,
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
+                            const SizedBox(height: 14),
+                            Text(
+                              'Rozgrzewanie TorChat',
+                              style: Theme.of(context).textTheme.headlineMedium,
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 4),
+                            const Text(
+                              'Prywatne wiadomości przez Tor',
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              summary.status,
+                              style: Theme.of(context).textTheme.titleSmall,
+                              textAlign: TextAlign.center,
+                            ),
+                            if (summary.detail.isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                summary.detail,
+                                style: Theme.of(context).textTheme.bodySmall,
+                                textAlign: TextAlign.center,
+                              ),
+                            ],
+                            const SizedBox(height: 24),
+                            for (
+                              var index = 0;
+                              index < statuses.length;
+                              index += 1
+                            )
+                              _WarmupRow(
+                                status: statuses[index],
+                                title: index == statuses.length - 1
+                                    ? 'Gotowość komunikacji'
+                                    : statuses[index].component.title,
+                                last: index == statuses.length - 1,
+                              ),
+                            if (error.isNotEmpty) ...[
+                              const SizedBox(height: 18),
+                              Text(
+                                error,
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: context.statusTheme.danger,
+                                ),
+                              ),
+                            ],
+                            if (connection.failed || error.isNotEmpty) ...[
+                              const SizedBox(height: 12),
+                              FilledButton.icon(
+                                onPressed: retry,
+                                icon: const ThemedIcon(Icons.refresh),
+                                label: const Text('Spróbuj ponownie'),
+                              ),
+                            ],
+                          ],
                         ),
-                      ],
-                      const SizedBox(height: 24),
-                      for (var index = 0; index < statuses.length; index += 1)
-                        _WarmupRow(
-                          status: statuses[index],
-                          title: index == statuses.length - 1
-                              ? 'Gotowość komunikacji'
-                              : statuses[index].component.title,
-                          last: index == statuses.length - 1,
-                        ),
-                      if (error.isNotEmpty) ...[
-                        const SizedBox(height: 18),
-                        Text(
-                          error,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: context.statusTheme.danger),
-                        ),
-                      ],
-                      if (connection.failed || error.isNotEmpty) ...[
-                        const SizedBox(height: 12),
-                        FilledButton.icon(
-                          onPressed: retry,
-                          icon: const ThemedIcon(Icons.refresh),
-                          label: const Text('Spróbuj ponownie'),
-                        ),
-                      ],
-                    ],
+                      ),
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
+          ],
         ),
       ),
     );
@@ -135,8 +154,7 @@ class _WarmupRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = context.statusTheme;
     final color = switch (status.state) {
-      ConnectionComponentState.pending =>
-        Theme.of(context).colorScheme.outline,
+      ConnectionComponentState.pending => Theme.of(context).colorScheme.outline,
       ConnectionComponentState.starting => theme.warning,
       ConnectionComponentState.ready => theme.success,
       ConnectionComponentState.degraded => theme.warning,
@@ -188,10 +206,7 @@ class _WarmupRow extends StatelessWidget {
                 children: [
                   Text(
                     title,
-                    style: TextStyle(
-                      color: color,
-                      fontWeight: FontWeight.w600,
-                    ),
+                    style: TextStyle(color: color, fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(height: 2),
                   Text(

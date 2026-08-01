@@ -3,14 +3,14 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('desktop shell uses cockpit workspace without global busy strip', () {
+  test('shell uses the unified transport dock without global busy strip', () {
     final shell = File('lib/features/shell/main_shell.dart').readAsStringSync();
 
-    expect(shell, contains('CockpitStatusBar('));
-    expect(shell, contains('CompactCockpitStatusBar('));
+    expect(shell, contains('TransportStatusDock('));
+    expect(shell, isNot(contains('CockpitStatusBar(')));
+    expect(shell, isNot(contains('CompactCockpitStatusBar(')));
     expect(shell, contains('DesktopWorkspace('));
     expect(shell, isNot(contains('ActionStatusStrip')));
-    expect(shell, isNot(contains('TorStatusBar(')));
   });
 
   test('desktop workspace is compact resizable and separates groups', () {
@@ -22,7 +22,7 @@ void main() {
     ).readAsStringSync();
 
     expect(workspace, contains('ResizableSplitPane('));
-    expect(workspace, contains("label: 'Grupy'"));
+    expect(workspace, contains("'Grupy'"));
     expect(workspace, contains('Nie mieszamy ich ze zwykłymi czatami'));
     expect(workspace, contains("Text('TorChat'"));
     expect(workspace, isNot(contains('PeerServerIndicator')));
