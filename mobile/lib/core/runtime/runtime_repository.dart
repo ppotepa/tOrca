@@ -4,6 +4,7 @@ import 'dart:collection';
 import '../../client_runtime.dart';
 import '../application_state/application_snapshot.dart';
 import '../application_state/application_state_store.dart';
+import 'message_paging.dart';
 import 'generated/runtime_contract.g.dart';
 import 'refresh_coordinator.dart';
 
@@ -132,6 +133,16 @@ class RuntimeRepository {
       applicationState.current?.profile ??
       await _runtime.profile() ??
       const RuntimeProfile();
+
+  Future<RuntimeMessagePage> messagePage(
+    String conversationId, {
+    ChatMessage? before,
+    int limit = defaultMessagePageSize,
+  }) =>
+      _runtime.messagePage(conversationId, before: before, limit: limit);
+
+  Future<List<ChatMessage>> allMessages(String conversationId) =>
+      _runtime.allMessages(conversationId);
 
   Future<RuntimeProfile> setNickname(String value) async {
     final profile = await _runtime.setNickname(value);

@@ -8,7 +8,7 @@ import 'image_message_codec.dart';
 const maximumSourceImageBytes = 20 * 1024 * 1024;
 
 Future<PreparedImageAttachment?> pickPreparedImageAttachment() async {
-  final result = await FilePicker.platform.pickFiles(
+  final result = await FilePicker.pickFiles(
     type: FileType.custom,
     allowedExtensions: const ['jpg', 'jpeg', 'png', 'webp'],
     allowMultiple: false,

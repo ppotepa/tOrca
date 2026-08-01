@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -77,7 +78,7 @@ class DesktopWindowLifecycle with WindowListener, TrayListener {
         shared: false,
       );
       _activationServer!.listen((socket) {
-        socket.transform(const SystemEncoding().decoder).listen((message) {
+        socket.cast<List<int>>().transform(utf8.decoder).listen((message) {
           if (message.trim() == _activationMessage) {
             unawaited(showWindow());
           }
