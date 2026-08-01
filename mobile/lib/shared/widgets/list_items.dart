@@ -17,7 +17,7 @@ class ConversationListTile extends StatelessWidget {
     required this.selected,
     required this.onTap,
     this.peerConnectionStatus = PeerConnectionStatus.offline,
-    this.transportPolicy = ContactTransportPolicy.peerWithRelayFallback,
+    this.transportPolicy = ContactTransportPolicy.peerOnly,
     this.peerEndpointStatus = PeerEndpointStatus.missing,
     this.asCard = false,
   });

@@ -79,6 +79,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "012_pending_peer_endpoint_inbox.sql",
         sql: include_str!("../../sql/migrations/012_pending_peer_endpoint_inbox.sql"),
     },
+    Migration {
+        version: 13,
+        name: "013_default_peer_transport.sql",
+        sql: include_str!("../../sql/migrations/013_default_peer_transport.sql"),
+    },
 ];
 
 pub struct ClientDatabase {
@@ -2174,7 +2179,7 @@ mod tests {
             })
             .expect("schema_migrations version is readable");
 
-        assert_eq!(latest_version, 12);
+        assert_eq!(latest_version, 13);
         assert_eq!(database.migration_runner().checksum().len(), 64);
 
         drop(database);
@@ -2224,8 +2229,8 @@ mod tests {
             .query_row("SELECT MAX(version) FROM schema_migrations;", [], |row| row.get(0))
             .expect("latest migration is readable");
 
-        assert_eq!(policy, "RELAY_ONLY");
-        assert_eq!(latest_version, 12);
+        assert_eq!(policy, "PEER_ONLY");
+        assert_eq!(latest_version, 13);
         drop(database);
         let _ = std::fs::remove_file(path);
     }

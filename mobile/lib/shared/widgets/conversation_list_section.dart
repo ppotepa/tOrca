@@ -107,7 +107,7 @@ class ConversationListSection extends ConsumerWidget {
                     contact?.peerConnectionStatus ?? PeerConnectionStatus.offline,
                 transportPolicy:
                     contact?.transportPolicy ??
-                    ContactTransportPolicy.peerWithRelayFallback,
+                    ContactTransportPolicy.peerOnly,
                 peerEndpointStatus:
                     contact?.peerEndpointStatus ?? PeerEndpointStatus.missing,
                 selected: selectedConversation == conversation.id,
