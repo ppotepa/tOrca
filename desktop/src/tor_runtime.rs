@@ -25,6 +25,13 @@ pub struct TorStatus {
     pub retry_attempt: u32,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TorLogSeverity {
+    Notice,
+    Warning,
+    Fatal,
+}
+
 pub struct TorRuntime {
     child: Option<Arc<Mutex<Child>>>,
     data_dir_lock: Option<TorDataLock>,
@@ -150,7 +157,7 @@ impl TorRuntime {
         std::thread::spawn(move || {
             for line in BufReader::new(stdout).lines().map_while(Result::ok) {
                 let lowered = line.to_ascii_lowercase();
-                if lowered.contains("[err]") || lowered.contains("[warn]") {
+                if classify_tor_log_line(&lowered) == TorLogSeverity::Fatal {
                     let _ = status_tx.send(TorStatus {
                         phase: TorPhase::Failed,
                         label: line.clone(),
@@ -192,7 +199,7 @@ impl TorRuntime {
         std::thread::spawn(move || {
             for line in BufReader::new(stderr).lines().map_while(Result::ok) {
                 let lowered = line.to_ascii_lowercase();
-                if lowered.contains("[err]") || lowered.contains("[warn]") {
+                if classify_tor_log_line(&lowered) == TorLogSeverity::Fatal {
                     let _ = stderr_tx.send(TorStatus {
                         phase: TorPhase::Failed,
                         label: line,
@@ -428,6 +435,23 @@ impl Drop for TorRuntime {
 
 fn free_port() -> Result<u16> {
     Ok(TcpListener::bind(("127.0.0.1", 0))?.local_addr()?.port())
+}
+
+fn classify_tor_log_line(line: &str) -> TorLogSeverity {
+    // Tor emits [warn] for recoverable guard and circuit conditions. Those
+    // conditions must remain visible in diagnostics but must not stop the
+    // relay actor or discard a working SOCKS endpoint.
+    if line.contains("[err]")
+        || line.contains("fatal")
+        || line.contains("configuration was invalid")
+        || line.contains("failed to bind")
+    {
+        TorLogSeverity::Fatal
+    } else if line.contains("[warn]") {
+        TorLogSeverity::Warning
+    } else {
+        TorLogSeverity::Notice
+    }
 }
 
 fn bootstrap_progress(line: &str) -> Option<i32> {

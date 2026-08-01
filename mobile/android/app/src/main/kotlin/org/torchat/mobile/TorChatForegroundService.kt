@@ -300,8 +300,8 @@ class TorChatForegroundService : Service() {
                 component = "tor",
                 eventCode = "tor_ready",
                 stage = "TOR_READY",
-                message = "Tor SOCKS endpoint is ready",
-                state = "ready",
+                message = "Tor SOCKS ready; relay circuit verification pending",
+                state = "starting",
                 durationMs = System.currentTimeMillis() - startedAt,
             )
             pendingOnionAction?.also { action ->

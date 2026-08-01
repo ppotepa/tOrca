@@ -20,4 +20,4 @@ RUN chmod 0755 /usr/local/bin/torka /usr/local/bin/torka-client \
 USER torchat
 ENV TORCHAT_NICKNAME=Torka
 VOLUME ["/var/lib/torchat"]
-ENTRYPOINT ["/usr/local/bin/torka"]
+ENTRYPOINT ["python3", "/usr/local/bin/torka"]

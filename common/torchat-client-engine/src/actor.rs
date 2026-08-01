@@ -1230,13 +1230,13 @@ impl ClientEngineActor {
 
     fn schedule_relay_retry(&mut self) {
         self.relay_retry_attempt = self.relay_retry_attempt.saturating_add(1);
-        let seconds = 2_u64.saturating_pow(
-            self.relay_retry_attempt.saturating_sub(1).min(5),
-        );
-        self.relay_retry_at = Some(Instant::now() + Duration::from_secs(seconds.min(60)));
+        let seconds = 5_u64
+            .saturating_mul(2_u64.saturating_pow(self.relay_retry_attempt.saturating_sub(1).min(4)))
+            .min(60);
+        self.relay_retry_at = Some(Instant::now() + Duration::from_secs(seconds));
         self.connection_state = ConnectionState::Backoff {
             attempt: self.relay_retry_attempt,
-            retry_in_ms: seconds.min(60_000),
+            retry_in_ms: seconds.saturating_mul(1_000),
         };
     }
 
@@ -1319,12 +1319,11 @@ impl ClientEngineActor {
                     .await;
             }
             Err(error) => {
-                if self.relay_retry_attempt >= 5 {
+                if is_permanent_relay_bootstrap_error(&error) {
                     self.relay_retry_at = None;
                     self.connection_state = ConnectionState::Stopped;
                     let message = format!(
-                        "relay bootstrap failed after {} attempts: {error}",
-                        self.relay_retry_attempt
+                        "relay bootstrap has a permanent configuration or protocol error: {error}"
                     );
                     let _ = events
                         .send(EngineEvent::Runtime {
@@ -1341,6 +1340,25 @@ impl ClientEngineActor {
                     return;
                 }
                 self.schedule_relay_retry();
+                let retry_in_ms = match self.connection_state {
+                    ConnectionState::Backoff { retry_in_ms, .. } => Some(retry_in_ms),
+                    _ => None,
+                };
+                let _ = events
+                    .send(EngineEvent::Runtime {
+                        event: transport_status_event(
+                            torchat_client_runtime::TransportComponent::Relay,
+                            torchat_client_runtime::TransportProbeState::Degraded,
+                            format!("relay circuit warming; retrying: {error}"),
+                            self.tor_status.progress,
+                            None,
+                            self.relay_retry_attempt,
+                            retry_in_ms,
+                            self.connection_generation,
+                            None,
+                        ),
+                    })
+                    .await;
                 let _ = events
                     .send(EngineEvent::Log {
                         log: EngineLogEvent {
@@ -3896,6 +3914,24 @@ fn error_code(error: &EngineError) -> &'static str {
         EngineError::Serialization(_) => "serialization",
         EngineError::Storage(_) => "storage",
         EngineError::Transport(_) => "transport",
+    }
+}
+
+fn is_permanent_relay_bootstrap_error(error: &torchat_client_runtime::RuntimeError) -> bool {
+    use torchat_client_runtime::RuntimeError;
+
+    match error {
+        RuntimeError::InvalidCommand(_) | RuntimeError::InvalidParams(_) | RuntimeError::Crypto(_) => true,
+        RuntimeError::Transport(message) | RuntimeError::Unavailable(message) => {
+            let normalized = message.to_ascii_lowercase();
+            normalized.contains("invalid websocket scheme")
+                || normalized.contains("invalid onion")
+                || normalized.contains("invalid socks")
+                || normalized.contains("invalid bootstrap proof")
+                || normalized.contains("protocol version")
+        }
+        RuntimeError::NotFound(_) | RuntimeError::Conflict(_) | RuntimeError::Timeout(_) => false,
+        RuntimeError::Storage(_) => true,
     }
 }
 

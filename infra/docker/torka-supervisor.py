@@ -38,6 +38,7 @@ def main():
 
     while not STOPPING:
         started_at = time.monotonic()
+        log("TORCHAT_TORKA_START")
         CHILD = subprocess.Popen(["/usr/local/bin/torka-client"])
         exit_code = CHILD.wait()
         CHILD = None
@@ -48,7 +49,7 @@ def main():
         if lived_for >= 120:
             backoff = minimum_backoff
         log(
-            f"client exited code={exit_code}; restarting in {backoff}s "
+            f"TORCHAT_TORKA_EXIT code={exit_code}; restarting in {backoff}s "
             f"after {lived_for:.1f}s"
         )
         time.sleep(backoff)

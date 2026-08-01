@@ -173,6 +173,23 @@ function Save-TorChatAndroidDiagnostics {
     }
     & adb -s $Device logcat -d -v threadtime 'TorChat-Engine:*' 'TorChat-Tor:*' 'AndroidRuntime:E' 'ActivityManager:W' '*:S' 2>&1 |
         Out-File -LiteralPath (Join-Path $root 'filtered-logcat.txt') -Encoding utf8
+
+    $journalListing = @(& adb -s $Device shell run-as org.torchat.mobile sh -c 'ls -t no_backup/engine-logs/*.jsonl 2>/dev/null' 2>$null)
+    $startupJournal = $journalListing | Where-Object { $_ -match 'startup-.*\.jsonl$' } | Select-Object -First 1
+    $platformJournal = $journalListing | Where-Object { $_ -match 'platform-.*\.jsonl$' } | Select-Object -First 1
+    foreach ($journal in @(
+        @{ Entry = $startupJournal; Name = 'startup-journal.jsonl' },
+        @{ Entry = $platformJournal; Name = 'platform-journal.jsonl' }
+    )) {
+        if ($journal.Entry) {
+            $remotePath = $journal.Entry.Trim()
+            & adb -s $Device shell run-as org.torchat.mobile cat $remotePath 2>&1 |
+                Out-File -LiteralPath (Join-Path $root $journal.Name) -Encoding utf8
+        } else {
+            "missing Android engine journal: $($journal.Name)" |
+                Out-File -LiteralPath (Join-Path $root $journal.Name) -Encoding utf8
+        }
+    }
     return $root
 }
 

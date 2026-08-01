@@ -1,0 +1,2 @@
+infra/docker/*.py text eol=lf
+infra/docker/Dockerfile.* text eol=lf

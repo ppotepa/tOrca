@@ -44,11 +44,28 @@ function Collect-TorChatDiagnostics {
     }
 
     if ($env:OS -eq 'Windows_NT') {
+        $desktopDiagnostics = Join-Path $root 'desktop'
+        New-Item -ItemType Directory -Force -Path $desktopDiagnostics | Out-Null
         Invoke-TorChatDiagnosticCapture -Path (Join-Path $root 'windows-processes.txt') -Action {
             Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
                 Where-Object { $_.Name -in @('torchat_mobile.exe','torchat-desktop.exe','tor.exe','adb.exe') } |
                 Select-Object Name,ProcessId,ParentProcessId,ExecutablePath,CommandLine |
                 Format-List
+        }
+        $desktopRoot = Join-Path $Context.RepositoryRoot '.torchat\clients\desktop\engine-logs'
+        $latestDesktopJournal = Get-ChildItem -LiteralPath $desktopRoot -Filter 'startup-*.jsonl' -File -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
+        if ($latestDesktopJournal) {
+            Copy-Item -LiteralPath $latestDesktopJournal.FullName -Destination (Join-Path $desktopDiagnostics 'startup-journal.jsonl') -Force
+        }
+        $desktopLog = Get-ChildItem -LiteralPath (Join-Path $Context.RepositoryRoot '.torchat\logs') -Recurse -Filter 'desktop.log' -File -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
+        if ($desktopLog) {
+            Copy-Item -LiteralPath $desktopLog.FullName -Destination (Join-Path $desktopDiagnostics 'runtime-stdio.log') -Force
+        }
+        $torrc = Join-Path $Context.RepositoryRoot '.torchat\clients\desktop\tor\data\torrc.generated'
+        if (Test-Path -LiteralPath $torrc) {
+            Copy-Item -LiteralPath $torrc -Destination (Join-Path $desktopDiagnostics 'torrc.generated') -Force
         }
     }
 
