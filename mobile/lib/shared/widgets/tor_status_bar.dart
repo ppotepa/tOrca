@@ -134,7 +134,7 @@ class _TransportStatusDockState extends State<TransportStatusDock>
       child: Padding(
         padding: EdgeInsets.fromLTRB(
           widget.desktop ? 10 : 8,
-          6,
+          0,
           widget.desktop ? 10 : 8,
           4,
         ),
@@ -143,7 +143,9 @@ class _TransportStatusDockState extends State<TransportStatusDock>
           elevation: 5,
           shadowColor: theme.colorScheme.shadow.withValues(alpha: .28),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: const BorderRadius.vertical(
+              bottom: Radius.circular(14),
+            ),
             side: BorderSide(color: theme.dividerColor.withValues(alpha: .7)),
           ),
           clipBehavior: Clip.antiAlias,

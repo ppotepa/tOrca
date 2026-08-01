@@ -72,7 +72,7 @@ class EngineStatusProbe implements StatusProbe {
       id: id,
       label: 'Silnik',
       detail: reported?.detail ?? status?.detail ?? 'gotowy',
-      icon: Icons.memory_rounded,
+      icon: Icons.settings_rounded,
       state: state,
       critical: true,
       progress: reported?.progress,
@@ -98,7 +98,7 @@ class RelayStatusProbe implements StatusProbe {
           (source.latencyMs == null
               ? source.phase.label
               : '${source.latencyMs} ms'),
-      icon: Icons.hub_outlined,
+      icon: Icons.auto_awesome_rounded,
       state: reported == null
           ? _fromPhase(source.phase)
           : _fromTransportState(reported.state),
@@ -124,7 +124,7 @@ class PeerStatusProbe implements StatusProbe {
       id: id,
       label: 'Tor P2P',
       detail: reported?.detail ?? _peerDetail(source.peerStatus),
-      icon: Icons.settings_input_antenna_rounded,
+      icon: Icons.handshake_rounded,
       state: reported == null
           ? _fromPeer(source.peerStatus)
           : _fromTransportState(reported.state),
