@@ -15,6 +15,7 @@ import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -418,31 +419,33 @@ class MainActivity : FlutterActivity() {
 
     private fun connect(result: MethodChannel.Result) {
         if (TorChatForegroundService.activeEngineHost != null) {
-            scope.launch {
-                runCatching {
-                    withContext(Dispatchers.IO) { TorChatForegroundService.awaitReady() }
-                }
-                    .onSuccess { result.success(true) }
-                    .onFailure { result.error("RUNTIME", it.message, null) }
+            runAsync(result) {
+                TorChatForegroundService.awaitReady()
+                true
             }
             return
         }
 
         ContextCompat.startForegroundService(this, Intent(this, TorChatForegroundService::class.java))
-        scope.launch {
-            runCatching {
-                withContext(Dispatchers.IO) { TorChatForegroundService.awaitReady() }
-            }
-                .onSuccess { result.success(true) }
-                .onFailure { result.error("RUNTIME", it.message, null) }
+        runAsync(result) {
+            TorChatForegroundService.awaitReady()
+            true
         }
     }
 
     private fun <T> runAsync(result: MethodChannel.Result, block: suspend () -> T) {
         scope.launch {
-            runCatching { withContext(Dispatchers.IO) { block() } }
-                .onSuccess(result::success)
-                .onFailure { result.error("RUNTIME", it.message, null) }
+            try {
+                result.success(withContext(Dispatchers.IO) { block() })
+            } catch (cancelled: CancellationException) {
+                // The Flutter result belongs to this Activity instance. When
+                // Android recreates it there is no live receiver to notify;
+                // rethrow to preserve structured concurrency without turning
+                // a normal lifecycle transition into a runtime error.
+                throw cancelled
+            } catch (error: Throwable) {
+                result.error("RUNTIME", error.message, null)
+            }
         }
     }
 

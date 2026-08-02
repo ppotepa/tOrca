@@ -60,7 +60,7 @@ private fun mapRelayConnectionEvent(event: GeneratedEngineEvent): JSONObject {
         )
     }
     val detail = snapshot.optString(EngineContract.DETAIL)
-    val label = detail.ifBlank { state.replace('_', ' ') }
+    val label = relayStatusLabel(state, detail)
     return JSONObject()
         .put(EngineContract.TYPE, EngineContract.TRANSPORT_STATUS_CHANGED)
         .put("component", "relay")
@@ -71,6 +71,32 @@ private fun mapRelayConnectionEvent(event: GeneratedEngineEvent): JSONObject {
         .apply {
             retryInMs?.let { put(EngineContract.RETRY_IN_MS, it) }
         }
+}
+
+/** Keep engine diagnostics out of the user-facing transport status. The
+ * connection state is canonical; `detail` only explains what triggered the
+ * latest snapshot and frequently contains values such as `platform fact
+ * applied` even when the relay is already connected. */
+private fun relayStatusLabel(state: String, detail: String): String {
+    val trimmed = detail.trim()
+    val technicalDetail = trimmed.isEmpty() || trimmed in setOf(
+        "engine actor initialized",
+        "connect requested",
+        "platform fact applied",
+        "relay connected",
+    )
+    if (!technicalDetail) return trimmed
+
+    return when (state) {
+        EngineContract.CONNECTION_STATE_WAITING_FOR_TOR -> "Oczekiwanie na Tor"
+        EngineContract.CONNECTION_STATE_CONNECTING -> "Łączenie z relay"
+        EngineContract.CONNECTION_STATE_AUTHENTICATING -> "Uwierzytelnianie relay"
+        EngineContract.CONNECTION_STATE_WAITING_FOR_READY -> "Oczekiwanie na gotowość relay"
+        EngineContract.CONNECTION_STATE_CONNECTED -> "Relay połączony"
+        EngineContract.CONNECTION_STATE_BACKOFF -> "Ponawianie połączenia relay"
+        EngineContract.CONNECTION_STATE_STOPPED -> "Relay zatrzymany"
+        else -> "Relay rozłączony"
+    }
 }
 
 private fun connectionProbeState(state: String): String = when (state) {

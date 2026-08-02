@@ -1,6 +1,7 @@
 package org.torchat.mobile
 
 import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeout
 import org.json.JSONArray
@@ -71,6 +72,15 @@ class AndroidEngineHost private constructor(
             }
             Log.d("TorChat-Engine", "Engine command completed type=$commandType requestId=$requestId")
             decoded.value
+        } catch (cancelled: CancellationException) {
+            // Activity recreation routinely cancels an awaiting Flutter call.
+            // The service-owned engine continues running, so this is neither
+            // an engine failure nor an actionable error for the user.
+            Log.d(
+                "TorChat-Engine",
+                "Engine command await cancelled type=$commandType requestId=$requestId",
+            )
+            throw cancelled
         } catch (error: Throwable) {
             Log.e(
                 "TorChat-Engine",
