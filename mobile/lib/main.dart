@@ -88,6 +88,12 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
   final _nickname = TextEditingController();
   bool _onboardingUnlocked = false;
   bool _runningUnlocked = false;
+  bool _incomingPairingDialogOpen = false;
+  // A prompt can be requested while the page is changing route (notably just
+  // after a pairing code was submitted).  Keep only a *scheduled* marker;
+  // marking it permanently as presented before showDialog has mounted loses
+  // the only accept/reject affordance when that frame cannot present a route.
+  final Set<String> _scheduledIncomingPairingIds = <String>{};
   String _reattachedNickname = '';
   Timer? _backgroundDebounce;
   StreamSubscription<DesktopNavigationIntent>? _desktopNavigationSubscription;
@@ -127,11 +133,9 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
     final profile = snapshot?['profile'];
     if (profile is Map) {
       final nickname = profile['nickname']?.toString().trim() ?? '';
-      final serviceAlive = snapshot?['serviceAlive'] == true;
       if (nickname.length >= 2 && mounted) {
         setState(() {
           _reattachedNickname = nickname;
-          if (serviceAlive) _runningUnlocked = true;
         });
       }
     }
@@ -148,9 +152,9 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
     }
     final controller = ref.read(appControllerProvider.notifier);
     for (var attempt = 0; attempt < 12 && mounted; attempt += 1) {
-      final state = ref.read(appControllerProvider);
       final snapshot = ref.read(applicationSnapshotProvider).valueOrNull;
-      final conversations = snapshot?.conversations ?? state.conversations;
+      final conversations =
+          snapshot?.conversations ?? const <ConversationSummary>[];
       if (conversations.any((item) => item.id == intent.conversationId)) {
         await controller.openConversation(intent.conversationId);
         await DesktopNotificationService.clear(intent.notificationId);
@@ -158,6 +162,67 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
       }
       await controller.refreshData(forcePairing: false, allowAutoTorka: false);
       await Future<void>.delayed(const Duration(milliseconds: 250));
+    }
+  }
+
+  void _queueIncomingPairingPrompt(List<PairingItem> inbox) {
+    if (!mounted || !_runningUnlocked || _incomingPairingDialogOpen) return;
+    final request = inbox.firstOrNullWhere(
+      (item) =>
+          item.received &&
+          item.can(PairingAvailableAction.accept) &&
+          !_scheduledIncomingPairingIds.contains(item.id),
+    );
+    if (request == null) return;
+
+    _scheduledIncomingPairingIds.add(request.id);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _incomingPairingDialogOpen) {
+        _scheduledIncomingPairingIds.remove(request.id);
+        return;
+      }
+      unawaited(_showIncomingPairingPrompt(request));
+    });
+  }
+
+  Future<void> _showIncomingPairingPrompt(PairingItem request) async {
+    if (!mounted || _incomingPairingDialogOpen) {
+      _scheduledIncomingPairingIds.remove(request.id);
+      return;
+    }
+    _incomingPairingDialogOpen = true;
+    final controller = ref.read(appControllerProvider.notifier);
+    try {
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => IncomingPairingDialog(
+          request: request,
+          onAccept: () async {
+            await controller.acceptPairing(request.id);
+            await controller.refreshData(
+              forcePairing: true,
+              allowAutoTorka: false,
+            );
+          },
+          onReject: () async {
+            await controller.rejectPairing(request.id);
+            await controller.refreshData(
+              forcePairing: true,
+              allowAutoTorka: false,
+            );
+          },
+        ),
+      );
+    } finally {
+      _incomingPairingDialogOpen = false;
+      // The dialog itself is the presentation lock.  Releasing this marker
+      // means a failed route presentation is retried from the persisted inbox
+      // instead of silently hiding a still-pending invitation forever.
+      _scheduledIncomingPairingIds.remove(request.id);
+      if (mounted) {
+        _queueIncomingPairingPrompt(ref.read(appControllerProvider).inbox);
+      }
     }
   }
 
@@ -287,10 +352,9 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
   }
 
   void _openAccount() {
-    final state = ref.read(appControllerProvider);
     final snapshot = ref.read(applicationSnapshotProvider).valueOrNull;
-    final profile = snapshot?.profile ?? state.profile;
-    final identity = snapshot?.identity ?? state.identity;
+    final profile = snapshot?.profile ?? const RuntimeProfile();
+    final identity = snapshot?.identity ?? const RuntimeIdentity();
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => AccountView(
@@ -409,7 +473,14 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(appControllerProvider);
+    ref.listen<List<PairingItem>>(
+      appControllerProvider.select((value) => value.inbox),
+      (_, inbox) => _queueIncomingPairingPrompt(inbox),
+    );
     final snapshot = ref.watch(applicationSnapshotProvider).valueOrNull;
+    final messageSnapshot = ref
+        .watch(conversationMessagesProvider(state.selectedConversationId ?? ''))
+        .valueOrNull;
     final controller = ref.read(appControllerProvider.notifier);
     final connection = state.connectionReadiness;
     final summary = state.connectionSummary;
@@ -435,6 +506,10 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
         : _onboardingUnlocked && profile.nickname.trim().isEmpty
         ? AppLaunchPhase.onboarding
         : resolvedPhase;
+
+    if (launchPhase == AppLaunchPhase.running) {
+      _queueIncomingPairingPrompt(state.inbox);
+    }
 
     if (launchPhase == AppLaunchPhase.warming) {
       return ConnectionWarmupScreen(
@@ -463,8 +538,9 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
       );
     }
 
-    final contacts = snapshot?.contacts ?? state.contacts;
-    final conversations = snapshot?.conversations ?? state.conversations;
+    final contacts = snapshot?.contacts ?? const <ContactRecord>[];
+    final conversations =
+        snapshot?.conversations ?? const <ConversationSummary>[];
     final selectedContact = state.selectedContact(contacts, conversations);
     return MainShell(
       tab: switch (state.destination) {
@@ -484,7 +560,7 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
       transportStatuses: state.transportStatuses,
       contacts: contacts,
       conversations: conversations,
-      messages: state.messages,
+      messages: messageSnapshot?.messages ?? const <ChatMessage>[],
       selectedConversation: state.selectedConversationId,
       selectedContact: selectedContact,
       search: _search,

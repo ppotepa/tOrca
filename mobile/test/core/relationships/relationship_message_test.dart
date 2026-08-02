@@ -32,11 +32,11 @@ void main() {
   test('ordinary and malformed messages are ignored', () {
     expect(RelationshipRemovedMessage.tryDecode('hello'), isNull);
     expect(
-      RelationshipRemovedMessage.tryDecode('${relationshipRemovedPrefix}{}'),
+      RelationshipRemovedMessage.tryDecode('$relationshipRemovedPrefix{}'),
       isNull,
     );
     expect(
-      RelationshipRemovedMessage.tryDecode('${relationshipRemovedPrefix}{broken'),
+      RelationshipRemovedMessage.tryDecode('$relationshipRemovedPrefix{broken'),
       isNull,
     );
   });

@@ -24,7 +24,7 @@ void main() {
     expect(workspace, contains('ResizableSplitPane('));
     expect(workspace, contains("'Grupy'"));
     expect(workspace, contains('Nie mieszamy ich ze zwykłymi czatami'));
-    expect(workspace, contains("Text('TorChat'"));
+    expect(workspace, contains("'TorChat'"));
     expect(workspace, isNot(contains('PeerServerIndicator')));
     expect(splitter, contains('SystemMouseCursors.resizeColumn'));
     expect(splitter, contains('torchat.desktop.sidebar.width'));
@@ -44,15 +44,27 @@ void main() {
     expect(chat, contains("MessageState.read => Icons.done_all"));
   });
 
-  test('new conversations appear optimistically before runtime projection', () {
-    final controller = File(
+  test('new conversations use the canonical runtime projection', () {
+    final notificationController = File(
       'lib/app/notification_safe_app_controller.dart',
     ).readAsStringSync();
+    final baseController = File(
+      'lib/app/app_controller_base.dart',
+    ).readAsStringSync();
 
-    expect(controller, contains('ConversationSummary('));
-    expect(controller, contains('ConversationState.pending'));
-    expect(controller, contains('Oczekiwanie na bezpieczne połączenie'));
-    expect(controller, contains('final operation = super.openOrStartConversation'));
+    expect(notificationController, isNot(contains('ConversationSummary(')));
+    expect(
+      notificationController,
+      isNot(contains('ConversationState.pending')),
+    );
+    expect(
+      notificationController,
+      isNot(contains('Future<void> openOrStartConversation')),
+    );
+    expect(
+      baseController,
+      contains('_repository.activateConversation(contact.id)'),
+    );
   });
 
   test('busy surfaces avoid flicker and block their own component', () {

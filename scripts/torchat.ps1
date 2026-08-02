@@ -22,9 +22,6 @@ param(
     [string]$PairCode,
 
     [switch]$Release,
-    [switch]$Incremental,
-    [switch]$Clean,
-    [switch]$SkipEnvironmentStart,
     [ValidateRange(0, 600)][int]$ReadyAttempts = 0,
     [switch]$NoCache,
     [switch]$DryRun,
@@ -97,8 +94,7 @@ foreach ($module in @(
     Import-Module $path -Force -DisableNameChecking
 }
 
-# Compatibility aliases remain accepted while documentation and CI migrate to
-# the domain/action command tree.
+# Named public commands map to the domain/action command tree.
 switch ($Command) {
     'start-dev' { $Command = 'stack'; $Target = 'start' }
     'stop-dev' { $Command = 'stack'; $Target = 'stop' }
@@ -132,7 +128,9 @@ switch ($Command) {
         $Command = 'deploy'
         $Target = 'all'
         $BuildPolicy = 'rebuild'
-        $OnionPolicy = 'rotate'
+        # Keep the already-published relay onion during a normal development
+        # redeploy. Rotation has a separate explicit deploy-clean workflow.
+        $OnionPolicy = 'preserve'
         $DatabasePolicy = 'reset'
         $ClientDataPolicy = 'reset'
         $InstallPolicy = 'always'
@@ -150,9 +148,7 @@ if ($Command -eq 'clean' -and $Target -eq 'all' -and -not $Confirm -and -not $Dr
     throw 'clean all requires -Confirm.'
 }
 if ($Release) { $Configuration = 'release' }
-if ($Incremental) { $BuildPolicy = 'smart' }
-if ($Clean -or $ClientDataPolicy -eq 'clean') { $ClientDataPolicy = 'reset' }
-if ($SkipEnvironmentStart) { $StackPolicy = 'skip' }
+if ($ClientDataPolicy -eq 'clean') { $ClientDataPolicy = 'reset' }
 
 $allowedCommands = @('status','stack','build','deploy','run','stop','test','clean','logs','device')
 if ($allowedCommands -notcontains $Command) {
@@ -180,7 +176,10 @@ $mutex = $null
 $mutexAcquired = $false
 $mutating = -not $DryRun -and $Command -in @('stack','build','deploy','run','stop','clean')
 if ($mutating) {
-    $mutexName = if ($env:OS -eq 'Windows_NT') { 'Global\TorChat-Cli' } else { 'TorChat-Cli' }
+    # Version the mutex name so a process orphaned by the pre-v2 launcher cannot
+    # permanently block the current command runner. The mutex is still global
+    # for all current TorChat invocations on the host.
+    $mutexName = if ($env:OS -eq 'Windows_NT') { 'Global\TorChat-Cli-v2' } else { 'TorChat-Cli-v2' }
     $mutex = New-Object System.Threading.Mutex($false, $mutexName)
     try {
         $mutexAcquired = $mutex.WaitOne(0)

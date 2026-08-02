@@ -95,12 +95,27 @@ android {
                 }
             }
             buildConfigField("String", "TORCHAT_SERVER_URL", "\"$releaseConfig\"")
-            // Local release deploys use the debug keystore until a product
-            // signing keystore is supplied by CI. No development identity or
-            // Alice/Bob fixture is compiled into this variant.
-            signingConfig = signingConfigs.getByName("debug")
-            isMinifyEnabled = false
-            isShrinkResources = false
+            // A release artifact must never silently fall back to the debug
+            // certificate. CI supplies these values as environment variables;
+            // developers can use the same names for a locally signed build.
+            val storeFilePath = System.getenv("TORCHAT_RELEASE_STORE_FILE")
+            val storePassword = System.getenv("TORCHAT_RELEASE_STORE_PASSWORD")
+            val keyAlias = System.getenv("TORCHAT_RELEASE_KEY_ALIAS")
+            val keyPassword = System.getenv("TORCHAT_RELEASE_KEY_PASSWORD")
+            if (releaseTask) {
+                require(!storeFilePath.isNullOrBlank() && !storePassword.isNullOrBlank()
+                    && !keyAlias.isNullOrBlank() && !keyPassword.isNullOrBlank()) {
+                    "Release signing requires TORCHAT_RELEASE_STORE_FILE, TORCHAT_RELEASE_STORE_PASSWORD, TORCHAT_RELEASE_KEY_ALIAS and TORCHAT_RELEASE_KEY_PASSWORD"
+                }
+                signingConfig = signingConfigs.create("torchatRelease") {
+                    storeFile = file(storeFilePath)
+                    this.storePassword = storePassword
+                    this.keyAlias = keyAlias
+                    this.keyPassword = keyPassword
+                }
+            }
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
@@ -110,7 +125,7 @@ android {
             buildConfigField("String", "TORCHAT_DEV_PEER_NAME", "\"\"")
             buildConfigField("String", "TORCHAT_DEV_PEER_KEY", "\"\"")
             buildConfigField("boolean", "TORCHAT_DEV_PAIR", "false")
-            manifestPlaceholders["torchatUsesCleartext"] = "true"
+            manifestPlaceholders["torchatUsesCleartext"] = "false"
         }
     }
 }

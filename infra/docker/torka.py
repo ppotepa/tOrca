@@ -34,6 +34,8 @@ class Engine:
         )
         self.responses = {}
         self.lines = queue.Queue()
+        self.relay_ready = threading.Event()
+        self.peer_status = {}
         threading.Thread(target=self._read, daemon=True).start()
 
     def _read(self):
@@ -54,7 +56,26 @@ class Engine:
                 log(f"fatal: {event.get('error', {})}")
             elif event.get("type") == "runtime":
                 runtime = event.get("event", {})
-                log(f"runtime {runtime.get('type', 'unknown')}")
+                runtime_type = runtime.get("type", "unknown")
+                if runtime_type == "peer_connection_changed":
+                    contact_id = runtime.get("contactId", "unknown")
+                    status = (runtime.get("status"), runtime.get("retryInMs"))
+                    # Probes can reconnect repeatedly while an endpoint is
+                    # warming. Keep the full transition signal but avoid
+                    # flooding local diagnostics with identical states.
+                    if self.peer_status.get(contact_id) != status:
+                        self.peer_status[contact_id] = status
+                        log(f"peer {contact_id}: {status[0]} retry_in_ms={status[1]}")
+                else:
+                    log(f"runtime {runtime_type}")
+                if (
+                    runtime_type == "transport_status_changed"
+                    and runtime.get("component") == "RELAY"
+                ):
+                    if runtime.get("state") == "READY":
+                        self.relay_ready.set()
+                    elif runtime.get("state") in {"ERROR", "OFFLINE"}:
+                        self.relay_ready.clear()
             self.lines.put(event)
 
     def command(self, command, timeout=30):
@@ -84,6 +105,23 @@ class Engine:
             runtime = event.get("event") if event.get("type") == "runtime" else None
             if isinstance(runtime, dict) and runtime.get("type") == "message_received":
                 yield runtime
+
+    def wait_for_relay(self):
+        """Wait for the shared engine's retry actor instead of restarting Torka.
+
+        A fresh Tor circuit may temporarily reject the relay onion even after
+        bootstrap reaches 100%. `connect` is deliberately asynchronous in the
+        engine, so a test peer must wait for its transport event before issuing
+        profile and pairing commands that require the control plane.
+        """
+        next_log = time.monotonic()
+        while not self.relay_ready.wait(timeout=1):
+            if self.process.poll() is not None:
+                raise RuntimeError(f"desktop engine exited with {self.process.returncode}")
+            now = time.monotonic()
+            if now >= next_log:
+                log("waiting for shared relay retry actor")
+                next_log = now + 15
 
 
 def pending_pairing_ids(value):
@@ -127,7 +165,7 @@ def conversation_for_message(engine, message_id):
 def verified_messaging_ready(engine):
     contacts = engine.command({"type": "list_contacts"}, timeout=15)
     if not any(
-        contact.get("verified") is True
+        contact_is_verified(contact)
         for contact in contacts if isinstance(contact, dict)
     ):
         return False
@@ -136,6 +174,34 @@ def verified_messaging_ready(engine):
         conversation.get("id")
         for conversation in conversations if isinstance(conversation, dict)
     )
+
+
+def contact_is_verified(contact):
+    """Read the canonical ContactRecord JSON (`verification`)."""
+    return str(
+        contact.get("verification")
+        or contact.get("verificationState")
+        or ""
+    ).upper() == "VERIFIED"
+
+
+def verify_available_contacts(engine):
+    """Trust contacts accepted by the development-only autonomous peer.
+
+    Torka's reserved pairing code is a local test fixture, not a user-facing
+    verification mechanism.  The bot therefore completes its own explicit
+    verification step so the normal message responder cannot be permanently
+    paused behind a manual UI action that no bot can perform.
+    """
+    contacts = engine.command({"type": "list_contacts"}, timeout=15)
+    for contact in contacts if isinstance(contacts, list) else []:
+        installation_id = contact.get("installationId")
+        if installation_id and not contact_is_verified(contact):
+            engine.command(
+                {"type": "verify_contact", "installation_id": installation_id},
+                timeout=15,
+            )
+            log(f"verified development contact {installation_id}")
 
 
 def queued_command_messages(engine, handled_message_ids):
@@ -220,11 +286,22 @@ def env_interval(name, default, minimum=1):
 
 def main():
     engine = Engine()
+    readiness_path = "/var/lib/torchat/torka-ready"
+    # A readiness marker belongs to this runtime incarnation only. Leaving an
+    # old marker after a sidecar crash would let an integration peer submit a
+    # pairing request before Torka has restored its relay session.
+    try:
+        os.unlink(readiness_path)
+    except FileNotFoundError:
+        pass
     try:
         engine.command({"type": "bootstrap"})
         engine.command({"type": "connect"})
+        engine.wait_for_relay()
         profile = engine.command({"type": "set_nickname", "nickname": os.environ.get("TORCHAT_NICKNAME", "Torka")})
         log(f"identity ready installation={profile.get('installationId', 'unknown')}")
+        with open(readiness_path, "w", encoding="utf-8") as readiness:
+            readiness.write("ready\n")
         reserved_code = os.environ.get("TORCHAT_TORKA_PAIRING_CODE", "").strip()
         if reserved_code:
             log(f"reserved pairing code: {reserved_code}")
@@ -247,6 +324,7 @@ def main():
                     for pairing_id in pending_pairing_ids(inbox):
                         log(f"accepting pairing request {pairing_id}")
                         engine.command({"type": "accept_pairing", "pairing_id": pairing_id}, timeout=30)
+                    verify_available_contacts(engine)
                 except Exception as error:
                     log(f"pairing inbox deferred: {error}")
 
@@ -264,6 +342,7 @@ def main():
             if now >= next_message_poll:
                 next_message_poll = now + message_interval
                 try:
+                    verify_available_contacts(engine)
                     if verified_messaging_ready(engine):
                         message_wait_logged = False
                         respond_to_commands(engine, handled_message_ids)
@@ -275,6 +354,10 @@ def main():
 
             time.sleep(idle_sleep)
     finally:
+        try:
+            os.unlink(readiness_path)
+        except FileNotFoundError:
+            pass
         if engine.process.poll() is None:
             try:
                 engine.command({"type": "shutdown"}, timeout=5)

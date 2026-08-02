@@ -11,6 +11,8 @@ void main() {
     startup.observeTransport(
       const RuntimeTorStatus(phase: TransportPhase.connected),
     );
+    startup.observeRelayReady(true);
+    startup.observePeerListenerReady();
     startup.observePeerEndpoint(true);
 
     await startup.waitForTor(generation);
@@ -33,10 +35,7 @@ void main() {
 
     startup.begin();
 
-    await expectLater(
-      oldWait,
-      throwsA(isA<StartupGenerationChanged>()),
-    );
+    await expectLater(oldWait, throwsA(isA<StartupGenerationChanged>()));
   });
 
   test('phase projection exposes exactly one current startup step', () {
@@ -62,11 +61,13 @@ void main() {
       steps
           .firstWhere((step) => step.kind == StartupStepKind.peerListener)
           .state,
-      StartupStepState.pending,
+      StartupStepState.ready,
     );
     expect(
-      steps.firstWhere((step) => step.kind == StartupStepKind.onionService).state,
-      StartupStepState.pending,
+      steps
+          .firstWhere((step) => step.kind == StartupStepKind.onionService)
+          .state,
+      StartupStepState.ready,
     );
   });
 
@@ -78,7 +79,9 @@ void main() {
       SequentialStartupPhase.tor,
       error: StateError('tor failed'),
     );
-    final torIndex = steps.indexWhere((step) => step.kind == StartupStepKind.tor);
+    final torIndex = steps.indexWhere(
+      (step) => step.kind == StartupStepKind.tor,
+    );
 
     expect(steps[torIndex].state, StartupStepState.error);
     for (var index = torIndex + 1; index < steps.length; index += 1) {

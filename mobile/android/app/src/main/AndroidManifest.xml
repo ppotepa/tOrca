@@ -9,7 +9,6 @@
         android:label="TorChat"
         android:name=".TorChatApplication"
         android:allowBackup="false"
-        android:requestLegacyExternalStorage="true"
         android:usesCleartextTraffic="${torchatUsesCleartext}"
         android:icon="@mipmap/ic_launcher">
         <service

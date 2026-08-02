@@ -1,5 +1,9 @@
 use futures_util::{SinkExt, StreamExt};
-use tokio::{net::TcpStream, sync::mpsc, time::{Duration, timeout}};
+use tokio::{
+    net::TcpStream,
+    sync::mpsc,
+    time::{Duration, timeout},
+};
 use tokio_tungstenite::{
     WebSocketStream, accept_hdr_async,
     tungstenite::{
@@ -10,8 +14,8 @@ use tokio_tungstenite::{
 use torchat_core::{
     Identity, PROTOCOL_VERSION,
     peer_protocol::{
-        PEER_PATH, PeerAck, PeerAckKind, PeerEndpointBundle, PeerFrame,
-        PeerServerChallenge, handshake_transcript,
+        PEER_PATH, PeerAck, PeerAckKind, PeerEndpointBundle, PeerFrame, PeerServerChallenge,
+        handshake_transcript,
     },
     verify_signature,
 };
@@ -23,6 +27,7 @@ use super::{
     wire::{decode_message, random_nonce, recv_frame_with_timeout, send_frame, unix_secs},
 };
 
+#[allow(clippy::result_large_err)] // tungstenite fixes this callback error type.
 pub(super) async fn serve_inbound(
     stream: TcpStream,
     identity_private_key: [u8; 32],

@@ -90,6 +90,7 @@ class PeerEndpoint {
 
 enum StartupStepKind {
   engine,
+  localData,
   tor,
   peerListener,
   onionService,
@@ -111,7 +112,8 @@ class StartupStep {
   final String detail;
 
   String get title => switch (kind) {
-    StartupStepKind.engine => 'Silnik i pamięć lokalna',
+    StartupStepKind.engine => 'Wspólny silnik',
+    StartupStepKind.localData => 'Dane lokalne',
     StartupStepKind.tor => 'Sieć Tor',
     StartupStepKind.peerListener => 'Lokalny serwer P2P',
     StartupStepKind.onionService => 'Usługa onion P2P',
@@ -120,7 +122,8 @@ class StartupStep {
   };
 
   String get description => switch (kind) {
-    StartupStepKind.engine => 'Otwieranie zaszyfrowanej bazy i tożsamości',
+    StartupStepKind.engine => 'Uruchamianie wspólnego silnika Rust',
+    StartupStepKind.localData => 'Otwieranie zaszyfrowanej bazy i tożsamości',
     StartupStepKind.tor => 'Uruchamianie procesu Tor i przygotowanie SOCKS',
     StartupStepKind.peerListener => 'Nasłuchiwanie lokalnego serwera peer',
     StartupStepKind.onionService => 'Publikowanie adresu urządzenia w Tor',
@@ -412,6 +415,40 @@ class TransportStatusSnapshot {
   final int generation;
   final String? endpoint;
   final int? updatedAt;
+}
+
+class StartupReadinessSnapshot {
+  const StartupReadinessSnapshot({
+    required this.engineReady,
+    required this.localDataReady,
+    required this.torReady,
+    required this.peerListenerReady,
+    required this.onionServiceReady,
+    required this.relayReady,
+    required this.generation,
+    required this.detail,
+  });
+
+  factory StartupReadinessSnapshot.fromJson(Map<String, dynamic> json) =>
+      StartupReadinessSnapshot(
+        engineReady: json['engineReady'] == true,
+        localDataReady: json['localDataReady'] == true,
+        torReady: json['torReady'] == true,
+        peerListenerReady: json['peerListenerReady'] == true,
+        onionServiceReady: json['onionServiceReady'] == true,
+        relayReady: json['relayReady'] == true,
+        generation: (json['generation'] as num?)?.toInt() ?? 0,
+        detail: json['detail']?.toString() ?? '',
+      );
+
+  final bool engineReady;
+  final bool localDataReady;
+  final bool torReady;
+  final bool peerListenerReady;
+  final bool onionServiceReady;
+  final bool relayReady;
+  final int generation;
+  final String detail;
 }
 
 class RuntimeIdentity {

@@ -1,7 +1,10 @@
 Set-StrictMode -Version Latest
 
 function Get-TorChatAndroidWifiDeviceRegex {
-    return '^\d{1,3}(?:\.\d{1,3}){3}:\d+$'
+    # adb wireless debugging can appear either as host:port or as the mDNS
+    # transport serial (adb-<id>._adb-tls-connect._tcp). Treat both as Wi-Fi
+    # so auto-selection does not reject a USB + wireless duplicate.
+    return '^(?:\d{1,3}(?:\.\d{1,3}){3}:\d+|adb-.+_adb-tls-connect\._tcp)$'
 }
 
 function Test-TorChatAndroidDeviceIsWifi {
@@ -30,8 +33,7 @@ function Get-TorChatAndroidDevices {
     return @(
         adb devices 2>$null |
             Where-Object { $_ -match '^\S+\s+device$' } |
-            ForEach-Object { ($_ -split '\s+')[0] } |
-            Where-Object { $_ -notmatch '\._adb-tls-connect\._tcp$' }
+            ForEach-Object { ($_ -split '\s+')[0] }
     )
 }
 
@@ -174,7 +176,12 @@ function Save-TorChatAndroidDiagnostics {
     & adb -s $Device logcat -d -v threadtime 'TorChat-Engine:*' 'TorChat-Tor:*' 'AndroidRuntime:E' 'ActivityManager:W' '*:S' 2>&1 |
         Out-File -LiteralPath (Join-Path $root 'filtered-logcat.txt') -Encoding utf8
 
-    $journalListing = @(& adb -s $Device shell run-as org.torchat.mobile sh -c 'ls -t no_backup/engine-logs/*.jsonl 2>/dev/null' 2>$null)
+    # Avoid `sh -c` here: PowerShell/adb quoting can consume the wildcard or
+    # redirection before Android's shell sees it. Listing the private directory
+    # directly is stable across USB and wireless adb transports.
+    $journalListing = @(& adb -s $Device shell run-as org.torchat.mobile ls -t no_backup/engine-logs 2>$null) |
+        ForEach-Object { $_.Trim() } |
+        Where-Object { $_ -match '\.jsonl$' }
     $startupJournal = $journalListing | Where-Object { $_ -match 'startup-.*\.jsonl$' } | Select-Object -First 1
     $platformJournal = $journalListing | Where-Object { $_ -match 'platform-.*\.jsonl$' } | Select-Object -First 1
     foreach ($journal in @(
@@ -182,7 +189,7 @@ function Save-TorChatAndroidDiagnostics {
         @{ Entry = $platformJournal; Name = 'platform-journal.jsonl' }
     )) {
         if ($journal.Entry) {
-            $remotePath = $journal.Entry.Trim()
+            $remotePath = "no_backup/engine-logs/$($journal.Entry.Trim())"
             & adb -s $Device shell run-as org.torchat.mobile cat $remotePath 2>&1 |
                 Out-File -LiteralPath (Join-Path $root $journal.Name) -Encoding utf8
         } else {
@@ -191,6 +198,41 @@ function Save-TorChatAndroidDiagnostics {
         }
     }
     return $root
+}
+
+function Get-TorChatAndroidApplicationReadiness {
+    param([Parameter(Mandatory = $true)][string]$Device)
+    $listing = @(& adb -s $Device shell run-as org.torchat.mobile ls -t no_backup/engine-logs 2>$null) |
+        ForEach-Object { $_.Trim() } |
+        Where-Object { $_ -match '^startup-.*\.jsonl$' }
+    $latest = $listing | Select-Object -First 1
+    if (-not $latest) {
+        return [pscustomobject]@{ Engine = $false; PeerEndpoint = $false; Relay = $false; Ready = $false }
+    }
+    $events = @(& adb -s $Device shell run-as org.torchat.mobile cat "no_backup/engine-logs/$latest" 2>$null) |
+        ForEach-Object {
+            try { $_ | ConvertFrom-Json -ErrorAction Stop } catch { $null }
+        }
+    $engineReady = @($events | Where-Object {
+        $_.component -eq 'engine' -and $_.message -eq 'client engine actor started for Android'
+    }).Count -gt 0
+    $peerEndpointReady = @($events | Where-Object {
+        $_.component -eq 'peer' -and $_.eventCode -eq 'peer_endpoint_changed' -and $_.message -match '(?:^|\s)status=Verified(?:\s|$)'
+    }).Count -gt 0
+    $relayReady = @($events | Where-Object {
+        $_.component -eq 'relay' -and $_.eventCode -eq 'connection_state_changed' -and $_.message -match '^Connected:'
+    }).Count -gt 0
+    [pscustomobject]@{
+        Engine = $engineReady
+        PeerEndpoint = $peerEndpointReady
+        Relay = $relayReady
+        Ready = $engineReady -and $peerEndpointReady -and $relayReady
+    }
+}
+
+function Test-TorChatAndroidApplicationReady {
+    param([Parameter(Mandatory = $true)][string]$Device)
+    return (Get-TorChatAndroidApplicationReadiness -Device $Device).Ready
 }
 
 function Stop-TorChatAndroidClient {
@@ -209,6 +251,13 @@ function Install-TorChatAndroidClient {
         $Artifact = Join-Path $Context.RepositoryRoot "mobile\build\app\outputs\flutter-apk\app-$($Context.Configuration).apk"
     }
     if (-not (Test-Path -LiteralPath $Artifact)) { throw "Android APK not found: $Artifact" }
+    try {
+        Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
+        $apkArchive = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path -LiteralPath $Artifact).Path)
+        $apkArchive.Dispose()
+    } catch {
+        throw "Android APK is invalid or incomplete: $Artifact. Rebuild with -BuildPolicy rebuild before installing. $($_.Exception.Message)"
+    }
 
     $output = @(& adb -s $Device install -r --no-streaming $Artifact 2>&1)
     $exitCode = $LASTEXITCODE
@@ -235,7 +284,8 @@ function Start-TorChatAndroidClient {
         [Parameter(Mandatory = $true)]$Context,
         [Parameter(Mandatory = $true)][string]$Device,
         [ValidateSet('preserve','reset')][string]$ClientDataPolicy = 'preserve',
-        [int]$ReadyAttempts = 40
+        [int]$ReadyAttempts = 40,
+        [int]$FunctionalReadyAttempts = 180
     )
     Assert-TorChatTool -Name adb
     $resolvedDevice = Resolve-TorChatAndroidDevice -Context $Context -Device $Device -DiscoveryTimeoutSeconds 20
@@ -269,6 +319,20 @@ function Start-TorChatAndroidClient {
         $diagnostics = Save-TorChatAndroidDiagnostics -Context $Context -Device $resolvedDevice
         throw "Android did not reach APP_READY/ENGINE_READY. Diagnostics: $diagnostics"
     }
+    $applicationReadiness = $null
+    $applicationReady = $false
+    for ($attempt = 1; $attempt -le $FunctionalReadyAttempts; $attempt++) {
+        $applicationReadiness = Get-TorChatAndroidApplicationReadiness -Device $resolvedDevice
+        $applicationReady = $applicationReadiness.Ready
+        $percent = [Math]::Min(99, [int](100 * $attempt / [Math]::Max(1,$FunctionalReadyAttempts)))
+        Write-TorChatStageProgress -Context $Context -Name 'Android application readiness' -Percent $percent -Detail "engine=$($applicationReadiness.Engine) p2p=$($applicationReadiness.PeerEndpoint) relay=$($applicationReadiness.Relay)"
+        if ($applicationReady) { break }
+        Start-Sleep -Seconds 1
+    }
+    if (-not $applicationReady) {
+        $diagnostics = Save-TorChatAndroidDiagnostics -Context $Context -Device $resolvedDevice
+        throw "Android process started, but onion/relay did not reach APPLICATION_READY. Diagnostics: $diagnostics"
+    }
     $initialPid = $appPid
     Start-Sleep -Seconds 5
     $stablePid = Get-TorChatAndroidAppPid -Device $resolvedDevice
@@ -276,7 +340,7 @@ function Start-TorChatAndroidClient {
         $diagnostics = Save-TorChatAndroidDiagnostics -Context $Context -Device $resolvedDevice
         throw "Android process was not stable for five seconds. Diagnostics: $diagnostics"
     }
-    [pscustomobject]@{ State = 'Ready'; Code = 'ANDROID_READY'; Message = "Android ready on $resolvedDevice (PID $stablePid)"; Device = $resolvedDevice; Pid = $stablePid }
+    [pscustomobject]@{ State = 'Ready'; Code = 'ANDROID_READY'; Message = "Android application ready on $resolvedDevice (PID $stablePid)"; Device = $resolvedDevice; Pid = $stablePid }
 }
 
 function Get-TorChatAndroidStatus {
@@ -285,7 +349,9 @@ function Get-TorChatAndroidStatus {
     $appPid = Get-TorChatAndroidAppPid -Device $resolved
     $ready = $false
     if ($appPid) {
-        $ready = (Test-TorChatAndroidActivityResumed -Device $resolved) -and (Test-TorChatAndroidServiceRunning -Device $resolved)
+        $ready = (Test-TorChatAndroidActivityResumed -Device $resolved) -and
+            (Test-TorChatAndroidServiceRunning -Device $resolved) -and
+            (Test-TorChatAndroidApplicationReady -Device $resolved)
     }
     [pscustomobject]@{
         State = if ($ready) { 'Ready' } else { 'Warning' }

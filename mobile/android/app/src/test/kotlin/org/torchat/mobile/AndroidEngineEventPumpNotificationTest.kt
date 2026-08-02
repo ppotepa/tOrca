@@ -8,7 +8,7 @@ import org.torchat.generated.EngineContract
 
 class AndroidEngineEventPumpNotificationTest {
     @Test
-    fun legacyPairingOfferNotificationIsSuppressed() {
+    fun pairingOfferNotificationIsSuppressed() {
         val event = JSONObject()
             .put(EngineContract.TYPE, EngineContract.EVENT_NOTIFICATION_REQUESTED)
             .put(

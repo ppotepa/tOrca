@@ -36,14 +36,15 @@ void main() {
       status(ConnectionComponent.localData, ConnectionComponentState.ready),
       status(ConnectionComponent.tor, ConnectionComponentState.ready),
       status(ConnectionComponent.relay, ConnectionComponentState.starting),
-      status(ConnectionComponent.peerListener, ConnectionComponentState.starting),
+      status(
+        ConnectionComponent.peerListener,
+        ConnectionComponentState.starting,
+      ),
       status(ConnectionComponent.onionService, ConnectionComponentState.ready),
     ]);
 
     expect(
-      result.where(
-        (item) => item.state == ConnectionComponentState.starting,
-      ),
+      result.where((item) => item.state == ConnectionComponentState.starting),
       hasLength(1),
     );
     expect(result[3].component, ConnectionComponent.relay);

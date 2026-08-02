@@ -29,6 +29,7 @@ class SequentialStartupOrchestrator {
   int _revision = 0;
   RuntimeTorStatus _transport = const RuntimeTorStatus();
   bool _runtimeReady = false;
+  bool _relayReady = false;
   bool _peerListenerReady = false;
   bool _onionServiceReady = false;
   Object? _failure;
@@ -43,14 +44,14 @@ class SequentialStartupOrchestrator {
   int begin({
     RuntimeTorStatus transport = const RuntimeTorStatus(),
     bool runtimeReady = false,
-    bool peerEndpointAvailable = false,
   }) {
     _generation += 1;
     _revision += 1;
     _transport = transport;
     _runtimeReady = runtimeReady;
-    _peerListenerReady = runtimeReady || peerEndpointAvailable;
-    _onionServiceReady = peerEndpointAvailable;
+    _relayReady = false;
+    _peerListenerReady = false;
+    _onionServiceReady = false;
     _failure = null;
     _notifyWaiters();
     return _generation;
@@ -58,8 +59,13 @@ class SequentialStartupOrchestrator {
 
   void observeRuntimeReady() {
     _runtimeReady = true;
-    // The shared actor binds the local peer transport before it accepts the
-    // bootstrap command, so runtime-ready also fences peer-listener readiness.
+    // Runtime readiness only proves that the shared engine is alive. The local
+    // P2P listener has its own lifecycle and must publish a separate fact;
+    // conflating the two allowed warmup to continue with no peer server.
+    _changed();
+  }
+
+  void observePeerListenerReady() {
     _peerListenerReady = true;
     _changed();
   }
@@ -69,9 +75,16 @@ class SequentialStartupOrchestrator {
     _changed();
   }
 
+  /// Relay readiness is a separate component from Tor SOCKS readiness. Tor
+  /// can be fully bootstrapped while the authenticated relay WebSocket is
+  /// still connecting or retrying.
+  void observeRelayReady(bool ready) {
+    _relayReady = ready;
+    _changed();
+  }
+
   void observePeerEndpoint(bool available) {
     if (available) {
-      _peerListenerReady = true;
       _onionServiceReady = true;
     } else {
       _onionServiceReady = false;
@@ -98,23 +111,20 @@ class SequentialStartupOrchestrator {
     generation,
     timeout,
     'Tor did not become ready',
-    () => switch (_transport.phase) {
-      TransportPhase.connecting ||
-      TransportPhase.connected ||
-      TransportPhase.reconnecting ||
-      TransportPhase.degraded => true,
-      _ => false,
-    },
+    () => _transport.phase == TransportPhase.connected,
   );
 
   Future<void> waitForRelay(
     int generation, {
-    Duration timeout = const Duration(minutes: 1),
+    // A cold onion circuit can legitimately require several guarded retries.
+    // Keep one UI deadline wider than the engine's complete retry ladder; the
+    // engine remains the owner of individual request timeouts and backoff.
+    Duration timeout = const Duration(minutes: 5),
   }) => _waitFor(
     generation,
     timeout,
     'Relay did not become ready',
-    () => _transport.phase == TransportPhase.connected,
+    () => _relayReady,
   );
 
   Future<void> waitForPeerListener(
@@ -235,59 +245,71 @@ class SequentialStartupOrchestrator {
     ];
   }
 
-  Set<StartupStepKind> _completedKinds(SequentialStartupPhase phase) => switch (phase) {
-    SequentialStartupPhase.engine => const {},
-    SequentialStartupPhase.localData => const {StartupStepKind.engine},
-    SequentialStartupPhase.tor => const {StartupStepKind.engine},
-    SequentialStartupPhase.relay => const {
-      StartupStepKind.engine,
-      StartupStepKind.tor,
-    },
-    SequentialStartupPhase.peerListener => const {
-      StartupStepKind.engine,
-      StartupStepKind.tor,
-      StartupStepKind.relay,
-    },
-    SequentialStartupPhase.onionService => const {
-      StartupStepKind.engine,
-      StartupStepKind.tor,
-      StartupStepKind.relay,
-      StartupStepKind.peerListener,
-    },
-    SequentialStartupPhase.communication => const {
-      StartupStepKind.engine,
-      StartupStepKind.tor,
-      StartupStepKind.relay,
-      StartupStepKind.peerListener,
-      StartupStepKind.onionService,
-    },
-    SequentialStartupPhase.complete => StartupStepKind.values.toSet(),
-  };
+  Set<StartupStepKind> _completedKinds(SequentialStartupPhase phase) =>
+      switch (phase) {
+        SequentialStartupPhase.engine => const {},
+        SequentialStartupPhase.localData => const {StartupStepKind.engine},
+        SequentialStartupPhase.tor => const {
+          StartupStepKind.engine,
+          StartupStepKind.localData,
+        },
+        SequentialStartupPhase.peerListener => const {
+          StartupStepKind.engine,
+          StartupStepKind.localData,
+          StartupStepKind.tor,
+        },
+        SequentialStartupPhase.onionService => const {
+          StartupStepKind.engine,
+          StartupStepKind.localData,
+          StartupStepKind.tor,
+          StartupStepKind.peerListener,
+        },
+        SequentialStartupPhase.relay => const {
+          StartupStepKind.engine,
+          StartupStepKind.localData,
+          StartupStepKind.tor,
+          StartupStepKind.peerListener,
+          StartupStepKind.onionService,
+        },
+        SequentialStartupPhase.communication => const {
+          StartupStepKind.engine,
+          StartupStepKind.localData,
+          StartupStepKind.tor,
+          StartupStepKind.peerListener,
+          StartupStepKind.onionService,
+          StartupStepKind.relay,
+        },
+        SequentialStartupPhase.complete => StartupStepKind.values.toSet(),
+      };
 
   StartupStepKind? _kindFor(SequentialStartupPhase phase) => switch (phase) {
     SequentialStartupPhase.engine => StartupStepKind.engine,
-    SequentialStartupPhase.localData => null,
+    SequentialStartupPhase.localData => StartupStepKind.localData,
     SequentialStartupPhase.tor => StartupStepKind.tor,
-    SequentialStartupPhase.relay => StartupStepKind.relay,
     SequentialStartupPhase.peerListener => StartupStepKind.peerListener,
     SequentialStartupPhase.onionService => StartupStepKind.onionService,
+    SequentialStartupPhase.relay => StartupStepKind.relay,
     SequentialStartupPhase.communication => StartupStepKind.communication,
     SequentialStartupPhase.complete => null,
   };
 
   String _runningDetail(SequentialStartupPhase phase) => switch (phase) {
     SequentialStartupPhase.engine => 'Uruchamianie wspólnego engine',
-    SequentialStartupPhase.localData => 'Odczytywanie zaszyfrowanych danych lokalnych',
+    SequentialStartupPhase.localData =>
+      'Odczytywanie zaszyfrowanych danych lokalnych',
     SequentialStartupPhase.tor => 'Oczekiwanie na gotowość sieci Tor',
     SequentialStartupPhase.relay => 'Łączenie z relayem onion',
-    SequentialStartupPhase.peerListener => 'Uruchamianie lokalnego listenera P2P',
+    SequentialStartupPhase.peerListener =>
+      'Uruchamianie lokalnego listenera P2P',
     SequentialStartupPhase.onionService => 'Publikowanie lokalnej usługi onion',
-    SequentialStartupPhase.communication => 'Finalizowanie gotowości komunikacji',
+    SequentialStartupPhase.communication =>
+      'Finalizowanie gotowości komunikacji',
     SequentialStartupPhase.complete => 'TorChat jest gotowy',
   };
 
   String _readyDetail(StartupStepKind kind) => switch (kind) {
-    StartupStepKind.engine => 'Engine i zaszyfrowane dane lokalne są gotowe',
+    StartupStepKind.engine => 'Wspólny engine jest gotowy',
+    StartupStepKind.localData => 'Tożsamość i dane lokalne są gotowe',
     StartupStepKind.tor => 'Sieć Tor jest gotowa',
     StartupStepKind.relay => 'Relay onion jest połączony',
     StartupStepKind.peerListener => 'Lokalny listener P2P działa',

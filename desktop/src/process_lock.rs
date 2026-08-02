@@ -59,8 +59,10 @@ impl TorDataLock {
         };
         let encoded = serde_json::to_vec_pretty(&metadata).context("encode Tor lock metadata")?;
         file.set_len(0).context("truncate Tor lock metadata")?;
-        file.seek(SeekFrom::Start(0)).context("seek Tor lock metadata")?;
-        file.write_all(&encoded).context("write Tor lock metadata")?;
+        file.seek(SeekFrom::Start(0))
+            .context("seek Tor lock metadata")?;
+        file.write_all(&encoded)
+            .context("write Tor lock metadata")?;
         file.write_all(b"\n").context("finish Tor lock metadata")?;
         file.sync_all().context("sync Tor lock metadata")?;
 
@@ -75,6 +77,7 @@ fn open_lock_file(path: &Path) -> Result<File> {
         .read(true)
         .write(true)
         .create(true)
+        .truncate(false)
         .share_mode(0)
         .open(path)
         .with_context(|| format!("open exclusive Tor lock {}", path.display()))

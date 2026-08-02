@@ -62,7 +62,7 @@ pub(crate) fn start_tor(
             .tor_data_dir
             .clone()
             .context("--tor-data-dir is required with --tor-binary for stdio-engine")?;
-        return TorRuntime::start(binary, &data_dir);
+        return TorRuntime::start(binary, &data_dir, cli.relay_socks5_proxy.clone());
     }
     if let Some(proxy) = &cli.socks5_proxy {
         return Ok(TorRuntime::external(proxy.clone()));
@@ -113,12 +113,8 @@ pub fn run_stdio_engine(cli: Cli) -> Result<()> {
                 &mut tor_endpoint_published,
             )
             .await?;
-            flush_pending_platform_action(
-                &engine,
-                &tor_runtime,
-                &mut pending_platform_action,
-            )
-            .await?;
+            flush_pending_platform_action(&engine, &tor_runtime, &mut pending_platform_action)
+                .await?;
             pump_engine_events(&mut engine, &tor_runtime, &mut pending_platform_action).await?;
 
             let line = match request_rx.recv_timeout(std::time::Duration::from_millis(50)) {
@@ -203,17 +199,13 @@ pub(crate) async fn drain_tor_statuses(
             *tor_endpoint_published = true;
         }
     }
-    if !*tor_endpoint_published && tor_runtime.is_ready() {
-        engine
-            .submit_platform_fact(
-                "desktop-tor-endpoint",
-                PlatformFact::TorEndpointAvailable {
-                    socks5_url: tor_runtime.socks_url().to_owned(),
-                },
-            )
-            .await?;
-        *tor_endpoint_published = true;
-    }
+    // A live control port only proves that the local Tor process is running.
+    // It does not prove that bootstrap finished or that a fresh onion circuit
+    // can be built. Publishing the SOCKS endpoint here started relay requests
+    // during `Bootstrapped 0..95%`, consumed their full timeout and then sent
+    // the startup screen into a long retry ladder. The Ready status above is
+    // emitted only for `Bootstrapped 100%` (or by the explicit external-Tor
+    // runtime), so it is the sole authority for this fact.
     Ok(())
 }
 

@@ -1,5 +1,6 @@
 package org.torchat.mobile
 
+import android.util.Log
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.withTimeout
 import org.json.JSONArray
@@ -29,6 +30,7 @@ class AndroidEngineHost private constructor(
         submitJson(
             JSONObject()
                 .put(EngineContract.REQUEST_ID, requestId)
+                .put(EngineContract.COMMAND_ID, requestId)
                 .put(EngineContract.COMMAND, command)
                 .toString(),
         )
@@ -53,11 +55,13 @@ class AndroidEngineHost private constructor(
 
     suspend fun submitCommandAndAwait(command: JSONObject, timeoutMs: Long = 10_000L): Any? {
         val requestId = UUID.randomUUID().toString()
+        val commandType = command.optString(EngineContract.TYPE).ifBlank { "unknown" }
         val response = CompletableDeferred<JSONObject>()
         check(pendingResponses.putIfAbsent(requestId, response) == null) {
             "Duplicate engine request id: $requestId"
         }
         return try {
+            Log.d("TorChat-Engine", "Submitting engine command type=$commandType requestId=$requestId")
             submitCommand(requestId, command)
             val decoded = GeneratedEngineResponse.fromJson(
                 withTimeout(timeoutMs) { response.await() },
@@ -65,7 +69,15 @@ class AndroidEngineHost private constructor(
             if (!decoded.ok) {
                 error(decoded.errorMessage ?: decoded.errorCode ?: "Engine request failed")
             }
+            Log.d("TorChat-Engine", "Engine command completed type=$commandType requestId=$requestId")
             decoded.value
+        } catch (error: Throwable) {
+            Log.e(
+                "TorChat-Engine",
+                "Engine command failed type=$commandType requestId=$requestId timeoutMs=$timeoutMs",
+                error,
+            )
+            throw error
         } finally {
             pendingResponses.remove(requestId)
         }

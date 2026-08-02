@@ -54,3 +54,9 @@ protocol/generated/
 
 # Local source aggregation used for manual review
 /scripts/concat.txt
+/concat.txt
+
+# Local developer-tool indexes and generated Python bytecode
+/.rtk/
+__pycache__/
+*.pyc

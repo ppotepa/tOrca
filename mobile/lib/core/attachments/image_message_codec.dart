@@ -20,13 +20,8 @@ class PreparedImageAttachment {
 
   int get size => bytes.lengthInBytes;
 
-  String toMessageBody() => '$imageMessagePrefix${jsonEncode({
-        'mime': 'image/jpeg',
-        'width': width,
-        'height': height,
-        'size': size,
-        'data': base64Encode(bytes),
-      })}';
+  String toMessageBody() =>
+      '$imageMessagePrefix${jsonEncode({'mime': 'image/jpeg', 'width': width, 'height': height, 'size': size, 'data': base64Encode(bytes)})}';
 }
 
 class DecodedImageMessage {
@@ -44,9 +39,7 @@ class DecodedImageMessage {
 Future<PreparedImageAttachment> prepareImageAttachment(
   Uint8List source, {
   int maximumBytes = maximumImageAttachmentBytes,
-}) => Isolate.run(
-      () => _prepareImageAttachment(source, maximumBytes),
-    );
+}) => Isolate.run(() => _prepareImageAttachment(source, maximumBytes));
 
 bool isImageMessageBody(String body) => body.startsWith(imageMessagePrefix);
 
@@ -85,10 +78,9 @@ PreparedImageAttachment _prepareImageAttachment(
     throw const FormatException('Nieobsługiwany lub uszkodzony obraz.');
   }
 
-  var working = image.bakeOrientation(decoded).convert(
-        numChannels: 3,
-        noAnimation: true,
-      );
+  var working = image
+      .bakeOrientation(decoded)
+      .convert(numChannels: 3, noAnimation: true);
   const longSideCandidates = <int>[1280, 1024, 800, 640, 480, 360];
   const qualityCandidates = <int>[78, 70, 62, 54, 46, 38, 30];
 

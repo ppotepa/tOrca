@@ -17,7 +17,7 @@ TorChat 0.1 is a reliable private 1:1 messenger for Windows and Android. The sco
 
 ## Trust model
 
-Entering a pairing code and explicitly accepting the request establishes trust. Pairing completion must produce a verified contact and active conversation on both sides. No second manual verification action is required.
+Entering a pairing code and explicitly accepting the request establishes trust. Pairing completion must produce a verified contact and active conversation on both sides. No additional `Verify contact` action is required; it produces a verified contact and an active conversation on both sides.
 
 ## Epic 1 — startup and lifecycle
 

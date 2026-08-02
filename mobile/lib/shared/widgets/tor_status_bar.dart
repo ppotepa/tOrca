@@ -39,9 +39,6 @@ class TransportStatusDock extends StatefulWidget {
   State<TransportStatusDock> createState() => _TransportStatusDockState();
 }
 
-/// Backwards-compatible name for older onboarding call sites.
-typedef TorStatusBar = TransportStatusDock;
-
 class _TransportStatusDockState extends State<TransportStatusDock>
     with SingleTickerProviderStateMixin {
   late final AnimationController _breathing = AnimationController(
@@ -99,10 +96,7 @@ class _TransportStatusDockState extends State<TransportStatusDock>
           ? 1450
           : 3200,
     );
-    if (_hasBusySegment ||
-        _hasErrorSegment ||
-        widget.phase.isConnected ||
-        widget.peerStatus == PeerServerStatus.ready) {
+    if (_hasBusySegment || _hasErrorSegment || _hasWarningSegment) {
       _breathing.repeat(reverse: true);
     } else {
       _breathing.stop();

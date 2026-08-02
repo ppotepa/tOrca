@@ -9,27 +9,28 @@ use tokio::sync::mpsc;
 use tokio::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 use torchat_client_runtime::{
-    ClientRuntime, ContactTransportPolicy, MessageSendEffect, MessageTransportOutcome, PairingPeerOutcome,
-    PairingPreparation, PairingSendKind, PairingSyncResult, PeerConnectionStatus,
-    PeerEndpointStatus, RuntimeClock, RuntimeError, RuntimeIdentity, RuntimeProfile,
-    RuntimeSendEffect, RuntimeSession, RuntimeStatusPhase, RuntimeStorage, RuntimeTorStatus,
-    RuntimeTransport, SystemRuntimeClock, WelcomeAcceptedResult, contact_card_from_invite,
-    contact_record_from_card,
+    ApplicationSnapshot, ClientRuntime, ContactTransportPolicy, MessageSendEffect,
+    MessageTransportOutcome, PairingPeerOutcome, PairingPreparation, PairingSendKind,
+    PairingSummary, PeerConnectionStatus, PeerEndpointStatus, ProjectionStamp, RuntimeClock,
+    RuntimeError, RuntimeIdentity, RuntimeProfile, RuntimeSendEffect, RuntimeSession,
+    RuntimeStatusPhase, RuntimeStorage, RuntimeTorStatus, RuntimeTransport,
+    StartupReadinessSnapshot, SystemRuntimeClock, UiCheckpoint, WelcomeAcceptedResult,
+    contact_card_from_invite, contact_record_from_card,
 };
 use torchat_core::{
     ContactInvite, Identity,
     application::{ApplicationPayloadV1, ApplicationReply},
     mls::{DirectConversation, MlsMember},
     peer_protocol::{
-        PEER_VIRTUAL_PORT, PeerAck, PeerAckKind, PeerCiphertextPayload, PeerEndpointBundle,
-        PeerEndpointUpdate,
+        MAX_TRANSPORT_CIPHERTEXT_BYTES, PEER_VIRTUAL_PORT, PeerAck, PeerAckKind,
+        PeerCiphertextPayload, PeerEndpointBundle, PeerEndpointUpdate,
     },
     relay::{RelayEnvelope, RelayPayloadV1},
 };
 
 use crate::{
     ClientDatabase, EngineCommand, EngineCommandEnvelope, EngineConfig, EngineError, EngineEvent,
-    EngineLogEvent, EngineResult, PlatformAction, PlatformFact,
+    EngineLogEvent, EngineResult, PlatformAction, PlatformFact, PlatformKind,
     event::{
         ConnectionSnapshot, ConnectionState, NotificationRequest, ResponsePayload, ResponseResult,
     },
@@ -37,32 +38,114 @@ use crate::{
     relay::{EngineRelay, RelayEvent, SharedRelayActor},
     storage::{
         DeliveryReceiptRecord, InboundEnvelopeStoreResult, PairingResponseRecord,
-        PeerEndpointBootstrapRecord, PendingContactConfirmationRecord,
+        PeerEndpointBootstrapRecord, PendingContactConfirmationRecord, PendingLocalInviteMlsRecord,
         PendingPeerEndpointInboxRecord, PendingWelcomeRecord, ReceivedEnvelopeRecord,
         RetryDeadline, RetryKind, SqliteRuntimeStorage,
     },
 };
 
+mod connection;
+
 #[derive(Clone, Debug)]
 enum PendingRelayDelivery {
-    PairingResponse { pairing_id: String },
-    Welcome { invite_id: String },
-    Message { message_id: String },
-    Receipt { message_id: String },
-    Ephemeral { installation_id: String },
-    PeerEndpointBootstrap { installation_id: String, sequence: u64 },
+    PairingResponse {
+        pairing_id: String,
+    },
+    Welcome {
+        invite_id: String,
+    },
+    Message {
+        message_id: String,
+    },
+    Receipt {
+        message_id: String,
+    },
+    Ephemeral {
+        installation_id: String,
+    },
+    PeerEndpointBootstrap {
+        installation_id: String,
+        sequence: u64,
+    },
+}
+
+enum RelayBootstrapOutcome {
+    Ready {
+        generation: u64,
+        relay: Box<SharedRelayActor>,
+    },
+    Failed {
+        generation: u64,
+        error: torchat_client_runtime::RuntimeError,
+    },
+}
+
+enum RelayControlResult {
+    Unit,
+    PairingCode(torchat_client_runtime::InviteCode),
+    PairingItem(Box<torchat_client_runtime::PairingItem>),
+    PairingInbox(Vec<torchat_client_runtime::PairingItem>),
+}
+
+enum RelayControlOperation {
+    Command(EngineCommand),
+    AcknowledgePairing {
+        pairing_id: String,
+    },
+    ConfirmContact {
+        pairing_id: String,
+        capability: String,
+        peer_installation_id: String,
+    },
+}
+
+struct RelayControlOutcome {
+    request_id: String,
+    respond: bool,
+    command_id: Option<String>,
+    command_descriptor: String,
+    operation: RelayControlOperation,
+    result: EngineResult<RelayControlResult>,
+}
+
+struct PendingRelayControl {
+    request_id: String,
+    respond: bool,
+    command_id: Option<String>,
+    command_descriptor: String,
+    operation: RelayControlOperation,
+}
+
+fn is_relay_control_command(command: &EngineCommand) -> bool {
+    matches!(
+        command,
+        EngineCommand::SetNickname { .. }
+            | EngineCommand::RefreshPairingCode
+            | EngineCommand::SubmitPairingCode { .. }
+            | EngineCommand::CancelPairing { .. }
+            | EngineCommand::PairingInbox
+    )
+}
+
+#[derive(Clone, Debug)]
+struct IdempotencyCommitContext {
+    command_id: String,
+    command_descriptor: String,
 }
 
 pub struct ClientEngineActor {
-    pub config: EngineConfig,
+    /// Retain only platform metadata after construction. Database and identity
+    /// secrets are consumed while opening the actor and must not have a second
+    /// long-lived copy in actor memory.
+    pub platform: PlatformKind,
     pub database: ClientDatabase,
     pub identity: Identity,
-    pub mls_inbox: MlsMember,
     pub conversations: HashMap<String, DirectConversation>,
     pub pending_welcomes: HashMap<String, PendingWelcomeRecord>,
     pending_relay_deliveries: HashMap<uuid::Uuid, PendingRelayDelivery>,
     pending_engine_events: Vec<EngineEvent>,
     active_peer_sessions: HashMap<String, HashSet<uuid::Uuid>>,
+    crypto_blocked_peers: HashSet<String>,
     connection_generation: u64,
     app_foreground: bool,
     pub session: RuntimeSession,
@@ -70,6 +153,7 @@ pub struct ClientEngineActor {
     pub connection_state: ConnectionState,
     pub tor_status: RuntimeTorStatus,
     pub socks5_url: Option<String>,
+    relay_onion_url: reqwest::Url,
     pub relay: Box<dyn EngineRelay>,
     peer_transport: Option<PeerTransportHandle>,
     local_peer_endpoint: Option<PeerEndpointBundle>,
@@ -78,11 +162,24 @@ pub struct ClientEngineActor {
     battery_saver: bool,
     device_idle: bool,
     background_restricted: bool,
+    /// The next relay poll is actor state, not a per-loop local deadline.
+    /// Recreating it after every command/event starves relay polling whenever
+    /// the actor is busy with peer traffic or UI requests.
+    relay_poll_at: Instant,
     relay_retry_at: Option<Instant>,
+    peer_probe_at: Instant,
     relay_retry_attempt: u32,
+    relay_bootstrap_in_flight: bool,
+    relay_control_queue: Vec<PendingRelayControl>,
+    relay_control_in_flight: bool,
+    relay_control_sender: Option<mpsc::UnboundedSender<RelayControlOutcome>>,
+    connect_requested: bool,
+    engine_session_id: String,
 }
 
 const RELAY_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const RETRY_BLOCKED_RECHECK: Duration = Duration::from_secs(5);
+const RETRY_OFFLINE_RECHECK: Duration = Duration::from_secs(30);
 
 impl ClientEngineActor {
     pub fn new(config: EngineConfig) -> EngineResult<Self> {
@@ -90,8 +187,9 @@ impl ClientEngineActor {
         let mut database = ClientDatabase::open(&config.database_path, &config.database_key)?;
         seed_runtime_identity(&mut database, &identity)?;
         database.delete_expired_pending_welcomes(unix_secs())?;
-        let (mls_inbox, conversations, pending_welcomes) =
-            load_engine_technical_state(&database, &identity)?;
+        database.delete_expired_pending_local_invite_mls(unix_secs())?;
+        let (conversations, pending_welcomes) = load_engine_technical_state(&database)?;
+        let crypto_blocked_peers = database.rejected_inbound_peer_senders()?;
         let relay_identity = identity_from_config(&config)?;
         let (local_peer_endpoint, stored_onion_generation) =
             database.local_peer_endpoint()?.unzip();
@@ -102,16 +200,17 @@ impl ClientEngineActor {
         } else {
             ConnectionState::WaitingForTor
         };
+        let platform = config.platform.clone();
         Ok(Self {
-            config,
+            platform,
             database,
             identity,
-            mls_inbox,
             conversations,
             pending_welcomes,
             pending_relay_deliveries: HashMap::new(),
             pending_engine_events: Vec::new(),
             active_peer_sessions: HashMap::new(),
+            crypto_blocked_peers,
             connection_generation: 0,
             app_foreground: true,
             session: RuntimeSession::new(),
@@ -126,6 +225,7 @@ impl ClientEngineActor {
                 retry_attempt: 0,
             },
             socks5_url: initial_socks5_url.clone(),
+            relay_onion_url: relay_onion_url.clone(),
             relay: Box::new(SharedRelayActor::new(
                 relay_onion_url,
                 initial_socks5_url,
@@ -138,8 +238,16 @@ impl ClientEngineActor {
             battery_saver: false,
             device_idle: false,
             background_restricted: false,
+            relay_poll_at: Instant::now() + RELAY_POLL_INTERVAL,
             relay_retry_at: None,
+            peer_probe_at: Instant::now() + Duration::from_secs(30),
             relay_retry_attempt: 0,
+            relay_bootstrap_in_flight: false,
+            relay_control_queue: Vec::new(),
+            relay_control_in_flight: false,
+            relay_control_sender: None,
+            connect_requested: false,
+            engine_session_id: uuid::Uuid::new_v4().to_string(),
         })
     }
 
@@ -149,6 +257,9 @@ impl ClientEngineActor {
         events: mpsc::Sender<EngineEvent>,
         shutdown: CancellationToken,
     ) -> EngineResult<()> {
+        let (relay_bootstrap_outcomes, mut relay_bootstrap_outcome_rx) = mpsc::unbounded_channel();
+        let (relay_control_outcomes, mut relay_control_outcome_rx) = mpsc::unbounded_channel();
+        self.relay_control_sender = Some(relay_control_outcomes.clone());
         let (peer_transport, mut peer_events) =
             PeerTransportHandle::bind(self.identity.private_key_bytes()).await?;
         if let Some(endpoint) = self.local_peer_endpoint.clone() {
@@ -185,7 +296,15 @@ impl ClientEngineActor {
             .send(EngineEvent::Log {
                 log: EngineLogEvent {
                     level: "info".to_owned(),
-                    message: format!("client engine actor started for {:?}", self.config.platform),
+                    message: format!("peer listener bound on local port {local_port}"),
+                },
+            })
+            .await;
+        let _ = events
+            .send(EngineEvent::Log {
+                log: EngineLogEvent {
+                    level: "info".to_owned(),
+                    message: format!("client engine actor started for {:?}", self.platform),
                 },
             })
             .await;
@@ -198,7 +317,17 @@ impl ClientEngineActor {
             } else {
                 RELAY_POLL_INTERVAL
             };
-            let relay_poll_at = Instant::now() + relay_poll_interval;
+            let relay_poll_at = self.relay_poll_at;
+            let peer_probe_interval = if !self.network_online {
+                Duration::from_secs(300)
+            } else if self.battery_saver || self.device_idle || self.background_restricted {
+                Duration::from_secs(180)
+            } else if self.app_foreground {
+                Duration::from_secs(30)
+            } else {
+                Duration::from_secs(120)
+            };
+            let peer_probe_at = self.peer_probe_at;
             let retry_deadline = self.next_retry_deadline()?;
             let retry_wakeup_at = self.next_retry_wakeup_at(retry_deadline)?;
             let retry_sleep_deadline =
@@ -218,9 +347,27 @@ impl ClientEngineActor {
                 }
                 _ = tokio::time::sleep_until(relay_poll_at) => {
                     self.drain_relay_events(&events).await;
+                    // Advance only after a real poll.  This preserves a
+                    // stable cadence under command/P2P load while adapting
+                    // the following interval to current platform policy.
+                    self.relay_poll_at = Instant::now() + relay_poll_interval;
                 }
-                _ = tokio::time::sleep_until(relay_retry_wakeup_at), if self.relay_retry_at.is_some() => {
-                    self.retry_relay_bootstrap(&events).await;
+                _ = tokio::time::sleep_until(peer_probe_at) => {
+                    let _ = self.queue_endpoint_update_probes();
+                    self.peer_probe_at = Instant::now() + peer_probe_interval;
+                }
+                _ = tokio::time::sleep_until(relay_retry_wakeup_at), if self.relay_retry_at.is_some() && !self.relay_bootstrap_in_flight => {
+                    self.start_relay_bootstrap(relay_bootstrap_outcomes.clone());
+                }
+                outcome = relay_bootstrap_outcome_rx.recv(), if self.relay_bootstrap_in_flight => {
+                    if let Some(outcome) = outcome {
+                        self.finish_relay_bootstrap(outcome, &events).await;
+                    }
+                }
+                outcome = relay_control_outcome_rx.recv(), if self.relay_control_in_flight => {
+                    if let Some(outcome) = outcome {
+                        self.finish_relay_control(outcome, &events).await;
+                    }
                 }
                 _ = tokio::time::sleep_until(retry_sleep_deadline), if retry_wakeup_at.is_some() => {
                     self.run_retry_scheduler(
@@ -256,7 +403,64 @@ impl ClientEngineActor {
                         break;
                     };
                     let should_stop = matches!(&envelope.command, EngineCommand::Shutdown);
-                    match self.handle_command(envelope.command) {
+                    let command_id = envelope.command_id.clone();
+                    let command_type = serde_json::to_value(&envelope.command)
+                        .ok()
+                        .and_then(|value| value.get("type").and_then(serde_json::Value::as_str).map(str::to_owned))
+                        .unwrap_or_else(|| "unknown".to_owned());
+                    let command_descriptor =
+                        idempotency_descriptor(&envelope.command, &command_type);
+                    if let Some(command_id) = command_id.as_deref()
+                        && let Ok(Some((stored_type, result_json, _revision))) =
+                            self.database.load_processed_command(command_id)
+                    {
+                            let result = if stored_type != command_descriptor {
+                                ResponseResult::Error {
+                                    code: "idempotency_conflict".to_owned(),
+                                    message: "command id was already used for a different command"
+                                        .to_owned(),
+                                }
+                            } else {
+                                match serde_json::from_str::<ResponsePayload>(&result_json) {
+                                    Ok(payload) => ResponseResult::Ok { payload },
+                                    Err(_) => ResponseResult::Error {
+                                        code: "idempotency_corrupt".to_owned(),
+                                        message: "stored command result is invalid".to_owned(),
+                                    },
+                                }
+                            };
+                            let _ = events
+                                .send(EngineEvent::Response {
+                                    request_id: envelope.request_id,
+                                    result,
+                                })
+                                .await;
+                            if should_stop {
+                                break;
+                            }
+                            continue;
+                    }
+                    let idempotency = command_id.as_ref().map(|command_id| {
+                        IdempotencyCommitContext {
+                            command_id: command_id.clone(),
+                            command_descriptor: command_descriptor.clone(),
+                        }
+                    });
+                    if is_relay_control_command(&envelope.command) {
+                        self.relay_control_queue.push(PendingRelayControl {
+                            request_id: envelope.request_id,
+                            respond: true,
+                            command_id,
+                            command_descriptor,
+                            operation: RelayControlOperation::Command(envelope.command),
+                        });
+                        self.start_next_relay_control(relay_control_outcomes.clone());
+                        if should_stop {
+                            break;
+                        }
+                        continue;
+                    }
+                    match self.handle_command(envelope.command, idempotency.as_ref()) {
                         Ok((payload, runtime_events, connection_snapshot)) => {
                             if let Some(snapshot) = connection_snapshot {
                                 let _ = events.send(EngineEvent::Connection { snapshot }).await;
@@ -267,9 +471,22 @@ impl ClientEngineActor {
                             for event in self.pending_engine_events.drain(..) {
                                 let _ = events.send(event).await;
                             }
+                            if let Some(command_id) = command_id.as_deref()
+                                && let Ok((_, revision)) = self.projection_head()
+                                && let Ok(result_json) = serde_json::to_string(&payload)
+                            {
+                                let _ = self.database.save_processed_command(
+                                    command_id,
+                                    &command_descriptor,
+                                    &result_json,
+                                    revision,
+                                );
+                            }
                             let _ = events.send(EngineEvent::Response {
                                 request_id: envelope.request_id,
-                                result: ResponseResult::Ok { payload },
+                                result: ResponseResult::Ok {
+                                    payload: payload.clone(),
+                                },
                             }).await;
                         }
                         Err(error) => {
@@ -294,6 +511,7 @@ impl ClientEngineActor {
     fn handle_command(
         &mut self,
         command: EngineCommand,
+        idempotency: Option<&IdempotencyCommitContext>,
     ) -> EngineResult<(
         ResponsePayload,
         Vec<torchat_client_runtime::RuntimeEvent>,
@@ -301,8 +519,11 @@ impl ClientEngineActor {
     )> {
         match command {
             EngineCommand::Bootstrap => {
-                let (bootstrapped, mut runtime_events) =
-                    self.with_runtime(|runtime| runtime.bootstrap_runtime())?;
+                let (bootstrapped, mut runtime_events) = self.with_runtime_idempotent(
+                    idempotency,
+                    |runtime| runtime.bootstrap_runtime(),
+                    |bootstrapped| json_response(bootstrapped),
+                )?;
                 runtime_events.push(transport_status_event(
                     torchat_client_runtime::TransportComponent::Engine,
                     torchat_client_runtime::TransportProbeState::Ready,
@@ -322,31 +543,33 @@ impl ClientEngineActor {
             EngineCommand::GetProfile => {
                 Ok((json_response(self.runtime_profile()?)?, Vec::new(), None))
             }
-            EngineCommand::PairingInbox => {
-                let (result, runtime_events): (PairingSyncResult, _) =
-                    self.with_runtime(|runtime| runtime.pairing_inbox())?;
-                for acknowledgement in &result.acknowledgements {
-                    if let Err(error) =
-                        self.acknowledge_pairing_request(&acknowledgement.pairing_id)
-                    {
-                        self.pending_engine_events.push(EngineEvent::Log {
-                            log: EngineLogEvent {
-                                level: "warn".to_owned(),
-                                message: format!(
-                                    "pairing inbox acknowledgement deferred pairing_id={} error={error}",
-                                    acknowledgement.pairing_id
-                                ),
-                            },
-                        });
-                    }
-                }
-                Ok((json_response(result)?, runtime_events, None))
-            }
+            EngineCommand::GetStartupReadiness => Ok((
+                json_response(StartupReadinessSnapshot {
+                    engine_ready: true,
+                    local_data_ready: true,
+                    tor_ready: self.socks5_url.is_some(),
+                    peer_listener_ready: self.peer_transport.is_some(),
+                    onion_service_ready: self.local_peer_endpoint.is_some(),
+                    relay_ready: self.connection_state == ConnectionState::Connected,
+                    generation: self.connection_generation,
+                    detail: self.tor_status.detail.clone(),
+                })?,
+                Vec::new(),
+                None,
+            )),
+            EngineCommand::GetApplicationSnapshot => Ok((
+                json_response(self.application_snapshot()?)?,
+                Vec::new(),
+                None,
+            )),
             EngineCommand::PairingOutbox => {
                 let (result, runtime_events) =
                     self.with_runtime(|runtime| runtime.pairing_outbox())?;
                 Ok((json_response(result)?, runtime_events, None))
             }
+            EngineCommand::PairingInbox => Err(EngineError::Unsupported(
+                "pairing inbox is dispatched through the relay-control worker".to_owned(),
+            )),
             EngineCommand::ListContacts => {
                 Ok((json_response(self.list_contacts()?)?, Vec::new(), None))
             }
@@ -364,7 +587,16 @@ impl ClientEngineActor {
                 None,
             )),
             EngineCommand::RetryPeerConnection { installation_id } => {
-                if self.database.contact_peer_endpoint(&installation_id)?.is_some() {
+                if self
+                    .database
+                    .contact_peer_endpoint(&installation_id)?
+                    .is_some()
+                {
+                    // Retrying a peer connection must perform an actual
+                    // authenticated probe. Expediting the message queue alone
+                    // leaves the contact displayed as offline until a new
+                    // message happens to open a session.
+                    let _ = self.queue_peer_probe(&installation_id);
                     self.database.expedite_peer_deliveries(&installation_id)?;
                     self.flush_pending_send_effects()?;
                 } else {
@@ -383,21 +615,11 @@ impl ClientEngineActor {
                     });
                 Ok((ResponsePayload::Empty, Vec::new(), None))
             }
-            EngineCommand::SetNickname { nickname } => {
-                let (profile, runtime_events) =
-                    self.with_runtime(|runtime| runtime.set_nickname(nickname))?;
-                Ok((json_response(profile)?, runtime_events, None))
-            }
-            EngineCommand::RefreshPairingCode => {
-                let (code, runtime_events) =
-                    self.with_runtime(|runtime| runtime.refresh_pairing_code())?;
-                Ok((json_response(code)?, runtime_events, None))
-            }
-            EngineCommand::SubmitPairingCode { code } => {
-                let (item, runtime_events) =
-                    self.with_runtime(|runtime| runtime.submit_pairing_code(code))?;
-                Ok((json_response(item)?, runtime_events, None))
-            }
+            EngineCommand::SetNickname { .. }
+            | EngineCommand::RefreshPairingCode
+            | EngineCommand::SubmitPairingCode { .. } => Err(EngineError::Unsupported(
+                "relay control command must be dispatched through the relay worker".to_owned(),
+            )),
             EngineCommand::AcceptPairing { pairing_id } => {
                 let (preparation, mut runtime_events): (PairingPreparation, _) =
                     self.with_runtime(|runtime| runtime.prepare_accept_pairing(&pairing_id))?;
@@ -413,39 +635,41 @@ impl ClientEngineActor {
                 )
                 .encode()
                 .map_err(EngineError::InvalidCommand)?;
-                let (effect, mut commit_events) = self.with_runtime(|runtime| {
-                    runtime.commit_accept_pairing(&pairing_id, invite_id, payload)
-                })?;
-                self.deliver_send_effect(effect.into())?;
+                let (effect, mut commit_events) = self.with_runtime_idempotent(
+                    idempotency,
+                    |runtime| runtime.commit_accept_pairing(&pairing_id, invite_id, payload),
+                    |_| Ok(ResponsePayload::Empty),
+                )?;
+                self.deliver_send_effect(effect)?;
                 runtime_events.append(&mut commit_events);
                 Ok((ResponsePayload::Empty, runtime_events, None))
             }
             EngineCommand::RejectPairing { pairing_id } => {
-                let (effect, runtime_events) =
-                    self.with_runtime(|runtime| runtime.commit_reject_pairing(&pairing_id))?;
+                let (effect, runtime_events) = self.with_runtime_idempotent(
+                    idempotency,
+                    |runtime| runtime.commit_reject_pairing(&pairing_id),
+                    |_| Ok(ResponsePayload::Empty),
+                )?;
                 self.deliver_send_effect(effect)?;
                 Ok((ResponsePayload::Empty, runtime_events, None))
             }
-            EngineCommand::CancelPairing { pairing_id } => {
-                let (_, runtime_events) =
-                    self.with_runtime(|runtime| runtime.prepare_cancel_pairing(&pairing_id))?;
-                self.relay
-                    .cancel_pairing(&pairing_id)
-                    .map_err(runtime_error)?;
-                let (_, mut confirm_events) =
-                    self.with_runtime(|runtime| runtime.confirm_pairing_cancelled(&pairing_id))?;
-                let mut events = runtime_events;
-                events.append(&mut confirm_events);
-                Ok((ResponsePayload::Empty, events, None))
-            }
+            EngineCommand::CancelPairing { .. } => Err(EngineError::Unsupported(
+                "relay control command must be dispatched through the relay worker".to_owned(),
+            )),
             EngineCommand::ArchivePairing { pairing_id } => {
-                let (_, runtime_events) =
-                    self.with_runtime(|runtime| runtime.archive_pairing(&pairing_id))?;
+                let (_, runtime_events) = self.with_runtime_idempotent(
+                    idempotency,
+                    |runtime| runtime.archive_pairing(&pairing_id),
+                    |_| json_response(true),
+                )?;
                 Ok((json_response(true)?, runtime_events, None))
             }
             EngineCommand::VerifyContact { installation_id } => {
-                let (_, runtime_events) =
-                    self.with_runtime(|runtime| runtime.verify_contact(&installation_id))?;
+                let (_, runtime_events) = self.with_runtime_idempotent(
+                    idempotency,
+                    |runtime| runtime.verify_contact(&installation_id),
+                    |_| json_response(true),
+                )?;
                 Ok((json_response(true)?, runtime_events, None))
             }
             EngineCommand::UpdateContactSettings {
@@ -455,35 +679,68 @@ impl ClientEngineActor {
                 blocked,
                 transport_policy,
             } => {
-                let (contact, runtime_events) = self.with_runtime(|runtime| {
-                    let mut contact = runtime.update_contact_settings(
-                        &installation_id,
-                        local_alias,
-                        muted,
-                        blocked,
-                    )?;
-                    if let Some(policy) = transport_policy {
-                        contact = runtime.set_contact_transport_policy(&installation_id, policy)?;
-                    }
-                    Ok(contact)
-                })?;
+                let (contact, runtime_events) = self.with_runtime_idempotent(
+                    idempotency,
+                    |runtime| {
+                        let mut contact = runtime.update_contact_settings(
+                            &installation_id,
+                            local_alias,
+                            muted,
+                            blocked,
+                        )?;
+                        if let Some(policy) = transport_policy {
+                            contact =
+                                runtime.set_contact_transport_policy(&installation_id, policy)?;
+                        }
+                        Ok(contact)
+                    },
+                    |contact| json_response(contact),
+                )?;
                 Ok((json_response(contact)?, runtime_events, None))
             }
+            EngineCommand::RemoveRelationship {
+                installation_id,
+                preserve_history,
+            } => {
+                let (_, runtime_events) = self.with_runtime_idempotent(
+                    idempotency,
+                    |runtime| runtime.remove_relationship(&installation_id, preserve_history),
+                    |_| Ok(ResponsePayload::Empty),
+                )?;
+                self.conversations.remove(&installation_id);
+                self.crypto_blocked_peers.remove(&installation_id);
+                self.active_peer_sessions.remove(&installation_id);
+                Ok((ResponsePayload::Empty, runtime_events, None))
+            }
             EngineCommand::StartConversation { contact_id } => {
-                let (created, runtime_events) =
-                    self.with_runtime(|runtime| runtime.start_conversation(&contact_id))?;
+                let (created, runtime_events) = self.with_runtime_idempotent(
+                    idempotency,
+                    |runtime| runtime.start_conversation(&contact_id),
+                    |created| json_response(created),
+                )?;
+                // Conversation activation also initializes direct reachability.
+                // Peer readiness must not depend on both users opening the UI.
+                let _ = self.queue_peer_probe(&contact_id);
                 Ok((json_response(created)?, runtime_events, None))
             }
             EngineCommand::OpenConversation { conversation_id } => {
-                let (_, runtime_events) =
-                    self.with_runtime(|runtime| runtime.open_conversation(conversation_id))?;
+                let (_, runtime_events) = self.with_runtime_idempotent(
+                    idempotency,
+                    |runtime| runtime.open_conversation(conversation_id.clone()),
+                    |_| json_response(true),
+                )?;
+                let _ = self.queue_peer_probe(&conversation_id);
                 Ok((json_response(true)?, runtime_events, None))
             }
             EngineCommand::CloseConversation => {
-                let (_, runtime_events) = self.with_runtime(|runtime| {
-                    runtime.close_conversation();
-                    Ok(())
-                })?;
+                let (_, runtime_events) = self.with_runtime_idempotent(
+                    idempotency,
+                    |runtime| {
+                        runtime.close_conversation();
+                        Ok(())
+                    },
+                    |_| json_response(true),
+                )?;
                 Ok((json_response(true)?, runtime_events, None))
             }
             EngineCommand::SendMessage {
@@ -492,6 +749,7 @@ impl ClientEngineActor {
                 reply_to_message_id,
             } => {
                 let (effect, runtime_events) = self.send_message_command(
+                    idempotency,
                     &conversation_id,
                     body,
                     reply_to_message_id.as_deref(),
@@ -499,14 +757,20 @@ impl ClientEngineActor {
                 Ok((json_response(effect)?, runtime_events, None))
             }
             EngineCommand::RetryMessage { message_id } => {
-                let (effect, runtime_events) =
-                    self.with_runtime(|runtime| runtime.retry_message(&message_id))?;
+                let (effect, runtime_events) = self.with_runtime_idempotent(
+                    idempotency,
+                    |runtime| runtime.retry_message(&message_id),
+                    |_| Ok(ResponsePayload::Empty),
+                )?;
                 self.deliver_send_effect(effect.into())?;
                 Ok((ResponsePayload::Empty, runtime_events, None))
             }
             EngineCommand::DeleteMessageLocal { message_id } => {
-                let (_, runtime_events) =
-                    self.with_runtime(|runtime| runtime.delete_message_local(&message_id))?;
+                let (_, runtime_events) = self.with_runtime_idempotent(
+                    idempotency,
+                    |runtime| runtime.delete_message_local(&message_id),
+                    |_| Ok(ResponsePayload::Empty),
+                )?;
                 Ok((ResponsePayload::Empty, runtime_events, None))
             }
             EngineCommand::SetTyping {
@@ -521,6 +785,13 @@ impl ClientEngineActor {
                         typing,
                     },
                 )?;
+                // Ephemeral frames are intentionally not dial-worthy on their
+                // own. Start a lightweight authenticated session when typing
+                // begins so the indicator is not silently dropped while the
+                // contact is otherwise idle.
+                if typing {
+                    let _ = self.queue_peer_probe(&conversation_id);
+                }
                 Ok((ResponsePayload::Empty, Vec::new(), None))
             }
             EngineCommand::SetPresence { online } => {
@@ -557,10 +828,23 @@ impl ClientEngineActor {
                 Ok((ResponsePayload::Empty, Vec::new(), None))
             }
             EngineCommand::Connect => {
+                if self.connect_requested && self.connection_state == ConnectionState::Connected {
+                    let (connected, runtime_events) =
+                        self.with_runtime(|runtime| runtime.connect())?;
+                    return Ok((
+                        json_response(connected)?,
+                        runtime_events,
+                        Some(
+                            self.connection_snapshot("connect requested; relay already connected"),
+                        ),
+                    ));
+                }
                 self.advance_connection_generation();
-                // An explicit connect is a new startup attempt. Internal
-                // retries remain bounded, while the UI retry resets the
-                // counter without touching persistent client state.
+                // Connect is the local runtime boundary. Never perform an
+                // onion HTTP/WebSocket request on the command path: doing so
+                // starves profile/storage queries behind Tor's circuit
+                // timeout. The actor retry scheduler owns relay bootstrap.
+                self.connect_requested = true;
                 self.relay_retry_at = None;
                 self.relay_retry_attempt = 0;
                 self.connection_state = if self.socks5_url.is_some() {
@@ -568,35 +852,10 @@ impl ClientEngineActor {
                 } else {
                     ConnectionState::WaitingForTor
                 };
-                let relay_ready = match self.relay.ensure_session() {
-                    Ok(()) => {
-                        self.relay_retry_at = None;
-                        self.relay_retry_attempt = 0;
-                        true
-                    }
-                    Err(error) => {
-                        self.schedule_relay_retry();
-                        self.pending_engine_events.push(EngineEvent::Log {
-                            log: EngineLogEvent {
-                                level: "warn".to_owned(),
-                                message: format!("relay bootstrap deferred: {error}"),
-                            },
-                        });
-                        false
-                    }
-                };
-                let profile = self.runtime_profile()?;
-                if relay_ready && !profile.nickname.trim().is_empty() {
-                    self.relay
-                        .update_profile(&profile.nickname)
-                        .map_err(runtime_error)
-                        .ok();
+                if self.socks5_url.is_some() && self.network_online {
+                    self.schedule_relay_bootstrap_now();
                 }
-                let (connected, mut runtime_events) =
-                    self.with_runtime(|runtime| runtime.connect())?;
-                if relay_ready {
-                    runtime_events.append(&mut self.sync_pairing_inbox()?);
-                }
+                let (connected, runtime_events) = self.with_runtime(|runtime| runtime.connect())?;
                 self.flush_pending_send_effects()?;
                 self.flush_pending_receipt_effects()?;
                 Ok((
@@ -636,10 +895,40 @@ impl ClientEngineActor {
             >,
         ) -> torchat_client_runtime::RuntimeResult<R>,
     ) -> EngineResult<(R, Vec<torchat_client_runtime::RuntimeEvent>)> {
+        self.with_runtime_internal(op, None, |_| Ok(None))
+    }
+
+    fn with_runtime_idempotent<R>(
+        &mut self,
+        idempotency: Option<&IdempotencyCommitContext>,
+        op: impl FnOnce(
+            &mut ClientRuntime<
+                SqliteRuntimeStorage<'_>,
+                EngineRuntimeTransport<'_>,
+                SystemRuntimeClock,
+            >,
+        ) -> torchat_client_runtime::RuntimeResult<R>,
+        response: impl FnOnce(&R) -> EngineResult<ResponsePayload>,
+    ) -> EngineResult<(R, Vec<torchat_client_runtime::RuntimeEvent>)> {
+        self.with_runtime_internal(op, idempotency, |value| response(value).map(Some))
+    }
+
+    fn with_runtime_internal<R>(
+        &mut self,
+        op: impl FnOnce(
+            &mut ClientRuntime<
+                SqliteRuntimeStorage<'_>,
+                EngineRuntimeTransport<'_>,
+                SystemRuntimeClock,
+            >,
+        ) -> torchat_client_runtime::RuntimeResult<R>,
+        idempotency: Option<&IdempotencyCommitContext>,
+        response: impl FnOnce(&R) -> EngineResult<Option<ResponsePayload>>,
+    ) -> EngineResult<(R, Vec<torchat_client_runtime::RuntimeEvent>)> {
         let storage = SqliteRuntimeStorage::new(self.database.transaction()?);
         let transport = EngineRuntimeTransport {
             status: self.tor_status.clone(),
-            relay: self.relay.as_mut(),
+            _actor: std::marker::PhantomData,
         };
         let session = mem::take(&mut self.session);
         let mut runtime = ClientRuntime::with_session(storage, transport, self.clock, session);
@@ -647,17 +936,52 @@ impl ClientEngineActor {
         runtime.session_mut().begin_transaction();
 
         let result = match op(&mut runtime) {
-            Ok(value) => match runtime.storage_mut().commit() {
-                Ok(()) => {
-                    runtime.session_mut().commit_transaction();
-                    Ok(value)
+            Ok(value) => {
+                // A read or a transient transport update must not manufacture
+                // a new durable projection revision.  The runtime stages its
+                // domain events in this transaction, which lets us advance
+                // the head only for state the UI can actually project.
+                let (projection_changed, conversation_ids) =
+                    runtime.session().pending_projection_changes();
+                let mut committed_revision = runtime
+                    .storage()
+                    .projection_head()
+                    .map_err(runtime_error)?
+                    .1;
+                if projection_changed {
+                    let (_, revision) = runtime
+                        .storage_mut()
+                        .bump_projection_revision(&conversation_ids)
+                        .map_err(runtime_error)?;
+                    committed_revision = revision;
                 }
-                Err(error) => {
-                    runtime.session_mut().rollback_transaction();
-                    runtime.restore_session(session_before);
-                    Err(error)
+                if let Some(context) = idempotency {
+                    let payload = response(&value)?;
+                    if let Some(payload) = payload {
+                        let result_json = serde_json::to_string(&payload)?;
+                        runtime
+                            .storage_mut()
+                            .save_processed_command(
+                                &context.command_id,
+                                &context.command_descriptor,
+                                &result_json,
+                                committed_revision,
+                            )
+                            .map_err(runtime_error)?;
+                    }
                 }
-            },
+                match runtime.storage_mut().commit() {
+                    Ok(()) => {
+                        runtime.session_mut().commit_transaction();
+                        Ok((value, projection_changed, conversation_ids))
+                    }
+                    Err(error) => {
+                        runtime.session_mut().rollback_transaction();
+                        runtime.restore_session(session_before);
+                        Err(error)
+                    }
+                }
+            }
             Err(error) => {
                 let _ = runtime.storage_mut().rollback();
                 runtime.session_mut().rollback_transaction();
@@ -674,7 +998,18 @@ impl ClientEngineActor {
         let (_, transport, _, session) = runtime.into_parts_with_session();
         self.session = session;
         self.tor_status = transport.status;
-        let value = result.map_err(runtime_error)?;
+        let (value, projection_changed, conversation_ids) = result.map_err(runtime_error)?;
+        if projection_changed && let Ok((store_id, revision)) = self.database.projection_head() {
+            let mut events = events;
+            events.push(torchat_client_runtime::RuntimeEvent::ProjectionChanged {
+                store_id,
+                engine_session_id: self.engine_session_id.clone(),
+                revision,
+                application: true,
+                conversation_ids,
+            });
+            return Ok((value, events));
+        }
         Ok((value, events))
     }
 
@@ -733,8 +1068,10 @@ impl ClientEngineActor {
                     retry_attempt: 0,
                 };
                 let status = self.tor_status.clone();
-                let (_, mut runtime_events) =
-                    self.with_runtime(|runtime| Ok(runtime.report_tor_status(status)))?;
+                let (_, mut runtime_events) = self.with_runtime(|runtime| {
+                    runtime.report_tor_status(status);
+                    Ok(())
+                })?;
                 runtime_events.push(transport_status_event(
                     torchat_client_runtime::TransportComponent::Relay,
                     relay_probe_state(&self.tor_status.phase),
@@ -757,6 +1094,12 @@ impl ClientEngineActor {
                     self.relay.set_socks5_url(self.socks5_url.clone());
                     self.connection_state = ConnectionState::Disconnected;
                 }
+                if self.connect_requested
+                    && self.network_online
+                    && self.connection_state != ConnectionState::Connected
+                {
+                    self.schedule_relay_bootstrap_now();
+                }
                 if self.tor_status.phase == RuntimeStatusPhase::Starting
                     || self.tor_status.phase == RuntimeStatusPhase::Offline
                 {
@@ -766,8 +1109,10 @@ impl ClientEngineActor {
                     self.tor_status.progress = self.tor_status.progress.or(Some(0));
                 }
                 let status = self.tor_status.clone();
-                let (_, mut runtime_events) =
-                    self.with_runtime(|runtime| Ok(runtime.report_tor_status(status)))?;
+                let (_, mut runtime_events) = self.with_runtime(|runtime| {
+                    runtime.report_tor_status(status);
+                    Ok(())
+                })?;
                 runtime_events.push(transport_status_event(
                     torchat_client_runtime::TransportComponent::Relay,
                     relay_probe_state(&self.tor_status.phase),
@@ -792,8 +1137,10 @@ impl ClientEngineActor {
                 self.tor_status.phase = RuntimeStatusPhase::Offline;
                 self.tor_status.progress = None;
                 let status = self.tor_status.clone();
-                let (_, mut runtime_events) =
-                    self.with_runtime(|runtime| Ok(runtime.report_tor_status(status)))?;
+                let (_, mut runtime_events) = self.with_runtime(|runtime| {
+                    runtime.report_tor_status(status);
+                    Ok(())
+                })?;
                 runtime_events.push(transport_status_event(
                     torchat_client_runtime::TransportComponent::Relay,
                     torchat_client_runtime::TransportProbeState::Offline,
@@ -861,12 +1208,10 @@ impl ClientEngineActor {
                 self.local_peer_endpoint = Some(endpoint);
                 let _ = self.queue_endpoint_update_probes();
                 let _ = self.queue_relay_endpoint_bootstraps();
-                let mut events = vec![
-                    torchat_client_runtime::RuntimeEvent::PeerEndpointChanged {
-                        contact_id: self.identity.installation_id(),
-                        status: torchat_client_runtime::PeerEndpointStatus::Verified,
-                    },
-                ];
+                let mut events = vec![torchat_client_runtime::RuntimeEvent::PeerEndpointChanged {
+                    contact_id: self.identity.installation_id(),
+                    status: torchat_client_runtime::PeerEndpointStatus::Verified,
+                }];
                 events.push(transport_status_event(
                     torchat_client_runtime::TransportComponent::Peer,
                     torchat_client_runtime::TransportProbeState::Ready,
@@ -923,6 +1268,9 @@ impl ClientEngineActor {
                     self.requeue_after_disconnect()?;
                     self.relay.set_socks5_url(self.socks5_url.clone());
                     self.connection_state = ConnectionState::Connecting;
+                    if self.connect_requested {
+                        self.schedule_relay_bootstrap_now();
+                    }
                     let _ = self.queue_endpoint_update_probes();
                 }
                 Ok(Vec::new())
@@ -1015,8 +1363,29 @@ impl ClientEngineActor {
                         Ok(runtime_events)
                     }
                     Err(error) => {
-                        let _ = delivered.send(Err(error.to_string()));
-                        Err(error)
+                        self.database.reject_inbound_peer_envelope(
+                            &envelope.sender_installation_id,
+                            &envelope.message_id.to_string(),
+                        )?;
+                        let _ = delivered.send(Ok(ack(PeerAckKind::Rejected)));
+                        self.crypto_blocked_peers
+                            .insert(envelope.sender_installation_id.clone());
+                        self.pending_engine_events.push(EngineEvent::Log {
+                            log: EngineLogEvent {
+                                level: "error".to_owned(),
+                                message: format!(
+                                    "peer MLS session blocked contact={} error={error}",
+                                    envelope.sender_installation_id
+                                ),
+                            },
+                        });
+                        Ok(vec![
+                            torchat_client_runtime::RuntimeEvent::PeerConnectionChanged {
+                                contact_id: envelope.sender_installation_id,
+                                status: PeerConnectionStatus::Backoff,
+                                retry_in_ms: None,
+                            },
+                        ])
                     }
                 }
             }
@@ -1026,12 +1395,19 @@ impl ClientEngineActor {
                 contact_installation_id,
                 endpoint_sequence,
             } => {
+                let delivery_id = match &delivery {
+                    PeerDeliveryTag::Message { message_id }
+                    | PeerDeliveryTag::Receipt { message_id } => message_id.as_str(),
+                    PeerDeliveryTag::Ephemeral => "ephemeral",
+                    PeerDeliveryTag::Probe => "probe",
+                    PeerDeliveryTag::EndpointUpdate => "endpoint-update",
+                };
                 self.pending_engine_events.push(EngineEvent::Log {
                     log: EngineLogEvent {
                         level: "info".to_owned(),
                         message: format!(
-                            "peer ack received contact={} kind={:?}",
-                            contact_installation_id, kind
+                            "peer ack received contact={} delivery={} kind={:?}",
+                            contact_installation_id, delivery_id, kind
                         ),
                     },
                 });
@@ -1055,14 +1431,22 @@ impl ClientEngineActor {
                             &message_id,
                             MessageTransportOutcome::PeerDelivered,
                         ),
+                        PeerAckKind::Rejected => self.apply_message_transport_outcome(
+                            &message_id,
+                            MessageTransportOutcome::PeerRejected,
+                        ),
                     },
                     PeerDeliveryTag::Receipt { message_id } => {
-                        if matches!(kind, PeerAckKind::Persisted | PeerAckKind::Delivered) {
+                        if matches!(
+                            kind,
+                            PeerAckKind::Persisted | PeerAckKind::Delivered | PeerAckKind::Rejected
+                        ) {
                             self.database.complete_delivery_receipt(&message_id)?;
                         }
                         Ok(Vec::new())
                     }
                     PeerDeliveryTag::Ephemeral => Ok(Vec::new()),
+                    PeerDeliveryTag::Probe => Ok(Vec::new()),
                     PeerDeliveryTag::EndpointUpdate => Ok(Vec::new()),
                 }
             }
@@ -1082,9 +1466,11 @@ impl ClientEngineActor {
                 if let Some(peer) = &self.peer_transport {
                     peer.authorize_contact(&endpoint);
                 }
+                let contact_id = endpoint.installation_id.clone();
+                let _ = self.queue_peer_probe(&contact_id);
                 Ok(vec![
                     torchat_client_runtime::RuntimeEvent::PeerEndpointChanged {
-                        contact_id: endpoint.installation_id,
+                        contact_id,
                         status: PeerEndpointStatus::Verified,
                     },
                 ])
@@ -1110,6 +1496,13 @@ impl ClientEngineActor {
                 error,
                 delivery,
             } => {
+                let status = if status == PeerConnectionStatus::Connected
+                    && self.crypto_blocked_peers.contains(&installation_id)
+                {
+                    PeerConnectionStatus::Backoff
+                } else {
+                    status
+                };
                 if let Some(session_id) = session_id {
                     let sessions = self
                         .active_peer_sessions
@@ -1186,14 +1579,6 @@ impl ClientEngineActor {
         }
     }
 
-    fn connection_snapshot(&self, detail: &str) -> ConnectionSnapshot {
-        ConnectionSnapshot {
-            state: self.connection_state.clone(),
-            generation: self.connection_generation,
-            detail: detail.to_owned(),
-        }
-    }
-
     fn recover_pending_inbound_peer_envelopes(
         &mut self,
     ) -> EngineResult<Vec<torchat_client_runtime::RuntimeEvent>> {
@@ -1206,7 +1591,7 @@ impl ClientEngineActor {
             })?;
             let ciphertext =
                 PeerCiphertextPayload::decode(&wire_payload).map_err(EngineError::Storage)?;
-            runtime_events.append(&mut self.handle_application_envelope(
+            let recovered = self.handle_application_envelope(
                 RelayEnvelope {
                     version: torchat_core::PROTOCOL_VERSION,
                     message_id,
@@ -1215,163 +1600,42 @@ impl ClientEngineActor {
                     ciphertext: wire_payload,
                 },
                 ciphertext,
-            )?);
-            self.database.complete_inbound_peer_envelope(
-                &record.sender_installation_id,
-                &record.message_id,
-            )?;
-        }
-        Ok(runtime_events)
-    }
-
-    fn advance_connection_generation(&mut self) {
-        self.connection_generation = self.connection_generation.wrapping_add(1);
-    }
-
-    fn schedule_relay_retry(&mut self) {
-        self.relay_retry_attempt = self.relay_retry_attempt.saturating_add(1);
-        let seconds = 5_u64
-            .saturating_mul(2_u64.saturating_pow(self.relay_retry_attempt.saturating_sub(1).min(4)))
-            .min(60);
-        self.relay_retry_at = Some(Instant::now() + Duration::from_secs(seconds));
-        self.connection_state = ConnectionState::Backoff {
-            attempt: self.relay_retry_attempt,
-            retry_in_ms: seconds.saturating_mul(1_000),
-        };
-    }
-
-    async fn retry_relay_bootstrap(&mut self, events: &mpsc::Sender<EngineEvent>) {
-        self.relay_retry_at = None;
-        if self.socks5_url.is_none() || !self.network_online {
-            self.schedule_relay_retry();
-            return;
-        }
-        match self.relay.ensure_session() {
-            Ok(()) => {
-                self.relay_retry_attempt = 0;
-                self.connection_state = ConnectionState::Connecting;
-                let _ = events
-                    .send(EngineEvent::Log {
+            );
+            match recovered {
+                Ok(mut events) => {
+                    runtime_events.append(&mut events);
+                    self.database.complete_inbound_peer_envelope(
+                        &record.sender_installation_id,
+                        &record.message_id,
+                    )?;
+                }
+                Err(error) => {
+                    self.database.reject_inbound_peer_envelope(
+                        &record.sender_installation_id,
+                        &record.message_id,
+                    )?;
+                    self.crypto_blocked_peers
+                        .insert(record.sender_installation_id.clone());
+                    self.pending_engine_events.push(EngineEvent::Log {
                         log: EngineLogEvent {
-                            level: "info".to_owned(),
-                            message: "relay bootstrap recovered".to_owned(),
-                        },
-                    })
-                    .await;
-                if let Ok(profile) = self.runtime_profile() {
-                    if !profile.nickname.trim().is_empty() {
-                        let _ = self.relay.update_profile(&profile.nickname);
-                    }
-                }
-                match self.sync_pairing_inbox() {
-                    Ok(runtime_events) => {
-                        for event in runtime_events {
-                            let _ = events.send(EngineEvent::Runtime { event }).await;
-                        }
-                    }
-                    Err(error) => {
-                        self.schedule_relay_retry();
-                        let _ = events
-                            .send(EngineEvent::Log {
-                                log: EngineLogEvent {
-                                    level: "warn".to_owned(),
-                                    message: format!(
-                                        "relay bootstrap recovered but pairing sync failed: {error}"
-                                    ),
-                                },
-                            })
-                            .await;
-                        return;
-                    }
-                }
-                if let Err(error) = self.flush_pending_send_effects() {
-                    self.schedule_relay_retry();
-                    let _ = events
-                        .send(EngineEvent::Log {
-                            log: EngineLogEvent {
-                                level: "warn".to_owned(),
-                                message: format!(
-                                    "relay bootstrap recovered but send flush failed: {error}"
-                                ),
-                            },
-                        })
-                        .await;
-                    return;
-                }
-                if let Err(error) = self.flush_pending_receipt_effects() {
-                    self.schedule_relay_retry();
-                    let _ = events
-                        .send(EngineEvent::Log {
-                            log: EngineLogEvent {
-                                level: "warn".to_owned(),
-                                message: format!(
-                                    "relay bootstrap recovered but receipt flush failed: {error}"
-                                ),
-                            },
-                        })
-                        .await;
-                    return;
-                }
-                let _ = events
-                    .send(EngineEvent::Connection {
-                        snapshot: self.connection_snapshot("relay bootstrap recovered"),
-                    })
-                    .await;
-            }
-            Err(error) => {
-                if is_permanent_relay_bootstrap_error(&error) {
-                    self.relay_retry_at = None;
-                    self.connection_state = ConnectionState::Stopped;
-                    let message = format!(
-                        "relay bootstrap has a permanent configuration or protocol error: {error}"
-                    );
-                    let _ = events
-                        .send(EngineEvent::Runtime {
-                            event: torchat_client_runtime::RuntimeEvent::RuntimeError {
-                                message: message.clone(),
-                            },
-                        })
-                        .await;
-                    let _ = events
-                        .send(EngineEvent::Connection {
-                            snapshot: self.connection_snapshot(&message),
-                        })
-                        .await;
-                    return;
-                }
-                self.schedule_relay_retry();
-                let retry_in_ms = match self.connection_state {
-                    ConnectionState::Backoff { retry_in_ms, .. } => Some(retry_in_ms),
-                    _ => None,
-                };
-                let _ = events
-                    .send(EngineEvent::Runtime {
-                        event: transport_status_event(
-                            torchat_client_runtime::TransportComponent::Relay,
-                            torchat_client_runtime::TransportProbeState::Degraded,
-                            format!("relay circuit warming; retrying: {error}"),
-                            self.tor_status.progress,
-                            None,
-                            self.relay_retry_attempt,
-                            retry_in_ms,
-                            self.connection_generation,
-                            None,
-                        ),
-                    })
-                    .await;
-                let _ = events
-                    .send(EngineEvent::Log {
-                        log: EngineLogEvent {
-                            level: "warn".to_owned(),
+                            level: "error".to_owned(),
                             message: format!(
-                                "relay bootstrap retry {} failed: {error}",
-                                self.relay_retry_attempt
+                                "quarantined undecryptable peer envelope contact={} message_id={} error={error}",
+                                record.sender_installation_id, record.message_id
                             ),
                         },
-                    })
-                    .await;
+                    });
+                    runtime_events.push(
+                        torchat_client_runtime::RuntimeEvent::PeerConnectionChanged {
+                            contact_id: record.sender_installation_id,
+                            status: PeerConnectionStatus::Backoff,
+                            retry_in_ms: None,
+                        },
+                    );
+                }
             }
         }
+        Ok(runtime_events)
     }
 
     fn requeue_after_disconnect(&mut self) -> EngineResult<()> {
@@ -1387,25 +1651,6 @@ impl ClientEngineActor {
             self.pending_engine_events
                 .push(EngineEvent::NotificationRequested { notification });
         }
-    }
-
-    fn sync_pairing_inbox(&mut self) -> EngineResult<Vec<torchat_client_runtime::RuntimeEvent>> {
-        let (result, runtime_events): (PairingSyncResult, _) =
-            self.with_runtime(|runtime| runtime.pairing_inbox())?;
-        for acknowledgement in result.acknowledgements {
-            if let Err(error) = self.acknowledge_pairing_request(&acknowledgement.pairing_id) {
-                self.pending_engine_events.push(EngineEvent::Log {
-                    log: EngineLogEvent {
-                        level: "warn".to_owned(),
-                        message: format!(
-                            "pairing sync acknowledgement deferred pairing_id={} error={error}",
-                            acknowledgement.pairing_id
-                        ),
-                    },
-                });
-            }
-        }
-        Ok(runtime_events)
     }
 
     async fn drain_relay_events(&mut self, events: &mpsc::Sender<EngineEvent>) {
@@ -1445,17 +1690,7 @@ impl ClientEngineActor {
         events: &mpsc::Sender<EngineEvent>,
         deadline: RetryDeadline,
     ) {
-        let control_plane_required = matches!(
-            deadline.kind,
-            RetryKind::PairingResponse
-                | RetryKind::PendingWelcome
-                | RetryKind::PeerEndpointBootstrap
-                | RetryKind::ContactConfirmation
-        );
-        if control_plane_required && self.connection_state != ConnectionState::Connected {
-            return;
-        }
-        if !control_plane_required && (!self.network_online || self.socks5_url.is_none()) {
+        if !self.retry_is_runnable(deadline.kind) {
             return;
         }
         let result = match deadline.kind {
@@ -1506,8 +1741,36 @@ impl ClientEngineActor {
         let Some(retry_deadline) = retry_deadline else {
             return Ok(None);
         };
+        if !self.retry_is_runnable(retry_deadline.kind) {
+            // A durable deadline in the past must not turn `sleep_until` into
+            // a tight loop while Tor, SOCKS or the relay control plane is
+            // unavailable. Platform facts still wake the actor immediately;
+            // this is solely a bounded fallback when such a fact is absent.
+            let delay = if !self.network_online {
+                RETRY_OFFLINE_RECHECK
+            } else {
+                RETRY_BLOCKED_RECHECK
+            };
+            return Ok(Some(Instant::now() + delay));
+        }
         let retry_delay_ms = retry_deadline.at_ms.saturating_sub(unix_ms()) as u64;
         Ok(Some(Instant::now() + Duration::from_millis(retry_delay_ms)))
+    }
+
+    fn retry_is_runnable(&self, kind: RetryKind) -> bool {
+        let control_plane_required = matches!(
+            kind,
+            RetryKind::PairingResponse
+                | RetryKind::PendingWelcome
+                | RetryKind::PeerEndpointBootstrap
+                | RetryKind::ContactConfirmation
+        );
+        if control_plane_required {
+            return self.network_online
+                && self.socks5_url.is_some()
+                && self.connection_state == ConnectionState::Connected;
+        }
+        self.network_online && self.socks5_url.is_some()
     }
 
     fn retry_expired_ack_deadlines(&mut self) -> EngineResult<()> {
@@ -1633,6 +1896,19 @@ impl ClientEngineActor {
                     }),
                 ))
             }
+            RelayEvent::PairingAvailable { pairing_id } => {
+                self.enqueue_pairing_inbox_refresh();
+                Ok((
+                    Vec::new(),
+                    None,
+                    Some(EngineLogEvent {
+                        level: "info".to_owned(),
+                        message: format!(
+                            "pairing inbox synchronized after relay notification pairing_id={pairing_id}"
+                        ),
+                    }),
+                ))
+            }
             RelayEvent::Envelope(envelope) => self
                 .handle_relay_envelope(envelope)
                 .map(|events| (events, None, None)),
@@ -1681,6 +1957,15 @@ impl ClientEngineActor {
         ciphertext: Vec<u8>,
         delivery: PeerDeliveryTag,
     ) -> EngineResult<()> {
+        // Ciphertext is encoded as URL-safe base64 in the JSON peer envelope.
+        // Keep enough room for envelope metadata and signatures below the
+        // authenticated frame limit.
+        if ciphertext.len() > MAX_TRANSPORT_CIPHERTEXT_BYTES {
+            return Err(EngineError::Transport(format!(
+                "peer payload exceeds safe frame budget ({} bytes)",
+                ciphertext.len()
+            )));
+        }
         if !self.network_online {
             return Err(EngineError::Transport(
                 "peer transport is paused while the network is offline".to_owned(),
@@ -1700,6 +1985,11 @@ impl ClientEngineActor {
                     "verified peer endpoint is missing for contact {recipient}"
                 ))
             })?;
+        if self.crypto_blocked_peers.contains(recipient) {
+            return Err(EngineError::Transport(
+                "peer MLS session is inconsistent; pair the contact again".to_owned(),
+            ));
+        }
         endpoint.validate(unix_secs()).map_err(|error| {
             EngineError::Transport(format!("peer endpoint validation failed: {error}"))
         })?;
@@ -1720,6 +2010,17 @@ impl ClientEngineActor {
                 ack_deadline,
                 ack_deadline,
             )? {
+                if self
+                    .database
+                    .outbound_delivery(delivery_message_id)?
+                    .is_some_and(|record| record.state.eq_ignore_ascii_case("IN_FLIGHT"))
+                {
+                    // A repeated runtime flush observed the same active lease.
+                    // The command is already owned by the peer actor; treating
+                    // this as a transport failure would requeue it and inflate
+                    // exponential backoff without a network attempt.
+                    return Ok(());
+                }
                 return Err(EngineError::Transport(
                     "outbound delivery is no longer queued".to_owned(),
                 ));
@@ -1759,12 +2060,12 @@ impl ClientEngineActor {
             return Ok(());
         };
         for contact in self.list_contacts()? {
+            if matches!(contact.transport_policy, ContactTransportPolicy::RelayOnly) {
+                continue;
+            }
             let updates = self
                 .database
                 .pending_endpoint_updates(&contact.installation_id)?;
-            if updates.is_empty() {
-                continue;
-            }
             let Some(endpoint) = self
                 .database
                 .contact_peer_endpoint(&contact.installation_id)?
@@ -1782,11 +2083,53 @@ impl ClientEngineActor {
                 sequence: stable_message_sequence(probe_id),
                 created_at: unix_secs(),
                 ciphertext: Vec::new(),
-                delivery: PeerDeliveryTag::EndpointUpdate,
+                // Endpoint updates are sent by the same command, but the
+                // delivery itself must remain a probe so a successful Ping
+                // reports peer reachability instead of an endpoint-only ACK.
+                delivery: PeerDeliveryTag::Probe,
                 socks5_url: socks5_url.clone(),
             })?;
         }
         Ok(())
+    }
+
+    fn queue_peer_probe(&mut self, recipient: &str) -> EngineResult<()> {
+        if matches!(
+            self.contact_transport_policy(recipient)?,
+            ContactTransportPolicy::RelayOnly
+        ) {
+            return Ok(());
+        }
+        if !self.network_online {
+            return Ok(());
+        }
+        let Some(socks5_url) = self.socks5_url.clone() else {
+            return Ok(());
+        };
+        let Some(local_endpoint) = self.local_peer_endpoint.clone() else {
+            return Ok(());
+        };
+        let Some(endpoint) = self.database.contact_peer_endpoint(recipient)? else {
+            return Ok(());
+        };
+        let probe_id = uuid::Uuid::new_v4();
+        let command = PeerOutboundCommand {
+            peer_public_key: endpoint.identity_public_key.clone(),
+            endpoint,
+            local_endpoint,
+            endpoint_updates: self.database.pending_endpoint_updates(recipient)?,
+            message_id: probe_id,
+            conversation_id: recipient.to_owned(),
+            sequence: stable_message_sequence(probe_id),
+            created_at: unix_secs(),
+            ciphertext: Vec::new(),
+            delivery: PeerDeliveryTag::Probe,
+            socks5_url,
+        };
+        self.peer_transport
+            .as_ref()
+            .ok_or_else(|| EngineError::Transport("peer listener is not running".to_owned()))?
+            .try_send(command)
     }
 
     fn queue_relay_endpoint_bootstraps(&mut self) -> EngineResult<()> {
@@ -1874,26 +2217,38 @@ impl ClientEngineActor {
         &mut self,
         record: PendingContactConfirmationRecord,
     ) -> EngineResult<()> {
-        self.relay
-            .confirm_contact(&record.capability, &record.peer_installation_id)
-            .map_err(runtime_error)
+        self.enqueue_contact_confirmation(&record);
+        Ok(())
+    }
+
+    fn queue_welcome_applied(
+        &mut self,
+        recipient_installation_id: &str,
+        invite_id: &str,
+    ) -> EngineResult<()> {
+        let profile = self.runtime_profile()?;
+        let nickname = protocol_nickname(&self.identity.installation_id(), &profile.nickname);
+        let payload = RelayPayloadV1::welcome_applied(
+            &self.identity,
+            &nickname,
+            recipient_installation_id.to_owned(),
+            invite_id.to_owned(),
+        )
+        .encode()
+        .map_err(EngineError::InvalidCommand)?;
+        self.queue_relay_envelope(
+            uuid::Uuid::new_v4(),
+            recipient_installation_id,
+            &payload,
+            PendingRelayDelivery::Ephemeral {
+                installation_id: recipient_installation_id.to_owned(),
+            },
+        )
     }
 
     fn acknowledge_pairing_request(&mut self, pairing_id: &str) -> EngineResult<()> {
-        match self.relay.acknowledge_pairing(pairing_id) {
-            Ok(()) => {
-                self.database
-                    .complete_pending_pairing_acknowledgement(pairing_id)?;
-                Ok(())
-            }
-            Err(error) => {
-                self.database.put_pending_pairing_acknowledgement(
-                    pairing_id,
-                    Some(&error.to_string()),
-                )?;
-                Err(runtime_error(error))
-            }
-        }
+        self.enqueue_pairing_acknowledgement(pairing_id);
+        Ok(())
     }
 
     fn handle_relay_delivery_outcome(
@@ -1931,8 +2286,8 @@ impl ClientEngineActor {
                     | MessageTransportOutcome::Delivered
                     | MessageTransportOutcome::PeerPersisted
                     | MessageTransportOutcome::PeerDelivered => {
-                        self.database.remove_pending_welcome(&invite_id)?;
-                        self.pending_welcomes.remove(&invite_id);
+                        // Relay acceptance is not application-level delivery.
+                        // Keep retrying until the peer signs WelcomeApplied.
                     }
                     MessageTransportOutcome::RecipientOffline
                     | MessageTransportOutcome::PeerUnavailable
@@ -2104,15 +2459,13 @@ impl ClientEngineActor {
                 // The contact and durable Welcome have now been committed by
                 // accept_invite. Finalize the originating local request as
                 // well; otherwise its PENDING record blocks every later code.
-                if let Ok(mut outcome_events) = self.apply_pairing_peer_outcome(
-                    pairing_id,
-                    PairingPeerOutcome::OfferReceived,
-                ) {
+                if let Ok(mut outcome_events) =
+                    self.apply_pairing_peer_outcome(pairing_id, PairingPeerOutcome::OfferReceived)
+                {
                     runtime_events.append(&mut outcome_events);
-                    if let Ok(mut completion_events) = self.apply_pairing_peer_outcome(
-                        pairing_id,
-                        PairingPeerOutcome::WelcomePrepared,
-                    ) {
+                    if let Ok(mut completion_events) = self
+                        .apply_pairing_peer_outcome(pairing_id, PairingPeerOutcome::WelcomePrepared)
+                    {
                         runtime_events.append(&mut completion_events);
                     }
                 } else {
@@ -2167,6 +2520,18 @@ impl ClientEngineActor {
                 // one-time material, so accepting that duplicate would fail
                 // with the misleading "No matching key package" error.
                 if self.database.invite_used(&invite_id)? {
+                    if let Err(error) =
+                        self.queue_welcome_applied(&sender.installation_id, &invite_id)
+                    {
+                        self.pending_engine_events.push(EngineEvent::Log {
+                            log: EngineLogEvent {
+                                level: "warn".to_owned(),
+                                message: format!(
+                                    "WelcomeApplied resend deferred invite_id={invite_id} error={error}"
+                                ),
+                            },
+                        });
+                    }
                     self.pending_engine_events.push(EngineEvent::Log {
                         log: EngineLogEvent {
                             level: "info".to_owned(),
@@ -2177,13 +2542,31 @@ impl ClientEngineActor {
                     });
                     return Ok(Vec::new());
                 }
-                let snapshot = self.snapshot_mls_inbox()?;
-                let fresh_member = self.fresh_mls_member()?;
-                let member = mem::replace(&mut self.mls_inbox, fresh_member);
+                let pending_invite = self
+                    .database
+                    .pending_local_invite_mls(&invite_id, unix_secs())?
+                    .ok_or_else(|| {
+                        EngineError::InvalidCommand(
+                            "local MLS state for contact invite is missing or expired".to_owned(),
+                        )
+                    })?;
+                if let Some(expected_sender) = &pending_invite.recipient_installation_id
+                    && expected_sender != &sender.installation_id
+                {
+                    return Err(EngineError::InvalidCommand(
+                        "Welcome sender does not match invite recipient".to_owned(),
+                    ));
+                }
+                let member = MlsMember::restore(
+                    &pending_invite.snapshot,
+                    self.identity.public_key().as_bytes(),
+                )
+                .map_err(|error| {
+                    EngineError::Storage(format!("restore invite MLS state: {error}"))
+                })?;
                 let conversation = match member.accept_conversation(&welcome, &tree) {
                     Ok(value) => value,
                     Err(error) => {
-                        self.restore_mls_inbox(&snapshot)?;
                         let detail = error.to_string();
                         if detail.contains("No matching key package") {
                             self.pending_engine_events.push(EngineEvent::Log {
@@ -2201,14 +2584,12 @@ impl ClientEngineActor {
                         return Err(EngineError::InvalidCommand(detail));
                     }
                 };
-                let inbox_snapshot_after = self.snapshot_mls_inbox()?;
                 let committed = self.commit_contact_with_conversation(
                     sender.clone(),
                     conversation,
                     None,
+                    Some(&invite_id),
                     None,
-                    None,
-                    Some(&inbox_snapshot_after),
                     Some(&invite_id),
                 );
                 match committed {
@@ -2220,14 +2601,38 @@ impl ClientEngineActor {
                         if let Some(peer_endpoint) = peer_endpoint {
                             runtime_events.extend(self.apply_peer_endpoint(peer_endpoint)?);
                         }
-                        self.pending_welcomes.remove(&invite_id);
+                        if let Err(error) =
+                            self.queue_welcome_applied(&sender.installation_id, &invite_id)
+                        {
+                            self.pending_engine_events.push(EngineEvent::Log {
+                                log: EngineLogEvent {
+                                    level: "warn".to_owned(),
+                                    message: format!(
+                                        "WelcomeApplied enqueue deferred invite_id={invite_id} error={error}"
+                                    ),
+                                },
+                            });
+                        }
                         Ok(runtime_events)
                     }
-                    Err(error) => {
-                        self.restore_mls_inbox(&snapshot)?;
-                        Err(error)
-                    }
+                    Err(error) => Err(error),
                 }
+            }
+            RelayPayloadV1::WelcomeApplied { .. } => {
+                let invite_id = payload
+                    .verify_welcome_applied(&envelope.sender, &self.identity.installation_id())
+                    .map_err(EngineError::InvalidCommand)?;
+                let Some(pending) = self.database.pending_welcome(&invite_id)? else {
+                    return Ok(Vec::new());
+                };
+                if pending.recipient_installation_id != envelope.sender {
+                    return Err(EngineError::InvalidCommand(
+                        "WelcomeApplied does not match pending Welcome recipient".to_owned(),
+                    ));
+                }
+                self.database.remove_pending_welcome(&invite_id)?;
+                self.pending_welcomes.remove(&invite_id);
+                Ok(Vec::new())
             }
             RelayPayloadV1::PeerEndpointBootstrap { .. } => {
                 let endpoint = payload
@@ -2291,9 +2696,11 @@ impl ClientEngineActor {
         if let Some(transport) = &self.peer_transport {
             transport.authorize_contact(&endpoint);
         }
+        let contact_id = endpoint.installation_id.clone();
+        let _ = self.queue_peer_probe(&contact_id);
         Ok(vec![
             torchat_client_runtime::RuntimeEvent::PeerEndpointChanged {
-                contact_id: endpoint.installation_id,
+                contact_id,
                 status: PeerEndpointStatus::Verified,
             },
         ])
@@ -2310,7 +2717,9 @@ impl ClientEngineActor {
             return Ok(Vec::new());
         };
         let payload = String::from_utf8(record.payload).map_err(|error| {
-            EngineError::Storage(format!("stored peer endpoint bootstrap is not UTF-8: {error}"))
+            EngineError::Storage(format!(
+                "stored peer endpoint bootstrap is not UTF-8: {error}"
+            ))
         })?;
         let payload = RelayPayloadV1::decode(&payload).map_err(EngineError::InvalidCommand)?;
         let endpoint = payload
@@ -2501,6 +2910,33 @@ impl ClientEngineActor {
                     })?;
                     Ok((events, None))
                 }
+                ApplicationPayloadV1::RelationshipRemoved {
+                    message_id: removal_message_id,
+                    removed_at,
+                    preserve_history,
+                    ..
+                } => {
+                    if removal_message_id != message_id {
+                        return Err(EngineError::InvalidCommand(
+                            "relationship removal messageId mismatch".to_owned(),
+                        ));
+                    }
+                    let (_, events) = self.with_runtime(|runtime| {
+                        // The shared runtime owns the relationship transition;
+                        // the transport only delivers the typed application
+                        // payload and persists the resulting MLS snapshot.
+                        runtime.remove_relationship(&peer, preserve_history)?;
+                        runtime
+                            .storage_mut()
+                            .put_conversation_mls_snapshot(&peer, &snapshot_after)?;
+                        runtime
+                            .storage_mut()
+                            .put_received_envelope(&envelope_record)?;
+                        let _ = removed_at;
+                        Ok(())
+                    })?;
+                    Ok((events, None))
+                }
             }
         })();
 
@@ -2532,24 +2968,23 @@ impl ClientEngineActor {
     ) -> EngineResult<String> {
         let profile = self.runtime_profile()?;
         let nickname = protocol_nickname(&self.identity.installation_id(), &profile.nickname);
-        let snapshot_before = self.snapshot_mls_inbox()?;
-        let key_package = self
-            .mls_inbox
+        let invite_id = uuid::Uuid::new_v4().to_string();
+        let expires_at = unix_secs() + 15 * 60;
+        let member = self.fresh_mls_member()?;
+        let key_package = member
             .key_package()
             .map_err(|error| EngineError::Storage(format!("create MLS key package: {error}")))?;
-        let snapshot_after = self.snapshot_mls_inbox()?;
-        if let Err(error) = self.database.put_mls_inbox_snapshot(&snapshot_after) {
-            self.restore_mls_inbox(&snapshot_before)?;
-            return Err(error);
-        }
+        let snapshot = member
+            .snapshot()
+            .map_err(|error| EngineError::Storage(format!("snapshot invite MLS state: {error}")))?;
         let payload = self
             .identity
             .contact_invite_payload(
                 Some(nickname),
-                recipient_installation_id,
+                recipient_installation_id.clone(),
                 URL_SAFE_NO_PAD.encode(key_package),
-                uuid::Uuid::new_v4().to_string(),
-                unix_secs() as u64 + 15 * 60,
+                invite_id.clone(),
+                expires_at as u64,
             )
             .map_err(|error| EngineError::Serialization(error.to_string()))?;
         let mut invite = ContactInvite::parse(&payload).map_err(EngineError::InvalidCommand)?;
@@ -2561,7 +2996,17 @@ impl ClientEngineActor {
         invite
             .sign(&self.identity)
             .map_err(|error| EngineError::Serialization(error.to_string()))?;
-        serde_json::to_string(&invite).map_err(EngineError::from)
+        let encoded = serde_json::to_string(&invite).map_err(EngineError::from)?;
+        self.database
+            .delete_expired_pending_local_invite_mls(unix_secs())?;
+        self.database
+            .put_pending_local_invite_mls(&PendingLocalInviteMlsRecord {
+                invite_id,
+                recipient_installation_id,
+                snapshot,
+                expires_at,
+            })?;
+        Ok(encoded)
     }
 
     fn runtime_profile(&mut self) -> EngineResult<RuntimeProfile> {
@@ -2582,6 +3027,56 @@ impl ClientEngineActor {
             .ok_or_else(|| EngineError::Storage("runtime identity is missing".to_owned()))?;
         storage.rollback().map_err(runtime_error)?;
         Ok(identity)
+    }
+
+    /// Read the application projection from one SQLite transaction.  The
+    /// projection stamp is read from the same transaction as contacts,
+    /// conversations and pairing state, so Flutter never has to assemble a
+    /// mixed-revision snapshot with `Future.wait`.
+    fn application_snapshot(&mut self) -> EngineResult<ApplicationSnapshot> {
+        let mut storage = SqliteRuntimeStorage::new(self.database.transaction()?);
+        let identity = storage
+            .identity()
+            .map_err(runtime_error)?
+            .ok_or_else(|| EngineError::Storage("runtime identity is missing".to_owned()))?;
+        let profile = storage.profile().map_err(runtime_error)?;
+        let contacts = storage.contacts().map_err(runtime_error)?;
+        let conversations = storage.conversations().map_err(runtime_error)?;
+        let inbox = storage.pairing_inbox().map_err(runtime_error)?;
+        let outbox = storage.pairing_outbox().map_err(runtime_error)?;
+        let (store_id, revision) = storage.projection_head().map_err(runtime_error)?;
+        storage.rollback().map_err(runtime_error)?;
+        Ok(ApplicationSnapshot {
+            schema_version: torchat_client_runtime::APPLICATION_SNAPSHOT_SCHEMA_VERSION,
+            generation: revision,
+            created_at_ms: unix_ms(),
+            identity,
+            profile,
+            contacts,
+            conversations,
+            pairing_summary: PairingSummary {
+                pending_inbox: inbox
+                    .iter()
+                    .filter(|item| item.state.is_outstanding())
+                    .count() as u32,
+                pending_outbox: outbox
+                    .iter()
+                    .filter(|item| item.state.is_outstanding())
+                    .count() as u32,
+            },
+            peer_endpoint_available: self.local_peer_endpoint.is_some(),
+            ui_checkpoint: UiCheckpoint::default(),
+            projection: ProjectionStamp {
+                store_id,
+                engine_session_id: self.engine_session_id.clone(),
+                revision,
+            },
+        })
+        .map(|snapshot| snapshot.normalize())
+    }
+
+    fn projection_head(&self) -> EngineResult<(String, u64)> {
+        self.database.projection_head()
     }
 
     fn list_contacts(&mut self) -> EngineResult<Vec<torchat_client_runtime::ContactRecord>> {
@@ -2612,6 +3107,7 @@ impl ClientEngineActor {
 
     fn send_message_command(
         &mut self,
+        idempotency: Option<&IdempotencyCommitContext>,
         conversation_id: &str,
         body: String,
         reply_to_message_id: Option<&str>,
@@ -2637,64 +3133,70 @@ impl ClientEngineActor {
         let next_attempt_at = now_ms + retry_backoff_ms(0);
         let ack_deadline = Some(now_ms + 60_000);
 
-        let transaction_result = self.with_runtime(|runtime| {
-            let effect = runtime.send_message_reply(conversation_id, body, reply_to_message_id)?;
-            let stored = runtime
-                .storage()
-                .message(&effect.message_id)?
-                .ok_or_else(|| {
-                    RuntimeError::Storage(
-                        "new outgoing message is missing from the active transaction".to_owned(),
-                    )
-                })?;
-            let message_id = uuid::Uuid::parse_str(&effect.message_id)
-                .map_err(|error| RuntimeError::Storage(error.to_string()))?;
-            let plaintext = ApplicationPayloadV1::Message {
-                version: torchat_core::PROTOCOL_VERSION,
-                message_id,
-                sent_at: stored.created_at,
-                body: effect.body.clone(),
-                reply_to: effect
-                    .reply_to
-                    .clone()
-                    .map(|reply| {
-                        Ok::<_, RuntimeError>(ApplicationReply {
-                            message_id: uuid::Uuid::parse_str(&reply.message_id)
-                                .map_err(|error| RuntimeError::Storage(error.to_string()))?,
-                            body: reply.body,
-                            outgoing: reply.outgoing,
+        let transaction_result = self.with_runtime_idempotent(
+            idempotency,
+            |runtime| {
+                let effect =
+                    runtime.send_message_reply(conversation_id, body, reply_to_message_id)?;
+                let stored = runtime
+                    .storage()
+                    .message(&effect.message_id)?
+                    .ok_or_else(|| {
+                        RuntimeError::Storage(
+                            "new outgoing message is missing from the active transaction"
+                                .to_owned(),
+                        )
+                    })?;
+                let message_id = uuid::Uuid::parse_str(&effect.message_id)
+                    .map_err(|error| RuntimeError::Storage(error.to_string()))?;
+                let plaintext = ApplicationPayloadV1::Message {
+                    version: torchat_core::PROTOCOL_VERSION,
+                    message_id,
+                    sent_at: stored.created_at,
+                    body: effect.body.clone(),
+                    reply_to: effect
+                        .reply_to
+                        .clone()
+                        .map(|reply| {
+                            Ok::<_, RuntimeError>(ApplicationReply {
+                                message_id: uuid::Uuid::parse_str(&reply.message_id)
+                                    .map_err(|error| RuntimeError::Storage(error.to_string()))?,
+                                body: reply.body,
+                                outgoing: reply.outgoing,
+                            })
                         })
-                    })
-                    .transpose()?,
-            }
-            .encode()
-            .map_err(RuntimeError::Storage)?;
-            let encrypted = conversation
-                .encrypt(&plaintext)
-                .map_err(RuntimeError::Storage)?;
-            let payload = PeerCiphertextPayload::new(&encrypted)
+                        .transpose()?,
+                }
                 .encode()
                 .map_err(RuntimeError::Storage)?;
-            let snapshot_after = conversation.snapshot().map_err(RuntimeError::Storage)?;
-            runtime.storage_mut().persist_outbound_encryption(
-                &effect.message_id,
-                payload.as_bytes(),
-                &effect.conversation_id,
-                &snapshot_after,
-            )?;
-            if !runtime.storage_mut().claim_outgoing_attempt(
-                &effect.message_id,
-                next_attempt_at,
-                ack_deadline,
-                None,
-                now_ms,
-            )? {
-                return Err(RuntimeError::Storage(
-                    "new outgoing message could not be claimed for delivery".to_owned(),
-                ));
-            }
-            Ok((effect, payload))
-        });
+                let encrypted = conversation
+                    .encrypt(&plaintext)
+                    .map_err(RuntimeError::Storage)?;
+                let payload = PeerCiphertextPayload::new(&encrypted)
+                    .encode()
+                    .map_err(RuntimeError::Storage)?;
+                let snapshot_after = conversation.snapshot().map_err(RuntimeError::Storage)?;
+                runtime.storage_mut().persist_outbound_encryption(
+                    &effect.message_id,
+                    payload.as_bytes(),
+                    &effect.conversation_id,
+                    &snapshot_after,
+                )?;
+                if !runtime.storage_mut().claim_outgoing_attempt(
+                    &effect.message_id,
+                    next_attempt_at,
+                    ack_deadline,
+                    None,
+                    now_ms,
+                )? {
+                    return Err(RuntimeError::Storage(
+                        "new outgoing message could not be claimed for delivery".to_owned(),
+                    ));
+                }
+                Ok((effect, payload))
+            },
+            |(effect, _)| json_response(effect),
+        );
 
         let ((effect, payload), mut runtime_events) = match transaction_result {
             Ok(value) => value,
@@ -2729,6 +3231,23 @@ impl ClientEngineActor {
         conversation_id: &str,
         application: ApplicationPayloadV1,
     ) -> EngineResult<()> {
+        // OpenMLS application encryption advances the sender generation. A
+        // typing/presence/read frame cannot use a lossy latest-only queue:
+        // dropping it would make the next durable message undecryptable.
+        // Keep these signals off until they use a non-ratcheting authenticated
+        // channel or the same durable delivery semantics as chat messages.
+        const EPHEMERAL_MLS_DELIVERY_SAFE: bool = false;
+        if !EPHEMERAL_MLS_DELIVERY_SAFE {
+            let feature = match application {
+                ApplicationPayloadV1::Typing { .. } => "typing indicators",
+                ApplicationPayloadV1::Presence { .. } => "presence signals",
+                ApplicationPayloadV1::ReadReceipt { .. } => "read receipts",
+                _ => "ephemeral signals",
+            };
+            return Err(EngineError::Unsupported(format!(
+                "{feature} are disabled until they have durable, ratchet-safe delivery"
+            )));
+        }
         let mut conversation = self.conversations.remove(conversation_id).ok_or_else(|| {
             EngineError::InvalidCommand(
                 "contact requires MLS welcome before sending ephemeral state".to_owned(),
@@ -2978,12 +3497,25 @@ impl ClientEngineActor {
             .outbound_delivery(message_id)?
             .map(|record| record.attempt_count)
             .unwrap_or(0);
-        self.database.requeue_outbound_delivery(
-            message_id,
-            unix_ms() + retry_backoff_ms(attempt),
-            error,
-        )?;
-        self.apply_message_transport_outcome(message_id, MessageTransportOutcome::PeerUnavailable)
+        if error.contains("peer frame exceeds size limit")
+            || error.contains("peer payload exceeds safe frame budget")
+        {
+            self.database.complete_outbound_delivery(message_id)?;
+            self.apply_message_transport_outcome(
+                message_id,
+                MessageTransportOutcome::PermanentFailure,
+            )
+        } else {
+            self.database.requeue_outbound_delivery(
+                message_id,
+                unix_ms() + retry_backoff_ms(attempt),
+                error,
+            )?;
+            self.apply_message_transport_outcome(
+                message_id,
+                MessageTransportOutcome::PeerUnavailable,
+            )
+        }
     }
 
     fn dispatch_outbound_receipt(
@@ -3177,8 +3709,8 @@ impl ClientEngineActor {
                     },
                 });
             } else {
-                self.database
-                    .complete_pending_contact_confirmation(&record.pairing_id)?;
+                // Completion is performed by the relay-control worker after the
+                // HTTP effect succeeds; keep the durable row until then.
             }
         }
         Ok(())
@@ -3188,15 +3720,15 @@ impl ClientEngineActor {
         if self.connection_state != ConnectionState::Connected {
             return Ok(());
         }
-        for (pairing_id, attempt_count) in
-            self.database.due_pending_pairing_acknowledgements(unix_ms())?
+        for (pairing_id, attempt_count) in self
+            .database
+            .due_pending_pairing_acknowledgements(unix_ms())?
         {
             let next_attempt_at = unix_ms() + retry_backoff_ms(attempt_count);
-            if !self.database.claim_pending_pairing_acknowledgement_attempt(
-                &pairing_id,
-                next_attempt_at,
-                None,
-            )? {
+            if !self
+                .database
+                .claim_pending_pairing_acknowledgement_attempt(&pairing_id, next_attempt_at, None)?
+            {
                 continue;
             }
             if let Err(error) = self.acknowledge_pairing_request(&pairing_id) {
@@ -3216,7 +3748,9 @@ impl ClientEngineActor {
 
     fn peer_retry_in_ms(&self, installation_id: &str) -> EngineResult<Option<u64>> {
         let now = unix_ms();
-        let outbound = self.database.next_contact_peer_retry_deadline_ms(installation_id)?;
+        let outbound = self
+            .database
+            .next_contact_peer_retry_deadline_ms(installation_id)?;
         let receipt = self
             .database
             .next_contact_receipt_retry_deadline_ms(installation_id)?;
@@ -3457,7 +3991,12 @@ impl ClientEngineActor {
                 .pending_welcomes
                 .get(&invite.invite_id)
                 .cloned()
-                .or_else(|| self.database.pending_welcome(&invite.invite_id).ok().flatten());
+                .or_else(|| {
+                    self.database
+                        .pending_welcome(&invite.invite_id)
+                        .ok()
+                        .flatten()
+                });
             if let Some(pending) = pending {
                 self.pending_welcomes
                     .insert(invite.invite_id.clone(), pending.clone());
@@ -3496,6 +4035,15 @@ impl ClientEngineActor {
                 });
             }
             return Ok(Vec::new());
+        }
+        if self
+            .list_contacts()?
+            .iter()
+            .any(|contact| contact.installation_id == invite.installation_id && !contact.blocked)
+        {
+            return Err(EngineError::InvalidCommand(
+                "contact already exists; remove it before pairing again".to_owned(),
+            ));
         }
 
         let card = contact_card_from_invite(&invite);
@@ -3540,7 +4088,6 @@ impl ClientEngineActor {
             Some(&invite.invite_id),
             Some(&pending),
             None,
-            None,
         )?;
         if let Some(peer_endpoint) = peer_endpoint {
             runtime_events.extend(self.apply_peer_endpoint(peer_endpoint)?);
@@ -3580,43 +4127,45 @@ impl ClientEngineActor {
         pairing_invite_id: Option<&str>,
         consume_invite_id: Option<&str>,
         pending_welcome: Option<&PendingWelcomeRecord>,
-        mls_inbox_snapshot: Option<&[u8]>,
-        remove_pending_welcome_id: Option<&str>,
+        remove_pending_local_invite_id: Option<&str>,
     ) -> EngineResult<Vec<torchat_client_runtime::RuntimeEvent>> {
         let conversation_snapshot = conversation
             .snapshot()
             .map_err(|error| EngineError::Storage(error.to_string()))?;
         let (result, mut runtime_events): (WelcomeAcceptedResult, _) =
             self.with_runtime(|runtime| {
-                if let Some(invite_id) = consume_invite_id {
-                    if !runtime.storage_mut().consume_invite(invite_id)? {
-                        return Err(RuntimeError::Conflict(
-                            "contact invite was already consumed".to_owned(),
-                        ));
-                    }
+                if let Some(invite_id) = consume_invite_id
+                    && !runtime.storage_mut().consume_invite(invite_id)?
+                {
+                    return Err(RuntimeError::Conflict(
+                        "contact invite was already consumed".to_owned(),
+                    ));
                 }
                 let result = runtime.welcome_accepted(
                     contact_record_from_card(&card, false),
                     true,
                     pairing_invite_id.map(str::to_owned),
                 )?;
+                runtime
+                    .storage_mut()
+                    .begin_verified_relationship(&card.installation_id, unix_ms())?;
                 runtime.storage_mut().put_conversation_mls_snapshot(
                     &result.conversation.id,
                     &conversation_snapshot,
                 )?;
-                if let Some(snapshot) = mls_inbox_snapshot {
-                    runtime.storage_mut().put_mls_inbox_snapshot(snapshot)?;
-                }
                 if let Some(pending) = pending_welcome {
                     runtime.storage_mut().put_pending_welcome(pending)?;
                 }
-                if let Some(invite_id) = remove_pending_welcome_id {
-                    runtime.storage_mut().remove_pending_welcome(invite_id)?;
+                if let Some(invite_id) = remove_pending_local_invite_id {
+                    runtime
+                        .storage_mut()
+                        .remove_pending_local_invite_mls(invite_id)?;
                 }
                 Ok(result)
             })?;
         self.conversations
             .insert(card.installation_id.clone(), conversation);
+        self.crypto_blocked_peers.remove(&card.installation_id);
         runtime_events.extend(self.apply_pending_peer_endpoint(&card.installation_id)?);
         if let Some(confirm) = result.confirm_contact {
             self.database.put_pending_contact_confirmation(
@@ -3648,9 +4197,6 @@ impl ClientEngineActor {
                         ),
                     },
                 });
-            } else {
-                self.database
-                    .complete_pending_contact_confirmation(&confirm.pairing_id)?;
             }
         }
         let _ = self.queue_relay_endpoint_bootstraps();
@@ -3661,23 +4207,11 @@ impl ClientEngineActor {
         MlsMember::create(self.identity.public_key().as_bytes())
             .map_err(|error| EngineError::Storage(format!("create MLS inbox state: {error}")))
     }
-
-    fn snapshot_mls_inbox(&self) -> EngineResult<Vec<u8>> {
-        self.mls_inbox
-            .snapshot()
-            .map_err(|error| EngineError::Storage(format!("snapshot MLS inbox state: {error}")))
-    }
-
-    fn restore_mls_inbox(&mut self, snapshot: &[u8]) -> EngineResult<()> {
-        self.mls_inbox = MlsMember::restore(snapshot, self.identity.public_key().as_bytes())
-            .map_err(|error| EngineError::Storage(format!("restore MLS inbox state: {error}")))?;
-        Ok(())
-    }
 }
 
 struct EngineRuntimeTransport<'a> {
     status: RuntimeTorStatus,
-    relay: &'a mut dyn EngineRelay,
+    _actor: std::marker::PhantomData<&'a mut dyn EngineRelay>,
 }
 
 impl RuntimeTransport for EngineRuntimeTransport<'_> {
@@ -3690,27 +4224,46 @@ impl RuntimeTransport for EngineRuntimeTransport<'_> {
     }
 
     fn update_profile(&mut self, nickname: &str) -> torchat_client_runtime::RuntimeResult<()> {
-        self.relay.update_profile(nickname)
+        let _ = nickname;
+        Err(torchat_client_runtime::RuntimeError::Unavailable(
+            "relay HTTP effects must be executed outside RuntimeSession".to_owned(),
+        ))
     }
 
     fn refresh_pairing_code(
         &mut self,
     ) -> torchat_client_runtime::RuntimeResult<torchat_client_runtime::InviteCode> {
-        self.relay.refresh_pairing_code()
+        Err(torchat_client_runtime::RuntimeError::Unavailable(
+            "relay HTTP effects must be executed outside RuntimeSession".to_owned(),
+        ))
     }
 
     fn submit_pairing_code(
         &mut self,
         code: &str,
     ) -> torchat_client_runtime::RuntimeResult<torchat_client_runtime::PairingItem> {
-        self.relay.submit_pairing_code(code)
+        let _ = code;
+        Err(torchat_client_runtime::RuntimeError::Unavailable(
+            "relay HTTP effects must be executed outside RuntimeSession".to_owned(),
+        ))
     }
 
     fn pairing_inbox(
         &mut self,
     ) -> torchat_client_runtime::RuntimeResult<Vec<torchat_client_runtime::PairingItem>> {
-        self.relay.pairing_inbox()
+        Err(torchat_client_runtime::RuntimeError::Unavailable(
+            "relay HTTP effects must be executed outside RuntimeSession".to_owned(),
+        ))
     }
+}
+
+/// Couples an idempotency key to the complete command payload, not merely to
+/// its command kind. A caller reusing an id for a different recipient/body is
+/// rejected instead of receiving a stale success response.
+fn idempotency_descriptor(command: &EngineCommand, command_type: &str) -> String {
+    let encoded = serde_json::to_vec(command).unwrap_or_default();
+    let digest = URL_SAFE_NO_PAD.encode(Sha256::digest(encoded));
+    format!("{command_type}:{digest}")
 }
 
 fn identity_from_config(config: &EngineConfig) -> EngineResult<Identity> {
@@ -3751,8 +4304,7 @@ fn protocol_nickname(installation_id: &str, nickname: &str) -> String {
         return trimmed.chars().take(32).collect();
     }
     let trimmed_installation_id = installation_id.trim();
-    if trimmed_installation_id.starts_with("peer-")
-        && trimmed_installation_id.chars().count() >= 2
+    if trimmed_installation_id.starts_with("peer-") && trimmed_installation_id.chars().count() >= 2
     {
         return trimmed_installation_id.chars().take(32).collect();
     }
@@ -3762,25 +4314,10 @@ fn protocol_nickname(installation_id: &str, nickname: &str) -> String {
 
 fn load_engine_technical_state(
     database: &ClientDatabase,
-    identity: &Identity,
 ) -> EngineResult<(
-    MlsMember,
     HashMap<String, DirectConversation>,
     HashMap<String, PendingWelcomeRecord>,
 )> {
-    let mls_inbox = if let Some(snapshot) = database.mls_inbox_snapshot()? {
-        MlsMember::restore(&snapshot, identity.public_key().as_bytes())
-            .map_err(|error| EngineError::Storage(format!("restore MLS inbox snapshot: {error}")))?
-    } else {
-        let inbox = MlsMember::create(identity.public_key().as_bytes())
-            .map_err(|error| EngineError::Storage(format!("create MLS inbox state: {error}")))?;
-        let snapshot = inbox
-            .snapshot()
-            .map_err(|error| EngineError::Storage(format!("snapshot MLS inbox state: {error}")))?;
-        database.put_mls_inbox_snapshot(&snapshot)?;
-        inbox
-    };
-
     let mut conversations = HashMap::new();
     for (conversation_id, snapshot) in database.conversation_mls_snapshots()? {
         let conversation = DirectConversation::restore(&snapshot).map_err(|error| {
@@ -3797,7 +4334,7 @@ fn load_engine_technical_state(
         .map(|record| (record.invite_id.clone(), record))
         .collect();
 
-    Ok((mls_inbox, conversations, pending_welcomes))
+    Ok((conversations, pending_welcomes))
 }
 
 fn unix_secs() -> i64 {
@@ -3819,16 +4356,8 @@ fn retry_backoff_ms(attempt_count: u32) -> i64 {
     5_000_i64 * (1_i64 << shift)
 }
 
-fn runtime_phase_for_tor_ready(state: &ConnectionState) -> RuntimeStatusPhase {
-    match state {
-        ConnectionState::Connected => RuntimeStatusPhase::Connected,
-        ConnectionState::Backoff { .. } => RuntimeStatusPhase::Reconnecting,
-        ConnectionState::Connecting
-        | ConnectionState::Authenticating
-        | ConnectionState::WaitingForReady
-        | ConnectionState::Disconnected => RuntimeStatusPhase::Connecting,
-        _ => RuntimeStatusPhase::Connecting,
-    }
+fn runtime_phase_for_tor_ready(_state: &ConnectionState) -> RuntimeStatusPhase {
+    RuntimeStatusPhase::Connected
 }
 
 fn is_expected_peer_shutdown(error: &str) -> bool {
@@ -3911,6 +4440,7 @@ fn error_code(error: &EngineError) -> &'static str {
         EngineError::Closed(_) => "closed",
         EngineError::InvalidConfig(_) => "invalid_config",
         EngineError::InvalidCommand(_) => "invalid_command",
+        EngineError::Unsupported(_) => "unsupported",
         EngineError::Serialization(_) => "serialization",
         EngineError::Storage(_) => "storage",
         EngineError::Transport(_) => "transport",
@@ -3921,7 +4451,9 @@ fn is_permanent_relay_bootstrap_error(error: &torchat_client_runtime::RuntimeErr
     use torchat_client_runtime::RuntimeError;
 
     match error {
-        RuntimeError::InvalidCommand(_) | RuntimeError::InvalidParams(_) | RuntimeError::Crypto(_) => true,
+        RuntimeError::InvalidCommand(_)
+        | RuntimeError::InvalidParams(_)
+        | RuntimeError::Crypto(_) => true,
         RuntimeError::Transport(message) | RuntimeError::Unavailable(message) => {
             let normalized = message.to_ascii_lowercase();
             normalized.contains("invalid websocket scheme")
@@ -3958,6 +4490,7 @@ fn relay_probe_state(
     }
 }
 
+#[allow(clippy::too_many_arguments)] // mirrors the generated transport-status contract.
 fn transport_status_event(
     component: torchat_client_runtime::TransportComponent,
     state: torchat_client_runtime::TransportProbeState,
@@ -3986,9 +4519,10 @@ fn transport_status_event(
 #[cfg(test)]
 mod tests {
     use super::{
-        is_expected_peer_shutdown, peer_endpoint_requires_update, protocol_nickname,
-        runtime_phase_for_tor_ready,
+        idempotency_descriptor, is_expected_peer_shutdown, peer_endpoint_requires_update,
+        protocol_nickname, runtime_phase_for_tor_ready,
     };
+    use crate::EngineCommand;
     use crate::event::ConnectionState;
     use torchat_client_runtime::RuntimeStatusPhase;
     use torchat_core::Identity;
@@ -4011,10 +4545,7 @@ mod tests {
 
     #[test]
     fn protocol_nickname_falls_back_when_profile_is_missing() {
-        assert_eq!(
-            protocol_nickname("abcdefgh12345678", " "),
-            "peer-abcdefgh"
-        );
+        assert_eq!(protocol_nickname("abcdefgh12345678", " "), "peer-abcdefgh");
     }
 
     #[test]
@@ -4023,21 +4554,21 @@ mod tests {
     }
 
     #[test]
-    fn tor_ready_without_relay_connection_remains_connecting() {
+    fn tor_ready_without_relay_connection_remains_ready() {
         assert_eq!(
             runtime_phase_for_tor_ready(&ConnectionState::Disconnected),
-            RuntimeStatusPhase::Connecting
+            RuntimeStatusPhase::Connected
         );
     }
 
     #[test]
-    fn tor_ready_with_backoff_reports_reconnecting() {
+    fn tor_ready_with_relay_backoff_remains_ready() {
         assert_eq!(
             runtime_phase_for_tor_ready(&ConnectionState::Backoff {
                 attempt: 2,
                 retry_in_ms: 2_000,
             }),
-            RuntimeStatusPhase::Reconnecting
+            RuntimeStatusPhase::Connected
         );
     }
 
@@ -4070,5 +4601,13 @@ mod tests {
             peer_endpoint_requires_update(Some(&previous), &newer, 1_800_000_000)
                 .expect("newer successor should be accepted")
         );
+    }
+
+    #[test]
+    fn idempotency_descriptor_binds_command_payload() {
+        let bootstrap = idempotency_descriptor(&EngineCommand::Bootstrap, "bootstrap");
+        let connect = idempotency_descriptor(&EngineCommand::Connect, "connect");
+        assert_ne!(bootstrap, connect);
+        assert!(bootstrap.starts_with("bootstrap:"));
     }
 }

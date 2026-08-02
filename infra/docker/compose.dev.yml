@@ -66,9 +66,36 @@ services:
         condition: service_healthy
     volumes:
       - torka_dev:/var/lib/torchat
+    healthcheck:
+      test: ["CMD-SHELL", "test -s /var/lib/torchat/torka-ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 72
     restart: unless-stopped
+
+  # A finite, opt-in second engine.  It pairs with the persistent Torka peer,
+  # waits for an authenticated direct onion session and proves normal message
+  # delivery with ping -> pong.  It is deliberately behind a Compose profile:
+  # routine developer deploys must never create or reset an extra client.
+  torka-integration:
+    profiles: ["integration"]
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.torka
+    entrypoint: ["python3", "/usr/local/bin/torka-integration"]
+    environment:
+      TORCHAT_ONION_URL: ${TORCHAT_ONION_URL:-}
+      TORCHAT_TORKA_PAIRING_CODE: ${TORCHAT_TORKA_PAIRING_CODE:-42424242}
+      TORCHAT_INTEGRATION_TIMEOUT_SECONDS: ${TORCHAT_INTEGRATION_TIMEOUT_SECONDS:-240}
+    depends_on:
+      torka:
+        condition: service_healthy
+    volumes:
+      - torka_integration_dev:/var/lib/torchat
+    restart: "no"
 
 volumes:
   postgres_dev:
   tor_dev:
   torka_dev:
+  torka_integration_dev:

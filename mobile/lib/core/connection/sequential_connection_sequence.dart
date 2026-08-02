@@ -12,8 +12,7 @@ List<ConnectionComponentStatus> sequentialConnectionStatuses(
         ConnectionComponentStatus(
           component: status.component,
           state: ConnectionComponentState.pending,
-          detail:
-              'Oczekiwanie na: ${blocking.component.title.toLowerCase()}',
+          detail: 'Oczekiwanie na: ${blocking.component.title.toLowerCase()}',
         ),
       );
       continue;

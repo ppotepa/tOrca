@@ -1,13 +1,11 @@
 import 'dart:async';
 
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-
 import '../client_runtime.dart';
 import '../core/models/domain.dart';
 import '../core/problems/runtime_problem_classifier.dart';
 import '../shared/async/async_operation_state.dart';
 import '../shared/formatters/operation_status.dart';
-import 'app_controller_legacy.dart' as legacy;
+import 'app_controller_base.dart' as base;
 import 'sequential_app_controller.dart';
 import 'ui_operation_registry.dart';
 
@@ -25,7 +23,7 @@ class PairingRecoveryAppController extends SequentialAppController {
   String? _lastAutoOpenedContactId;
 
   @override
-  legacy.AppState build() {
+  base.AppState build() {
     final initial = super.build();
     listenSelf((_, next) => _sanitizeTechnicalProblem(next.error));
     _pairingWatchdog = Timer.periodic(
@@ -43,10 +41,7 @@ class PairingRecoveryAppController extends SequentialAppController {
     _begin(UiOperationKey.conversationsLoad, 'Ładowanie rozmów');
     await super.initialize();
     _finishFromController(UiOperationKey.contactsLoad, 'Ładowanie kontaktów');
-    _finishFromController(
-      UiOperationKey.conversationsLoad,
-      'Ładowanie rozmów',
-    );
+    _finishFromController(UiOperationKey.conversationsLoad, 'Ładowanie rozmów');
     if (state.transport.connected) {
       await _synchronizePairing(force: true);
     }
@@ -57,11 +52,8 @@ class PairingRecoveryAppController extends SequentialAppController {
     bool forcePairing = false,
     bool allowAutoTorka = true,
   }) async {
-    final repository = ref.read(legacy.runtimeRepositoryProvider);
     final effectiveForcePairing =
-        forcePairing ||
-        repository.applicationState.isStale ||
-        _isPairingAction(state.action);
+        forcePairing || _isPairingAction(state.action);
 
     await super.refreshData(
       forcePairing: effectiveForcePairing,
@@ -269,14 +261,20 @@ class PairingRecoveryAppController extends SequentialAppController {
     final error = state.error.trim();
     final classification = classifyRuntimeProblem(error);
     final visibleError = classification.userVisible ? error : '';
-    ref.read(uiOperationProvider(key).notifier).state = AsyncOperationState(
-      phase: visibleError.isEmpty
-          ? AsyncOperationPhase.succeeded
-          : AsyncOperationPhase.failed,
-      label: label,
-      targetId: targetId,
-      error: visibleError,
-    );
+    try {
+      ref.read(uiOperationProvider(key).notifier).state = AsyncOperationState(
+        phase: visibleError.isEmpty
+            ? AsyncOperationPhase.succeeded
+            : AsyncOperationPhase.failed,
+        label: label,
+        targetId: targetId,
+        error: visibleError,
+      );
+    } on StateError {
+      // An async runtime operation may finish after its ProviderContainer was
+      // disposed (for example during host shutdown). Its result is no longer
+      // observable and must not turn a clean shutdown into an uncaught error.
+    }
   }
 
   void _sanitizeTechnicalProblem(String message) {
@@ -299,7 +297,7 @@ class PairingRecoveryAppController extends SequentialAppController {
       if (_pairingSyncQueued) _schedulePairingSync(force: false);
     });
     _pairingSyncInFlight = run;
-    unawaited(run.catchError((Object _, StackTrace __) {}));
+    unawaited(run.catchError((Object _, StackTrace _) {}));
   }
 
   Future<void> _drainPairingSync({required bool force}) async {
@@ -324,13 +322,10 @@ class PairingRecoveryAppController extends SequentialAppController {
       await refreshData(forcePairing: true, allowAutoTorka: false);
       _lastPairingSync = DateTime.now();
       final newContact = state.contacts.cast<ContactRecord?>().firstWhere(
-            (contact) =>
-                contact != null && !knownContactIds.contains(contact.id),
-            orElse: () => null,
-          );
-      await _promoteTrustedPairingContacts(
-        openContactId: newContact?.id,
+        (contact) => contact != null && !knownContactIds.contains(contact.id),
+        orElse: () => null,
       );
+      await _promoteTrustedPairingContacts(openContactId: newContact?.id);
     } catch (_) {
       // Connection recovery and the watchdog will retry. A transport outage is
       // not a global user-facing pairing error.
@@ -351,7 +346,9 @@ class PairingRecoveryAppController extends SequentialAppController {
 
   Future<void> _runTrustedContactPromotion(String? openContactId) async {
     var changed = false;
-    for (final contact in state.contacts.where((contact) => !contact.verified)) {
+    for (final contact in state.contacts.where(
+      (contact) => !contact.verified,
+    )) {
       try {
         await super.verifyContact(contact.id);
         changed = true;

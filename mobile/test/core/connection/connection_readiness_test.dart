@@ -17,12 +17,9 @@ void main() {
         localDataReady: true,
       );
 
-      expect(readiness.relay.ready, isTrue);
+      expect(readiness.relay.ready, isFalse);
       expect(readiness.peerListener.ready, isTrue);
-      expect(
-        readiness.onionService.state,
-        ConnectionComponentState.starting,
-      );
+      expect(readiness.onionService.state, ConnectionComponentState.starting);
       expect(readiness.onboardingReady, isFalse);
       expect(readiness.communicationReady, isFalse);
     });
@@ -77,7 +74,7 @@ void main() {
   });
 
   group('resolveLaunchPhase', () {
-    test('returning user enters local shell while Tor is offline', () {
+    test('returning user remains fenced while Tor is offline', () {
       final readiness = ConnectionReadiness.fromRuntime(
         transport: const RuntimeTorStatus(
           phase: TransportPhase.offline,
@@ -94,7 +91,7 @@ void main() {
           profile: const RuntimeProfile(nickname: 'Alice'),
           connection: readiness,
         ),
-        AppLaunchPhase.running,
+        AppLaunchPhase.warming,
       );
     });
 
@@ -126,10 +123,7 @@ void main() {
         AppLaunchPhase.warming,
       );
       expect(
-        resolveLaunchPhase(
-          profile: const RuntimeProfile(),
-          connection: ready,
-        ),
+        resolveLaunchPhase(profile: const RuntimeProfile(), connection: ready),
         AppLaunchPhase.onboarding,
       );
     });

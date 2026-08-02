@@ -150,7 +150,9 @@ class MainShell extends StatelessWidget {
               (typingContacts[selectedConversation] ?? false),
           peerOnline:
               selectedContact != null &&
-              (onlineContacts[selectedContact!.id] ?? false),
+              (selectedContact!.peerConnectionStatus ==
+                      PeerConnectionStatus.connected ||
+                  (onlineContacts[selectedContact!.id] ?? false)),
         )
       : ContactsView(
           saved: contacts,
@@ -164,7 +166,6 @@ class MainShell extends StatelessWidget {
           ownInvite: ownInvite,
           error: error,
           notice: notice,
-          busy: false,
           showContactList: !desktop,
         );
 

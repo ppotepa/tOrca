@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
@@ -32,13 +33,23 @@ class DesktopWindowLifecycle with WindowListener, TrayListener {
 
   static Future<bool> initialize() {
     if (!isDesktopPlatform) return Future<bool>.value(true);
+    if (Platform.environment['FLUTTER_TEST'] == 'true') {
+      return Future<bool>.value(true);
+    }
     return _initialization ??= instance._initialize();
   }
 
   Future<bool> _initialize() async {
     if (!await _acquireSingleInstance()) return false;
 
-    await windowManager.ensureInitialized();
+    try {
+      await windowManager.ensureInitialized();
+    } on MissingPluginException {
+      // A non-Flutter desktop host/test can construct the runtime before the
+      // window plugin is attached. Do not block engine or data warmup on UI
+      // chrome; the real desktop host will initialize it on the next launch.
+      return true;
+    }
     final preferences = await SharedPreferences.getInstance();
     final storedWidth = preferences.getDouble(_windowWidthKey);
     final storedHeight = preferences.getDouble(_windowHeightKey);

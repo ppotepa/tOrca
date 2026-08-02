@@ -27,6 +27,17 @@ pub trait RuntimeStorage {
     fn messages(&self, conversation_id: &str) -> RuntimeResult<Vec<ChatMessage>>;
     fn put_message(&mut self, message: ChatMessage) -> RuntimeResult<()>;
     fn delete_message(&mut self, message_id: &str) -> RuntimeResult<()>;
+    fn remove_relationship(
+        &mut self,
+        installation_id: &str,
+        removed_at: i64,
+        preserve_history: bool,
+    ) -> RuntimeResult<()> {
+        let _ = (installation_id, removed_at, preserve_history);
+        Err(crate::RuntimeError::Unavailable(
+            "relationship removal is not supported by this storage".to_owned(),
+        ))
+    }
     fn pending_messages(&self) -> RuntimeResult<Vec<ChatMessage>>;
     fn pending_receipts(&self) -> RuntimeResult<Vec<ReceiptSendEffect>> {
         Ok(Vec::new())

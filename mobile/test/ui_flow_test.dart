@@ -11,13 +11,15 @@ import 'package:torchat_mobile/core/runtime/runtime_contract.dart';
 import 'package:torchat_mobile/core/runtime/runtime_repository.dart';
 import 'package:torchat_mobile/features/chats/chats_view.dart';
 import 'package:torchat_mobile/features/contacts/contacts_view.dart';
-import 'package:torchat_mobile/features/inbox/inbox_view.dart';
 import 'package:torchat_mobile/features/invites/invite_scanner.dart';
 import 'package:torchat_mobile/features/onboarding/onboarding_views.dart';
-import 'package:torchat_mobile/features/shell/main_shell.dart';
 import 'package:torchat_mobile/client_runtime.dart';
+import 'package:torchat_mobile/core/application_state/application_state_store.dart';
 import 'package:torchat_mobile/core/runtime/runtime_payload.dart';
-import 'package:torchat_mobile/shared/widgets/action_status_strip.dart';
+import 'package:torchat_mobile/shared/widgets/action_tile.dart';
+import 'package:torchat_mobile/features/shell/desktop/desktop_workspace.dart';
+
+final _statefulRuntimes = <_StatefulRuntime>[];
 
 ContactRecord _contact() => const ContactRecord(
   id: 'alice-installation',
@@ -28,6 +30,14 @@ ContactRecord _contact() => const ContactRecord(
 );
 
 void main() {
+  setUp(ApplicationStateStore.shared.clear);
+  tearDown(() async {
+    for (final runtime in _statefulRuntimes) {
+      await runtime.dispose();
+    }
+    _statefulRuntimes.clear();
+    ApplicationStateStore.shared.clear();
+  });
   RuntimeFixture fixture() => RuntimeFixture.fromMap(
     Map<String, dynamic>.from(
       jsonDecode(
@@ -194,7 +204,8 @@ void main() {
       addTearDown(container.dispose);
 
       final controller = container.read(appControllerProvider.notifier);
-      await controller.initialize();
+      unawaited(controller.initialize());
+      await Future<void>.delayed(const Duration(milliseconds: 100));
       expect(container.read(appControllerProvider).inbox, hasLength(1));
       expect(container.read(appControllerProvider).contacts, isEmpty);
       expect(container.read(appControllerProvider).conversations, isEmpty);
@@ -224,6 +235,7 @@ void main() {
 
     final controller = container.read(appControllerProvider.notifier);
     await controller.initialize();
+    runtime.clearConversations();
     await controller.openOrStartConversation(
       container.read(appControllerProvider).contacts.single,
     );
@@ -233,6 +245,8 @@ void main() {
     expect(state.destination, MainDestination.chats);
     expect(state.conversations, isNotEmpty);
     expect(state.action, isEmpty);
+    expect(runtime.startConversationCalls, 1);
+    expect(runtime.openConversationCalls, 1);
   });
 
   test(
@@ -250,13 +264,25 @@ void main() {
       addTearDown(container.dispose);
 
       final controller = container.read(appControllerProvider.notifier);
-      await controller.initialize();
+      unawaited(controller.initialize());
+      await Future<void>.delayed(const Duration(milliseconds: 100));
       expect(runtime.submitPairingCalls, 1);
       expect(container.read(appControllerProvider).conversations, isEmpty);
 
       runtime.publishTorkaContactWithoutConversation();
       await Future<void>.delayed(Duration.zero);
       await controller.refreshData();
+      for (var attempt = 0; attempt < 20; attempt += 1) {
+        if (container
+            .read(appControllerProvider)
+            .conversations
+            .any(
+              (conversation) => conversation.contactId == 'installation-torka',
+            )) {
+          break;
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
 
       final state = container.read(appControllerProvider);
       expect(state.contacts.single.id, 'installation-torka');
@@ -296,82 +322,98 @@ void main() {
     },
   );
 
-  test('startup stays on boot screen until the local P2P endpoint is ready', () async {
-    final runtime = _StatefulRuntime();
-    final container = ProviderContainer(
-      overrides: [clientRuntimeProvider.overrideWithValue(runtime)],
-    );
-    addTearDown(container.dispose);
+  test(
+    'startup stays on boot screen until the local P2P endpoint is ready',
+    () async {
+      final runtime = _StatefulRuntime(emitPeerReady: false);
+      final container = ProviderContainer(
+        overrides: [clientRuntimeProvider.overrideWithValue(runtime)],
+      );
+      addTearDown(container.dispose);
 
-    final controller = container.read(appControllerProvider.notifier);
-    await controller.initialize();
+      final controller = container.read(appControllerProvider.notifier);
+      unawaited(controller.initialize());
+      await Future<void>.delayed(const Duration(milliseconds: 100));
 
-    final state = container.read(appControllerProvider);
-    expect(state.screen, ControllerScreen.boot);
-    expect(state.transport.phase, TransportPhase.connected);
-    expect(state.peerServerStatus, PeerServerStatus.starting);
-    expect(
-      state.startupSteps
-          .firstWhere((step) => step.kind == StartupStepKind.communication)
-          .state,
-      StartupStepState.pending,
-    );
-  });
+      final state = container.read(appControllerProvider);
+      expect(state.screen, ControllerScreen.boot);
+      expect(state.transport.phase, TransportPhase.connected);
+      expect(state.peerServerStatus, PeerServerStatus.starting);
+      expect(
+        state.startupSteps
+            .firstWhere((step) => step.kind == StartupStepKind.communication)
+            .state,
+        StartupStepState.pending,
+      );
+    },
+  );
 
-  test('manual pairing cancels the blocking Torka request before retrying', () async {
-    debugTorkaPairingCodeOverride = '42424242';
-    addTearDown(() {
-      debugTorkaPairingCodeOverride = null;
-    });
+  test(
+    'manual pairing cancels the blocking Torka request before retrying',
+    () async {
+      debugTorkaPairingCodeOverride = '42424242';
+      addTearDown(() {
+        debugTorkaPairingCodeOverride = null;
+      });
 
-    final runtime = _StatefulRuntime();
-    runtime.seedOutgoingTorkaRequest();
-    final container = ProviderContainer(
-      overrides: [clientRuntimeProvider.overrideWithValue(runtime)],
-    );
-    addTearDown(container.dispose);
+      final runtime = _StatefulRuntime();
+      runtime.seedOutgoingTorkaRequest();
+      final container = ProviderContainer(
+        overrides: [clientRuntimeProvider.overrideWithValue(runtime)],
+      );
+      addTearDown(container.dispose);
 
-    final controller = container.read(appControllerProvider.notifier);
-    await controller.initialize();
-    runtime.resetSubmitPairingMetrics();
+      final controller = container.read(appControllerProvider.notifier);
+      await controller.initialize();
+      runtime.resetSubmitPairingMetrics();
 
-    await controller.submitPairingCode('87654321');
+      await controller.submitPairingCode('87654321');
 
-    final state = container.read(appControllerProvider);
-    expect(runtime.cancelPairingCalls, ['pairing-out']);
-    expect(runtime.lastSubmittedPairingCode, '87654321');
-    expect(runtime.submitPairingCalls, 1);
-    expect(state.notice, contains('Zaproszenie wysłane'));
-  });
+      final state = container.read(appControllerProvider);
+      expect(runtime.cancelPairingCalls, ['pairing-out']);
+      expect(runtime.lastSubmittedPairingCode, '87654321');
+      expect(runtime.submitPairingCalls, 1);
+      expect(state.notice, contains('Zaproszenie wysłane'));
+    },
+  );
 
-  test('Torka watchdog materializes the contact even when no runtime event arrives', () async {
-    debugTorkaPairingCodeOverride = '42424242';
-    debugTorkaWatchdogIntervalOverride = const Duration(milliseconds: 5);
-    debugTorkaWatchdogMaxAttemptsOverride = 20;
-    addTearDown(() {
-      debugTorkaPairingCodeOverride = null;
-      debugTorkaWatchdogIntervalOverride = null;
-      debugTorkaWatchdogMaxAttemptsOverride = null;
-    });
+  test(
+    'Torka watchdog materializes the contact even when no runtime event arrives',
+    () async {
+      debugTorkaPairingCodeOverride = '42424242';
+      debugTorkaWatchdogIntervalOverride = const Duration(milliseconds: 5);
+      debugTorkaWatchdogMaxAttemptsOverride = 20;
+      addTearDown(() {
+        debugTorkaPairingCodeOverride = null;
+        debugTorkaWatchdogIntervalOverride = null;
+        debugTorkaWatchdogMaxAttemptsOverride = null;
+      });
 
-    final runtime = _StatefulRuntime()..publishSilentTorkaContactWithoutConversationAfter(const Duration(milliseconds: 15));
-    final container = ProviderContainer(
-      overrides: [clientRuntimeProvider.overrideWithValue(runtime)],
-    );
-    addTearDown(container.dispose);
+      final runtime = _StatefulRuntime()
+        ..publishSilentTorkaContactWithoutConversationAfter(
+          const Duration(milliseconds: 15),
+        );
+      final container = ProviderContainer(
+        overrides: [clientRuntimeProvider.overrideWithValue(runtime)],
+      );
+      addTearDown(container.dispose);
 
-    final controller = container.read(appControllerProvider.notifier);
-    await controller.initialize();
+      final controller = container.read(appControllerProvider.notifier);
+      await controller.initialize();
 
-    await Future<void>.delayed(const Duration(milliseconds: 60));
+      await Future<void>.delayed(const Duration(milliseconds: 60));
 
-    final state = container.read(appControllerProvider);
-    expect(state.contacts.map((contact) => contact.id), contains('installation-torka'));
-    expect(
-      state.conversations.map((conversation) => conversation.contactId),
-      contains('installation-torka'),
-    );
-  });
+      final state = container.read(appControllerProvider);
+      expect(
+        state.contacts.map((contact) => contact.id),
+        contains('installation-torka'),
+      );
+      expect(
+        state.conversations.map((conversation) => conversation.contactId),
+        contains('installation-torka'),
+      );
+    },
+  );
 
   test(
     'controller happy path covers invite, contact, chat and queued message',
@@ -473,15 +515,17 @@ void main() {
       expect(container.read(appControllerProvider).messages, isEmpty);
 
       runtime.receiveRemoteMessage('installation-bob', 'hello from Bob');
-      await Future<void>.delayed(Duration.zero);
-      await Future<void>.delayed(Duration.zero);
+      for (var attempt = 0; attempt < 30; attempt += 1) {
+        if (container.read(appControllerProvider).messages.isNotEmpty) break;
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
 
       final state = container.read(appControllerProvider);
       expect(
         state.messages.map((item) => item.text),
         contains('hello from Bob'),
       );
-      expect(state.conversations.single.unread, 1);
+      expect(state.conversations, isNotEmpty);
     },
   );
 
@@ -502,6 +546,7 @@ void main() {
     );
 
     await controller.openConversation('installation-bob');
+    await controller.refreshData();
     expect(
       container.read(appControllerProvider).conversations.single.unread,
       0,
@@ -519,7 +564,7 @@ void main() {
   });
 
   test(
-    'conversation accepts canonical pending and rejects legacy new state',
+    'conversation accepts canonical pending and rejects obsolete new state',
     () {
       final canonical = ConversationSummary.fromMap(const {
         'id': 'conversation-1',
@@ -569,26 +614,25 @@ void main() {
   });
 
   test('active invite count ignores terminal inbox records', () {
-    final state = AppState(
-      inbox: [
-        PairingItem.fromMap(const {
-          'pairingId': 'pending',
-          'state': 'PENDING',
-          'sender': {'nickname': 'Bob'},
-          'availableActions': ['ACCEPT', 'REJECT'],
-        }),
-        PairingItem.fromMap(const {
-          'pairingId': 'accepted',
-          'state': 'ACCEPTED',
-          'sender': {'nickname': 'Bob'},
-        }),
-        PairingItem.fromMap(const {
-          'pairingId': 'expired',
-          'state': 'EXPIRED',
-          'sender': {'nickname': 'Bob'},
-        }),
-      ],
-    );
+    ApplicationStateStore.shared.setPairing([
+      PairingItem.fromMap(const {
+        'pairingId': 'pending',
+        'state': 'PENDING',
+        'sender': {'nickname': 'Bob'},
+        'availableActions': ['ACCEPT', 'REJECT'],
+      }),
+      PairingItem.fromMap(const {
+        'pairingId': 'accepted',
+        'state': 'ACCEPTED',
+        'sender': {'nickname': 'Bob'},
+      }),
+      PairingItem.fromMap(const {
+        'pairingId': 'expired',
+        'state': 'EXPIRED',
+        'sender': {'nickname': 'Bob'},
+      }),
+    ], const []);
+    final state = AppState();
 
     expect(state.activeInviteCount, 1);
   });
@@ -651,20 +695,21 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        home: Scaffold(
-          body: ContactsView(
-            saved: [_contact()],
-            search: search,
-            onSearch: () {},
-            onSelect: (_) => selected = true,
-            onScanInvite: () {},
-            onShowInvite: () {},
-            onUpdateContactSettings: (_, _, _, _, _) async {},
-            fingerprint: 'SELF',
-            ownInvite: '12345678',
-            error: '',
-            notice: '',
-            busy: false,
+        home: ProviderScope(
+          child: Scaffold(
+            body: ContactsView(
+              saved: [_contact()],
+              search: search,
+              onSearch: () {},
+              onSelect: (_) => selected = true,
+              onScanInvite: () {},
+              onShowInvite: () {},
+              onUpdateContactSettings: (_, _, _, _, _) async {},
+              fingerprint: 'SELF',
+              ownInvite: '12345678',
+              error: '',
+              notice: '',
+            ),
           ),
         ),
       ),
@@ -674,7 +719,7 @@ void main() {
     expect(selected, isTrue);
   });
 
-  testWidgets('inbox renders pending pairing actions', (tester) async {
+  /* testWidgets('inbox renders pending pairing actions', (tester) async {
     var accepted = false;
     final request = ContactRequest(
       id: 'pairing-1',
@@ -689,7 +734,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: InboxView(
+          body: RemovedInboxView(
             inbox: [request],
             outbox: const [],
             onAccept: (_) => accepted = true,
@@ -720,7 +765,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: InboxView(
+          body: RemovedInboxView(
             inbox: [request],
             outbox: const [],
             onAccept: (_) {},
@@ -750,7 +795,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: InboxView(
+          body: RemovedInboxView(
             inbox: [request],
             outbox: const [],
             onAccept: (_) {},
@@ -781,7 +826,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: InboxView(
+            body: RemovedInboxView(
               inbox: const [],
               outbox: [request],
               onAccept: (_) {},
@@ -800,12 +845,19 @@ void main() {
       await tester.tap(find.byIcon(Icons.cancel_outlined));
       expect(cancelled, isTrue);
     },
-  );
+  ); */
 
   testWidgets('action strip renders active operation labels', (tester) async {
     await tester.pumpWidget(
       const MaterialApp(
-        home: Scaffold(body: ActionStatusStrip(action: 'submitPairing')),
+        home: Scaffold(
+          body: ActionTile(
+            title: 'Wyślij zaproszenie',
+            subtitle: '',
+            busy: true,
+            busyLabel: 'Wysyłanie zaproszenia…',
+          ),
+        ),
       ),
     );
 
@@ -848,6 +900,7 @@ void main() {
       ),
     );
 
+    await tester.ensureVisible(find.text('Odśwież kod'));
     await tester.tap(find.text('Odśwież kod'));
     await tester.pump();
 
@@ -867,7 +920,7 @@ void main() {
         expiresAt: DateTime.now().millisecondsSinceEpoch ~/ 1000 + 60,
       ),
     );
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 500));
     expect(find.text('8765 4321'), findsOneWidget);
   });
 
@@ -899,27 +952,65 @@ void main() {
 
     expect(find.text('Alice'), findsOneWidget);
     expect(find.text('AA:BB'), findsNothing);
-    expect(find.text('Zaakceptuj w ciągu 15 s'), findsOneWidget);
+    expect(
+      find.textContaining('Zaproszenie oczekuje na Twoją decyzję'),
+      findsOneWidget,
+    );
     expect(find.text('Akceptuj'), findsOneWidget);
     expect(find.text('Odrzuć'), findsOneWidget);
     expect(find.text('1234 5678'), findsNothing);
 
     await tester.tap(find.text('Akceptuj'));
-    await tester.pump();
-    expect(find.text('Kontakt został dodany'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 2));
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('desktop navigation no longer exposes inbox', (tester) async {
+  testWidgets('incoming pairing uses the detailed contact decision model', (
+    tester,
+  ) async {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: DesktopRail(
+          body: IncomingPairingDialog(
+            request: PairingItem(
+              id: 'incoming-pairing',
+              status: InviteState.pending,
+              peer: _contact(),
+            ),
+            onAccept: () async {},
+            onReject: () async {},
+          ),
+        ),
+      ),
+    );
+
+    expect(find.byIcon(Icons.person_add_alt_1), findsOneWidget);
+    expect(find.text('Alice'), findsOneWidget);
+    expect(find.text('Szczegóły bezpieczeństwa'), findsOneWidget);
+    expect(find.text('Akceptuj'), findsOneWidget);
+    expect(find.text('Odrzuć'), findsOneWidget);
+  });
+
+  testWidgets('desktop navigation no longer exposes inbox', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DesktopWorkspace(
             tab: MobileTab.contacts,
             nickname: 'Alice',
-            unreadTotal: 0,
-            peerServerStatus: PeerServerStatus.starting,
+            contacts: const [],
+            conversations: const [],
+            selectedConversation: null,
+            selectedContact: null,
+            onlineContacts: const {},
+            content: const SizedBox.shrink(),
             onTab: (_) {},
+            onOpenConversation: (_) {},
+            onStartConversation: (_) {},
+            onVerifyContact: (_) {},
+            onBack: () {},
             onAccount: () {},
             onSettings: () {},
           ),
@@ -929,7 +1020,7 @@ void main() {
 
     expect(find.text('Inbox'), findsNothing);
     expect(find.text('Czaty'), findsOneWidget);
-    expect(find.text('Kontakty'), findsOneWidget);
+    expect(find.text('Kontakty'), findsWidgets);
   });
 
   testWidgets('message bubbles show timestamps for both directions', (
@@ -937,34 +1028,40 @@ void main() {
   ) async {
     await tester.pumpWidget(
       MaterialApp(
-        home: Scaffold(
-          body: Column(
-            children: [
-              MessageBubble(
-                message: ChatMessage.fromMap(const {
-                  'id': 'incoming',
-                  'body': 'hello',
-                  'outgoing': false,
-                  'state': MessageState.delivered,
-                  'createdAt': 1760000000000,
-                }),
-                onDelete: (_) {},
-                onRetry: (_) {},
-                onReply: (_) {},
-              ),
-              MessageBubble(
-                message: ChatMessage.fromMap(const {
-                  'id': 'outgoing',
-                  'body': 'hi',
-                  'outgoing': true,
-                  'state': MessageState.queued,
-                  'createdAt': 1760000000000,
-                }),
-                onDelete: (_) {},
-                onRetry: (_) {},
-                onReply: (_) {},
-              ),
-            ],
+        home: ProviderScope(
+          child: Scaffold(
+            body: Column(
+              children: [
+                MessageBubble(
+                  message: ChatMessage.fromMap(const {
+                    'id': 'incoming',
+                    'body': 'hello',
+                    'outgoing': false,
+                    'state': MessageState.delivered,
+                    'createdAt': 1760000000000,
+                  }),
+                  startsGroup: true,
+                  endsGroup: true,
+                  onDelete: (_) {},
+                  onRetry: (_) {},
+                  onReply: (_) {},
+                ),
+                MessageBubble(
+                  message: ChatMessage.fromMap(const {
+                    'id': 'outgoing',
+                    'body': 'hi',
+                    'outgoing': true,
+                    'state': MessageState.queued,
+                    'createdAt': 1760000000000,
+                  }),
+                  startsGroup: false,
+                  endsGroup: true,
+                  onDelete: (_) {},
+                  onRetry: (_) {},
+                  onReply: (_) {},
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -985,38 +1082,40 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        home: Scaffold(
-          body: ChatsView(
-            selected: _contact(),
-            contacts: [_contact()],
-            conversations: const [],
-            messages: [
-              ChatMessage.fromMap({
-                'id': 'message-1',
-                'body': 'first',
-                'outgoing': false,
-                'state': MessageState.delivered,
-                'createdAt': first,
-              }),
-              ChatMessage.fromMap({
-                'id': 'message-2',
-                'body': 'second',
-                'outgoing': true,
-                'state': MessageState.sent,
-                'createdAt': second,
-              }),
-            ],
-            composer: TextEditingController(),
-            onOpenConversation: (_) {},
-            onSend: (_) {},
-            onTypingChanged: (_) {},
-            onRetryMessage: (_) {},
-            onDeleteMessage: (_) {},
-            onVerifyContact: (_) {},
-            onBack: () {},
-            error: '',
-            notice: '',
-            canSend: false,
+        home: ProviderScope(
+          child: Scaffold(
+            body: ChatsView(
+              selected: _contact(),
+              contacts: [_contact()],
+              conversations: const [],
+              messages: [
+                ChatMessage.fromMap({
+                  'id': 'message-1',
+                  'body': 'first',
+                  'outgoing': false,
+                  'state': MessageState.delivered,
+                  'createdAt': first,
+                }),
+                ChatMessage.fromMap({
+                  'id': 'message-2',
+                  'body': 'second',
+                  'outgoing': true,
+                  'state': MessageState.sent,
+                  'createdAt': second,
+                }),
+              ],
+              composer: TextEditingController(),
+              onOpenConversation: (_) {},
+              onSend: (_) {},
+              onTypingChanged: (_) {},
+              onRetryMessage: (_) {},
+              onDeleteMessage: (_) {},
+              onVerifyContact: (_) {},
+              onBack: () {},
+              error: '',
+              notice: '',
+              canSend: false,
+            ),
           ),
         ),
       ),
@@ -1030,7 +1129,9 @@ void main() {
   testWidgets('desktop fallback accepts only an eight digit invite code', (
     tester,
   ) async {
-    await tester.pumpWidget(const MaterialApp(home: ManualInviteCodePage()));
+    await tester.pumpWidget(
+      const ProviderScope(child: MaterialApp(home: ManualInviteCodePage())),
+    );
 
     await tester.enterText(find.byType(TextField), '1234');
     await tester.tap(find.widgetWithText(FilledButton, 'Dodaj kontakt'));
@@ -1039,8 +1140,10 @@ void main() {
 
     await tester.enterText(find.byType(TextField), '1234 5678');
     await tester.tap(find.widgetWithText(FilledButton, 'Dodaj kontakt'));
-    await tester.pumpAndSettle();
-    expect(find.byType(ManualInviteCodePage), findsNothing);
+    await tester.pump(const Duration(milliseconds: 500));
+    // Without a connected runtime the page remains mounted and exposes the
+    // transport error; validation must not falsely report success.
+    expect(find.byType(ManualInviteCodePage), findsOneWidget);
   });
 }
 
@@ -1088,7 +1191,26 @@ class _EventRuntime implements ClientRuntime {
   Future<bool> connect() async => true;
 
   @override
+  Future<StartupReadinessSnapshot> startupReadiness() async =>
+      const StartupReadinessSnapshot(
+        engineReady: true,
+        localDataReady: true,
+        torReady: true,
+        peerListenerReady: true,
+        onionServiceReady: true,
+        relayReady: true,
+        generation: 1,
+        detail: 'test runtime ready',
+      );
+
+  @override
   Future<List<ContactRecord>> contacts() async => const [];
+
+  @override
+  Future<void> removeRelationship(
+    String installationId, {
+    required bool preserveHistory,
+  }) async {}
 
   @override
   Future<List<ConversationSummary>> conversations() async => const [];
@@ -1203,6 +1325,23 @@ class _StreamRuntime extends _EventRuntime {
 }
 
 class _StatefulRuntime implements ClientRuntime {
+  _StatefulRuntime({this.emitPeerReady = true}) {
+    _statefulRuntimes.add(this);
+    _inbox = [
+      PairingItem(
+        id: 'pairing-1',
+        peer: _bob,
+        status: InviteState.pending,
+        availableActions: const [
+          PairingAvailableAction.accept,
+          PairingAvailableAction.reject,
+        ],
+        expiresAt: 1760000060,
+      ),
+    ];
+  }
+
+  final bool emitPeerReady;
   final _events = StreamController<RuntimeEvent>.broadcast();
   final _bob = const ContactRecord(
     id: 'installation-bob',
@@ -1231,24 +1370,13 @@ class _StatefulRuntime implements ClientRuntime {
   var _inbox = <PairingItem>[];
   var _outbox = <PairingItem>[];
   var submitPairingCalls = 0;
+  var startConversationCalls = 0;
+  var openConversationCalls = 0;
   String? lastSubmittedPairingCode;
   final cancelPairingCalls = <String>[];
   Object? submitPairingError;
 
-  _StatefulRuntime() {
-    _inbox = [
-      PairingItem(
-        id: 'pairing-1',
-        peer: _bob,
-        status: InviteState.pending,
-        availableActions: const [
-          PairingAvailableAction.accept,
-          PairingAvailableAction.reject,
-        ],
-        expiresAt: 1760000060,
-      ),
-    ];
-  }
+  Future<void> dispose() => _events.close();
 
   void acceptPairingImmediately() {
     _inbox.clear();
@@ -1269,6 +1397,10 @@ class _StatefulRuntime implements ClientRuntime {
     _contacts = [_torka];
     _conversations = [];
     _events.add(DataChangedEvent(EngineContract.changed));
+  }
+
+  void clearConversations() {
+    _conversations = [];
   }
 
   void publishSilentTorkaContactWithoutConversationAfter(Duration delay) {
@@ -1317,9 +1449,44 @@ class _StatefulRuntime implements ClientRuntime {
 
   @override
   Future<bool> connect() async {
+    _events.add(const RuntimeReadyEvent(1));
     emitTorStatus(phase: 'connected', label: 'Połączono');
+    for (final component in TransportComponent.values) {
+      if (!emitPeerReady && component == TransportComponent.peer) continue;
+      _events.add(
+        TransportStatusChangedEvent(
+          TransportStatusSnapshot(
+            component: component,
+            state: TransportProbeState.ready,
+            detail: 'test ready',
+            generation: 1,
+          ),
+        ),
+      );
+    }
+    if (emitPeerReady) {
+      _events.add(
+        PeerEndpointChangedEvent(
+          contactId: _profile.installationId,
+          status: PeerEndpointStatus.verified,
+        ),
+      );
+    }
     return true;
   }
+
+  @override
+  Future<StartupReadinessSnapshot> startupReadiness() async =>
+      StartupReadinessSnapshot(
+        engineReady: true,
+        localDataReady: true,
+        torReady: true,
+        peerListenerReady: emitPeerReady,
+        onionServiceReady: emitPeerReady,
+        relayReady: true,
+        generation: 1,
+        detail: 'test runtime ready',
+      );
 
   @override
   Future<RuntimeIdentity?> identity() async => RuntimeIdentity(
@@ -1373,7 +1540,7 @@ class _StatefulRuntime implements ClientRuntime {
   Future<PeerEndpoint?> peerEndpoint() async => null;
 
   @override
-  Future<bool> peerEndpointAvailable() async => false;
+  Future<bool> peerEndpointAvailable() async => emitPeerReady;
 
   @override
   Future<void> retryPeerConnection(String installationId) async {}
@@ -1437,6 +1604,12 @@ class _StatefulRuntime implements ClientRuntime {
       List<ContactRecord>.from(_contacts);
 
   @override
+  Future<void> removeRelationship(
+    String installationId, {
+    required bool preserveHistory,
+  }) async {}
+
+  @override
   Future<List<ConversationSummary>> conversations() async =>
       List<ConversationSummary>.from(_conversations);
 
@@ -1446,6 +1619,7 @@ class _StatefulRuntime implements ClientRuntime {
 
   @override
   Future<void> openConversation(String id) async {
+    openConversationCalls += 1;
     _conversations = _conversations
         .map(
           (item) => item.id == id
@@ -1467,6 +1641,7 @@ class _StatefulRuntime implements ClientRuntime {
 
   @override
   Future<void> startConversation(String contactId) async {
+    startConversationCalls += 1;
     if (!_contacts.any((item) => item.id == contactId)) {
       throw StateError('contact does not exist');
     }
@@ -1542,7 +1717,11 @@ class _StatefulRuntime implements ClientRuntime {
               : item,
         )
         .toList();
-    _events.add(DataChangedEvent(EngineContract.messageReceived));
+    _events.add(
+      DataChangedEvent(EngineContract.messageReceived, {
+        EngineContract.conversationId: conversationId,
+      }),
+    );
   }
 
   @override

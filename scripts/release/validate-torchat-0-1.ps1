@@ -82,7 +82,7 @@ function Invoke-TorChatMatrixStep {
         $watch.Stop()
         Add-TorChatMatrixResult -Id $Id -Platform $Platform -Status failed `
             -DurationSeconds $watch.Elapsed.TotalSeconds -Message $_.Exception.Message
-        Write-Host "[FAIL] $Id: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "[FAIL] ${Id}: $($_.Exception.Message)" -ForegroundColor Red
     }
 }
 
@@ -94,7 +94,7 @@ function Skip-TorChatMatrixStep {
     )
     Add-TorChatMatrixResult -Id $Id -Platform $Platform -Status skipped `
         -DurationSeconds 0 -Message $Reason
-    Write-Host "[SKIP] $Id: $Reason" -ForegroundColor Yellow
+    Write-Host "[SKIP] ${Id}: $Reason" -ForegroundColor Yellow
 }
 
 function Test-TorChatAndroidDevice {

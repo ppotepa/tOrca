@@ -2,7 +2,8 @@ use rusqlite::{OptionalExtension, Transaction, params};
 use torchat_client_runtime::{
     ChatMessage, ContactRecord, ConversationState, ConversationSummary, InviteCode, InviteState,
     MessageState, PairingItem, PeerConnectionStatus, PeerEndpointStatus, ReceiptSendEffect,
-    RuntimeError, RuntimeIdentity, RuntimeProfile, RuntimeResult, RuntimeStorage, VerificationState,
+    RuntimeError, RuntimeIdentity, RuntimeProfile, RuntimeResult, RuntimeStorage,
+    VerificationState,
     logic::{fallback_contact_nickname, normalized_contact_nickname},
 };
 
@@ -40,6 +41,71 @@ impl<'db> SqliteRuntimeStorage<'db> {
         Ok(())
     }
 
+    /// Returns the durable projection head for the transaction currently
+    /// owned by the runtime.  Keeping this in SQLite (rather than in a
+    /// process-local counter) makes the stamp survive engine restarts and
+    /// allows the UI to reject stale responses deterministically.
+    pub fn projection_head(&self) -> RuntimeResult<(String, u64)> {
+        self.tx()
+            .query_row(
+                "SELECT store_id, global_revision FROM projection_meta WHERE singleton = 1;",
+                [],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64)),
+            )
+            .map_err(storage_error)
+    }
+
+    /// Stores an idempotent command result in the transaction currently owned
+    /// by the runtime. Callers must invoke this before `commit()` so the
+    /// domain mutation and its replay result are durable together.
+    pub fn save_processed_command(
+        &mut self,
+        command_id: &str,
+        command_descriptor: &str,
+        result_json: &str,
+        committed_revision: u64,
+    ) -> RuntimeResult<()> {
+        self.tx()
+            .execute(
+                "INSERT INTO processed_commands
+                 (command_id, command_type, result_json, committed_revision)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(command_id) DO NOTHING;",
+                params![
+                    command_id,
+                    command_descriptor,
+                    result_json,
+                    committed_revision as i64,
+                ],
+            )
+            .map_err(storage_error)?;
+        Ok(())
+    }
+
+    pub fn bump_projection_revision(
+        &mut self,
+        conversation_ids: &[String],
+    ) -> RuntimeResult<(String, u64)> {
+        self.tx()
+            .execute(
+                "UPDATE projection_meta SET global_revision = global_revision + 1 WHERE singleton = 1;",
+                [],
+            )
+            .map_err(storage_error)?;
+        let (store_id, revision) = self.projection_head()?;
+        for conversation_id in conversation_ids {
+            self.tx()
+                .execute(
+                    "INSERT INTO conversation_projection_revisions (conversation_id, revision)
+                     VALUES (?1, ?2)
+                     ON CONFLICT(conversation_id) DO UPDATE SET revision = excluded.revision;",
+                    rusqlite::params![conversation_id, revision as i64],
+                )
+                .map_err(storage_error)?;
+        }
+        Ok((store_id, revision))
+    }
+
     pub fn has_table_column(&self, table: &str, column: &str) -> Result<bool, crate::EngineError> {
         let mut statement = self
             .tx()
@@ -69,7 +135,7 @@ impl<'db> SqliteRuntimeStorage<'db> {
         self.transaction
             .as_ref()
             .expect("sqlite runtime storage transaction must exist while active")
-            .as_ref()
+            .transaction()
     }
 
     fn get_setting_json<T: serde::de::DeserializeOwned>(
@@ -146,8 +212,14 @@ impl<'db> SqliteRuntimeStorage<'db> {
         }
     }
 
-    pub fn put_mls_inbox_snapshot(&mut self, snapshot: &[u8]) -> RuntimeResult<()> {
-        self.put_setting_blob("mls_inbox_snapshot_v1", snapshot)
+    pub fn remove_pending_local_invite_mls(&mut self, invite_id: &str) -> RuntimeResult<()> {
+        self.tx()
+            .execute(
+                "DELETE FROM pending_local_invite_mls WHERE invite_id = ?1;",
+                [invite_id],
+            )
+            .map_err(storage_error)?;
+        Ok(())
     }
 
     pub fn put_conversation_mls_snapshot(
@@ -163,6 +235,35 @@ impl<'db> SqliteRuntimeStorage<'db> {
                     snapshot = excluded.snapshot,
                     updated_at = unixepoch();",
                 params![conversation_id, snapshot],
+            )
+            .map_err(storage_error)?;
+        Ok(())
+    }
+
+    /// Start a verified relationship after an earlier removal.  Tombstones are
+    /// deliberately stronger than ordinary contact updates: they suppress MLS
+    /// and endpoint writes to prevent delayed frames from resurrecting a
+    /// removed relationship.  A newly verified pairing is the sole operation
+    /// allowed to clear that barrier, and callers must do so in the same
+    /// transaction as the new contact and MLS snapshot.
+    pub fn begin_verified_relationship(
+        &mut self,
+        installation_id: &str,
+        boundary_at: i64,
+    ) -> RuntimeResult<()> {
+        self.tx()
+            .execute(
+                "DELETE FROM relationship_tombstones WHERE contact_installation_id = ?1;",
+                [installation_id],
+            )
+            .map_err(storage_error)?;
+        self.tx()
+            .execute(
+                "INSERT INTO relationship_boundaries (contact_installation_id, boundary_at)
+                 VALUES (?1, ?2)
+                 ON CONFLICT(contact_installation_id) DO UPDATE SET
+                    boundary_at = excluded.boundary_at;",
+                rusqlite::params![installation_id, boundary_at],
             )
             .map_err(storage_error)?;
         Ok(())
@@ -319,18 +420,6 @@ impl<'db> SqliteRuntimeStorage<'db> {
             .map_err(storage_error)?;
         Ok(changed > 0)
     }
-
-    fn put_setting_blob(&self, key: &str, value: &[u8]) -> RuntimeResult<()> {
-        self.tx()
-            .execute(
-                "INSERT INTO settings (key, value)
-                 VALUES (?1, ?2)
-                 ON CONFLICT(key) DO UPDATE SET value = excluded.value;",
-                params![key, value],
-            )
-            .map_err(storage_error)?;
-        Ok(())
-    }
 }
 
 impl RuntimeStorage for SqliteRuntimeStorage<'_> {
@@ -344,6 +433,84 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
 
     fn put_profile(&mut self, profile: RuntimeProfile) -> RuntimeResult<()> {
         self.put_setting_json(SETTING_PROFILE, &profile)
+    }
+
+    fn remove_relationship(
+        &mut self,
+        installation_id: &str,
+        removed_at: i64,
+        preserve_history: bool,
+    ) -> RuntimeResult<()> {
+        if installation_id.trim().is_empty() {
+            return Err(RuntimeError::InvalidParams(
+                "contact installation id must not be empty".to_owned(),
+            ));
+        }
+        let tx = self.tx();
+        tx.execute_batch(
+            "CREATE TABLE IF NOT EXISTS relationship_tombstones (
+            contact_installation_id TEXT PRIMARY KEY,
+            removed_at INTEGER NOT NULL,
+            preserve_history INTEGER NOT NULL DEFAULT 1
+        );",
+        )
+        .map_err(storage_error)?;
+        tx.execute(
+            "INSERT INTO relationship_tombstones (contact_installation_id, removed_at, preserve_history)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(contact_installation_id) DO UPDATE SET
+                removed_at = MAX(relationship_tombstones.removed_at, excluded.removed_at),
+                preserve_history = excluded.preserve_history;",
+            rusqlite::params![installation_id, removed_at, if preserve_history { 1_i64 } else { 0_i64 }],
+        ).map_err(storage_error)?;
+        tx.execute(
+            "UPDATE contacts SET blocked = 1, updated_at = unixepoch() WHERE installation_id = ?1;",
+            [installation_id],
+        )
+        .map_err(storage_error)?;
+        tx.execute("UPDATE conversations SET state = 'OFFLINE', updated_at = unixepoch() WHERE contact_installation_id = ?1;", [installation_id]).map_err(storage_error)?;
+        let prefix = "torchat-relationship-removed-v1:%".to_owned();
+        tx.execute(
+            "UPDATE messages SET state = 'FAILED', next_attempt_at = 0, ack_deadline = NULL,
+             last_transport_error = 'relationship removed'
+             WHERE conversation_id IN (SELECT id FROM conversations WHERE contact_installation_id = ?1)
+             AND outgoing = 1 AND UPPER(state) IN ('QUEUED', 'SENDING') AND body NOT LIKE ?2;",
+            rusqlite::params![installation_id, prefix],
+        ).map_err(storage_error)?;
+        tx.execute(
+            "DELETE FROM outbound_deliveries WHERE contact_installation_id = ?1
+             AND message_id NOT IN (SELECT id FROM messages WHERE body LIKE ?2);",
+            rusqlite::params![installation_id, prefix],
+        )
+        .map_err(storage_error)?;
+        tx.execute(
+            "DELETE FROM delivery_receipts WHERE conversation_id IN
+             (SELECT id FROM conversations WHERE contact_installation_id = ?1);",
+            [installation_id],
+        )
+        .map_err(storage_error)?;
+        if !preserve_history {
+            tx.execute(
+                "DELETE FROM messages WHERE conversation_id IN
+                 (SELECT id FROM conversations WHERE contact_installation_id = ?1)
+                 AND body NOT LIKE ?2;",
+                rusqlite::params![installation_id, prefix],
+            )
+            .map_err(storage_error)?;
+        }
+        for sql in [
+            "DELETE FROM conversation_mls WHERE conversation_id IN (SELECT id FROM conversations WHERE contact_installation_id = ?1);",
+            "DELETE FROM contact_peer_endpoints WHERE contact_installation_id = ?1;",
+            "DELETE FROM endpoint_update_outbox WHERE contact_installation_id = ?1;",
+            "DELETE FROM peer_endpoint_bootstrap_outbox WHERE contact_installation_id = ?1;",
+            "DELETE FROM pending_contact_confirmations WHERE peer_installation_id = ?1;",
+            "DELETE FROM pending_peer_endpoint_inbox WHERE contact_installation_id = ?1;",
+            "DELETE FROM inbound_peer_envelopes WHERE sender_installation_id = ?1;",
+            "DELETE FROM received_envelopes WHERE sender_installation_id = ?1;",
+        ] {
+            tx.execute(sql, [installation_id]).map_err(storage_error)?;
+        }
+        Ok(())
     }
 
     fn pairing_code(&self) -> RuntimeResult<Option<InviteCode>> {
@@ -397,7 +564,10 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
             Ok(finalize_pairing_item(PairingItem {
                 pairing_id,
                 sender: Some(ContactRecord {
-                    nickname: normalized_contact_nickname(&sender_installation_id, &sender_nickname),
+                    nickname: normalized_contact_nickname(
+                        &sender_installation_id,
+                        &sender_nickname,
+                    ),
                     installation_id: sender_installation_id,
                     public_key: sender_public_key,
                     fingerprint: sender_fingerprint,
@@ -597,15 +767,10 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                             ELSE 0
                         END AS has_pending_peer_exchange,
                         CASE
-                            WHEN EXISTS (
-                                SELECT 1
-                                FROM outbound_deliveries od
-                                WHERE od.contact_installation_id = c.installation_id
-                                  AND UPPER(od.state) = 'QUEUED'
-                                  AND od.attempt_count > 0
-                            ) THEN 1
+                            WHEN p.last_connected_at IS NOT NULL
+                             AND p.last_connected_at >= (unixepoch() - 120) THEN 1
                             ELSE 0
-                        END AS has_peer_retry,
+                        END AS has_recent_peer_connection,
                         p.last_connected_at
                  FROM contacts c
                  LEFT JOIN contact_peer_endpoints p
@@ -627,7 +792,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                     row.get::<_, String>("transport_policy")?,
                     row.get::<_, i64>("has_peer_endpoint")?,
                     row.get::<_, i64>("has_pending_peer_exchange")?,
-                    row.get::<_, i64>("has_peer_retry")?,
+                    row.get::<_, i64>("has_recent_peer_connection")?,
                     row.get::<_, Option<i64>>("last_connected_at")?,
                 ))
             })
@@ -645,7 +810,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                 transport_policy,
                 has_peer_endpoint,
                 has_pending_peer_exchange,
-                has_peer_retry,
+                has_recent_peer_connection,
                 last_peer_connected_at,
             ) = row.map_err(storage_error)?;
             Ok(ContactRecord {
@@ -664,12 +829,15 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                 } else {
                     PeerEndpointStatus::Missing
                 },
-                peer_connection_status: if has_peer_retry != 0 {
-                    PeerConnectionStatus::Backoff
+                // A queued delivery retry is not proof of a live peer
+                // connection. Reachability is owned by the engine event path.
+                peer_connection_status: if has_recent_peer_connection != 0 {
+                    PeerConnectionStatus::Connected
                 } else {
                     PeerConnectionStatus::Offline
                 },
-                transport_policy: serde_json::from_str(&format!("\"{transport_policy}\"")).unwrap_or_default(),
+                transport_policy: serde_json::from_str(&format!("\"{transport_policy}\""))
+                    .unwrap_or_default(),
                 last_peer_connected_at,
                 dev: None,
             })

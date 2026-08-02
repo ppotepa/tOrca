@@ -89,8 +89,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     if (!mounted) return;
     setState(() {
       _notifications = store.getBool('torchat.notifications.enabled') ?? true;
-      _messageAlerts =
-          store.getBool('torchat.notifications.messages') ?? true;
+      _messageAlerts = store.getBool('torchat.notifications.messages') ?? true;
       _sound = store.getBool('torchat.notifications.sound') ?? true;
       _vibration = store.getBool('torchat.notifications.vibration') ?? true;
       _preview = store.getBool('torchat.notifications.preview') ?? false;
@@ -119,9 +118,9 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     } catch (error) {
       if (!mounted) return;
       setState(() => assign(previous));
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error.toString())),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.toString())));
     } finally {
       if (mounted) setState(() => _saving.remove(key));
     }
@@ -134,18 +133,15 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
       _saving.add(_reducedMotionKey);
     });
     try {
-      await ref
-          .read(themeControllerProvider.notifier)
-          .setReducedMotion(value);
+      await ref.read(themeControllerProvider.notifier).setReducedMotion(value);
     } catch (error) {
       if (!mounted) return;
       setState(() {
-        _themePreferences =
-            _themePreferences.copyWith(reducedMotion: previous);
+        _themePreferences = _themePreferences.copyWith(reducedMotion: previous);
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error.toString())),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.toString())));
     } finally {
       if (mounted) setState(() => _saving.remove(_reducedMotionKey));
     }
@@ -167,21 +163,21 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     } catch (error) {
       if (!mounted) return;
       setState(() => _autostart = previous);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error.toString())),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.toString())));
     } finally {
       if (mounted) setState(() => _saving.remove(_autostartOperationKey));
     }
   }
 
   AsyncOperationState _preferenceState(String key) => AsyncOperationState(
-        phase: _saving.contains(key)
-            ? AsyncOperationPhase.running
-            : AsyncOperationPhase.idle,
-        label: 'Zapisywanie ustawienia',
-        targetId: key,
-      );
+    phase: _saving.contains(key)
+        ? AsyncOperationPhase.running
+        : AsyncOperationPhase.idle,
+    label: 'Zapisywanie ustawienia',
+    targetId: key,
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -446,10 +442,9 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
               ),
               title: 'Reset danych demo',
               subtitle: 'Wymaga potwierdzenia',
-              borderColor: Theme.of(context)
-                  .colorScheme
-                  .error
-                  .withValues(alpha: .60),
+              borderColor: Theme.of(
+                context,
+              ).colorScheme.error.withValues(alpha: .60),
               backgroundColor: Theme.of(context).colorScheme.errorContainer,
               child: ActionTile(
                 title: 'Wyczyść lokalny stan',
@@ -471,16 +466,16 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     ValueChanged<bool> assign, {
     bool enabled = true,
   }) => BusySurface(
-        state: _preferenceState(key),
-        label: 'Zapisywanie…',
-        child: ThemedSwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          title: Text(title),
-          subtitle: Text(subtitle),
-          value: value,
-          onChanged: enabled && !_saving.contains(key)
-              ? (next) => _set(key, value, next, assign)
-              : null,
-        ),
-      );
+    state: _preferenceState(key),
+    label: 'Zapisywanie…',
+    child: ThemedSwitchListTile(
+      contentPadding: EdgeInsets.zero,
+      title: Text(title),
+      subtitle: Text(subtitle),
+      value: value,
+      onChanged: enabled && !_saving.contains(key)
+          ? (next) => _set(key, value, next, assign)
+          : null,
+    ),
+  );
 }

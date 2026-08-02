@@ -6,7 +6,9 @@ import 'package:torchat_mobile/core/models/domain.dart';
 import 'package:torchat_mobile/features/shell/main_shell.dart';
 
 void main() {
-  testWidgets('shell exposes navigation and recovery shortcuts', (tester) async {
+  testWidgets('shell exposes navigation and recovery shortcuts', (
+    tester,
+  ) async {
     var tab = MobileTab.chats;
     var settings = 0;
     var account = 0;

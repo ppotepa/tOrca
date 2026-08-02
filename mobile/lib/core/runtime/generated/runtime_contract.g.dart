@@ -2,6 +2,8 @@
 abstract final class EngineContract {
   static const type = 'type';
   static const requestId = 'requestId';
+  static const commandId = 'commandId';
+  static const revision = 'revision';
   static const command = 'command';
   static const result = 'result';
   static const status = 'status';
@@ -115,6 +117,8 @@ abstract final class EngineContract {
   static const connect = 'connect';
   static const getIdentity = 'getIdentity';
   static const getProfile = 'getProfile';
+  static const getStartupReadiness = 'getStartupReadiness';
+  static const getApplicationSnapshot = 'getApplicationSnapshot';
   static const pairingInbox = 'pairingInbox';
   static const pairingOutbox = 'pairingOutbox';
   static const listContacts = 'listContacts';
@@ -132,6 +136,7 @@ abstract final class EngineContract {
   static const cancelPairing = 'cancelPairing';
   static const verifyContact = 'verifyContact';
   static const updateContactSettings = 'updateContactSettings';
+  static const removeRelationship = 'removeRelationship';
   static const startConversation = 'startConversation';
   static const openConversation = 'openConversation';
   static const closeConversation = 'closeConversation';
@@ -148,6 +153,8 @@ abstract final class EngineContract {
   static const commandConnect = 'connect';
   static const commandGetIdentity = 'get_identity';
   static const commandGetProfile = 'get_profile';
+  static const commandGetStartupReadiness = 'get_startup_readiness';
+  static const commandGetApplicationSnapshot = 'get_application_snapshot';
   static const commandPairingInbox = 'pairing_inbox';
   static const commandPairingOutbox = 'pairing_outbox';
   static const commandListContacts = 'list_contacts';
@@ -165,6 +172,7 @@ abstract final class EngineContract {
   static const commandCancelPairing = 'cancel_pairing';
   static const commandVerifyContact = 'verify_contact';
   static const commandUpdateContactSettings = 'update_contact_settings';
+  static const commandRemoveRelationship = 'remove_relationship';
   static const commandStartConversation = 'start_conversation';
   static const commandOpenConversation = 'open_conversation';
   static const commandCloseConversation = 'close_conversation';
@@ -199,8 +207,7 @@ abstract final class EngineContract {
   static const factAppVisibilityChanged = 'app_visibility_changed';
   static const factNetworkChanged = 'network_changed';
   static const factPowerModeChanged = 'power_mode_changed';
-  static const factBackgroundExecutionRestricted =
-      'background_execution_restricted';
+  static const factBackgroundExecutionRestricted = 'background_execution_restricted';
 
   static const torPhaseStarting = 'starting';
   static const torPhaseBootstrapping = 'bootstrapping';
@@ -210,10 +217,6 @@ abstract final class EngineContract {
   static const runtimeReady = 'runtime_ready';
   static const torStatus = 'tor_status';
   static const transportStatusChanged = 'transport_status_changed';
-  static const transportComponent = 'component';
-  static const transportState = 'state';
-  static const endpoint = 'endpoint';
-  static const updatedAt = 'updatedAt';
   static const profileReady = 'profile_ready';
   static const inviteReceived = 'invite_received';
   static const inviteStateChanged = 'invite_state_changed';
@@ -227,6 +230,7 @@ abstract final class EngineContract {
   static const changed = 'changed';
   static const runtimeError = 'runtime_error';
   static const runtimeLog = 'runtime_log';
+  static const projectionChanged = 'projection_changed';
 
   static const connectionStateWaitingForTor = 'waiting_for_tor';
   static const connectionStateDisconnected = 'disconnected';
@@ -284,8 +288,7 @@ abstract final class EngineContract {
   static const outcomePermanentFailure = 'PERMANENT_FAILURE';
 
   static const contactTransportPolicyPeerOnly = 'PEER_ONLY';
-  static const contactTransportPolicyPeerWithRelayFallback =
-      'PEER_WITH_RELAY_FALLBACK';
+  static const contactTransportPolicyPeerWithRelayFallback = 'PEER_WITH_RELAY_FALLBACK';
   static const contactTransportPolicyRelayOnly = 'RELAY_ONLY';
 
   static const pairingOutcomeOfferReceived = 'OFFER_RECEIVED';
@@ -305,4 +308,8 @@ abstract final class EngineContract {
 
   static const platformActionConfigureOnionService = 'configure_onion_service';
   static const platformActionRotateOnionService = 'rotate_onion_service';
+  static const transportComponent = 'component';
+  static const transportState = 'state';
+  static const endpoint = 'endpoint';
+  static const updatedAt = 'updatedAt';
 }

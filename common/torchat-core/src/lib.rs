@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 pub mod application;
-pub mod c_api;
 pub mod mls;
 pub mod peer_protocol;
 pub mod relay;

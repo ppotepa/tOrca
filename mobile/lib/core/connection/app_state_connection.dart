@@ -6,10 +6,10 @@ extension AppStateConnection on AppState {
   ConnectionReadiness get connectionReadiness =>
       ConnectionReadiness.fromRuntime(
         transport: transport,
+        transportStatuses: transportStatuses,
         peerServerStatus: peerServerStatus,
         startupSteps: startupSteps,
-        localDataReady:
-            !isLoading && identity.installationId.trim().isNotEmpty,
+        localDataReady: !isLoading && identity.installationId.trim().isNotEmpty,
       );
 
   ConnectionSummary get connectionSummary => ConnectionSummary.fromReadiness(

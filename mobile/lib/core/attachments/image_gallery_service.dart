@@ -20,10 +20,6 @@ class ImageGalleryService {
       throw StateError('Brak uprawnień do zapisania obrazu w galerii.');
     }
     final safeId = messageId.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
-    await Gal.putImageBytes(
-      bytes,
-      album: 'TorChat',
-      name: 'torchat-$safeId',
-    );
+    await Gal.putImageBytes(bytes, album: 'TorChat', name: 'torchat-$safeId');
   }
 }

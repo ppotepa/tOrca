@@ -19,4 +19,9 @@ const SESSION_TICK: Duration = Duration::from_millis(100);
 const OUTBOUND_CAPACITY: usize = 128;
 const SESSION_CAPACITY: usize = 64;
 const EVENT_CAPACITY: usize = 128;
-const MAX_IN_FLIGHT: usize = 8;
+// MLS application messages advance a shared per-conversation generation.
+// Keep a single durable frame in flight per peer session so the receiver
+// persists and processes generation N before generation N+1 is dispatched.
+// Transport-level multiplexing here can otherwise turn normal network timing
+// into an unrecoverable `Generation is too old` failure.
+const MAX_IN_FLIGHT: usize = 1;

@@ -30,11 +30,22 @@ function Assert-TorChatDockerEngine {
         if (Test-Path -LiteralPath $stdoutPath) { $output += Get-Content -LiteralPath $stdoutPath -ErrorAction SilentlyContinue }
         if (Test-Path -LiteralPath $stderrPath) { $output += Get-Content -LiteralPath $stderrPath -ErrorAction SilentlyContinue }
         $text = ($output | Out-String).TrimEnd()
+        # Start-Process may retain a stale ExitCode value until refreshed after
+        # WaitForExit; without this Docker was reported unavailable even when
+        # stdout contained a valid server version.
+        $process.Refresh()
         if ($text) { $text | Set-Content -LiteralPath $logPath -Encoding UTF8 }
-        if ($process.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($text)) {
+        $serverVersion = if (Test-Path -LiteralPath $stdoutPath) {
+            (Get-Content -LiteralPath $stdoutPath -Raw -ErrorAction SilentlyContinue).Trim()
+        } else { '' }
+        # Docker Desktop can return a transient non-zero status from
+        # `docker version` while still returning a valid server version. The
+        # server version is the authoritative readiness signal here.
+        if ([string]::IsNullOrWhiteSpace($serverVersion) -or
+            $serverVersion -notmatch '^\d+\.\d+\.\d+') {
             throw 'Docker Desktop Linux engine returned an error.'
         }
-        return ($text -split "`r?`n" | Select-Object -Last 1).Trim()
+        return $serverVersion
     } catch {
         $_ | Out-String | Add-Content -LiteralPath $logPath -Encoding UTF8
         throw "Docker Desktop Linux engine is unavailable. Start or restart Docker Desktop, wait for 'Engine running', then retry. Diagnostics: $logPath"
@@ -167,6 +178,7 @@ function Test-TorChatOnionReachability {
 
     $deadline = [DateTimeOffset]::UtcNow.AddSeconds($TimeoutSeconds)
     $attempt = 0
+    $consecutiveSuccesses = 0
     $lastFailure = 'no response'
     do {
         $attempt++
@@ -179,18 +191,26 @@ function Test-TorChatOnionReachability {
             try {
                 $payload = $text | ConvertFrom-Json
                 if ($payload.status -eq 'ok') {
-                    return [pscustomobject]@{
-                        State = 'Ready'
-                        Code = 'ONION_REACHABLE'
-                        Message = "Onion relay is reachable after $attempt attempt(s)"
-                        Attempts = $attempt
+                    $consecutiveSuccesses++
+                    if ($consecutiveSuccesses -ge 2) {
+                        return [pscustomobject]@{
+                            State = 'Ready'
+                            Code = 'ONION_REACHABLE'
+                            Message = "Onion relay passed two consecutive probes after $attempt attempt(s)"
+                            Attempts = $attempt
+                        }
                     }
+                    $lastFailure = 'first successful probe; confirming circuit stability'
+                } else {
+                    $consecutiveSuccesses = 0
+                    $lastFailure = "unexpected status '$($payload.status)'"
                 }
-                $lastFailure = "unexpected status '$($payload.status)'"
             } catch {
+                $consecutiveSuccesses = 0
                 $lastFailure = "invalid JSON response: $text"
             }
         } else {
+            $consecutiveSuccesses = 0
             $classification = switch ($exitCode) {
                 7 { 'SOCKS endpoint refused the connection' }
                 28 { 'onion descriptor or circuit is still warming' }
@@ -224,12 +244,20 @@ function Reset-TorChatStackState {
     )
     if ($DatabasePolicy -eq 'preserve' -and $OnionPolicy -eq 'preserve') { return }
 
-    # Torka is an independent development client, but it must be recreated
-    # when the local control-plane state or its onion URL changes.
-    [void](Invoke-TorChatCompose -Context $Context -ComposeContext $ComposeContext -Arguments @('stop','server','postgres','tor','torka') -LogName 'docker-reset-stop.log' -AllowedExitCodes @(0))
-    [void](Invoke-TorChatCompose -Context $Context -ComposeContext $ComposeContext -Arguments @('rm','-f','server','postgres','tor','torka') -LogName 'docker-reset-rm.log' -AllowedExitCodes @(0))
+    # A database-only reset keeps the published hidden service running. Tor is
+    # stopped only for an explicit onion rotation.
+    $resetServices = if ($OnionPolicy -eq 'rotate') {
+        @('server','postgres','tor','torka')
+    } else {
+        @('server','postgres','torka')
+    }
+    [void](Invoke-TorChatCompose -Context $Context -ComposeContext $ComposeContext -Arguments (@('stop') + $resetServices) -LogName 'docker-reset-stop.log' -AllowedExitCodes @(0))
+    [void](Invoke-TorChatCompose -Context $Context -ComposeContext $ComposeContext -Arguments (@('rm','-f') + $resetServices) -LogName 'docker-reset-rm.log' -AllowedExitCodes @(0))
     if ($DatabasePolicy -eq 'reset') {
         [void](Invoke-TorChatNative -Context $Context -FilePath 'docker' -ArgumentList @('volume','rm','-f',"$($ComposeContext.Project)_postgres_dev") -LogName 'docker-reset-postgres.log' -AllowedExitCodes @(0,1))
+        # Torka owns a client database too. Reset it together with the relay
+        # database so it cannot probe freshly reset clients using stale keys.
+        [void](Invoke-TorChatNative -Context $Context -FilePath 'docker' -ArgumentList @('volume','rm','-f',"$($ComposeContext.Project)_torka_dev") -LogName 'docker-reset-torka.log' -AllowedExitCodes @(0,1))
     }
     if ($OnionPolicy -eq 'rotate') {
         [void](Invoke-TorChatNative -Context $Context -FilePath 'docker' -ArgumentList @('volume','rm','-f',"$($ComposeContext.Project)_tor_dev") -LogName 'docker-rotate-onion.log' -AllowedExitCodes @(0,1))
@@ -273,7 +301,12 @@ function Start-TorChatStack {
         [void](Invoke-TorChatCompose -Context $Context -ComposeContext $compose -Arguments @('up','-d','--force-recreate','server','torka') -LogName 'docker-server-recreate.log')
         [void](Wait-TorChatHttpHealth -Context $Context -Url ("http://127.0.0.1:{0}/health" -f $EnvironmentState.Values['TORCHAT_HTTP_PORT']) -TimeoutSeconds 90)
     } else {
-        [void](Invoke-TorChatCompose -Context $Context -ComposeContext $compose -Arguments @('up','-d','torka') -LogName 'docker-torka-up.log')
+        # Torka is a stateful development client. `docker compose up -d` does
+        # not recreate an existing container merely because its locally built
+        # image changed, leaving a stale bot runtime after an engine/Python
+        # fix. Recreate only Torka; its volume preserves identity and test
+        # contacts while server, Tor and client applications remain untouched.
+        [void](Invoke-TorChatCompose -Context $Context -ComposeContext $compose -Arguments @('up','-d','--force-recreate','torka') -LogName 'docker-torka-up.log')
     }
 
     if ($Readiness -in @('bootstrap','onion','strict')) {

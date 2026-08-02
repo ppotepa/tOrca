@@ -75,6 +75,13 @@ pub enum RelayPayloadV1 {
         peer_endpoint: Option<PeerEndpointBundle>,
         signature: String,
     },
+    WelcomeApplied {
+        version: u16,
+        sender: ContactCard,
+        recipient: String,
+        invite_id: String,
+        signature: String,
+    },
     PeerEndpointBootstrap {
         version: u16,
         sender: ContactCard,
@@ -150,6 +157,25 @@ impl RelayPayloadV1 {
         }
     }
 
+    pub fn welcome_applied(
+        identity: &Identity,
+        nickname: &str,
+        recipient: String,
+        invite_id: String,
+    ) -> Self {
+        let sender = ContactCard::from_identity(identity, nickname.trim());
+        let signature = identity.sign(&welcome_applied_signing_bytes(
+            &sender, &recipient, &invite_id,
+        ));
+        Self::WelcomeApplied {
+            version: PROTOCOL_VERSION,
+            sender,
+            recipient,
+            invite_id,
+            signature,
+        }
+    }
+
     pub fn encode(&self) -> Result<String, String> {
         serde_json::to_vec(self)
             .map(|value| URL_SAFE_NO_PAD.encode(value))
@@ -166,6 +192,7 @@ impl RelayPayloadV1 {
             Self::PairingOffer { version, .. }
             | Self::PairingRejected { version, .. }
             | Self::Welcome { version, .. }
+            | Self::WelcomeApplied { version, .. }
             | Self::PeerEndpointBootstrap { version, .. } => *version,
         };
         if version != PROTOCOL_VERSION {
@@ -244,6 +271,38 @@ impl RelayPayloadV1 {
         }
     }
 
+    pub fn verify_welcome_applied(
+        &self,
+        expected_sender: &str,
+        expected_recipient: &str,
+    ) -> Result<String, String> {
+        let Self::WelcomeApplied {
+            sender,
+            recipient,
+            invite_id,
+            signature,
+            ..
+        } = self
+        else {
+            return Err("relay payload is not a WelcomeApplied acknowledgement".into());
+        };
+        sender.validate()?;
+        if sender.installation_id != expected_sender {
+            return Err("WelcomeApplied sender does not match relay sender".into());
+        }
+        if recipient != expected_recipient {
+            return Err("WelcomeApplied recipient does not match local identity".into());
+        }
+        if !verify_signature(
+            &sender.public_key,
+            &welcome_applied_signing_bytes(sender, recipient, invite_id),
+            signature,
+        ) {
+            return Err("invalid WelcomeApplied signature".into());
+        }
+        Ok(invite_id.clone())
+    }
+
     pub fn peer_endpoint_bootstrap(
         identity: &Identity,
         nickname: &str,
@@ -318,6 +377,26 @@ fn welcome_signing_bytes(
     output
 }
 
+fn welcome_applied_signing_bytes(
+    sender: &ContactCard,
+    recipient: &str,
+    invite_id: &str,
+) -> Vec<u8> {
+    let mut output = b"torchat-welcome-applied-v1".to_vec();
+    for value in [
+        sender.installation_id.as_bytes(),
+        sender.public_key.as_bytes(),
+        sender.fingerprint.as_bytes(),
+        sender.nickname.as_bytes(),
+        recipient.as_bytes(),
+        invite_id.as_bytes(),
+    ] {
+        output.extend_from_slice(&(value.len() as u32).to_be_bytes());
+        output.extend_from_slice(value);
+    }
+    output
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct RelayEnvelope {
     pub version: u16,
@@ -339,6 +418,7 @@ pub enum RelayClientFrame {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RelayServerFrame {
     Ready { installation_id: String },
+    PairingAvailable { pairing_id: Uuid },
     Envelope(RelayEnvelope),
     Forwarded { message_id: Uuid },
     DeliveryReceipt { message_id: Uuid },
@@ -396,6 +476,30 @@ mod tests {
         assert!(
             changed
                 .verify_welcome(&alice.installation_id(), &bob.installation_id())
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn signed_welcome_applied_round_trip_rejects_wrong_sender() {
+        let alice = Identity::generate();
+        let bob = Identity::generate();
+        let payload = RelayPayloadV1::welcome_applied(
+            &alice,
+            "Alice",
+            bob.installation_id(),
+            "invite-1".into(),
+        );
+        let decoded = RelayPayloadV1::decode(&payload.encode().unwrap()).unwrap();
+        assert_eq!(
+            decoded
+                .verify_welcome_applied(&alice.installation_id(), &bob.installation_id())
+                .unwrap(),
+            "invite-1"
+        );
+        assert!(
+            decoded
+                .verify_welcome_applied(&bob.installation_id(), &bob.installation_id())
                 .is_err()
         );
     }

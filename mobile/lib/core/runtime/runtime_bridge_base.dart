@@ -1,4 +1,5 @@
 import '../../client_runtime.dart';
+import '../application_state/application_snapshot.dart';
 import 'runtime_arguments.dart';
 import 'runtime_contract.dart';
 import 'runtime_payload.dart';
@@ -10,7 +11,7 @@ abstract interface class RuntimeCallBridge {
   ]);
 }
 
-mixin RuntimeBridgeMethods implements ClientRuntime {
+mixin RuntimeBridgeMethods implements ClientRuntime, RuntimeProjectionProvider {
   Future<Object?> callRuntime(
     String method, [
     RuntimeArguments params = RuntimeArguments.empty,
@@ -29,6 +30,68 @@ mixin RuntimeBridgeMethods implements ClientRuntime {
   Future<RuntimeProfile?> profile() async => RuntimePayload.fromDynamicOrNull(
     await callRuntime(EngineContract.getProfile),
   )?.profile();
+
+  @override
+  Future<StartupReadinessSnapshot> startupReadiness() async {
+    final value = await callRuntime(EngineContract.getStartupReadiness);
+    if (value is! Map) {
+      throw StateError('Engine returned an invalid startup readiness snapshot');
+    }
+    return StartupReadinessSnapshot.fromJson(
+      value.map((key, item) => MapEntry(key.toString(), item)),
+    );
+  }
+
+  @override
+  Future<ApplicationSnapshot?> applicationSnapshot() async {
+    final value = await callRuntime(EngineContract.getApplicationSnapshot);
+    if (value is! Map) return null;
+    final map = Map<String, dynamic>.from(value);
+    final projection = map['projection'];
+    final stamp = projection is Map
+        ? Map<String, dynamic>.from(projection)
+        : const <String, dynamic>{};
+    final identity = map['identity'] is Map
+        ? RuntimeIdentity.fromMap(
+            Map<String, dynamic>.from(map['identity'] as Map),
+          )
+        : const RuntimeIdentity();
+    final profile = map['profile'] is Map
+        ? RuntimeProfile.fromMap(
+            Map<String, dynamic>.from(map['profile'] as Map),
+          )
+        : const RuntimeProfile();
+    final contacts = (map['contacts'] as List? ?? const [])
+        .whereType<Map>()
+        .map((item) => ContactRecord.fromMap(Map<String, dynamic>.from(item)))
+        .toList(growable: false);
+    final conversations = (map['conversations'] as List? ?? const [])
+        .whereType<Map>()
+        .map(
+          (item) => ConversationSummary.fromMap(
+            Map<String, dynamic>.from(item),
+          ),
+        )
+        .toList(growable: false);
+    final pairing = map['pairingSummary'] is Map
+        ? Map<String, dynamic>.from(map['pairingSummary'] as Map)
+        : const <String, dynamic>{};
+    return ApplicationSnapshot(
+      schemaVersion: (map['schemaVersion'] as num?)?.toInt() ?? 1,
+      generation: (map['generation'] as num?)?.toInt() ?? 0,
+      createdAtMs: (map['createdAtMs'] as num?)?.toInt() ?? 0,
+      identity: identity,
+      profile: profile,
+      contacts: contacts,
+      conversations: conversations,
+      pendingInbox: (pairing['pendingInbox'] as num?)?.toInt() ?? 0,
+      pendingOutbox: (pairing['pendingOutbox'] as num?)?.toInt() ?? 0,
+      peerEndpointAvailable: map['peerEndpointAvailable'] as bool? ?? false,
+      projectionStoreId: stamp['storeId']?.toString() ?? '',
+      projectionSessionId: stamp['engineSessionId']?.toString() ?? '',
+      projectionRevision: (stamp['revision'] as num?)?.toInt() ?? 0,
+    );
+  }
 
   @override
   Future<InviteCode?> refreshPairingCode() async =>
@@ -146,6 +209,18 @@ mixin RuntimeBridgeMethods implements ClientRuntime {
       ),
     ),
   ).contact();
+
+  @override
+  Future<void> removeRelationship(
+    String installationId, {
+    required bool preserveHistory,
+  }) => callRuntime(
+    EngineContract.removeRelationship,
+    RuntimeArguments.relationshipRemoval(
+      installationId,
+      preserveHistory: preserveHistory,
+    ),
+  );
 
   @override
   Future<List<ContactRecord>> contacts() async =>

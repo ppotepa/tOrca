@@ -1,15 +1,21 @@
 use std::sync::Mutex;
 
-use tokio::runtime::Runtime;
-use torchat_client_engine::ClientEngine;
+use tokio::{runtime::Runtime, sync::mpsc};
+use tokio_util::sync::CancellationToken;
+use torchat_client_engine::{EngineCommandEnvelope, event::EngineEventReceiver};
 
 pub struct EngineHandle {
     pub runtime: Runtime,
-    pub state: Mutex<EngineHandleState>,
+    /// Lifecycle and command submission are independent from event polling.
+    /// `poll_json` may wait for hundreds of milliseconds, so it must never
+    /// hold this mutex and delay a platform fact or a user command.
+    pub command_state: Mutex<EngineHandleCommandState>,
+    pub events: Mutex<EngineEventReceiver>,
 }
 
-pub struct EngineHandleState {
-    pub engine: ClientEngine,
+pub struct EngineHandleCommandState {
+    pub commands: mpsc::Sender<EngineCommandEnvelope>,
+    pub shutdown_token: CancellationToken,
     pub started: bool,
     pub shutdown: bool,
 }

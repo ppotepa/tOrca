@@ -46,9 +46,9 @@ type RelayStream = WebSocketStream<RelaySocket>;
 // allow, especially immediately after bootstrap, after mobile network changes,
 // or while a peer/relay onion is still warming. Keep the relay responsive, but
 // do not tear it down so aggressively that healthy onion sessions flap.
-const RELAY_CONNECT_TIMEOUT: Duration = Duration::from_secs(25);
+const RELAY_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const RELAY_REQUEST_TIMEOUT: Duration = Duration::from_secs(45);
-const RELAY_READY_TIMEOUT: Duration = Duration::from_secs(35);
+const RELAY_READY_TIMEOUT: Duration = Duration::from_secs(15);
 
 enum RelaySocket {
     Direct(TcpStream),
@@ -217,6 +217,17 @@ impl SharedRelayActor {
         })?;
         self.session_token = Some(session.session_token.clone());
         Ok(session.session_token)
+    }
+
+    /// Establish only the authenticated HTTP control-plane session.
+    ///
+    /// Relay-control commands run on short-lived blocking workers. They must
+    /// not start a second `/v1/events` writer because the server permits one
+    /// live WebSocket per installation and would replace the actor's primary
+    /// event connection. The long-lived event writer is created only by the
+    /// actor bootstrap path through `EngineRelay::ensure_session`.
+    pub(crate) fn ensure_http_session(&mut self) -> RuntimeResult<()> {
+        self.ensure_session_token().map(|_| ())
     }
 
     fn ensure_writer(&mut self, token: &str) -> RuntimeResult<()> {
@@ -624,6 +635,9 @@ async fn run_writer_loop(
                         Message::Text(text) => match serde_json::from_str::<RelayServerFrame>(&text) {
                             Ok(RelayServerFrame::Pong) => {
                             }
+                            Ok(RelayServerFrame::PairingAvailable { pairing_id }) => {
+                                let _ = event_tx.send(RelayEvent::PairingAvailable { pairing_id });
+                            }
                             Ok(RelayServerFrame::Envelope(envelope)) => {
                                 let _ = event_tx.send(RelayEvent::Envelope(envelope));
                             }
@@ -803,8 +817,8 @@ async fn connect_relay(
 }
 
 fn relay_ping_message() -> Message {
-    let payload = serde_json::to_string(&RelayClientFrame::Ping)
-        .expect("relay ping frame must serialize");
+    let payload =
+        serde_json::to_string(&RelayClientFrame::Ping).expect("relay ping frame must serialize");
     Message::Text(payload.into())
 }
 
@@ -996,24 +1010,26 @@ mod tests {
     #[test]
     fn incoming_relay_traffic_counts_as_liveness() {
         assert!(relay_message_confirms_liveness(&Message::Text("{}".into())));
-        assert!(relay_message_confirms_liveness(&Message::Ping(vec![1].into())));
-        assert!(relay_message_confirms_liveness(&Message::Pong(vec![2].into())));
+        assert!(relay_message_confirms_liveness(&Message::Ping(
+            vec![1].into()
+        )));
+        assert!(relay_message_confirms_liveness(&Message::Pong(
+            vec![2].into()
+        )));
         assert!(!relay_message_confirms_liveness(&Message::Close(None)));
     }
 
     #[test]
     fn default_relay_timeouts_are_tor_tolerant() {
         let actor = SharedRelayActor::new(
-            Url::parse(
-                "http://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.onion",
-            )
-            .expect("test relay URL must parse"),
+            Url::parse("http://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.onion")
+                .expect("test relay URL must parse"),
             Some("socks5://127.0.0.1:9050".to_owned()),
             Identity::generate(),
         );
 
-        assert_eq!(actor.connection.connect_timeout, Duration::from_secs(25));
-        assert_eq!(actor.connection.ready_timeout, Duration::from_secs(35));
+        assert_eq!(actor.connection.connect_timeout, Duration::from_secs(10));
+        assert_eq!(actor.connection.ready_timeout, Duration::from_secs(15));
         assert_eq!(actor.heartbeat.pong_timeout, Duration::from_secs(150));
     }
 
@@ -1033,7 +1049,10 @@ mod tests {
         .expect("response should decode");
 
         assert_eq!(
-            decoded.sender.as_ref().map(|value| value.installation_id.as_str()),
+            decoded
+                .sender
+                .as_ref()
+                .map(|value| value.installation_id.as_str()),
             Some("installation-torka")
         );
     }

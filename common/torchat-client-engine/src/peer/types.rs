@@ -22,6 +22,7 @@ pub enum PeerDeliveryTag {
     Message { message_id: String },
     Receipt { message_id: String },
     Ephemeral,
+    Probe,
     EndpointUpdate,
 }
 
@@ -30,7 +31,7 @@ impl PeerDeliveryTag {
         match self {
             Self::Message { message_id } => Some(format!("message:{message_id}")),
             Self::Receipt { message_id } => Some(format!("receipt:{message_id}")),
-            Self::Ephemeral | Self::EndpointUpdate => None,
+            Self::Ephemeral | Self::Probe | Self::EndpointUpdate => None,
         }
     }
 

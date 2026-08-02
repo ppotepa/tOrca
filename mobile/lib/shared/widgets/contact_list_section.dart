@@ -38,57 +38,59 @@ class ContactListSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (showHeader) ...[
-            FeatureHeader(title: title, subtitle: subtitle),
-            const SizedBox(height: 10),
-          ],
-          Expanded(
-            child: contacts.isEmpty
-                ? EmptyState(icon: Icons.people_outline, message: emptyMessage)
-                : ListView.separated(
-                    itemCount: contacts.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 5),
-                    itemBuilder: (context, index) {
-                      final contact = contacts[index];
-                      return Semantics(
-                        container: true,
-                        label: 'Kontakt ${contact.displayName}',
-                        hint: 'Naciśnij, aby rozpocząć rozmowę. Przytrzymaj, aby otworzyć menu.',
-                        child: GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onLongPressStart: (details) => _showContextMenu(
-                            context,
-                            contact,
-                            details.globalPosition,
-                          ),
-                          onSecondaryTapDown: (details) => _showContextMenu(
-                            context,
-                            contact,
-                            details.globalPosition,
-                          ),
-                          child: ContactListTile(
-                            contact: contact,
-                            onTap: onSelect,
-                            subtitle: contactSubtitleBuilder?.call(contact),
-                            trailing: contactTrailingBuilder?.call(contact),
-                            asCard: asCard,
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-          ),
-        ],
-      );
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      if (showHeader) ...[
+        FeatureHeader(title: title, subtitle: subtitle),
+        const SizedBox(height: 10),
+      ],
+      Expanded(
+        child: contacts.isEmpty
+            ? EmptyState(icon: Icons.people_outline, message: emptyMessage)
+            : ListView.separated(
+                itemCount: contacts.length,
+                separatorBuilder: (_, _) => const SizedBox(height: 5),
+                itemBuilder: (context, index) {
+                  final contact = contacts[index];
+                  return Semantics(
+                    container: true,
+                    label: 'Kontakt ${contact.displayName}',
+                    hint:
+                        'Naciśnij, aby rozpocząć rozmowę. Przytrzymaj, aby otworzyć menu.',
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onLongPressStart: (details) => _showContextMenu(
+                        context,
+                        contact,
+                        details.globalPosition,
+                      ),
+                      onSecondaryTapDown: (details) => _showContextMenu(
+                        context,
+                        contact,
+                        details.globalPosition,
+                      ),
+                      child: ContactListTile(
+                        contact: contact,
+                        onTap: onSelect,
+                        subtitle: contactSubtitleBuilder?.call(contact),
+                        trailing: contactTrailingBuilder?.call(contact),
+                        asCard: asCard,
+                      ),
+                    ),
+                  );
+                },
+              ),
+      ),
+    ],
+  );
 
   Future<void> _showContextMenu(
     BuildContext context,
     ContactRecord contact,
     Offset position,
   ) async {
-    final overlay = Overlay.of(context).context.findRenderObject()! as RenderBox;
+    final overlay =
+        Overlay.of(context).context.findRenderObject()! as RenderBox;
     final action = await showMenu<String>(
       context: context,
       position: RelativeRect.fromRect(
@@ -98,11 +100,16 @@ class ContactListSection extends StatelessWidget {
       items: [
         const PopupMenuItem(value: 'open', child: Text('Rozpocznij rozmowę')),
         if (onDetails != null)
-          const PopupMenuItem(value: 'details', child: Text('Szczegóły kontaktu')),
+          const PopupMenuItem(
+            value: 'details',
+            child: Text('Szczegóły kontaktu'),
+          ),
         if (onToggleMute != null)
           PopupMenuItem(
             value: 'mute',
-            child: Text(contact.muted ? 'Włącz powiadomienia' : 'Wycisz kontakt'),
+            child: Text(
+              contact.muted ? 'Włącz powiadomienia' : 'Wycisz kontakt',
+            ),
           ),
         const PopupMenuItem(value: 'copy', child: Text('Kopiuj fingerprint')),
         if (onRemove != null)

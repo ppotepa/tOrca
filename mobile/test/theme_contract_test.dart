@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pixelarticons/pixelarticons.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -104,26 +105,28 @@ void main() {
 
     TorChatThemeFamily? selectedFamily;
     await tester.pumpWidget(
-      MaterialApp(
-        theme: buildRetroDarkTheme(),
-        home: SettingsView(
-          nickname: 'torca',
-          torStatus: 'online',
-          themePreferences: const TorChatThemePreferences(),
-          onThemeFamilyChanged: (family) => selectedFamily = family,
-          onBrightnessChanged: (_) {},
-          onRetroPaletteChanged: (_) {},
-          onOpenTor: () {},
-          onEditProfile: () {},
-          onReset: () {},
+      ProviderScope(
+        child: MaterialApp(
+          theme: buildRetroDarkTheme(),
+          home: SettingsView(
+            nickname: 'torca',
+            torStatus: 'online',
+            themePreferences: const TorChatThemePreferences(),
+            onThemeFamilyChanged: (family) => selectedFamily = family,
+            onBrightnessChanged: (_) {},
+            onRetroPaletteChanged: (_) {},
+            onOpenTor: () {},
+            onEditProfile: () {},
+            onReset: () {},
+          ),
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 250));
     expect(find.text('Mocha'), findsNothing);
 
     await tester.tap(find.text('Retro'));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 250));
     expect(selectedFamily, TorChatThemeFamily.retro);
 
     for (final palette in TorChatRetroPalette.values) {

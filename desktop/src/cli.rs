@@ -14,6 +14,12 @@ pub struct Cli {
     #[arg(long, env = "TORCHAT_SOCKS5_PROXY")]
     pub socks5_proxy: Option<String>,
 
+    /// Optional outbound SOCKS proxy used while managed Tor continues to own
+    /// the local onion service. Local development can reuse a warm Tor proxy;
+    /// production leaves this unset and uses managed Tor for both directions.
+    #[arg(long, env = "TORCHAT_RELAY_SOCKS5_PROXY")]
+    pub relay_socks5_proxy: Option<String>,
+
     /// Managed Tor executable. When set, desktop owns the Tor process and
     /// ignores --socks5-proxy.
     #[arg(long, env = "TORCHAT_TOR_BINARY")]

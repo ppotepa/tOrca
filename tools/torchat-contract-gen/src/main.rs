@@ -178,7 +178,12 @@ fn main() -> Result<(), String> {
 
 fn find_repo_root(mut path: PathBuf) -> Result<PathBuf, String> {
     loop {
-        if path.join("REFACTOR2.MD").is_file() && path.join("Cargo.toml").is_file() {
+        if path.join("Cargo.toml").is_file()
+            && path
+                .join("common")
+                .join("client-engine-contract.json")
+                .is_file()
+        {
             return Ok(path);
         }
         if !path.pop() {
@@ -271,7 +276,11 @@ fn render_kotlin_contract(
     out.push('\n');
     render_kotlin_values(&mut out, "OUTCOME_", message_transport);
     out.push('\n');
-    render_kotlin_values(&mut out, "CONTACT_TRANSPORT_POLICY_", contact_transport_policies);
+    render_kotlin_values(
+        &mut out,
+        "CONTACT_TRANSPORT_POLICY_",
+        contact_transport_policies,
+    );
     out.push('\n');
     render_kotlin_values(&mut out, "PAIRING_OUTCOME_", pairing_peer);
     out.push('\n');
@@ -404,7 +413,11 @@ fn render_dart_contract(
     out.push('\n');
     render_dart_values(&mut out, "outcome_", message_transport);
     out.push('\n');
-    render_dart_values(&mut out, "contact_transport_policy_", contact_transport_policies);
+    render_dart_values(
+        &mut out,
+        "contact_transport_policy_",
+        contact_transport_policies,
+    );
     out.push('\n');
     render_dart_values(&mut out, "pairing_outcome_", pairing_peer);
     out.push('\n');
@@ -417,6 +430,10 @@ fn render_dart_contract(
     );
     out.push('\n');
     render_dart_values(&mut out, "platform_action_", platform_action_types);
+    out.push_str("  static const transportComponent = 'component';\n");
+    out.push_str("  static const transportState = 'state';\n");
+    out.push_str("  static const endpoint = 'endpoint';\n");
+    out.push_str("  static const updatedAt = 'updatedAt';\n");
     out.push_str("}\n");
     out
 }
@@ -428,6 +445,7 @@ fn render_dart_values(out: &mut String, prefix: &str, values: &[String]) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_dart_models(
     engine_event_types: &[String],
     tor_phases: &[String],
@@ -645,6 +663,8 @@ fn wire_keys() -> &'static [(&'static str, &'static str)] {
     &[
         ("TYPE", "type"),
         ("REQUEST_ID", "requestId"),
+        ("COMMAND_ID", "commandId"),
+        ("REVISION", "revision"),
         ("COMMAND", "command"),
         ("RESULT", "result"),
         ("STATUS", "status"),
@@ -805,7 +825,7 @@ fn upper_camel_identifier(value: &str) -> String {
 fn lower_camel_identifier(value: &str) -> String {
     if value.contains('_') || value.contains('-') {
         let mut words = value
-            .split(|ch| ch == '_' || ch == '-')
+            .split(['_', '-'])
             .filter(|word| !word.is_empty())
             .map(str::to_ascii_lowercase);
         let Some(first) = words.next() else {

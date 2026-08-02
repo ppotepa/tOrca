@@ -4,9 +4,12 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     ClientEngineActor, EngineCommand, EngineCommandEnvelope, EngineConfig, EngineError,
-    EngineEvent, EngineFatalError, EngineResult, PlatformFact, COMMAND_CHANNEL_CAPACITY,
-    WORKER_OUTCOME_CHANNEL_CAPACITY, event::EngineEventReceiver, logging::StartupJournal,
+    EngineEvent, EngineFatalError, EngineResult, PlatformFact, event::EngineEventReceiver,
+    logging::StartupJournal,
 };
+
+pub const COMMAND_CHANNEL_CAPACITY: usize = 256;
+pub const WORKER_OUTCOME_CHANNEL_CAPACITY: usize = 256;
 
 pub struct ClientEngine {
     commands: mpsc::Sender<EngineCommandEnvelope>,
@@ -17,12 +20,10 @@ pub struct ClientEngine {
 impl ClientEngine {
     pub fn new(config: EngineConfig) -> EngineResult<Self> {
         let (command_tx, command_rx) = mpsc::channel(COMMAND_CHANNEL_CAPACITY);
-        let (actor_event_tx, mut actor_event_rx) =
-            mpsc::channel(WORKER_OUTCOME_CHANNEL_CAPACITY);
+        let (actor_event_tx, mut actor_event_rx) = mpsc::channel(WORKER_OUTCOME_CHANNEL_CAPACITY);
         let (event_tx, event_rx) = mpsc::channel(WORKER_OUTCOME_CHANNEL_CAPACITY);
         let shutdown = CancellationToken::new();
-        let mut journal =
-            StartupJournal::open(config.log_directory.as_deref(), &config.platform);
+        let mut journal = StartupJournal::open(config.log_directory.as_deref(), &config.platform);
         let actor = match ClientEngineActor::new(config) {
             Ok(actor) => actor,
             Err(error) => {
@@ -42,10 +43,7 @@ impl ClientEngine {
         let fatal_events = actor_event_tx.clone();
         let actor_shutdown = shutdown.clone();
         tokio::spawn(async move {
-            if let Err(error) = actor
-                .run(command_rx, actor_event_tx, actor_shutdown)
-                .await
-            {
+            if let Err(error) = actor.run(command_rx, actor_event_tx, actor_shutdown).await {
                 let _ = fatal_events
                     .send(EngineEvent::Fatal {
                         error: EngineFatalError {
@@ -68,11 +66,22 @@ impl ClientEngine {
         request_id: impl Into<String>,
         command: EngineCommand,
     ) -> EngineResult<()> {
+        self.submit_envelope(EngineCommandEnvelope {
+            request_id: request_id.into(),
+            command_id: None,
+            command,
+        })
+        .await
+    }
+
+    /// Submits a command without discarding its caller-supplied command id.
+    ///
+    /// FFI hosts use this path because `command_id` participates in durable
+    /// idempotency.  Keeping it at the engine boundary also makes a retried
+    /// platform request distinguishable from a new command.
+    pub async fn submit_envelope(&self, envelope: EngineCommandEnvelope) -> EngineResult<()> {
         self.commands
-            .send(EngineCommandEnvelope {
-                request_id: request_id.into(),
-                command,
-            })
+            .send(envelope)
             .await
             .map_err(|_| EngineError::Closed("engine command channel is closed"))
     }

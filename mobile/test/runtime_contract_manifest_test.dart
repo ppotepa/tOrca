@@ -23,6 +23,8 @@ void main() {
       EngineContract.connect,
       EngineContract.getIdentity,
       EngineContract.getProfile,
+      EngineContract.getStartupReadiness,
+      EngineContract.getApplicationSnapshot,
       EngineContract.pairingInbox,
       EngineContract.pairingOutbox,
       EngineContract.listContacts,
@@ -40,6 +42,7 @@ void main() {
       EngineContract.cancelPairing,
       EngineContract.verifyContact,
       EngineContract.updateContactSettings,
+      EngineContract.removeRelationship,
       EngineContract.startConversation,
       EngineContract.openConversation,
       EngineContract.closeConversation,
@@ -55,6 +58,7 @@ void main() {
     expect(strings(contract['events']), [
       EngineContract.runtimeReady,
       EngineContract.torStatus,
+      EngineContract.transportStatusChanged,
       EngineContract.profileReady,
       EngineContract.inviteReceived,
       EngineContract.inviteStateChanged,
@@ -68,6 +72,7 @@ void main() {
       EngineContract.changed,
       EngineContract.runtimeError,
       EngineContract.runtimeLog,
+      EngineContract.projectionChanged,
     ]);
   });
 

@@ -9,6 +9,7 @@ import '../../core/attachments/image_gallery_service.dart';
 import '../../core/attachments/image_message_codec.dart';
 import '../../core/models/domain.dart';
 import '../../core/relationships/relationship_message.dart';
+import '../../shared/widgets/message_delivery_surface.dart';
 import 'chats_view.dart' show MessageBubble;
 
 class ReleaseMessageBubble extends StatefulWidget {
@@ -116,9 +117,9 @@ class _ReleaseMessageBubbleState extends State<ReleaseMessageBubble> {
       }
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(_cleanError(error))),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(_cleanError(error))));
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -150,9 +151,7 @@ class _ReleaseMessageBubbleState extends State<ReleaseMessageBubble> {
     final decoded = decodeImageMessageBody(message.text);
     final mine = message.outgoing;
     final chat = context.chatTheme;
-    final foreground = mine
-        ? chat.outgoingForeground
-        : chat.incomingForeground;
+    final foreground = mine ? chat.outgoingForeground : chat.incomingForeground;
     final background = mine ? chat.outgoingBubble : chat.incomingBubble;
     final imageLabel = mine
         ? 'Wysłany obraz'
@@ -171,78 +170,92 @@ class _ReleaseMessageBubbleState extends State<ReleaseMessageBubble> {
           onTap: _imageBytes == null
               ? null
               : () => _showPreview(
-                    context,
-                    _imageBytes!,
-                    contactName: mine ? 'Ty' : widget.contactName,
-                  ),
+                  context,
+                  _imageBytes!,
+                  contactName: mine ? 'Ty' : widget.contactName,
+                ),
           onLongPress: () => _showActions(context),
-          child: Container(
-            constraints: const BoxConstraints(maxWidth: 420),
-            clipBehavior: Clip.antiAlias,
-            decoration: BoxDecoration(
-              color: background,
-              borderRadius: BorderRadius.circular(chat.bubbleRadius),
-              border: chat.bubbleBorderWidth > 0
-                  ? Border.all(
-                      color: chat.composerBorder,
-                      width: chat.bubbleBorderWidth,
-                    )
-                  : null,
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                if (widget.startsGroup)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 7, 12, 6),
-                    child: Text(
-                      mine ? 'Ty' : widget.contactName,
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                            color: foreground.withValues(alpha: .82),
-                            fontWeight: FontWeight.w700,
-                          ),
-                    ),
-                  ),
-                _imageContent(context, decoded, foreground),
-                Container(
-                  padding: const EdgeInsets.fromLTRB(12, 6, 10, 7),
-                  color: foreground.withValues(alpha: .075),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      Icon(
-                        _cached
-                            ? Icons.lock_outline
-                            : Icons.cloud_download_outlined,
-                        size: 13,
-                        color: foreground.withValues(alpha: .72),
-                      ),
-                      const SizedBox(width: 5),
-                      Flexible(
-                        child: Text(
-                          decoded == null
-                              ? 'obraz uszkodzony'
-                              : '${decoded.width}×${decoded.height} · '
-                                  '${decoded.bytes.lengthInBytes ~/ 1024} KiB',
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                                color: foreground.withValues(alpha: .72),
-                              ),
+          child: MessageDeliverySurface(
+            state: message.state,
+            child: Container(
+              constraints: const BoxConstraints(maxWidth: 420),
+              clipBehavior: Clip.antiAlias,
+              decoration: BoxDecoration(
+                color: background,
+                borderRadius: BorderRadius.circular(chat.bubbleRadius),
+                border: chat.bubbleBorderWidth > 0
+                    ? Border.all(
+                        color: chat.composerBorder,
+                        width: chat.bubbleBorderWidth,
+                      )
+                    : null,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (widget.startsGroup)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 7, 12, 6),
+                      child: Text(
+                        mine ? 'Ty' : widget.contactName,
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: foreground.withValues(alpha: .82),
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      Icon(
-                        _stateIcon(message.state),
-                        size: 14,
-                        color: message.state == MessageState.failed
-                            ? context.statusTheme.danger
-                            : foreground.withValues(alpha: .72),
-                      ),
-                    ],
+                    ),
+                  _imageContent(context, decoded, foreground),
+                  Container(
+                    padding: const EdgeInsets.fromLTRB(12, 6, 10, 7),
+                    color: foreground.withValues(alpha: .075),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        Icon(
+                          _cached
+                              ? Icons.lock_outline
+                              : Icons.cloud_download_outlined,
+                          size: 13,
+                          color: foreground.withValues(alpha: .72),
+                        ),
+                        const SizedBox(width: 5),
+                        Flexible(
+                          child: Text(
+                            decoded == null
+                                ? 'obraz uszkodzony'
+                                : '${decoded.width}×${decoded.height} · '
+                                      '${decoded.bytes.lengthInBytes ~/ 1024} KiB',
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.labelSmall
+                                ?.copyWith(
+                                  color: foreground.withValues(alpha: .72),
+                                ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Icon(
+                          _stateIcon(message.state),
+                          size: 14,
+                          color: message.state == MessageState.failed
+                              ? context.statusTheme.danger
+                              : foreground.withValues(alpha: .72),
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          _stateLabel(message.state),
+                          style: Theme.of(context).textTheme.labelSmall
+                              ?.copyWith(
+                                color: message.state == MessageState.failed
+                                    ? context.statusTheme.danger
+                                    : foreground.withValues(alpha: .72),
+                              ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -276,9 +289,7 @@ class _ReleaseMessageBubbleState extends State<ReleaseMessageBubble> {
     if (_loading) {
       return SizedBox(
         height: 180,
-        child: Center(
-          child: CircularProgressIndicator(color: foreground),
-        ),
+        child: Center(child: CircularProgressIndicator(color: foreground)),
       );
     }
     if (_imageBytes == null) {
@@ -314,32 +325,32 @@ class _ReleaseMessageBubbleState extends State<ReleaseMessageBubble> {
     Uint8List bytes, {
     required String contactName,
   }) => Navigator.of(context).push<void>(
-        MaterialPageRoute(
-          builder: (_) => Scaffold(
-            appBar: AppBar(
-              title: Text(contactName),
-              actions: [
-                IconButton(
-                  tooltip: 'Zapisz w galerii',
-                  onPressed: _saveToGallery,
-                  icon: const ThemedIcon(Icons.download_for_offline_outlined),
-                ),
-              ],
+    MaterialPageRoute(
+      builder: (_) => Scaffold(
+        appBar: AppBar(
+          title: Text(contactName),
+          actions: [
+            IconButton(
+              tooltip: 'Zapisz w galerii',
+              onPressed: _saveToGallery,
+              icon: const ThemedIcon(Icons.download_for_offline_outlined),
             ),
-            backgroundColor: Colors.black,
-            body: InteractiveViewer(
-              minScale: .5,
-              maxScale: 5,
-              child: Center(
-                child: Hero(
-                  tag: 'image-message-${message.id}',
-                  child: Image.memory(bytes, fit: BoxFit.contain),
-                ),
-              ),
+          ],
+        ),
+        backgroundColor: Colors.black,
+        body: InteractiveViewer(
+          minScale: .5,
+          maxScale: 5,
+          child: Center(
+            child: Hero(
+              tag: 'image-message-${message.id}',
+              child: Image.memory(bytes, fit: BoxFit.contain),
             ),
           ),
         ),
-      );
+      ),
+    ),
+  );
 
   Future<void> _showActions(BuildContext context) async {
     final action = await showModalBottomSheet<String>(
@@ -418,45 +429,45 @@ class _RelationshipRemovedEvent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Semantics(
-        container: true,
-        label: message.outgoing
-            ? 'Zakończono relację z kontaktem $contactName'
-            : '$contactName zakończył relację',
-        child: Center(
-          child: Container(
-            margin: const EdgeInsets.symmetric(vertical: 12),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(
-              color: context.statusTheme.warning.withValues(alpha: .10),
-              border: Border.all(
-                color: context.statusTheme.warning.withValues(alpha: .55),
-              ),
-              borderRadius: context.effectsTheme.pixelated
-                  ? BorderRadius.zero
-                  : BorderRadius.circular(10),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                ThemedIcon(
-                  Icons.person_remove_outlined,
-                  size: 18,
-                  color: context.statusTheme.warning,
-                ),
-                const SizedBox(width: 9),
-                Flexible(
-                  child: Text(
-                    message.outgoing
-                        ? 'Zakończono relację z kontaktem $contactName.'
-                        : '$contactName zakończył relację.',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ),
-              ],
-            ),
+    container: true,
+    label: message.outgoing
+        ? 'Zakończono relację z kontaktem $contactName'
+        : '$contactName zakończył relację',
+    child: Center(
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: context.statusTheme.warning.withValues(alpha: .10),
+          border: Border.all(
+            color: context.statusTheme.warning.withValues(alpha: .55),
           ),
+          borderRadius: context.effectsTheme.pixelated
+              ? BorderRadius.zero
+              : BorderRadius.circular(10),
         ),
-      );
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ThemedIcon(
+              Icons.person_remove_outlined,
+              size: 18,
+              color: context.statusTheme.warning,
+            ),
+            const SizedBox(width: 9),
+            Flexible(
+              child: Text(
+                message.outgoing
+                    ? 'Zakończono relację z kontaktem $contactName.'
+                    : '$contactName zakończył relację.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
 }
 
 String _cleanError(Object error) => error
@@ -465,9 +476,18 @@ String _cleanError(Object error) => error
     .replaceFirst('Bad state: ', '');
 
 IconData _stateIcon(MessageState state) => switch (state) {
-      MessageState.queued => Icons.hourglass_bottom,
-      MessageState.sending => Icons.schedule,
-      MessageState.sent => Icons.done,
-      MessageState.delivered || MessageState.read => Icons.done_all,
-      MessageState.failed => Icons.error_outline,
-    };
+  MessageState.queued => Icons.hourglass_bottom,
+  MessageState.sending => Icons.schedule,
+  MessageState.sent => Icons.done,
+  MessageState.delivered || MessageState.read => Icons.done_all,
+  MessageState.failed => Icons.error_outline,
+};
+
+String _stateLabel(MessageState state) => switch (state) {
+  MessageState.queued => 'w kolejce',
+  MessageState.sending => 'wysyłanie',
+  MessageState.sent => 'wysłano',
+  MessageState.delivered => 'dostarczono',
+  MessageState.read => 'odczytano',
+  MessageState.failed => 'błąd',
+};

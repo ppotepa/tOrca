@@ -11,9 +11,9 @@ fn temporary_database_path() -> PathBuf {
     ))
 }
 
-fn remove_database(path: &PathBuf) {
+fn remove_database(path: &std::path::Path) {
     for candidate in [
-        path.clone(),
+        path.to_path_buf(),
         PathBuf::from(format!("{}-wal", path.display())),
         PathBuf::from(format!("{}-shm", path.display())),
     ] {
@@ -29,8 +29,7 @@ fn accepted_pairing_response_and_acknowledgement_survive_restart_idempotently() 
     let expires_at = 4_000_000_000_i64;
 
     {
-        let database = ClientDatabase::open(&path, &key)
-            .expect("encrypted database should open");
+        let database = ClientDatabase::open(&path, &key).expect("encrypted database should open");
         database
             .connection()
             .execute(
@@ -66,25 +65,28 @@ fn accepted_pairing_response_and_acknowledgement_survive_restart_idempotently() 
             .put_pending_pairing_acknowledgement(pairing_id, Some("retry after reconnect"))
             .expect("duplicate acknowledgement insert should update one record");
 
-        assert!(database
-            .claim_pairing_response_attempt(
-                pairing_id,
-                25_000,
-                Some("relay temporarily unavailable"),
-            )
-            .expect("pairing response should be claimable"));
-        assert!(database
-            .claim_pending_pairing_acknowledgement_attempt(
-                pairing_id,
-                30_000,
-                Some("ack relay unavailable"),
-            )
-            .expect("pairing acknowledgement should be claimable"));
+        assert!(
+            database
+                .claim_pairing_response_attempt(
+                    pairing_id,
+                    25_000,
+                    Some("relay temporarily unavailable"),
+                )
+                .expect("pairing response should be claimable")
+        );
+        assert!(
+            database
+                .claim_pending_pairing_acknowledgement_attempt(
+                    pairing_id,
+                    30_000,
+                    Some("ack relay unavailable"),
+                )
+                .expect("pairing acknowledgement should be claimable")
+        );
     }
 
     {
-        let database = ClientDatabase::open(&path, &key)
-            .expect("encrypted database should reopen");
+        let database = ClientDatabase::open(&path, &key).expect("encrypted database should reopen");
         let response = database
             .pairing_response_retry_record(pairing_id, 1)
             .expect("pairing retry lookup should succeed")
@@ -92,7 +94,10 @@ fn accepted_pairing_response_and_acknowledgement_survive_restart_idempotently() 
         assert_eq!(response.pairing_id, pairing_id);
         assert_eq!(response.recipient_installation_id, "peer-pairing");
         assert_eq!(response.state, "ACCEPTED");
-        assert_eq!(response.offer_payload, Some(b"durable-offer-payload".to_vec()));
+        assert_eq!(
+            response.offer_payload,
+            Some(b"durable-offer-payload".to_vec())
+        );
         assert_eq!(response.attempt_count, 1);
         assert_eq!(response.next_attempt_at, 25_000);
         assert_eq!(
@@ -129,10 +134,12 @@ fn accepted_pairing_response_and_acknowledgement_survive_restart_idempotently() 
         database
             .complete_pairing_response(pairing_id)
             .expect("pairing response should complete atomically");
-        assert!(database
-            .pairing_response_retry_record(pairing_id, 1)
-            .expect("completed pairing lookup should succeed")
-            .is_none());
+        assert!(
+            database
+                .pairing_response_retry_record(pairing_id, 1)
+                .expect("completed pairing lookup should succeed")
+                .is_none()
+        );
 
         database
             .complete_pending_pairing_acknowledgement(pairing_id)

@@ -1,4 +1,4 @@
-use std::{path::Path, time::Duration};
+use std::{collections::HashSet, path::Path, time::Duration};
 
 use rusqlite::{Connection, OptionalExtension, params};
 use sha2::Digest;
@@ -12,6 +12,66 @@ pub const MIGRATION_LOOKUP: &str = include_str!("../../sql/queries/migration_loo
 pub const MIGRATION_INSERT: &str = include_str!("../../sql/queries/migration_insert.sql");
 pub const TABLE_COLUMNS: &str = include_str!("../../sql/queries/table_columns.sql");
 pub const CONNECTION_PRAGMAS: &str = include_str!("../../sql/queries/connection_pragmas.sql");
+
+// Development/0.x databases are recreated by deploy-clean. Keep their
+// initial schema as one deterministic batch so a fresh Android or desktop
+// client cannot observe a partially applied migration chain. The historical
+// migration table is still populated with the same versions, which lets an
+// existing 0.x database remain readable until the first explicit reset.
+pub const BASELINE_SCHEMA: &str = concat!(
+    include_str!("../../sql/migrations/000_schema_migrations.sql"),
+    "\n",
+    include_str!("../../sql/migrations/001_canonical_client.sql"),
+    "\n",
+    include_str!("../../sql/migrations/002_pairing_inbox_retry.sql"),
+    "\n",
+    include_str!("../../sql/migrations/003_pairing_response_delivery.sql"),
+    "\n",
+    include_str!("../../sql/migrations/004_retry_indexes.sql"),
+    "\n",
+    include_str!("../../sql/migrations/005_message_replies.sql"),
+    "\n",
+    include_str!("../../sql/migrations/006_contact_preferences.sql"),
+    "\n",
+    include_str!("../../sql/migrations/007_peer_p2p.sql"),
+    "\n",
+    include_str!("../../sql/migrations/008_contact_transport_policy.sql"),
+    "\n",
+    include_str!("../../sql/migrations/009_peer_endpoint_bootstrap_outbox.sql"),
+    "\n",
+    include_str!("../../sql/migrations/010_pending_contact_confirmations.sql"),
+    "\n",
+    include_str!("../../sql/migrations/011_pending_pairing_acknowledgements.sql"),
+    "\n",
+    include_str!("../../sql/migrations/012_pending_peer_endpoint_inbox.sql"),
+    "\n",
+    include_str!("../../sql/migrations/013_default_peer_transport.sql"),
+    "\n",
+    include_str!("../../sql/migrations/014_runtime_integrity.sql"),
+    "\n",
+    include_str!("../../sql/migrations/015_pairing_mls_state.sql"),
+    "\n",
+    include_str!("../../sql/migrations/016_projection_consistency.sql"),
+    "\n",
+    "INSERT OR IGNORE INTO schema_migrations (version, name) VALUES ",
+    "(0, '000_schema_migrations.sql'),",
+    "(1, '001_canonical_client.sql'),",
+    "(2, '002_pairing_inbox_retry.sql'),",
+    "(3, '003_pairing_response_delivery.sql'),",
+    "(4, '004_retry_indexes.sql'),",
+    "(5, '005_message_replies.sql'),",
+    "(6, '006_contact_preferences.sql'),",
+    "(7, '007_peer_p2p.sql'),",
+    "(8, '008_contact_transport_policy.sql'),",
+    "(9, '009_peer_endpoint_bootstrap_outbox.sql'),",
+    "(10, '010_pending_contact_confirmations.sql'),",
+    "(11, '011_pending_pairing_acknowledgements.sql'),",
+    "(12, '012_pending_peer_endpoint_inbox.sql'),",
+    "(13, '013_default_peer_transport.sql'),",
+    "(14, '014_runtime_integrity.sql'),",
+    "(15, '015_pairing_mls_state.sql'),",
+    "(16, '016_projection_consistency.sql');"
+);
 
 pub const MIGRATIONS: &[Migration] = &[
     Migration {
@@ -84,6 +144,21 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "013_default_peer_transport.sql",
         sql: include_str!("../../sql/migrations/013_default_peer_transport.sql"),
     },
+    Migration {
+        version: 14,
+        name: "014_runtime_integrity.sql",
+        sql: include_str!("../../sql/migrations/014_runtime_integrity.sql"),
+    },
+    Migration {
+        version: 15,
+        name: "015_pairing_mls_state.sql",
+        sql: include_str!("../../sql/migrations/015_pairing_mls_state.sql"),
+    },
+    Migration {
+        version: 16,
+        name: "016_projection_consistency.sql",
+        sql: include_str!("../../sql/migrations/016_projection_consistency.sql"),
+    },
 ];
 
 pub struct ClientDatabase {
@@ -100,6 +175,14 @@ pub struct PendingWelcomeRecord {
     pub attempt_count: u32,
     pub next_attempt_at: i64,
     pub last_error: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PendingLocalInviteMlsRecord {
+    pub invite_id: String,
+    pub recipient_installation_id: Option<String>,
+    pub snapshot: Vec<u8>,
+    pub expires_at: i64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -263,8 +346,42 @@ impl ClientDatabase {
                 "sqlite integrity_check failed: {integrity_check}"
             )));
         }
+        let has_schema_migrations = connection
+            .query_row(
+                "SELECT EXISTS(
+                    SELECT 1 FROM sqlite_master
+                    WHERE type = 'table' AND name = 'schema_migrations'
+                );",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(sqlite_error)?
+            != 0;
+        let has_client_tables = connection
+            .query_row(
+                "SELECT EXISTS(
+                    SELECT 1 FROM sqlite_master
+                    WHERE type = 'table' AND name IN ('contacts', 'messages')
+                );",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(sqlite_error)?
+            != 0;
+        if !has_schema_migrations && has_client_tables {
+            return Err(EngineError::Storage(
+                "unversioned client database detected; run deploy-clean or reset the client database"
+                    .to_owned(),
+            ));
+        }
         let migration_runner = MigrationRunner::new(MIGRATIONS);
-        migration_runner.run(&connection)?;
+        if !has_schema_migrations {
+            connection
+                .execute_batch(BASELINE_SCHEMA)
+                .map_err(sqlite_error)?;
+        } else {
+            migration_runner.run(&connection)?;
+        }
         Ok(Self {
             connection,
             migration_runner,
@@ -277,6 +394,60 @@ impl ClientDatabase {
 
     pub fn connection_mut(&mut self) -> &mut Connection {
         &mut self.connection
+    }
+
+    pub fn load_processed_command(
+        &self,
+        command_id: &str,
+    ) -> EngineResult<Option<(String, String, i64)>> {
+        self.connection
+            .query_row(
+                "SELECT command_type, result_json, committed_revision
+                 FROM processed_commands WHERE command_id = ?1;",
+                [command_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(sqlite_error)
+    }
+
+    pub fn save_processed_command(
+        &mut self,
+        command_id: &str,
+        command_type: &str,
+        result_json: &str,
+        committed_revision: u64,
+    ) -> EngineResult<()> {
+        self.connection
+            .execute(
+                "INSERT OR IGNORE INTO processed_commands
+                 (command_id, command_type, result_json, committed_revision)
+                 VALUES (?1, ?2, ?3, ?4);",
+                rusqlite::params![
+                    command_id,
+                    command_type,
+                    result_json,
+                    committed_revision as i64
+                ],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
+    pub fn projection_head(&self) -> EngineResult<(String, u64)> {
+        self.connection
+            .query_row(
+                "SELECT store_id, global_revision FROM projection_meta WHERE singleton = 1;",
+                [],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64)),
+            )
+            .map_err(sqlite_error)
     }
 
     pub fn migration_runner(&self) -> &MigrationRunner {
@@ -669,10 +840,7 @@ impl ClientDatabase {
         Ok(changed > 0)
     }
 
-    pub fn complete_pending_pairing_acknowledgement(
-        &self,
-        pairing_id: &str,
-    ) -> EngineResult<()> {
+    pub fn complete_pending_pairing_acknowledgement(&self, pairing_id: &str) -> EngineResult<()> {
         self.connection
             .execute(
                 "DELETE FROM pending_pairing_acknowledgements
@@ -796,9 +964,7 @@ impl ClientDatabase {
         Ok(())
     }
 
-    pub fn next_pending_contact_confirmation_retry_deadline_ms(
-        &self,
-    ) -> EngineResult<Option<i64>> {
+    pub fn next_pending_contact_confirmation_retry_deadline_ms(&self) -> EngineResult<Option<i64>> {
         self.connection
             .query_row(
                 "SELECT MIN(next_attempt_at) AS next_attempt_at
@@ -951,8 +1117,14 @@ impl ClientDatabase {
                      last_error = NULL,
                      updated_at = unixepoch()
                  WHERE message_id = ?1
-                   AND UPPER(state) IN ('QUEUED', 'IN_FLIGHT');",
-                params![message_id, next_attempt_at, ack_deadline],
+                   AND (
+                       UPPER(state) = 'QUEUED'
+                       OR (
+                           UPPER(state) = 'IN_FLIGHT'
+                           AND COALESCE(ack_deadline, 0) <= ?4
+                       )
+                   );",
+                params![message_id, next_attempt_at, ack_deadline, unix_ms()],
             )
             .map(|changed| changed > 0)
             .map_err(sqlite_error)
@@ -1015,7 +1187,10 @@ impl ClientDatabase {
     }
 
     pub fn requeue_peer_deliveries(&self, now_ms: i64) -> EngineResult<()> {
-        let transaction = self.connection.unchecked_transaction().map_err(sqlite_error)?;
+        let transaction = self
+            .connection
+            .unchecked_transaction()
+            .map_err(sqlite_error)?;
         transaction
             .execute(
                 "UPDATE outbound_deliveries
@@ -1129,6 +1304,22 @@ impl ClientDatabase {
             .map_err(sqlite_error)
     }
 
+    pub fn rejected_inbound_peer_senders(&self) -> EngineResult<HashSet<String>> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT DISTINCT sender_installation_id
+                 FROM inbound_peer_envelopes
+                 WHERE UPPER(state) = 'REJECTED';",
+            )
+            .map_err(sqlite_error)?;
+        let rows = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(sqlite_error)?;
+        rows.collect::<rusqlite::Result<HashSet<_>>>()
+            .map_err(sqlite_error)
+    }
+
     pub fn complete_inbound_peer_envelope(
         &self,
         sender_installation_id: &str,
@@ -1145,12 +1336,77 @@ impl ClientDatabase {
         Ok(())
     }
 
-    pub fn mls_inbox_snapshot(&self) -> EngineResult<Option<Vec<u8>>> {
-        self.get_setting_blob("mls_inbox_snapshot_v1")
+    pub fn reject_inbound_peer_envelope(
+        &self,
+        sender_installation_id: &str,
+        message_id: &str,
+    ) -> EngineResult<()> {
+        self.connection
+            .execute(
+                "UPDATE inbound_peer_envelopes
+                 SET state = 'REJECTED', updated_at = unixepoch()
+                 WHERE sender_installation_id = ?1 AND message_id = ?2;",
+                params![sender_installation_id, message_id],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
     }
 
-    pub fn put_mls_inbox_snapshot(&self, snapshot: &[u8]) -> EngineResult<()> {
-        self.put_setting_blob("mls_inbox_snapshot_v1", snapshot)
+    pub fn put_pending_local_invite_mls(
+        &self,
+        record: &PendingLocalInviteMlsRecord,
+    ) -> EngineResult<()> {
+        self.connection
+            .execute(
+                "INSERT INTO pending_local_invite_mls (
+                    invite_id, recipient_installation_id, snapshot, expires_at
+                 ) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(invite_id) DO UPDATE SET
+                    recipient_installation_id = excluded.recipient_installation_id,
+                    snapshot = excluded.snapshot,
+                    expires_at = excluded.expires_at;",
+                params![
+                    record.invite_id,
+                    record.recipient_installation_id,
+                    record.snapshot,
+                    record.expires_at,
+                ],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
+    pub fn pending_local_invite_mls(
+        &self,
+        invite_id: &str,
+        now_secs: i64,
+    ) -> EngineResult<Option<PendingLocalInviteMlsRecord>> {
+        self.connection
+            .query_row(
+                "SELECT invite_id, recipient_installation_id, snapshot, expires_at
+                 FROM pending_local_invite_mls
+                 WHERE invite_id = ?1 AND expires_at >= ?2;",
+                params![invite_id, now_secs],
+                |row| {
+                    Ok(PendingLocalInviteMlsRecord {
+                        invite_id: row.get("invite_id")?,
+                        recipient_installation_id: row.get("recipient_installation_id")?,
+                        snapshot: row.get("snapshot")?,
+                        expires_at: row.get("expires_at")?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(sqlite_error)
+    }
+
+    pub fn delete_expired_pending_local_invite_mls(&self, now_secs: i64) -> EngineResult<usize> {
+        self.connection
+            .execute(
+                "DELETE FROM pending_local_invite_mls WHERE expires_at < ?1;",
+                [now_secs],
+            )
+            .map_err(sqlite_error)
     }
 
     pub fn conversation_mls_snapshots(&self) -> EngineResult<Vec<(String, Vec<u8>)>> {
@@ -2083,31 +2339,6 @@ impl ClientDatabase {
             .map_err(sqlite_error)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)
     }
-
-    fn get_setting_blob(&self, key: &str) -> EngineResult<Option<Vec<u8>>> {
-        self.connection
-            .query_row(
-                "SELECT value
-                 FROM settings
-                 WHERE key = ?1;",
-                [key],
-                |row| row.get("value"),
-            )
-            .optional()
-            .map_err(sqlite_error)
-    }
-
-    fn put_setting_blob(&self, key: &str, value: &[u8]) -> EngineResult<()> {
-        self.connection
-            .execute(
-                "INSERT INTO settings (key, value)
-                 VALUES (?1, ?2)
-                 ON CONFLICT(key) DO UPDATE SET value = excluded.value;",
-                params![key, value],
-            )
-            .map_err(sqlite_error)?;
-        Ok(())
-    }
 }
 
 fn sqlite_error(error: rusqlite::Error) -> EngineError {
@@ -2179,8 +2410,44 @@ mod tests {
             })
             .expect("schema_migrations version is readable");
 
-        assert_eq!(latest_version, 13);
+        assert_eq!(latest_version, 16);
         assert_eq!(database.migration_runner().checksum().len(), 64);
+
+        drop(database);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn local_invite_mls_state_is_isolated_by_invite_id() {
+        let path = temp_database_path("invite-mls");
+        let database = ClientDatabase::open(&path, &key(9)).expect("database opens");
+        for (invite_id, snapshot) in [("invite-a", vec![1, 2]), ("invite-b", vec![3, 4])] {
+            database
+                .put_pending_local_invite_mls(&PendingLocalInviteMlsRecord {
+                    invite_id: invite_id.to_owned(),
+                    recipient_installation_id: None,
+                    snapshot,
+                    expires_at: unix_secs() + 60,
+                })
+                .expect("invite state persists");
+        }
+
+        assert_eq!(
+            database
+                .pending_local_invite_mls("invite-a", unix_secs())
+                .unwrap()
+                .unwrap()
+                .snapshot,
+            vec![1, 2]
+        );
+        assert_eq!(
+            database
+                .pending_local_invite_mls("invite-b", unix_secs())
+                .unwrap()
+                .unwrap()
+                .snapshot,
+            vec![3, 4]
+        );
 
         drop(database);
         let _ = std::fs::remove_file(path);
@@ -2211,7 +2478,7 @@ mod tests {
                  );",
                 [],
             )
-            .expect("legacy contact inserts");
+            .expect("contact inserts");
         drop(connection);
 
         let database =
@@ -2226,11 +2493,13 @@ mod tests {
             .expect("transport policy is readable");
         let latest_version: i64 = database
             .connection()
-            .query_row("SELECT MAX(version) FROM schema_migrations;", [], |row| row.get(0))
+            .query_row("SELECT MAX(version) FROM schema_migrations;", [], |row| {
+                row.get(0)
+            })
             .expect("latest migration is readable");
 
         assert_eq!(policy, "PEER_ONLY");
-        assert_eq!(latest_version, 13);
+        assert_eq!(latest_version, 16);
         drop(database);
         let _ = std::fs::remove_file(path);
     }

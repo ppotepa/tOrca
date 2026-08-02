@@ -8,11 +8,11 @@ use std::{
 
 use tokio::time::Duration;
 use torchat_client_engine::{
-    ClientEngine, EngineCommandEnvelope, EngineConfig, EngineError, PlatformFact,
+    ClientEngine, EngineCommand, EngineCommandEnvelope, EngineConfig, EngineError, PlatformFact,
 };
 
 use crate::{
-    handle::{EngineHandle, EngineHandleState},
+    handle::{EngineHandle, EngineHandleCommandState},
     json,
 };
 
@@ -49,16 +49,26 @@ unsafe fn handle_ref<'a>(value: *mut OpaqueEngineHandle) -> Result<&'a EngineHan
     value
         .cast::<EngineHandle>()
         .as_ref()
-        .ok_or_else(|| EngineError::Closed("engine handle is null"))
+        .ok_or(EngineError::Closed("engine handle is null"))
 }
 
-fn state_mut(
+fn command_state_mut(
     handle: &EngineHandle,
-) -> Result<std::sync::MutexGuard<'_, EngineHandleState>, EngineError> {
+) -> Result<std::sync::MutexGuard<'_, EngineHandleCommandState>, EngineError> {
     handle
-        .state
+        .command_state
         .lock()
         .map_err(|_| EngineError::Closed("engine handle is poisoned"))
+}
+
+fn event_receiver_mut(
+    handle: &EngineHandle,
+) -> Result<std::sync::MutexGuard<'_, torchat_client_engine::event::EngineEventReceiver>, EngineError>
+{
+    handle
+        .events
+        .lock()
+        .map_err(|_| EngineError::Closed("engine event receiver is poisoned"))
 }
 
 unsafe fn input<'a>(data: *const u8, len: usize) -> Result<&'a [u8], EngineError> {
@@ -118,13 +128,16 @@ pub unsafe extern "C" fn torchat_client_engine_new(
         let runtime = tokio::runtime::Runtime::new()
             .map_err(|error| EngineError::InvalidConfig(error.to_string()))?;
         let engine = runtime.block_on(async { ClientEngine::new(config) })?;
+        let (commands, events, shutdown_token) = engine.into_parts();
         Ok(into_opaque(Box::new(EngineHandle {
             runtime,
-            state: std::sync::Mutex::new(EngineHandleState {
-                engine,
+            command_state: std::sync::Mutex::new(EngineHandleCommandState {
+                commands,
+                shutdown_token,
                 started: false,
                 shutdown: false,
             }),
+            events: std::sync::Mutex::new(events),
         })))
     })
     .unwrap_or(std::ptr::null_mut())
@@ -134,14 +147,24 @@ pub unsafe extern "C" fn torchat_client_engine_new(
 pub unsafe extern "C" fn torchat_client_engine_start(value: *mut OpaqueEngineHandle) -> i32 {
     protected(|| {
         let handle = handle_ref(value)?;
-        let mut state = state_mut(handle)?;
+        let mut state = command_state_mut(handle)?;
         if state.shutdown {
             return Err(EngineError::Closed("engine handle is shutdown"));
         }
         if state.started {
             return Ok(0);
         }
-        handle.runtime.block_on(state.engine.start())?;
+        let commands = state.commands.clone();
+        handle.runtime.block_on(async move {
+            commands
+                .send(EngineCommandEnvelope {
+                    request_id: "engine-start-bootstrap".to_owned(),
+                    command_id: None,
+                    command: EngineCommand::Bootstrap,
+                })
+                .await
+                .map_err(|_| EngineError::Closed("engine command channel is closed"))
+        })?;
         state.started = true;
         Ok(0)
     })
@@ -157,16 +180,20 @@ pub unsafe extern "C" fn torchat_client_engine_submit_json(
     protected(|| {
         let handle = handle_ref(value)?;
         let envelope: EngineCommandEnvelope = json::decode(input(request_json, request_len)?)?;
-        let state = state_mut(handle)?;
+        let state = command_state_mut(handle)?;
         if state.shutdown {
             return Err(EngineError::Closed("engine handle is shutdown"));
         }
         if !state.started {
             return Err(EngineError::Closed("engine handle is not started"));
         }
-        handle
-            .runtime
-            .block_on(state.engine.submit(envelope.request_id, envelope.command))?;
+        let commands = state.commands.clone();
+        handle.runtime.block_on(async move {
+            commands
+                .send(envelope)
+                .await
+                .map_err(|_| EngineError::Closed("engine command channel is closed"))
+        })?;
         Ok(0)
     })
     .unwrap_or(-1)
@@ -179,13 +206,13 @@ pub unsafe extern "C" fn torchat_client_engine_poll_json(
 ) -> *mut c_char {
     protected(|| {
         let handle = handle_ref(value)?;
-        let mut state = state_mut(handle)?;
+        let mut events = event_receiver_mut(handle)?;
         let event = if timeout_ms == 0 {
-            state.engine.poll().ok()
+            events.try_recv().ok()
         } else {
             handle
                 .runtime
-                .block_on(state.engine.poll_timeout(Duration::from_millis(timeout_ms)))
+                .block_on(events.recv_timeout(Duration::from_millis(timeout_ms)))
         };
         json::encode(&event)
     })
@@ -202,16 +229,24 @@ pub unsafe extern "C" fn torchat_client_engine_platform_fact_json(
     protected(|| {
         let handle = handle_ref(value)?;
         let fact: PlatformFact = json::decode(input(fact_json, fact_len)?)?;
-        let state = state_mut(handle)?;
+        let state = command_state_mut(handle)?;
         if state.shutdown {
             return Err(EngineError::Closed("engine handle is shutdown"));
         }
         if !state.started {
             return Err(EngineError::Closed("engine handle is not started"));
         }
-        handle
-            .runtime
-            .block_on(state.engine.submit_platform_fact("platform-fact", fact))?;
+        let commands = state.commands.clone();
+        handle.runtime.block_on(async move {
+            commands
+                .send(EngineCommandEnvelope {
+                    request_id: "platform-fact".to_owned(),
+                    command_id: None,
+                    command: EngineCommand::PlatformFact { fact },
+                })
+                .await
+                .map_err(|_| EngineError::Closed("engine command channel is closed"))
+        })?;
         Ok(0)
     })
     .unwrap_or(-1)
@@ -221,11 +256,11 @@ pub unsafe extern "C" fn torchat_client_engine_platform_fact_json(
 pub unsafe extern "C" fn torchat_client_engine_shutdown(value: *mut OpaqueEngineHandle) {
     let _ = protected(|| {
         let handle = handle_ref(value)?;
-        let mut state = state_mut(handle)?;
+        let mut state = command_state_mut(handle)?;
         if state.shutdown {
             return Ok(());
         }
-        state.engine.shutdown();
+        state.shutdown_token.cancel();
         state.shutdown = true;
         Ok(())
     });
@@ -239,9 +274,9 @@ pub unsafe extern "C" fn torchat_client_engine_free(value: *mut OpaqueEngineHand
     let _ = protected(|| {
         let handle = Box::from_raw(value.cast::<EngineHandle>());
         {
-            let mut state = state_mut(&handle)?;
+            let mut state = command_state_mut(&handle)?;
             if !state.shutdown {
-                state.engine.shutdown();
+                state.shutdown_token.cancel();
                 state.shutdown = true;
             }
         }

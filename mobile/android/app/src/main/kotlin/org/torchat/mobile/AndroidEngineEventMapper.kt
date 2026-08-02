@@ -9,7 +9,7 @@ fun mapEngineEventToPublishedEvents(engineEvent: JSONObject): List<Map<String, A
     val event = GeneratedEngineEvent.fromJson(engineEvent)
     return when (event.type) {
         EngineContract.EVENT_RUNTIME -> listOf(event.objectValue(EngineContract.EVENT).toRuntimeMap())
-        EngineContract.EVENT_CONNECTION -> listOf(mapConnectionEvent(event).toRuntimeMap())
+        EngineContract.EVENT_CONNECTION -> listOf(mapRelayConnectionEvent(event).toRuntimeMap())
         EngineContract.EVENT_FATAL -> listOf(mapFatalEvent(event))
         EngineContract.EVENT_LOG -> listOf(mapLogEvent(event))
         else -> emptyList()
@@ -34,7 +34,9 @@ private fun mapLogEvent(event: GeneratedEngineEvent): Map<String, Any?> {
     )
 }
 
-private fun mapConnectionEvent(event: GeneratedEngineEvent): JSONObject {
+/** Relay connection is not Tor bootstrap. Keep it in the canonical transport
+ * component stream so it cannot overwrite the platform-owned Tor status. */
+private fun mapRelayConnectionEvent(event: GeneratedEngineEvent): JSONObject {
     val snapshot = event.objectValue(EngineContract.SNAPSHOT)
     val stateValue = snapshot.opt(EngineContract.STATE)
     val (state, retryAttempt, retryInMs) = when (stateValue) {
@@ -60,9 +62,9 @@ private fun mapConnectionEvent(event: GeneratedEngineEvent): JSONObject {
     val detail = snapshot.optString(EngineContract.DETAIL)
     val label = detail.ifBlank { state.replace('_', ' ') }
     return JSONObject()
-        .put(EngineContract.TYPE, EngineContract.TOR_STATUS)
-        .put(EngineContract.PHASE, connectionPhase(state))
-        .put(EngineContract.LABEL, label)
+        .put(EngineContract.TYPE, EngineContract.TRANSPORT_STATUS_CHANGED)
+        .put("component", "relay")
+        .put("state", connectionProbeState(state))
         .put(EngineContract.DETAIL, label)
         .put(EngineContract.RETRY_ATTEMPT, retryAttempt)
         .put(EngineContract.GENERATION, snapshot.optLong(EngineContract.GENERATION))
@@ -71,7 +73,7 @@ private fun mapConnectionEvent(event: GeneratedEngineEvent): JSONObject {
         }
 }
 
-private fun connectionPhase(state: String): String = when (state) {
+private fun connectionProbeState(state: String): String = when (state) {
     EngineContract.CONNECTION_STATE_WAITING_FOR_TOR -> EngineContract.TRANSPORT_PHASE_STARTING
     EngineContract.CONNECTION_STATE_DISCONNECTED,
     EngineContract.CONNECTION_STATE_STOPPED -> EngineContract.TRANSPORT_PHASE_OFFLINE

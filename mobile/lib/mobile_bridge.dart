@@ -73,11 +73,12 @@ class MobileBridge extends Object
   /// on UI reattach it observes the existing service instead of rebuilding it.
   @override
   Future<bool> connect() async {
-    unawaited(
-      _channel
-          .invokeMethod<Object?>(EngineContract.connect)
-          .then<void>((_) {}, onError: (Object _, StackTrace _) {}),
-    );
+    // Do not race the startup orchestrator with the Android service. The
+    // connect response is the service's process/engine readiness barrier;
+    // swallowing it made warmup continue while the engine was still starting.
+    await _channel
+        .invokeMethod<Object?>(EngineContract.connect)
+        .timeout(const Duration(seconds: 45));
     await _channel.invokeMethod<Object?>(EngineContract.getIdentity);
     return true;
   }

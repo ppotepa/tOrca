@@ -9,6 +9,10 @@ use crate::{Identity, PROTOCOL_VERSION, is_valid_onion_address, verify_signature
 
 pub const PEER_VIRTUAL_PORT: u16 = 443;
 pub const PEER_PATH: &str = "/v1/peer";
+/// Maximum serialized ciphertext accepted by every message transport. Keeping
+/// this below the relay limit prevents a P2P-accepted message from becoming a
+/// permanently retrying relay-fallback payload.
+pub const MAX_TRANSPORT_CIPHERTEXT_BYTES: usize = 128 * 1024;
 pub const MAX_PEER_FRAME_BYTES: usize = 256 * 1024;
 pub const MAX_PREAUTH_FRAME_BYTES: usize = 8 * 1024;
 
@@ -253,9 +257,31 @@ pub struct PeerMessageEnvelope {
     pub sender_installation_id: String,
     pub sequence: u64,
     pub created_at: i64,
-    #[serde(with = "serde_bytes")]
+    #[serde(with = "base64_bytes")]
     pub ciphertext: Vec<u8>,
     pub signature: String,
+}
+
+mod base64_bytes {
+    use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(value: &[u8], serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&URL_SAFE_NO_PAD.encode(value))
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        URL_SAFE_NO_PAD
+            .decode(value)
+            .map_err(serde::de::Error::custom)
+    }
 }
 
 impl PeerMessageEnvelope {
@@ -325,6 +351,7 @@ pub enum PeerAckKind {
     Received,
     Persisted,
     Delivered,
+    Rejected,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -493,6 +520,23 @@ mod tests {
     }
 
     #[test]
+    fn attachment_sized_ciphertext_stays_within_peer_frame_limit() {
+        let identity = Identity::generate();
+        let envelope = PeerMessageEnvelope::new(
+            &identity,
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            "conversation",
+            1,
+            42,
+            vec![7; 96 * 1024],
+        );
+        let encoded = encode_frame(&PeerFrame::Message { envelope }).unwrap();
+        assert!(encoded.len() < MAX_PEER_FRAME_BYTES);
+        assert!(decode_frame(&encoded, true).is_ok());
+    }
+
+    #[test]
     fn preauth_frame_limit_is_stricter() {
         let frame = PeerFrame::ProtocolError {
             code: "x".repeat(MAX_PREAUTH_FRAME_BYTES),
@@ -500,5 +544,18 @@ mod tests {
         let encoded = encode_frame(&frame).unwrap();
         assert!(decode_frame(&encoded, false).is_err());
         assert!(decode_frame(&encoded, true).is_ok());
+    }
+
+    #[test]
+    fn rejected_ack_round_trips_with_message_identity() {
+        let ack = PeerAck {
+            session_id: Uuid::new_v4(),
+            message_id: Uuid::new_v4(),
+            kind: PeerAckKind::Rejected,
+            ciphertext_hash: [7; 32],
+        };
+        let encoded = encode_frame(&PeerFrame::Ack { ack: ack.clone() }).unwrap();
+        let decoded = decode_frame(&encoded, true).unwrap();
+        assert_eq!(decoded, PeerFrame::Ack { ack });
     }
 }

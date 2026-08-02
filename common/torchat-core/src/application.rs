@@ -20,8 +20,7 @@ pub struct ContactRemovedPayloadV1 {
 
 impl ContactRemovedPayloadV1 {
     pub fn encode(&self) -> Result<Vec<u8>, String> {
-        serde_json::to_vec(self)
-            .map_err(|error| format!("encode contact removal payload: {error}"))
+        serde_json::to_vec(self).map_err(|error| format!("encode contact removal payload: {error}"))
     }
 
     pub fn decode(bytes: &[u8]) -> Result<Self, String> {
@@ -79,6 +78,19 @@ pub enum ApplicationPayloadV1 {
         #[serde(rename = "readAt")]
         read_at: i64,
     },
+
+    RelationshipRemoved {
+        version: u16,
+
+        #[serde(rename = "messageId")]
+        message_id: Uuid,
+
+        #[serde(rename = "removedAt")]
+        removed_at: i64,
+
+        #[serde(rename = "preserveHistory")]
+        preserve_history: bool,
+    },
 }
 
 impl ApplicationPayloadV1 {
@@ -135,6 +147,12 @@ mod tests {
                 version: 1,
                 message_ids: vec![Uuid::from_u128(9)],
                 read_at: 47,
+            },
+            ApplicationPayloadV1::RelationshipRemoved {
+                version: 1,
+                message_id: Uuid::from_u128(10),
+                removed_at: 48,
+                preserve_history: false,
             },
         ] {
             let encoded = payload.encode().unwrap();

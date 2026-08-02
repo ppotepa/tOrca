@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      signed_android_release:
+        description: Build and verify the signed Android release APK.
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: release-0-1-${{ github.ref }}
@@ -21,20 +27,40 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Clean architecture check
+        shell: pwsh
+        run: ./scripts/internal/check-clean-architecture.ps1
+      - name: Runtime contract check
+        shell: pwsh
+        run: ./scripts/internal/check-runtime-contract.ps1
+      - name: SQL isolation check
+        shell: pwsh
+        run: ./scripts/internal/check-sql-isolation.ps1
+      - name: Text encoding check
+        shell: pwsh
+        run: ./scripts/internal/check-text-encoding.ps1
       - name: Format
         run: cargo fmt --all -- --check
-      - name: Runtime check
-        run: cargo check -p torchat-client-runtime
-      - name: Runtime tests
-        run: cargo test -p torchat-client-runtime
-      - name: Engine check
-        run: cargo check -p torchat-client-engine
-      - name: Engine tests
-        run: cargo test -p torchat-client-engine
-      - name: Clippy runtime
-        run: cargo clippy -p torchat-client-runtime --all-targets -- -D warnings
-      - name: Clippy engine
-        run: cargo clippy -p torchat-client-engine --all-targets -- -D warnings
+      - name: Workspace check
+        run: cargo check --workspace
+      - name: Workspace tests
+        run: cargo test --workspace
+      - name: Workspace clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  tor-integration:
+    name: Two real engines through Tor
+    # The probe builds two release sidecars and waits for real onion
+    # descriptors. Keep pull requests fast, but make it a mainline and
+    # manually-dispatched release gate.
+    if: github.event_name != 'pull_request'
+    needs: rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pair two independent engines and verify direct ping/pong
+        shell: pwsh
+        run: ./scripts/tests/Test-TorChatTwoEngineIntegration.ps1 -TimeoutSeconds 360
 
   flutter:
     name: Flutter analyze and tests
@@ -74,6 +100,56 @@ jobs:
           cache: true
       - run: flutter pub get
       - run: flutter build apk --debug
+      - name: Android engine ABI check
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+        run: ./scripts/internal/check-android-engine-symbols.ps1
+
+  android-release:
+    name: Android signed release verification
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.signed_android_release
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Materialize release keystore
+        shell: bash
+        env:
+          TORCHAT_RELEASE_KEYSTORE_BASE64: ${{ secrets.TORCHAT_RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          umask 077
+          printf '%s' "$TORCHAT_RELEASE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/torchat-release.jks"
+      - run: flutter pub get
+      - name: Build signed release APK
+        env:
+          TORCHAT_RELEASE_STORE_FILE: ${{ runner.temp }}/torchat-release.jks
+          TORCHAT_RELEASE_STORE_PASSWORD: ${{ secrets.TORCHAT_RELEASE_STORE_PASSWORD }}
+          TORCHAT_RELEASE_KEY_ALIAS: ${{ secrets.TORCHAT_RELEASE_KEY_ALIAS }}
+          TORCHAT_RELEASE_KEY_PASSWORD: ${{ secrets.TORCHAT_RELEASE_KEY_PASSWORD }}
+        run: flutter build apk --release
+      - name: Verify release certificate and archive APK
+        shell: bash
+        run: |
+          keytool -printcert -jarfile build/app/outputs/flutter-apk/app-release.apk
+          sha256sum build/app/outputs/flutter-apk/app-release.apk > app-release.apk.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: torchat-android-release
+          path: |
+            mobile/build/app/outputs/flutter-apk/app-release.apk
+            mobile/app-release.apk.sha256
 
   windows:
     name: Windows debug build and diagnostics

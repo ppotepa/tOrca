@@ -19,6 +19,7 @@ pub enum RuntimeType {
     Changed,
     RuntimeError,
     RuntimeLog,
+    ProjectionChanged,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -75,12 +76,16 @@ pub enum RuntimeEvent {
     MessageReceived {
         #[serde(default, rename = "messageId")]
         message_id: Option<uuid::Uuid>,
+        #[serde(default, rename = "conversationId")]
+        conversation_id: Option<String>,
         #[serde(default)]
         text: Option<String>,
     },
     MessageStateChanged {
         #[serde(default, rename = "messageId")]
         message_id: Option<uuid::Uuid>,
+        #[serde(default, rename = "conversationId")]
+        conversation_id: Option<String>,
         #[serde(default)]
         state: Option<crate::models::MessageState>,
     },
@@ -126,6 +131,17 @@ pub enum RuntimeEvent {
     RuntimeLog {
         message: String,
     },
+    ProjectionChanged {
+        #[serde(rename = "storeId")]
+        store_id: String,
+        #[serde(rename = "engineSessionId")]
+        engine_session_id: String,
+        revision: u64,
+        #[serde(default)]
+        application: bool,
+        #[serde(default, rename = "conversationIds")]
+        conversation_ids: Vec<String>,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -145,6 +161,19 @@ pub enum TransportProbeState {
     Degraded,
     Error,
     Offline,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartupReadinessSnapshot {
+    pub engine_ready: bool,
+    pub local_data_ready: bool,
+    pub tor_ready: bool,
+    pub peer_listener_ready: bool,
+    pub onion_service_ready: bool,
+    pub relay_ready: bool,
+    pub generation: u64,
+    pub detail: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

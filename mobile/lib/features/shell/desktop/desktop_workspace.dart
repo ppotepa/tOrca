@@ -9,7 +9,6 @@ import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/feature_header.dart';
 import '../../../shared/widgets/identity_section.dart';
 import '../../../shared/widgets/info_tile.dart';
-import '../../../shared/widgets/list_items.dart';
 import '../../../shared/widgets/section_card.dart';
 import 'resizable_split_pane.dart';
 
@@ -55,103 +54,106 @@ class DesktopWorkspace extends StatefulWidget {
 
 class _DesktopWorkspaceState extends State<DesktopWorkspace> {
   bool _inspectorOpen = false;
+  bool _railExpanded = true;
 
   int get _unreadTotal => widget.conversations.totalUnread;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
-        builder: (context, constraints) {
-          final compactRail = constraints.maxWidth < 1180;
-          final canShowInspector = constraints.maxWidth >= 1320;
-          final selected = widget.selectedContact;
-          final showInspector = canShowInspector && _inspectorOpen && selected != null;
+    builder: (context, constraints) {
+      final compactRail = constraints.maxWidth < 900 || !_railExpanded;
+      final canShowInspector = constraints.maxWidth >= 1320;
+      final selected = widget.selectedContact;
+      final showInspector =
+          canShowInspector && _inspectorOpen && selected != null;
 
-          return Row(
-            children: [
-              SizedBox(
-                width: compactRail ? 68 : 116,
-                child: _CompactNavigationRail(
-                  compact: compactRail,
-                  tab: widget.tab,
-                  nickname: widget.nickname,
-                  unreadTotal: _unreadTotal,
-                  onTab: widget.onTab,
-                  onAccount: widget.onAccount,
-                  onSettings: widget.onSettings,
-                ),
-              ),
-              Expanded(
-                child: ResizableSplitPane(
-                  sidebar: widget.tab == MobileTab.chats
-                      ? _ConversationSidebar(
-                          conversations: widget.conversations,
-                          contacts: widget.contacts,
-                          selectedConversation: widget.selectedConversation,
-                          onOpenConversation: widget.onOpenConversation,
-                        )
-                      : _ContactSidebar(
-                          contacts: widget.contacts,
-                          onlineContacts: widget.onlineContacts,
-                          onSelect: widget.onStartConversation,
-                        ),
-                  content: Row(
-                    children: [
-                      Expanded(
-                        child: Stack(
-                          children: [
-                            Positioned.fill(
-                              child: ColoredBox(
-                                color: Theme.of(context).scaffoldBackgroundColor,
-                                child: widget.tab == MobileTab.chats
-                                    ? widget.content
-                                    : Padding(
-                                        padding: const EdgeInsets.all(20),
-                                        child: widget.content,
-                                      ),
-                              ),
-                            ),
-                            if (selected != null)
-                              Positioned(
-                                top: 10,
-                                right: 10,
-                                child: Tooltip(
-                                  message: showInspector
-                                      ? 'Ukryj szczegóły'
-                                      : 'Pokaż szczegóły',
-                                  child: IconButton.filledTonal(
-                                    onPressed: () => setState(
-                                      () => _inspectorOpen = !_inspectorOpen,
-                                    ),
-                                  icon: ThemedIcon(
-                                      showInspector
-                                          ? Icons.expand_less
-                                          : Icons.info_outline,
-                                      size: 18,
-                                    ),
+      return Row(
+        children: [
+          SizedBox(
+            width: compactRail ? 68 : 116,
+            child: _CompactNavigationRail(
+              compact: compactRail,
+              tab: widget.tab,
+              nickname: widget.nickname,
+              unreadTotal: _unreadTotal,
+              onTab: widget.onTab,
+              onAccount: widget.onAccount,
+              onSettings: widget.onSettings,
+              onToggle: () => setState(() => _railExpanded = !_railExpanded),
+            ),
+          ),
+          Expanded(
+            child: ResizableSplitPane(
+              sidebar: widget.tab == MobileTab.chats
+                  ? _ConversationSidebar(
+                      conversations: widget.conversations,
+                      contacts: widget.contacts,
+                      selectedConversation: widget.selectedConversation,
+                      onOpenConversation: widget.onOpenConversation,
+                    )
+                  : _ContactSidebar(
+                      contacts: widget.contacts,
+                      onlineContacts: widget.onlineContacts,
+                      onSelect: widget.onStartConversation,
+                    ),
+              content: Row(
+                children: [
+                  Expanded(
+                    child: Stack(
+                      children: [
+                        Positioned.fill(
+                          child: ColoredBox(
+                            color: Theme.of(context).scaffoldBackgroundColor,
+                            child: widget.tab == MobileTab.chats
+                                ? widget.content
+                                : Padding(
+                                    padding: const EdgeInsets.all(20),
+                                    child: widget.content,
                                   ),
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                      if (showInspector)
-                        SizedBox(
-                          width: 320,
-                          child: _ConversationInspector(
-                            contact: selected,
-                            onVerify: widget.onVerifyContact,
-                            onClose: () => setState(() => _inspectorOpen = false),
-                            onBack: widget.onBack,
                           ),
                         ),
-                    ],
+                        if (selected != null)
+                          Positioned(
+                            top: 10,
+                            right: 10,
+                            child: Tooltip(
+                              message: showInspector
+                                  ? 'Ukryj szczegóły'
+                                  : 'Pokaż szczegóły',
+                              child: IconButton.filledTonal(
+                                onPressed: () => setState(
+                                  () => _inspectorOpen = !_inspectorOpen,
+                                ),
+                                icon: ThemedIcon(
+                                  showInspector
+                                      ? Icons.expand_less
+                                      : Icons.info_outline,
+                                  size: 18,
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
-                ),
+                  if (showInspector)
+                    SizedBox(
+                      width: 320,
+                      child: _ConversationInspector(
+                        contact: selected,
+                        onVerify: widget.onVerifyContact,
+                        onClose: () => setState(() => _inspectorOpen = false),
+                        onBack: widget.onBack,
+                      ),
+                    ),
+                ],
               ),
-            ],
-          );
-        },
+            ),
+          ),
+        ],
       );
+    },
+  );
 }
 
 class _CompactNavigationRail extends StatelessWidget {
@@ -163,6 +165,7 @@ class _CompactNavigationRail extends StatelessWidget {
     required this.onTab,
     required this.onAccount,
     required this.onSettings,
+    required this.onToggle,
   });
 
   final bool compact;
@@ -172,6 +175,7 @@ class _CompactNavigationRail extends StatelessWidget {
   final ValueChanged<MobileTab> onTab;
   final VoidCallback onAccount;
   final VoidCallback onSettings;
+  final VoidCallback onToggle;
 
   @override
   Widget build(BuildContext context) {
@@ -187,6 +191,12 @@ class _CompactNavigationRail extends StatelessWidget {
         child: Column(
           children: [
             const SizedBox(height: 12),
+            _RailItem(
+              compact: compact,
+              icon: compact ? Icons.menu : Icons.menu_open,
+              label: compact ? 'Rozwiń nawigację' : 'Zwiń nawigację',
+              onPressed: onToggle,
+            ),
             _RailItem(
               compact: compact,
               selected: tab == MobileTab.chats,
@@ -230,7 +240,14 @@ class _CompactNavigationRail extends StatelessWidget {
                   const ThemedIcon(Icons.shield_outlined, size: 21),
                   if (!compact) ...[
                     const SizedBox(width: 9),
-                    Text('TorChat', style: Theme.of(context).textTheme.titleSmall),
+                    Flexible(
+                      child: Text(
+                        'TorChat',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                    ),
                   ],
                 ],
               ),
@@ -291,10 +308,7 @@ class _RailItem extends StatelessWidget {
                 ? MainAxisAlignment.center
                 : MainAxisAlignment.start,
             children: [
-              CounterBadge(
-                count: badge,
-                child: ThemedIcon(icon, size: 20),
-              ),
+              CounterBadge(count: badge, child: ThemedIcon(icon, size: 20)),
               if (!compact) ...[
                 const SizedBox(width: 10),
                 Expanded(
@@ -346,17 +360,19 @@ class _ConversationSidebarState extends State<_ConversationSidebar> {
   List<ConversationSummary> get _filtered {
     final query = _search.text.trim().toLowerCase();
     if (query.isEmpty) return widget.conversations;
-    return widget.conversations.where((conversation) {
-      var contactName = '';
-      for (final contact in widget.contacts) {
-        if (contact.id == conversation.contactId) {
-          contactName = contact.displayName.toLowerCase();
-          break;
-        }
-      }
-      return contactName.contains(query) ||
-          conversation.preview.toLowerCase().contains(query);
-    }).toList(growable: false);
+    return widget.conversations
+        .where((conversation) {
+          var contactName = '';
+          for (final contact in widget.contacts) {
+            if (contact.id == conversation.contactId) {
+              contactName = contact.displayName.toLowerCase();
+              break;
+            }
+          }
+          return contactName.contains(query) ||
+              conversation.preview.toLowerCase().contains(query);
+        })
+        .toList(growable: false);
   }
 
   @override
@@ -463,18 +479,21 @@ class _ContactSidebarState extends State<_ContactSidebar> {
 
   List<ContactRecord> get _filtered {
     final query = _search.text.trim().toLowerCase();
-    return widget.contacts.where((contact) {
-      final matchesQuery = query.isEmpty ||
-          contact.displayName.toLowerCase().contains(query) ||
-          contact.fingerprint.toLowerCase().contains(query);
-      final matchesFilter = switch (_filter) {
-        _ContactFilter.all => true,
-        _ContactFilter.online => widget.onlineContacts[contact.id] == true,
-        _ContactFilter.p2p =>
-          contact.peerConnectionStatus == PeerConnectionStatus.connected,
-      };
-      return matchesQuery && matchesFilter;
-    }).toList(growable: false);
+    return widget.contacts
+        .where((contact) {
+          final matchesQuery =
+              query.isEmpty ||
+              contact.displayName.toLowerCase().contains(query) ||
+              contact.fingerprint.toLowerCase().contains(query);
+          final matchesFilter = switch (_filter) {
+            _ContactFilter.all => true,
+            _ContactFilter.online => widget.onlineContacts[contact.id] == true,
+            _ContactFilter.p2p =>
+              contact.transportPolicy != ContactTransportPolicy.relayOnly,
+          };
+          return matchesQuery && matchesFilter;
+        })
+        .toList(growable: false);
   }
 
   @override
@@ -513,7 +532,8 @@ class _ContactSidebarState extends State<_ContactSidebar> {
               _FilterChip(
                 label: 'Online',
                 selected: _filter == _ContactFilter.online,
-                onSelected: () => setState(() => _filter = _ContactFilter.online),
+                onSelected: () =>
+                    setState(() => _filter = _ContactFilter.online),
               ),
               _FilterChip(
                 label: 'P2P',
@@ -533,16 +553,19 @@ class _ContactSidebarState extends State<_ContactSidebar> {
               emptyMessage: 'Brak kontaktów dla wybranego filtra.',
               contactSubtitleBuilder: (contact) {
                 final online = widget.onlineContacts[contact.id] == true;
-                final route = contact.peerConnectionStatus ==
-                        PeerConnectionStatus.connected
-                    ? 'Tor P2P'
-                    : 'Tor relay';
+                final route = switch (contact.transportPolicy) {
+                  ContactTransportPolicy.relayOnly => 'Tor relay',
+                  ContactTransportPolicy.peerWithRelayFallback =>
+                    contact.peerConnectionStatus ==
+                            PeerConnectionStatus.connected
+                        ? 'Tor P2P'
+                        : 'Tor P2P + relay fallback',
+                  ContactTransportPolicy.peerOnly => 'Tor P2P',
+                };
                 return '${online ? 'online' : 'offline'} · $route';
               },
-              contactTrailingBuilder: (contact) => const ThemedIcon(
-                Icons.chevron_right,
-                size: 18,
-              ),
+              contactTrailingBuilder: (contact) =>
+                  const ThemedIcon(Icons.chevron_right, size: 18),
             ),
           ),
         ],
@@ -564,11 +587,11 @@ class _FilterChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => FilterChip(
-        label: Text(label),
-        selected: selected,
-        showCheckmark: false,
-        onSelected: (_) => onSelected(),
-      );
+    label: Text(label),
+    selected: selected,
+    showCheckmark: false,
+    onSelected: (_) => onSelected(),
+  );
 }
 
 class _ConversationInspector extends StatelessWidget {
@@ -627,10 +650,14 @@ class _ConversationInspector extends StatelessWidget {
               children: [
                 InfoTile(
                   title: 'Trasa',
-                  subtitle: contact.peerConnectionStatus ==
+                  subtitle: _inspectorRouteLabel(contact),
+                  /*
+                      contact.peerConnectionStatus ==
                           PeerConnectionStatus.connected
                       ? 'Bezpośrednio przez Tor P2P'
                       : 'Przez Tor relay / oczekiwanie na P2P',
+                ),
+                  */
                 ),
                 InfoTile(
                   title: 'Endpoint',
@@ -648,13 +675,11 @@ class _ConversationInspector extends StatelessWidget {
             title: 'INFORMACJE',
             child: Column(
               children: [
-                InfoTile(
-                  title: 'Installation ID',
-                  subtitle: contact.id,
-                ),
+                InfoTile(title: 'Installation ID', subtitle: contact.id),
                 InfoTile(
                   title: 'Ostatnie P2P',
-                  subtitle: contact.lastPeerConnectedAt?.trim().isNotEmpty == true
+                  subtitle:
+                      contact.lastPeerConnectedAt?.trim().isNotEmpty == true
                       ? contact.lastPeerConnectedAt!
                       : 'Brak zapisanej sesji',
                 ),
@@ -672,3 +697,13 @@ class _ConversationInspector extends StatelessWidget {
     );
   }
 }
+
+String _inspectorRouteLabel(ContactRecord contact) =>
+    switch (contact.transportPolicy) {
+      ContactTransportPolicy.relayOnly => 'Przez Tor relay',
+      ContactTransportPolicy.peerWithRelayFallback =>
+        contact.peerConnectionStatus == PeerConnectionStatus.connected
+            ? 'Bezposrednio przez Tor P2P'
+            : 'P2P / awaryjny relay',
+      ContactTransportPolicy.peerOnly => 'Przez Tor P2P / oczekiwanie na peer',
+    };

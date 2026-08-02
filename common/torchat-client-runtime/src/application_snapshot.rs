@@ -1,11 +1,26 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ContactRecord, ConversationSummary, PeerConnectionStatus, PeerEndpointStatus,
-    RuntimeIdentity, RuntimeProfile,
+    ContactRecord, ConversationSummary, PeerConnectionStatus, PeerEndpointStatus, RuntimeIdentity,
+    RuntimeProfile,
 };
 
 pub const APPLICATION_SNAPSHOT_SCHEMA_VERSION: u32 = 1;
+
+/// Identifies the durable store and the engine session that produced a
+/// projection.  The revision is persisted with the domain mutation, so a
+/// client can reject stale responses even when transports deliver events out
+/// of order.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectionStamp {
+    #[serde(default)]
+    pub store_id: String,
+    #[serde(default)]
+    pub engine_session_id: String,
+    #[serde(default)]
+    pub revision: u64,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -21,6 +36,18 @@ pub struct ApplicationSnapshot {
     pub pairing_summary: PairingSummary,
     pub peer_endpoint_available: bool,
     pub ui_checkpoint: UiCheckpoint,
+    #[serde(default)]
+    pub projection: ProjectionStamp,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationProjection {
+    pub projection: ProjectionStamp,
+    pub conversation_id: String,
+    pub messages: Vec<crate::ChatMessage>,
+    #[serde(default)]
+    pub has_more: bool,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -75,9 +102,7 @@ impl ApplicationSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        ContactTransportPolicy, ConversationState, VerificationState,
-    };
+    use crate::{ContactTransportPolicy, ConversationState, VerificationState};
 
     #[test]
     fn snapshot_normalization_is_deterministic() {
@@ -86,7 +111,7 @@ mod tests {
             "public".to_owned(),
             "fingerprint".to_owned(),
         );
-        let mut snapshot = ApplicationSnapshot {
+        let snapshot = ApplicationSnapshot {
             schema_version: 0,
             generation: 4,
             created_at_ms: 5,
@@ -145,6 +170,7 @@ mod tests {
             pairing_summary: PairingSummary::default(),
             peer_endpoint_available: true,
             ui_checkpoint: UiCheckpoint::default(),
+            projection: ProjectionStamp::default(),
         }
         .normalize();
 

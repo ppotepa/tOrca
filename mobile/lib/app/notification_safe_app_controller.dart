@@ -1,75 +1,78 @@
 import 'dart:async';
 
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../client_runtime.dart';
 import '../core/models/domain.dart';
 import '../core/relationships/relationship_message.dart';
 import '../core/runtime/message_paging.dart';
-import 'app_controller_legacy.dart' as legacy;
+import 'app_controller_base.dart' as base;
 import 'conversation_navigation_intent.dart';
 import 'desktop_notification_service.dart';
 import 'pairing_recovery_app_controller.dart';
 
 class NotificationSafeAppController extends PairingRecoveryAppController {
-  static const _legacyPairingNoticePrefix = 'Oczekujące zaproszenia:';
+  static const _pendingPairingNoticePrefix = 'Oczekujące zaproszenia:';
   static const _relationshipActiveSincePrefix =
       'torchat.relationship.activeSince.';
   static const _activeNotificationConversationKey =
       'torchat.notifications.activeConversationId';
 
-  bool _clearingLegacyNotice = false;
-  bool _reconcilingRelationshipRemoval = false;
-  StreamSubscription<RuntimeEvent>? _notificationEvents;
+  bool _clearingPendingNotice = false;
   final Set<String> _appliedRelationshipRemovalMessageIds = <String>{};
 
   @override
-  legacy.AppState build() {
+  base.AppState build() {
     final initial = super.build();
-    final repository = ref.watch(legacy.runtimeRepositoryProvider);
-    _notificationEvents ??= repository.events.listen((event) {
-      if (event is DataChangedEvent && event.type == 'notification_opened') {
-        ConversationNavigationIntents.openConversation(
-          conversationId: event.payload['conversationId']?.toString() ?? '',
-          notificationId: event.payload['notificationId']?.toString() ?? '',
-        );
-        return;
-      }
-      if (event is! NotificationRequestedEvent) return;
-      unawaited(
-        DesktopNotificationService.show(
-          event,
-          selectedConversationId: state.selectedConversationId,
-        ),
-      );
-    });
-    ref.onDispose(() => _notificationEvents?.cancel());
     listenSelf((previous, next) {
       if (previous?.selectedConversationId != next.selectedConversationId) {
         unawaited(_persistActiveConversation(next.selectedConversationId));
       }
-      if (_clearingLegacyNotice ||
-          !next.notice.startsWith(_legacyPairingNoticePrefix)) {
+      if (_clearingPendingNotice ||
+          !next.notice.startsWith(_pendingPairingNoticePrefix)) {
         return;
       }
-      _clearingLegacyNotice = true;
+      _clearingPendingNotice = true;
       state = state.copyWith(notice: '');
-      _clearingLegacyNotice = false;
+      _clearingPendingNotice = false;
     });
-    return initial.notice.startsWith(_legacyPairingNoticePrefix)
+    return initial.notice.startsWith(_pendingPairingNoticePrefix)
         ? initial.copyWith(notice: '')
         : initial;
   }
 
   @override
+  void handleRuntimeEventSideEffects(RuntimeEvent event) {
+    if (event is DataChangedEvent && event.type == 'notification_opened') {
+      ConversationNavigationIntents.openConversation(
+        conversationId: event.payload['conversationId']?.toString() ?? '',
+        notificationId: event.payload['notificationId']?.toString() ?? '',
+      );
+      return;
+    }
+    if (event is! NotificationRequestedEvent) return;
+    unawaited(
+      DesktopNotificationService.show(
+        event,
+        selectedConversationId: state.selectedConversationId,
+      ),
+    );
+  }
+
+  @override
   Future<void> initialize() async {
-    final preferences = await SharedPreferences.getInstance();
-    if (!preferences.containsKey('torchat.privacy.readReceipts')) {
-      await preferences.setBool('torchat.privacy.readReceipts', false);
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      if (!preferences.containsKey('torchat.privacy.readReceipts')) {
+        await preferences.setBool('torchat.privacy.readReceipts', false);
+      }
+    } on MissingPluginException {
+      // A host can attach the platform plugins after the engine starts. The
+      // preference is only a persistence hint; it must not block runtime boot.
     }
     await super.initialize();
     await _persistActiveConversation(state.selectedConversationId);
-    await _reconcileRelationshipRemovals();
     _hideRemovedRelationships();
   }
 
@@ -82,16 +85,20 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
       forcePairing: forcePairing,
       allowAutoTorka: allowAutoTorka,
     );
-    await _reconcileRelationshipRemovals();
     _hideRemovedRelationships();
   }
 
   Future<int> loadOlderMessages(String conversationId) async {
-    if (conversationId.isEmpty || state.selectedConversationId != conversationId) {
+    if (conversationId.isEmpty ||
+        state.selectedConversationId != conversationId) {
       return 0;
     }
-    final repository = ref.read(legacy.runtimeRepositoryProvider);
-    final before = state.messages.isEmpty ? null : state.messages.first;
+    final repository = ref.read(base.runtimeRepositoryProvider);
+    final currentMessages = await repository.messages(
+      conversationId,
+      force: false,
+    );
+    final before = currentMessages.isEmpty ? null : currentMessages.first;
     final page = await repository.messagePage(
       conversationId,
       before: before,
@@ -99,15 +106,7 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
     );
     if (page.messages.isEmpty) return 0;
 
-    final existingIds = state.messages.map((message) => message.id).toSet();
-    final added = page.messages
-        .where((message) => existingIds.add(message.id))
-        .toList(growable: false);
-    if (added.isEmpty) return 0;
-    final merged = <ChatMessage>[...added, ...state.messages]
-      ..sort(_compareMessages);
-    state = state.copyWith(messages: merged);
-    return added.length;
+    return repository.mergeOlderMessagePage(conversationId, page);
   }
 
   @override
@@ -155,7 +154,7 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
         ).encode();
         try {
           await ref
-              .read(legacy.runtimeRepositoryProvider)
+              .read(base.runtimeRepositoryProvider)
               .sendMessage(relationshipConversation.id, payload);
         } catch (error, stackTrace) {
           removalDeliveryError = error;
@@ -171,11 +170,10 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
       blocked,
       transportPolicy,
     );
-    if (blocked && relationshipConversation != null) {
-      await _cancelPendingOrdinaryMessages(relationshipConversation.id);
-      if (!preserveHistory) {
-        await _deleteHistoryExceptRemoval(relationshipConversation.id);
-      }
+    if (blocked && !contact.blocked) {
+      await ref
+          .read(base.runtimeRepositoryProvider)
+          .removeRelationship(contact.id, preserveHistory: preserveHistory);
     }
     await super.refreshData(forcePairing: false, allowAutoTorka: false);
     _hideRemovedRelationships();
@@ -191,155 +189,21 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
     }
   }
 
-  @override
-  Future<void> openOrStartConversation(ContactRecord contact) async {
-    final alreadyExists = state.conversations.any(
-      (conversation) => conversation.contactId == contact.id,
-    );
-    if (alreadyExists) {
-      await super.openOrStartConversation(contact);
+  Future<void> _persistActiveConversation(String? conversationId) async {
+    final SharedPreferences preferences;
+    try {
+      preferences = await SharedPreferences.getInstance();
+    } on MissingPluginException {
+      // Widget/unit tests and headless engine startup have no platform
+      // preferences channel. The canonical runtime state remains in the
+      // application store, so persistence is optional here.
       return;
     }
-
-    final operation = super.openOrStartConversation(contact);
-    final optimistic = ConversationSummary(
-      id: contact.id,
-      contactId: contact.id,
-      preview: 'Oczekiwanie na bezpieczne połączenie…',
-      unread: 0,
-      state: ConversationState.pending,
-      lastMessageAt: DateTime.now().toIso8601String(),
-    );
-    state = state.copyWith(
-      conversations: [
-        optimistic,
-        for (final conversation in state.conversations)
-          if (conversation.contactId != contact.id) conversation,
-      ],
-      selectedConversationId: contact.id,
-      destination: legacy.MainDestination.chats,
-    );
-
-    await operation;
-
-    final realConversationExists = state.conversations.any(
-      (conversation) => conversation.contactId == contact.id,
-    );
-    if (state.error.trim().isNotEmpty) {
-      state = state.copyWith(
-        conversations: [
-          for (final conversation in state.conversations)
-            if (conversation.contactId != contact.id ||
-                conversation.id != contact.id)
-              conversation,
-        ],
-      );
-    } else if (!realConversationExists) {
-      state = state.copyWith(conversations: [optimistic, ...state.conversations]);
-    }
-  }
-
-  Future<void> _persistActiveConversation(String? conversationId) async {
-    final preferences = await SharedPreferences.getInstance();
     final id = conversationId?.trim() ?? '';
     if (id.isEmpty) {
       await preferences.remove(_activeNotificationConversationKey);
     } else {
       await preferences.setString(_activeNotificationConversationKey, id);
-    }
-  }
-
-  Future<void> _reconcileRelationshipRemovals() async {
-    if (_reconcilingRelationshipRemoval) return;
-    _reconcilingRelationshipRemoval = true;
-    try {
-      final repository = ref.read(legacy.runtimeRepositoryProvider);
-      final preferences = await SharedPreferences.getInstance();
-      for (final conversation in List<ConversationSummary>.of(state.conversations)) {
-        ContactRecord? contact;
-        for (final candidate in state.contacts) {
-          if (candidate.id == conversation.contactId) {
-            contact = candidate;
-            break;
-          }
-        }
-        if (contact == null || contact.blocked) continue;
-
-        ChatMessage? removalMessage;
-        RelationshipRemovedMessage? removal;
-        try {
-          final messages = await repository.messages(conversation.id);
-          for (final message in messages.reversed) {
-            if (message.outgoing) continue;
-            final candidate = RelationshipRemovedMessage.tryDecode(message.text);
-            if (candidate == null) continue;
-            removalMessage = message;
-            removal = candidate;
-            break;
-          }
-        } catch (_) {}
-
-        removal ??= RelationshipRemovedMessage.tryDecode(conversation.preview);
-        if (removal == null) continue;
-        final removalId = removalMessage?.id ??
-            'preview:${conversation.id}:${removal.removedAt.toIso8601String()}';
-        if (!_appliedRelationshipRemovalMessageIds.add(removalId)) continue;
-
-        final activeSince = DateTime.tryParse(
-          preferences.getString(
-                '$_relationshipActiveSincePrefix${conversation.contactId}',
-              ) ??
-              '',
-        );
-        final storedAt = removalMessage == null
-            ? removal.removedAt
-            : DateTime.tryParse(removalMessage.createdAt);
-        if (activeSince != null &&
-            storedAt != null &&
-            !storedAt.toUtc().isAfter(activeSince.toUtc())) {
-          continue;
-        }
-
-        await super.updateContactSettings(
-          contact,
-          contact.localAlias,
-          contact.muted,
-          true,
-          contact.transportPolicy,
-        );
-        await _cancelPendingOrdinaryMessages(conversation.id);
-        if (!removal.preserveHistory) {
-          await _deleteHistoryExceptRemoval(conversation.id);
-        }
-      }
-    } finally {
-      _reconcilingRelationshipRemoval = false;
-    }
-  }
-
-  Future<void> _cancelPendingOrdinaryMessages(String conversationId) async {
-    final repository = ref.read(legacy.runtimeRepositoryProvider);
-    try {
-      final messages = await repository.allMessages(conversationId);
-      for (final message in messages) {
-        final pending = message.state == MessageState.queued ||
-            message.state == MessageState.sending;
-        if (!message.outgoing ||
-            !pending ||
-            isRelationshipRemovedMessage(message.text)) {
-          continue;
-        }
-        await repository.deleteMessageLocal(message.id);
-      }
-    } catch (_) {}
-  }
-
-  Future<void> _deleteHistoryExceptRemoval(String conversationId) async {
-    final repository = ref.read(legacy.runtimeRepositoryProvider);
-    final messages = await repository.allMessages(conversationId);
-    for (final message in messages) {
-      if (isRelationshipRemovedMessage(message.text)) continue;
-      await repository.deleteMessageLocal(message.id);
     }
   }
 
@@ -349,32 +213,18 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
         .map((contact) => contact.id)
         .toSet();
     if (removed.isEmpty) return;
-    final selectedRemoved = state.selectedConversationId != null &&
+    final selectedRemoved =
+        state.selectedConversationId != null &&
         state.conversations.any(
           (conversation) =>
               conversation.id == state.selectedConversationId &&
               removed.contains(conversation.contactId),
         );
     state = state.copyWith(
-      contacts: [
-        for (final contact in state.contacts)
-          if (!removed.contains(contact.id)) contact,
-      ],
-      conversations: [
-        for (final conversation in state.conversations)
-          if (!removed.contains(conversation.contactId)) conversation,
-      ],
       clearSelection: selectedRemoved,
       notice: selectedRemoved
           ? 'Relacja z kontaktem została zakończona.'
           : state.notice,
     );
   }
-}
-
-int _compareMessages(ChatMessage left, ChatMessage right) {
-  final leftAt = DateTime.tryParse(left.createdAt)?.millisecondsSinceEpoch ?? 0;
-  final rightAt = DateTime.tryParse(right.createdAt)?.millisecondsSinceEpoch ?? 0;
-  final time = leftAt.compareTo(rightAt);
-  return time != 0 ? time : left.id.compareTo(right.id);
 }

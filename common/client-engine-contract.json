@@ -6,6 +6,8 @@
       "connect",
       "getIdentity",
       "getProfile",
+      "getStartupReadiness",
+      "getApplicationSnapshot",
       "pairingInbox",
       "pairingOutbox",
       "listContacts",
@@ -23,6 +25,7 @@
       "cancelPairing",
       "verifyContact",
       "updateContactSettings",
+      "removeRelationship",
       "startConversation",
       "openConversation",
       "closeConversation",
@@ -41,6 +44,8 @@
     "connect",
     "get_identity",
     "get_profile",
+    "get_startup_readiness",
+    "get_application_snapshot",
     "pairing_inbox",
     "pairing_outbox",
     "list_contacts",
@@ -58,6 +63,7 @@
     "cancel_pairing",
     "verify_contact",
     "update_contact_settings",
+    "remove_relationship",
     "start_conversation",
     "open_conversation",
     "close_conversation",
@@ -121,6 +127,7 @@
     "changed",
     "runtime_error",
     "runtime_log"
+    ,"projection_changed"
   ],
   "messageStates": [
     "QUEUED",

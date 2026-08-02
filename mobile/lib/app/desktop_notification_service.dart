@@ -36,7 +36,8 @@ class DesktopNotificationService {
       return;
     }
 
-    final processed = preferences.getStringList(_notificationDeduplicationKey) ??
+    final processed =
+        preferences.getStringList(_notificationDeduplicationKey) ??
         const <String>[];
     if (processed.contains(id)) return;
     final updated = <String>[...processed, id];

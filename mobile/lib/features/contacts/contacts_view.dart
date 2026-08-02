@@ -29,7 +29,6 @@ class ContactsView extends ConsumerWidget {
     required this.ownInvite,
     required this.error,
     required this.notice,
-    required this.busy,
     this.showContactList = true,
   });
 
@@ -45,13 +44,12 @@ class ContactsView extends ConsumerWidget {
     bool,
     bool,
     ContactTransportPolicy,
-  ) onUpdateContactSettings;
+  )
+  onUpdateContactSettings;
   final String fingerprint;
   final String ownInvite;
   final String error;
   final String notice;
-  @Deprecated('Busy is derived from component-scoped operation providers.')
-  final bool busy;
   final bool showContactList;
 
   @override
@@ -185,7 +183,8 @@ class ContactsView extends ConsumerWidget {
                       const Chip(label: Text('DEV')),
                     IconButton(
                       tooltip: 'Szczegóły kontaktu',
-                      onPressed: () => _showContactDetails(context, ref, contact),
+                      onPressed: () =>
+                          _showContactDetails(context, ref, contact),
                       icon: const ThemedIcon(Icons.info_outline),
                     ),
                     const ThemedIcon(Icons.chevron_right),
@@ -329,15 +328,15 @@ class ContactsView extends ConsumerWidget {
                         onPressed: saveState.busy
                             ? null
                             : () => _confirmRelationshipRemoval(
-                                  context,
-                                  dialogRef,
-                                  contact,
-                                  alias.text.trim().isEmpty
-                                      ? null
-                                      : alias.text.trim(),
-                                  muted,
-                                  transportPolicy,
-                                ),
+                                context,
+                                dialogRef,
+                                contact,
+                                alias.text.trim().isEmpty
+                                    ? null
+                                    : alias.text.trim(),
+                                muted,
+                                transportPolicy,
+                              ),
                         icon: const ThemedIcon(
                           Icons.person_remove_outlined,
                           size: 18,
@@ -459,7 +458,9 @@ class ContactsView extends ConsumerWidget {
       Navigator.of(context).pop();
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Relacja z ${contact.displayName} została zakończona.')),
+        SnackBar(
+          content: Text('Relacja z ${contact.displayName} została zakończona.'),
+        ),
       );
     }
   }
@@ -473,21 +474,18 @@ class _DiagnosticLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(bottom: 4),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              width: 126,
-              child: Text(
-                label,
-                style: Theme.of(context).textTheme.labelMedium,
-              ),
-            ),
-            Expanded(child: SelectableText(value)),
-          ],
+    padding: const EdgeInsets.only(bottom: 4),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 126,
+          child: Text(label, style: Theme.of(context).textTheme.labelMedium),
         ),
-      );
+        Expanded(child: SelectableText(value)),
+      ],
+    ),
+  );
 }
 
 String _effectiveRouteLabel(ContactRecord contact) {
@@ -497,31 +495,29 @@ String _effectiveRouteLabel(ContactRecord contact) {
   if (contact.peerConnectionStatus == PeerConnectionStatus.connected) {
     return 'P2P onion';
   }
-  if (contact.transportPolicy ==
-      ContactTransportPolicy.peerWithRelayFallback) {
+  if (contact.transportPolicy == ContactTransportPolicy.peerWithRelayFallback) {
     return 'relay fallback (P2P nieaktywne)';
   }
   return 'P2P oczekuje / offline';
 }
 
 String _peerEndpointLabel(PeerEndpointStatus status) => switch (status) {
-      PeerEndpointStatus.verified => 'endpoint zweryfikowany',
-      PeerEndpointStatus.pendingExchange => 'oczekuje na wymianę endpointu',
-      PeerEndpointStatus.invalid => 'endpoint nieprawidłowy',
-      PeerEndpointStatus.missing => 'endpoint niedostępny',
-    };
+  PeerEndpointStatus.verified => 'endpoint zweryfikowany',
+  PeerEndpointStatus.pendingExchange => 'oczekuje na wymianę endpointu',
+  PeerEndpointStatus.invalid => 'endpoint nieprawidłowy',
+  PeerEndpointStatus.missing => 'endpoint niedostępny',
+};
 
 String _peerConnectionLabel(PeerConnectionStatus status) => switch (status) {
-      PeerConnectionStatus.connected => 'połączono',
-      PeerConnectionStatus.connecting => 'łączenie',
-      PeerConnectionStatus.authenticating => 'uwierzytelnianie',
-      PeerConnectionStatus.backoff => 'oczekiwanie na ponowienie',
-      PeerConnectionStatus.offline => 'offline',
-    };
+  PeerConnectionStatus.connected => 'połączono',
+  PeerConnectionStatus.connecting => 'łączenie',
+  PeerConnectionStatus.authenticating => 'uwierzytelnianie',
+  PeerConnectionStatus.backoff => 'oczekiwanie na ponowienie',
+  PeerConnectionStatus.offline => 'offline',
+};
 
 String _transportPolicyLabel(ContactTransportPolicy policy) => switch (policy) {
-      ContactTransportPolicy.peerOnly => 'Tylko P2P',
-      ContactTransportPolicy.peerWithRelayFallback =>
-        'P2P z fallbackiem relay',
-      ContactTransportPolicy.relayOnly => 'Tylko relay',
-    };
+  ContactTransportPolicy.peerOnly => 'Tylko P2P',
+  ContactTransportPolicy.peerWithRelayFallback => 'P2P z fallbackiem relay',
+  ContactTransportPolicy.relayOnly => 'Tylko relay',
+};

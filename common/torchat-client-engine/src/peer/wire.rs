@@ -21,8 +21,7 @@ where
         .await
         .ok_or_else(|| "peer websocket closed".to_owned())?
         .map_err(|error| format!("read peer websocket: {error}"))?;
-    decode_message(message, authenticated)?
-        .ok_or_else(|| "peer websocket closed".to_owned())
+    decode_message(message, authenticated)?.ok_or_else(|| "peer websocket closed".to_owned())
 }
 
 pub(super) async fn recv_frame_with_timeout<S>(
@@ -120,10 +119,7 @@ pub(super) fn parse_socks_addr(value: &str) -> Result<SocketAddr, String> {
     ))
 }
 
-pub(super) fn same_peer_endpoint(
-    left: &PeerEndpointBundle,
-    right: &PeerEndpointBundle,
-) -> bool {
+pub(super) fn same_peer_endpoint(left: &PeerEndpointBundle, right: &PeerEndpointBundle) -> bool {
     left.installation_id == right.installation_id
         && left.identity_public_key == right.identity_public_key
         && left.onion_address == right.onion_address
@@ -143,10 +139,7 @@ pub(super) async fn connect_socket(
         .map_err(|error| format!("connect to Tor SOCKS: {error}"))?;
     let socks = timeout(
         HANDSHAKE_TIMEOUT,
-        tokio_socks::tcp::Socks5Stream::connect_with_socket(
-            socket,
-            (onion_address, virtual_port),
-        ),
+        tokio_socks::tcp::Socks5Stream::connect_with_socket(socket, (onion_address, virtual_port)),
     )
     .await
     .map_err(|_| "connect to peer onion timed out".to_owned())?

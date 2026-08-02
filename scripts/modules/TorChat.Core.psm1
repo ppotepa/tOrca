@@ -253,7 +253,10 @@ function Complete-TorChatRun {
         completedAt = [DateTimeOffset]::UtcNow.ToString('o')
         results = @($Context.Results)
     }
-    $summary | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $Context.SummaryPath -Encoding UTF8
+    # Status payloads contain nested stage diagnostics. Keep enough depth to
+    # serialize them without PowerShell emitting a misleading warning after an
+    # otherwise successful command.
+    $summary | ConvertTo-Json -Depth 32 | Set-Content -LiteralPath $Context.SummaryPath -Encoding UTF8
     Write-TorChatEvent -Context $Context -Stage 'run' -State $state.ToLowerInvariant()
     Write-TorChatSummary -Context $Context -State $state
     $state

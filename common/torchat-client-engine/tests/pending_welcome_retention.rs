@@ -1,14 +1,19 @@
 use rusqlite::{Connection, params};
 
-const CONNECTION_PRAGMAS: &str =
-    include_str!("../sql/queries/connection_pragmas.sql");
+const CONNECTION_PRAGMAS: &str = include_str!("../sql/queries/connection_pragmas.sql");
+const CANONICAL_SCHEMA: &str = include_str!("../sql/migrations/001_canonical_client.sql");
+const INTEGRITY_MIGRATION: &str = include_str!("../sql/migrations/014_runtime_integrity.sql");
 
 #[test]
 fn forwarded_welcome_delete_is_converted_to_scheduled_retry() {
     let connection = Connection::open_in_memory().expect("open sqlite");
     connection
         .execute_batch(CONNECTION_PRAGMAS)
-        .expect("install pragmas and retention trigger");
+        .expect("install pragmas");
+    connection
+        .execute_batch(CANONICAL_SCHEMA)
+        .and_then(|_| connection.execute_batch(INTEGRITY_MIGRATION))
+        .expect("install schema and retention trigger");
 
     let now: i64 = connection
         .query_row("SELECT unixepoch();", [], |row| row.get(0))
@@ -29,7 +34,7 @@ fn forwarded_welcome_delete_is_converted_to_scheduled_retry() {
             "DELETE FROM pending_welcomes WHERE invite_id = ?1;",
             ["invite-a"],
         )
-        .expect("legacy forwarded delete should be intercepted");
+        .expect("forwarded delete should be intercepted");
 
     let retained: (i64, Option<String>) = connection
         .query_row(
@@ -50,7 +55,11 @@ fn forwarded_welcome_preserves_scheduler_backoff_deadline() {
     let connection = Connection::open_in_memory().expect("open sqlite");
     connection
         .execute_batch(CONNECTION_PRAGMAS)
-        .expect("install pragmas and retention trigger");
+        .expect("install pragmas");
+    connection
+        .execute_batch(CANONICAL_SCHEMA)
+        .and_then(|_| connection.execute_batch(INTEGRITY_MIGRATION))
+        .expect("install schema and retention trigger");
 
     let now: i64 = connection
         .query_row("SELECT unixepoch();", [], |row| row.get(0))
@@ -77,7 +86,7 @@ fn forwarded_welcome_preserves_scheduler_backoff_deadline() {
             "DELETE FROM pending_welcomes WHERE invite_id = ?1;",
             ["invite-backoff"],
         )
-        .expect("legacy forwarded delete should be intercepted");
+        .expect("forwarded delete should be intercepted");
 
     let retained: i64 = connection
         .query_row(
@@ -94,7 +103,11 @@ fn expired_welcome_can_be_deleted_normally() {
     let connection = Connection::open_in_memory().expect("open sqlite");
     connection
         .execute_batch(CONNECTION_PRAGMAS)
-        .expect("install pragmas and retention trigger");
+        .expect("install pragmas");
+    connection
+        .execute_batch(CANONICAL_SCHEMA)
+        .and_then(|_| connection.execute_batch(INTEGRITY_MIGRATION))
+        .expect("install schema and retention trigger");
 
     let now: i64 = connection
         .query_row("SELECT unixepoch();", [], |row| row.get(0))

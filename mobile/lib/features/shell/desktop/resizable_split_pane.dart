@@ -66,37 +66,37 @@ class _ResizableSplitPaneState extends State<ResizableSplitPane> {
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
-        builder: (context, constraints) {
-          final availableWidth = constraints.maxWidth;
-          final dynamicMaximum = _dynamicMaximum(availableWidth);
-          final width = _sidebarWidth
-              .clamp(widget.minimumSidebarWidth, dynamicMaximum)
-              .toDouble();
-          return Row(
-            children: [
-              SizedBox(width: width, child: widget.sidebar),
-              _ResizeHandle(
-                dragging: _dragging,
-                onDoubleTap: () {
-                  setState(() {
-                    _sidebarWidth = widget.initialSidebarWidth
-                        .clamp(widget.minimumSidebarWidth, dynamicMaximum)
-                        .toDouble();
-                  });
-                  _persistWidth();
-                },
-                onDragStart: () => setState(() => _dragging = true),
-                onDragUpdate: (delta) => _resize(delta, availableWidth),
-                onDragEnd: () {
-                  setState(() => _dragging = false);
-                  _persistWidth();
-                },
-              ),
-              Expanded(child: widget.content),
-            ],
-          );
-        },
+    builder: (context, constraints) {
+      final availableWidth = constraints.maxWidth;
+      final dynamicMaximum = _dynamicMaximum(availableWidth);
+      final width = _sidebarWidth
+          .clamp(widget.minimumSidebarWidth, dynamicMaximum)
+          .toDouble();
+      return Row(
+        children: [
+          SizedBox(width: width, child: widget.sidebar),
+          _ResizeHandle(
+            dragging: _dragging,
+            onDoubleTap: () {
+              setState(() {
+                _sidebarWidth = widget.initialSidebarWidth
+                    .clamp(widget.minimumSidebarWidth, dynamicMaximum)
+                    .toDouble();
+              });
+              _persistWidth();
+            },
+            onDragStart: () => setState(() => _dragging = true),
+            onDragUpdate: (delta) => _resize(delta, availableWidth),
+            onDragEnd: () {
+              setState(() => _dragging = false);
+              _persistWidth();
+            },
+          ),
+          Expanded(child: widget.content),
+        ],
       );
+    },
+  );
 }
 
 class _ResizeHandle extends StatelessWidget {

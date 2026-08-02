@@ -7,7 +7,7 @@ use axum::{
     Json, Router,
     body::Bytes,
     extract::{
-        State, WebSocketUpgrade,
+        DefaultBodyLimit, State, WebSocketUpgrade,
         ws::{Message, WebSocket},
     },
     http::{HeaderMap, StatusCode},
@@ -36,6 +36,8 @@ const PAIRING_CODE_TTL_SECONDS: u64 = 60;
 const PAIRING_REQUEST_TTL_SECONDS: u64 = 600;
 const PAIRING_ATTEMPT_WINDOW_SECONDS: u64 = 60;
 const PAIRING_ATTEMPT_LIMIT: u32 = 5;
+const MAX_PENDING_CHALLENGES: usize = 10_000;
+const MAX_JSON_REQUEST_BYTES: usize = 16 * 1024;
 const DATABASE_MIGRATIONS: &[(&str, &str)] = &[
     (
         "004_schema_sql_files.sql",
@@ -349,6 +351,9 @@ async fn main() {
             axum::routing::delete(remove_contact),
         )
         .route("/v1/events", get(events))
+        // Bootstrap and pairing payloads are small signed metadata. Do not
+        // let an unauthenticated caller make Axum buffer arbitrary bodies.
+        .layer(DefaultBodyLimit::max(MAX_JSON_REQUEST_BYTES))
         .with_state(state);
     let bind = env::var("TORCHAT_BIND").unwrap_or_else(|_| "127.0.0.1:8080".into());
     let address: SocketAddr = bind
@@ -412,24 +417,35 @@ async fn status_page() -> Html<String> {
     ))
 }
 
-async fn create_challenge(State(state): State<AppState>) -> Json<ChallengeResponse> {
+async fn create_challenge(
+    State(state): State<AppState>,
+) -> Result<Json<ChallengeResponse>, (StatusCode, Json<serde_json::Value>)> {
+    let current = now();
+    let mut challenges = state.challenges.write().await;
+    challenges.retain(|_, challenge| challenge.expires_at >= current);
+    if challenges.len() >= MAX_PENDING_CHALLENGES {
+        return Err(error(
+            StatusCode::TOO_MANY_REQUESTS,
+            "bootstrap challenge capacity reached",
+        ));
+    }
     let challenge_id = Uuid::new_v4();
     let mut bytes = [0u8; 32];
     rng().fill(&mut bytes);
     let challenge = URL_SAFE_NO_PAD.encode(bytes);
-    let expires_at = now() + CHALLENGE_TTL_SECONDS;
-    state.challenges.write().await.insert(
+    let expires_at = current + CHALLENGE_TTL_SECONDS;
+    challenges.insert(
         challenge_id,
         Challenge {
             value: challenge.clone(),
             expires_at,
         },
     );
-    Json(ChallengeResponse {
+    Ok(Json(ChallengeResponse {
         challenge_id,
         challenge,
         expires_in_seconds: CHALLENGE_TTL_SECONDS,
-    })
+    }))
 }
 
 async fn register_installation(
@@ -631,7 +647,6 @@ async fn create_pairing_request(
     tracing::info!(sender = %sender, "create_pairing_request start");
     let code = torchat_core::Identity::pairing_code_digits(&request.code)
         .map_err(|message| error(StatusCode::BAD_REQUEST, &message))?;
-    take_pairing_attempt(&state, &sender).await?;
     let reserved_recipient = reserved_pairing_recipient(&state, &code).await;
     let use_reserved_recipient = reserved_recipient.is_some();
     let hash = pairing_code_hash(&state, &code);
@@ -661,12 +676,25 @@ async fn create_pairing_request(
         .query_opt(SQL_PAIRING_REQUEST_LOOKUP, &[&sender, &recipient])
         .await
         .map_err(|_| error(StatusCode::INTERNAL_SERVER_ERROR, "database error"))?;
-    if existing.is_some() {
-        return Err(error(
-            StatusCode::CONFLICT,
-            "a pending invitation to this user already exists",
+    if let Some(existing) = existing {
+        // Retries of the same sender/recipient request are idempotent. Do not
+        // consume the rate-limit budget and do not create a second pending
+        // row; return the canonical request so the client can reconcile its
+        // local outbox.
+        let pairing_id: Uuid = existing.get(0);
+        let expires_at: i64 = existing.get(1);
+        let recipient_card = contact_card(&state, &recipient).await?;
+        return Ok((
+            StatusCode::OK,
+            Json(PairingRequestCreated {
+                pairing_id,
+                expires_at,
+                state: "PENDING",
+                sender: Some(recipient_card),
+            }),
         ));
     }
+    take_pairing_attempt(&state, &sender).await?;
     if !use_reserved_recipient {
         let consumed = state
             .db
@@ -701,9 +729,23 @@ async fn create_pairing_request(
             error(StatusCode::INTERNAL_SERVER_ERROR, "database error")
         })?;
     if inserted == 0 {
-        return Err(error(
-            StatusCode::CONFLICT,
-            "a pending invitation to this user already exists",
+        // A concurrent request won the unique sender/recipient race. Re-read
+        // and return the same idempotent result instead of exposing a retry
+        // error to the client.
+        let existing = state
+            .db
+            .query_one(SQL_PAIRING_REQUEST_LOOKUP, &[&sender, &recipient])
+            .await
+            .map_err(|_| error(StatusCode::INTERNAL_SERVER_ERROR, "database error"))?;
+        let recipient_card = contact_card(&state, &recipient).await?;
+        return Ok((
+            StatusCode::OK,
+            Json(PairingRequestCreated {
+                pairing_id: existing.get(0),
+                expires_at: existing.get(1),
+                state: "PENDING",
+                sender: Some(recipient_card),
+            }),
         ));
     }
     tracing::info!(
@@ -712,6 +754,24 @@ async fn create_pairing_request(
         pairing_id = %pairing_id,
         "create_pairing_request ok"
     );
+    // Pairing data remains in the control-plane inbox. This frame carries no
+    // contact or invite payload; it only wakes an online recipient so its
+    // shared runtime can synchronize immediately instead of waiting for the
+    // recovery poller.
+    if let Err(notification_error) = send_server_frame(
+        &state,
+        &recipient,
+        torchat_core::relay::RelayServerFrame::PairingAvailable { pairing_id },
+    )
+    .await
+    {
+        tracing::warn!(
+            recipient = %recipient,
+            pairing_id = %pairing_id,
+            error = %notification_error,
+            "pairing availability notification failed"
+        );
+    }
     let recipient_card = contact_card(&state, &recipient).await?;
     Ok((
         StatusCode::CREATED,
@@ -869,13 +929,20 @@ async fn reserved_pairing_recipient(state: &AppState, code: &str) -> Option<Stri
         return None;
     }
     let nickname = state.dev_reserved_pairing_nickname.as_ref().as_ref()?;
-    if let Some(found) = state.installations.read().await.iter().find_map(|(installation_id, installation)| {
-        installation
-            .nickname
-            .as_ref()
-            .filter(|value| value.trim().eq_ignore_ascii_case(nickname))
-            .map(|_| installation_id.clone())
-    }) {
+    if let Some(found) =
+        state
+            .installations
+            .read()
+            .await
+            .iter()
+            .find_map(|(installation_id, installation)| {
+                installation
+                    .nickname
+                    .as_ref()
+                    .filter(|value| value.trim().eq_ignore_ascii_case(nickname))
+                    .map(|_| installation_id.clone())
+            })
+    {
         return Some(found);
     }
     installation_id_for_reserved_nickname(state, nickname).await
@@ -1300,7 +1367,7 @@ async fn route_envelope(
     if envelope.version != torchat_core::PROTOCOL_VERSION
         || envelope.sender != sender_id
         || envelope.recipient.is_empty()
-        || envelope.ciphertext.len() > 128 * 1024
+        || envelope.ciphertext.len() > torchat_core::peer_protocol::MAX_TRANSPORT_CIPHERTEXT_BYTES
         || !relay_ciphertext_allowed(&envelope.ciphertext)
     {
         tracing::warn!(
@@ -1382,6 +1449,7 @@ fn relay_ciphertext_allowed(ciphertext: &str) -> bool {
             torchat_core::relay::RelayPayloadV1::PairingOffer { .. }
             | torchat_core::relay::RelayPayloadV1::PairingRejected { .. }
             | torchat_core::relay::RelayPayloadV1::Welcome { .. }
+            | torchat_core::relay::RelayPayloadV1::WelcomeApplied { .. }
             | torchat_core::relay::RelayPayloadV1::PeerEndpointBootstrap { .. },
         ) => true,
         Err(_) => torchat_core::peer_protocol::PeerCiphertextPayload::decode(ciphertext).is_ok(),
@@ -1508,7 +1576,6 @@ mod tests {
         route_envelope, websocket_frame_action,
     };
     use axum::extract::ws::Message;
-    use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
     use std::{collections::HashMap, sync::Arc};
     use tokio::sync::{RwLock, mpsc};
     use uuid::Uuid;
@@ -1573,9 +1640,12 @@ mod tests {
 
     #[test]
     fn pairing_request_insert_is_conflict_safe_for_duplicate_sender_recipient_pairs() {
-        assert!(SQL_PAIRING_REQUEST_INSERT.contains(
-            "ON CONFLICT (sender_installation_id, recipient_installation_id) DO NOTHING"
-        ));
+        assert!(
+            SQL_PAIRING_REQUEST_INSERT.contains(
+                "ON CONFLICT (sender_installation_id, recipient_installation_id) DO UPDATE"
+            )
+        );
+        assert!(SQL_PAIRING_REQUEST_INSERT.contains("pending_pairings.expires_at < NOW()"));
     }
 
     #[test]

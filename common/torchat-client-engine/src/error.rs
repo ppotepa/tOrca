@@ -7,6 +7,7 @@ pub enum EngineError {
     Closed(&'static str),
     InvalidConfig(String),
     InvalidCommand(String),
+    Unsupported(String),
     Serialization(String),
     Storage(String),
     Transport(String),
@@ -18,6 +19,7 @@ impl fmt::Display for EngineError {
             Self::Closed(message) => write!(f, "{message}"),
             Self::InvalidConfig(message)
             | Self::InvalidCommand(message)
+            | Self::Unsupported(message)
             | Self::Serialization(message)
             | Self::Storage(message)
             | Self::Transport(message) => f.write_str(message),

@@ -15,6 +15,5 @@ class TorChatMotionPolicy {
     reducedMotion.value = value;
   }
 
-  static Duration duration(Duration normal) =>
-      enabled ? Duration.zero : normal;
+  static Duration duration(Duration normal) => enabled ? Duration.zero : normal;
 }

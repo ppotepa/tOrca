@@ -1,27 +1,20 @@
 use std::{fs, path::PathBuf};
 
 use rusqlite::{OptionalExtension, params};
-use torchat_client_engine::{
-    ClientDatabase,
-    config::SecretBytes,
-    storage::sqlite::MIGRATIONS,
-};
+use torchat_client_engine::{ClientDatabase, config::SecretBytes, storage::sqlite::MIGRATIONS};
 use uuid::Uuid;
 
 fn temporary_database_path(test_name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!(
-        "torchat-{test_name}-{}.sqlite3",
-        Uuid::new_v4()
-    ))
+    std::env::temp_dir().join(format!("torchat-{test_name}-{}.sqlite3", Uuid::new_v4()))
 }
 
 fn database_key() -> SecretBytes {
     SecretBytes(vec![0x5a; 32])
 }
 
-fn remove_database(path: &PathBuf) {
+fn remove_database(path: &std::path::Path) {
     for candidate in [
-        path.clone(),
+        path.to_path_buf(),
         PathBuf::from(format!("{}-wal", path.display())),
         PathBuf::from(format!("{}-shm", path.display())),
     ] {
@@ -74,15 +67,19 @@ fn fresh_database_applies_every_registered_migration() {
         .max()
         .expect("at least one migration");
 
-    let database = ClientDatabase::open(&path, &database_key())
-        .expect("fresh encrypted database should open");
+    let database =
+        ClientDatabase::open(&path, &database_key()).expect("fresh encrypted database should open");
     let applied_version: i64 = database
         .connection()
-        .query_row("SELECT MAX(version) FROM schema_migrations;", [], |row| row.get(0))
+        .query_row("SELECT MAX(version) FROM schema_migrations;", [], |row| {
+            row.get(0)
+        })
         .expect("migration version should be readable");
     let applied_count: i64 = database
         .connection()
-        .query_row("SELECT COUNT(*) FROM schema_migrations;", [], |row| row.get(0))
+        .query_row("SELECT COUNT(*) FROM schema_migrations;", [], |row| {
+            row.get(0)
+        })
         .expect("migration count should be readable");
 
     assert_eq!(applied_version, expected_version);
@@ -160,7 +157,11 @@ fn reopening_database_preserves_client_state_across_migrations() {
             .expect("message should survive database reopen");
         assert_eq!(
             message,
-            ("preserved local message".to_owned(), "DELIVERED".to_owned(), 2)
+            (
+                "preserved local message".to_owned(),
+                "DELIVERED".to_owned(),
+                2
+            )
         );
 
         let setting: Vec<u8> = connection
@@ -173,7 +174,9 @@ fn reopening_database_preserves_client_state_across_migrations() {
         assert_eq!(setting, b"preserved-value");
 
         let applied_version: i64 = connection
-            .query_row("SELECT MAX(version) FROM schema_migrations;", [], |row| row.get(0))
+            .query_row("SELECT MAX(version) FROM schema_migrations;", [], |row| {
+                row.get(0)
+            })
             .expect("latest migration version should remain recorded");
         assert_eq!(
             applied_version,
@@ -227,7 +230,10 @@ fn message_state_timestamps_are_durable_monotonic_and_cascaded() {
             )
             .optional()
             .expect("timestamp lookup should succeed");
-        assert!(empty.is_none(), "queued messages must not have delivery timestamps");
+        assert!(
+            empty.is_none(),
+            "queued messages must not have delivery timestamps"
+        );
 
         connection
             .execute(
@@ -314,10 +320,16 @@ fn message_state_timestamps_are_durable_monotonic_and_cascaded() {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .expect("timestamp projection should expose message state");
-        assert_eq!(projected, ("READ".to_owned(), recorded.0, recorded.1, recorded.2));
+        assert_eq!(
+            projected,
+            ("READ".to_owned(), recorded.0, recorded.1, recorded.2)
+        );
 
         connection
-            .execute("DELETE FROM messages WHERE id = ?1;", ["message-timestamps"])
+            .execute(
+                "DELETE FROM messages WHERE id = ?1;",
+                ["message-timestamps"],
+            )
             .expect("message deletion should succeed");
         let remaining: i64 = connection
             .query_row(

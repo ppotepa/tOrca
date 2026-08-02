@@ -1,5 +1,5 @@
 -- P2P is the product default for every contact. Migration 008 intentionally
--- kept legacy contacts on RELAY_ONLY while the peer endpoint rollout settled;
+-- kept existing contacts on RELAY_ONLY while the peer endpoint rollout settled;
 -- normalize that transitional default now. Users can still opt into relay
 -- fallback or relay-only explicitly from contact settings.
 UPDATE contacts

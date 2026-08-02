@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use url::Url;
+use zeroize::Zeroize;
 
 use crate::command::PlatformKind;
 
@@ -23,6 +24,12 @@ pub struct SecretBytes(#[serde(with = "serde_bytes")] pub Vec<u8>);
 impl SecretBytes {
     pub fn expose(&self) -> &[u8] {
         &self.0
+    }
+}
+
+impl Drop for SecretBytes {
+    fn drop(&mut self) {
+        self.0.zeroize();
     }
 }
 

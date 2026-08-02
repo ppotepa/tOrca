@@ -9,19 +9,18 @@ ApplicationSnapshot? parseApplicationSnapshotMap(Map<String, dynamic> raw) {
 
   final identity = RuntimeIdentity.fromMap(identityMap);
   final profile = RuntimeProfile.fromMap(profileMap);
-  final contacts = _mapList(raw['contacts'])
-      .map(ContactRecord.fromMap)
-      .toList(growable: false);
-  final conversations = _mapList(raw['conversations'])
-      .map(ConversationSummary.fromMap)
-      .toList(growable: false);
+  final contacts = _mapList(
+    raw['contacts'],
+  ).map(ContactRecord.fromMap).toList(growable: false);
+  final conversations = _mapList(
+    raw['conversations'],
+  ).map(ConversationSummary.fromMap).toList(growable: false);
   final now = DateTime.now();
   final rawGeneration = _intValue(raw['generation']);
   final rawCreatedAt = _intValue(raw['createdAtMs']);
 
   return ApplicationSnapshot(
-    generation:
-        rawGeneration == 0 ? now.microsecondsSinceEpoch : rawGeneration,
+    generation: rawGeneration == 0 ? now.microsecondsSinceEpoch : rawGeneration,
     createdAtMs: rawCreatedAt == 0 ? now.millisecondsSinceEpoch : rawCreatedAt,
     identity: identity,
     profile: profile,

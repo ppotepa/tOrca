@@ -2,7 +2,13 @@ import 'package:flutter/material.dart';
 
 import '../theme_preferences.dart';
 
-enum TorChatActivityIndicatorKind { material, hourglass, terminal, blocks, dots }
+enum TorChatActivityIndicatorKind {
+  material,
+  hourglass,
+  terminal,
+  blocks,
+  dots,
+}
 
 @immutable
 class TorChatActivityTheme extends ThemeExtension<TorChatActivityTheme> {
@@ -30,37 +36,37 @@ class TorChatActivityTheme extends ThemeExtension<TorChatActivityTheme> {
     }
     return switch (palette) {
       TorChatRetroPalette.arcade => const TorChatActivityTheme(
-          kind: TorChatActivityIndicatorKind.blocks,
-          frames: ['▖', '▘', '▝', '▗'],
-          frameDuration: Duration(milliseconds: 180),
-          overlayOpacity: .22,
-          disabledOpacity: .48,
-          fontFamily: 'PressStart2P',
-        ),
+        kind: TorChatActivityIndicatorKind.blocks,
+        frames: ['▖', '▘', '▝', '▗'],
+        frameDuration: Duration(milliseconds: 180),
+        overlayOpacity: .22,
+        disabledOpacity: .48,
+        fontFamily: 'PressStart2P',
+      ),
       TorChatRetroPalette.mocha => const TorChatActivityTheme(
-          kind: TorChatActivityIndicatorKind.hourglass,
-          frames: ['⌛', '⧖', '⧗', '⏳'],
-          frameDuration: Duration(milliseconds: 320),
-          overlayOpacity: .20,
-          disabledOpacity: .52,
-          fontFamily: 'PixelifySans',
-        ),
+        kind: TorChatActivityIndicatorKind.hourglass,
+        frames: ['⌛', '⧖', '⧗', '⏳'],
+        frameDuration: Duration(milliseconds: 320),
+        overlayOpacity: .20,
+        disabledOpacity: .52,
+        fontFamily: 'PixelifySans',
+      ),
       TorChatRetroPalette.gruvbox => const TorChatActivityTheme(
-          kind: TorChatActivityIndicatorKind.terminal,
-          frames: ['|', '/', '—', r'\\'],
-          frameDuration: Duration(milliseconds: 180),
-          overlayOpacity: .22,
-          disabledOpacity: .50,
-          fontFamily: 'PressStart2P',
-        ),
+        kind: TorChatActivityIndicatorKind.terminal,
+        frames: ['|', '/', '—', r'\\'],
+        frameDuration: Duration(milliseconds: 180),
+        overlayOpacity: .22,
+        disabledOpacity: .50,
+        fontFamily: 'PressStart2P',
+      ),
       TorChatRetroPalette.nord => const TorChatActivityTheme(
-          kind: TorChatActivityIndicatorKind.dots,
-          frames: ['·  ', '·· ', '···'],
-          frameDuration: Duration(milliseconds: 360),
-          overlayOpacity: .18,
-          disabledOpacity: .56,
-          fontFamily: 'PixelifySans',
-        ),
+        kind: TorChatActivityIndicatorKind.dots,
+        frames: ['·  ', '·· ', '···'],
+        frameDuration: Duration(milliseconds: 360),
+        overlayOpacity: .18,
+        disabledOpacity: .56,
+        fontFamily: 'PixelifySans',
+      ),
     };
   }
 
@@ -89,10 +95,8 @@ class TorChatActivityTheme extends ThemeExtension<TorChatActivityTheme> {
   );
 
   @override
-  TorChatActivityTheme lerp(
-    covariant TorChatActivityTheme? other,
-    double t,
-  ) => other == null
+  TorChatActivityTheme lerp(covariant TorChatActivityTheme? other, double t) =>
+      other == null
       ? this
       : TorChatActivityTheme(
           kind: t < .5 ? kind : other.kind,

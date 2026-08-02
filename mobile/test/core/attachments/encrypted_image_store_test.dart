@@ -59,21 +59,28 @@ void main() {
     expect(usage.bytes, 0);
   });
 
-  test('different key treats cache as disposable and removes corrupt file', () async {
-    await store.put('message-1', Uint8List.fromList([9, 8, 7, 6]));
-    final other = EncryptedImageStore(
-      directoryProvider: () async => directory,
-      keyProvider: () async => SecretKey(List<int>.filled(32, 8)),
-    );
+  test(
+    'different key treats cache as disposable and removes corrupt file',
+    () async {
+      await store.put('message-1', Uint8List.fromList([9, 8, 7, 6]));
+      final other = EncryptedImageStore(
+        directoryProvider: () async => directory,
+        keyProvider: () async => SecretKey(List<int>.filled(32, 8)),
+      );
 
-    expect(await other.read('message-1'), isNull);
-    expect(await other.contains('message-1'), isFalse);
-  });
+      expect(await other.read('message-1'), isNull);
+      expect(await other.contains('message-1'), isFalse);
+    },
+  );
 
   test('encrypted file cannot be moved to a different message id', () async {
     await store.put('message-1', Uint8List.fromList([5, 4, 3, 2, 1]));
-    final source = File('${directory.path}${Platform.pathSeparator}message-1.tca');
-    final swapped = File('${directory.path}${Platform.pathSeparator}message-2.tca');
+    final source = File(
+      '${directory.path}${Platform.pathSeparator}message-1.tca',
+    );
+    final swapped = File(
+      '${directory.path}${Platform.pathSeparator}message-2.tca',
+    );
     await swapped.writeAsBytes(await source.readAsBytes(), flush: true);
 
     expect(await store.read('message-2'), isNull);

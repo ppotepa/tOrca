@@ -19,7 +19,7 @@ internal object AndroidNotificationPolicy {
         val title = notification.optString(EngineContract.TITLE).trim()
         val body = notification.optString(EngineContract.BODY).trim()
 
-        // This legacy PairingOffer alert is a protocol finalization event, not
+        // This PairingOffer alert is a protocol finalization event, not
         // a newly committed incoming request. Reconnects can replay it.
         if (title == "Nowe zaproszenie" && body == "Masz nową prośbę o rozmowę.") {
             return false

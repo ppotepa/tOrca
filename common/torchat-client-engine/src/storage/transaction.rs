@@ -13,13 +13,13 @@ impl<'db> SqliteTransaction<'db> {
         }
     }
 
-    pub fn as_ref(&self) -> &Transaction<'db> {
+    pub fn transaction(&self) -> &Transaction<'db> {
         self.transaction
             .as_ref()
             .expect("sqlite transaction must be present while active")
     }
 
-    pub fn as_mut(&mut self) -> &mut Transaction<'db> {
+    pub fn transaction_mut(&mut self) -> &mut Transaction<'db> {
         self.transaction
             .as_mut()
             .expect("sqlite transaction must be present while active")

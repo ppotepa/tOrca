@@ -42,8 +42,9 @@ class ApplicationSnapshotPatch {
       identity: identity,
       profile: profile,
       contacts: contacts == null ? null : List.unmodifiable(contacts!),
-      conversations:
-          conversations == null ? null : List.unmodifiable(conversations!),
+      conversations: conversations == null
+          ? null
+          : List.unmodifiable(conversations!),
       pendingInbox: pendingInbox,
       pendingOutbox: pendingOutbox,
       peerEndpointAvailable: peerEndpointAvailable,

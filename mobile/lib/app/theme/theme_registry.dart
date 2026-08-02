@@ -14,12 +14,10 @@ abstract final class TorChatThemeRegistry {
     TorChatThemeFamily family, {
     TorChatRetroPalette retroPalette = TorChatRetroPalette.mocha,
   }) => _withActivityTheme(
-    _withAccessibleColorScheme(
-      switch (family) {
-        TorChatThemeFamily.current => buildCurrentLightTheme(),
-        TorChatThemeFamily.retro => buildRetroLightTheme(retroPalette),
-      },
-    ),
+    _withAccessibleColorScheme(switch (family) {
+      TorChatThemeFamily.current => buildCurrentLightTheme(),
+      TorChatThemeFamily.retro => buildRetroLightTheme(retroPalette),
+    }),
     family,
     retroPalette,
   );
@@ -28,12 +26,10 @@ abstract final class TorChatThemeRegistry {
     TorChatThemeFamily family, {
     TorChatRetroPalette retroPalette = TorChatRetroPalette.mocha,
   }) => _withActivityTheme(
-    _withAccessibleColorScheme(
-      switch (family) {
-        TorChatThemeFamily.current => buildCurrentDarkTheme(),
-        TorChatThemeFamily.retro => buildRetroDarkTheme(retroPalette),
-      },
-    ),
+    _withAccessibleColorScheme(switch (family) {
+      TorChatThemeFamily.current => buildCurrentDarkTheme(),
+      TorChatThemeFamily.retro => buildRetroDarkTheme(retroPalette),
+    }),
     family,
     retroPalette,
   );
@@ -90,15 +86,14 @@ abstract final class TorChatThemeRegistry {
   ) {
     final extensions = theme.extensions.values.toList(growable: true);
     extensions.add(TorChatActivityTheme.forTheme(family, palette: palette));
-    return theme.copyWith(extensions: extensions.cast<ThemeExtension<dynamic>>());
+    return theme.copyWith(
+      extensions: extensions.cast<ThemeExtension<dynamic>>(),
+    );
   }
 }
 
 @visibleForTesting
-Color accessibleForeground(
-  Color background, {
-  Color backdrop = Colors.white,
-}) {
+Color accessibleForeground(Color background, {Color backdrop = Colors.white}) {
   const dark = Color(0xff111111);
   const light = Colors.white;
   return contrastRatio(background, light, backdrop: backdrop) >=

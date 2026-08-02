@@ -2871,6 +2871,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
  "libc",
  "pin-project-lite",
  "tokio",
@@ -2897,6 +2898,7 @@ dependencies = [
  "torchat-core",
  "url",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]
@@ -2906,6 +2908,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tokio-util",
  "torchat-client-engine",
 ]
 

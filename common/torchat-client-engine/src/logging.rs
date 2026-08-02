@@ -5,7 +5,9 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 
 use crate::{EngineEvent, PlatformKind};
 
@@ -15,6 +17,7 @@ const LOG_BUDGET_BYTES: u64 = 20 * 1024 * 1024;
 pub(crate) struct StartupJournal {
     file: Option<File>,
     session_id: String,
+    pseudonym_salt: String,
     platform: String,
 }
 
@@ -34,6 +37,7 @@ impl StartupJournal {
         Self {
             file,
             session_id,
+            pseudonym_salt: uuid::Uuid::new_v4().to_string(),
             platform,
         }
     }
@@ -50,20 +54,12 @@ impl StartupJournal {
 
     pub(crate) fn record(&mut self, event: &EngineEvent) {
         match event {
-            EngineEvent::Fatal { error } => self.write(
-                "error",
-                "engine",
-                &error.code,
-                None,
-                &error.message,
-            ),
-            EngineEvent::Log { log } => self.write(
-                &log.level,
-                "engine",
-                "engine_log",
-                None,
-                &log.message,
-            ),
+            EngineEvent::Fatal { error } => {
+                self.write("error", "engine", &error.code, None, &error.message)
+            }
+            EngineEvent::Log { log } => {
+                self.write(&log.level, "engine", "engine_log", None, &log.message)
+            }
             EngineEvent::Connection { snapshot } => self.write(
                 "info",
                 "relay",
@@ -72,17 +68,15 @@ impl StartupJournal {
                 &format!("{:?}: {}", snapshot.state, snapshot.detail),
             ),
             EngineEvent::Runtime {
-                event: torchat_client_runtime::RuntimeEvent::TorStatus {
-                    phase,
-                    detail,
-                    retry_attempt,
-                    ..
-                },
+                event:
+                    torchat_client_runtime::RuntimeEvent::TorStatus {
+                        phase,
+                        detail,
+                        retry_attempt,
+                        ..
+                    },
             } => self.write(
-                if matches!(
-                    phase,
-                    torchat_client_runtime::RuntimeStatusPhase::Error
-                ) {
+                if matches!(phase, torchat_client_runtime::RuntimeStatusPhase::Error) {
                     "error"
                 } else {
                     "info"
@@ -94,22 +88,13 @@ impl StartupJournal {
             ),
             EngineEvent::Runtime {
                 event: torchat_client_runtime::RuntimeEvent::RuntimeError { message },
-            } => self.write(
-                "error",
-                "engine",
-                "runtime_error",
-                None,
-                message,
-            ),
+            } => self.write("error", "engine", "runtime_error", None, message),
             EngineEvent::Runtime {
                 event: torchat_client_runtime::RuntimeEvent::RuntimeLog { message },
             } => self.write("info", "engine", "runtime_log", None, message),
             EngineEvent::Runtime {
                 event:
-                    torchat_client_runtime::RuntimeEvent::PeerEndpointChanged {
-                        contact_id,
-                        status,
-                    },
+                    torchat_client_runtime::RuntimeEvent::PeerEndpointChanged { contact_id, status },
             } => self.write(
                 if matches!(status, torchat_client_runtime::PeerEndpointStatus::Verified) {
                     "info"
@@ -133,9 +118,7 @@ impl StartupJournal {
                 "peer",
                 "peer_connection_changed",
                 Some("PEER_TRANSPORT"),
-                &format!(
-                    "contact={contact_id} status={status:?} retry_in_ms={retry_in_ms:?}"
-                ),
+                &format!("contact={contact_id} status={status:?} retry_in_ms={retry_in_ms:?}"),
             ),
             EngineEvent::PlatformAction { action } => self.write(
                 "info",
@@ -157,6 +140,7 @@ impl StartupJournal {
         stage: Option<&str>,
         message: &str,
     ) {
+        let message = self.redact(message);
         let Some(file) = &mut self.file else {
             return;
         };
@@ -168,12 +152,69 @@ impl StartupJournal {
             "component": component,
             "eventCode": event_code,
             "stage": stage,
-            "message": redact(message),
+            "message": message,
         });
         if serde_json::to_writer(&mut *file, &entry).is_ok() {
             let _ = file.write_all(b"\n");
             let _ = file.flush();
         }
+    }
+
+    /// Persistent journals are useful only if they do not become a durable
+    /// contact graph.  Keep identifiers linkable inside this one journal so a
+    /// support trace is coherent, but make them unlinkable across sessions.
+    fn redact(&self, message: &str) -> String {
+        message
+            .split_whitespace()
+            .map(|token| self.redact_token(token))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    fn redact_token(&self, token: &str) -> String {
+        if token.to_ascii_lowercase().contains(".onion") {
+            return "[onion]".to_owned();
+        }
+        let Some((key, value)) = token.split_once('=') else {
+            return token.to_owned();
+        };
+        let normalized = key
+            .trim_matches(|character: char| !character.is_ascii_alphanumeric() && character != '_')
+            .to_ascii_lowercase();
+        let sensitive = matches!(
+            normalized.as_str(),
+            "contact"
+                | "contact_id"
+                | "installation_id"
+                | "sender"
+                | "recipient"
+                | "message_id"
+                | "pairing_id"
+                | "conversation_id"
+                | "invite_id"
+        );
+        if !sensitive || value.is_empty() {
+            return token.to_owned();
+        }
+        let suffix = value
+            .chars()
+            .rev()
+            .take_while(|character| {
+                !character.is_ascii_alphanumeric() && *character != '-' && *character != '_'
+            })
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect::<String>();
+        let value = value.trim_end_matches(|character: char| {
+            !character.is_ascii_alphanumeric() && character != '-' && character != '_'
+        });
+        let mut digest = Sha256::new();
+        digest.update(self.pseudonym_salt.as_bytes());
+        digest.update(b":");
+        digest.update(value.as_bytes());
+        let pseudonym = URL_SAFE_NO_PAD.encode(digest.finalize());
+        format!("{key}=[id-{}]{suffix}", &pseudonym[..10])
     }
 }
 
@@ -184,12 +225,7 @@ fn prepare_directory(directory: &Path) -> std::io::Result<()> {
         .filter_map(Result::ok)
         .filter_map(|entry| {
             let metadata = entry.metadata().ok()?;
-            if !metadata.is_file()
-                || !entry
-                    .file_name()
-                    .to_string_lossy()
-                    .starts_with("startup-")
-            {
+            if !metadata.is_file() || !entry.file_name().to_string_lossy().starts_with("startup-") {
                 return None;
             }
             let modified = metadata.modified().ok()?;
@@ -197,7 +233,10 @@ fn prepare_directory(directory: &Path) -> std::io::Result<()> {
         })
         .collect::<Vec<_>>();
     for (path, modified, _) in &logs {
-        if now.duration_since(*modified).is_ok_and(|age| age > LOG_RETENTION) {
+        if now
+            .duration_since(*modified)
+            .is_ok_and(|age| age > LOG_RETENTION)
+        {
             let _ = fs::remove_file(path);
         }
     }
@@ -213,20 +252,6 @@ fn prepare_directory(directory: &Path) -> std::io::Result<()> {
         }
     }
     Ok(())
-}
-
-fn redact(message: &str) -> String {
-    message
-        .split_whitespace()
-        .map(|token| {
-            if token.to_ascii_lowercase().contains(".onion") {
-                "[onion]"
-            } else {
-                token
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 fn unix_ms() -> u128 {
@@ -264,5 +289,21 @@ mod tests {
         assert!(contents.contains("[onion]"));
         assert!(!contents.contains(".onion"));
         let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn stable_identifiers_are_pseudonymous_within_one_journal() {
+        let journal = StartupJournal {
+            file: None,
+            session_id: "session".to_owned(),
+            pseudonym_salt: "session-salt".to_owned(),
+            platform: "desktop".to_owned(),
+        };
+        let first = journal.redact("contact=peer-alice message_id=message-42");
+        let second = journal.redact("contact=peer-alice message_id=message-42");
+        assert_eq!(first, second);
+        assert!(!first.contains("peer-alice"));
+        assert!(!first.contains("message-42"));
+        assert!(first.contains("contact=[id-"));
     }
 }

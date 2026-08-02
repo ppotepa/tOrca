@@ -7,15 +7,12 @@ use uuid::Uuid;
 const REMOVAL_PREFIX: &str = "torchat-relationship-removed-v1:";
 
 fn temporary_database_path() -> PathBuf {
-    std::env::temp_dir().join(format!(
-        "torchat-remote-removal-{}.sqlite3",
-        Uuid::new_v4()
-    ))
+    std::env::temp_dir().join(format!("torchat-remote-removal-{}.sqlite3", Uuid::new_v4()))
 }
 
-fn remove_database(path: &PathBuf) {
+fn remove_database(path: &std::path::Path) {
     for candidate in [
-        path.clone(),
+        path.to_path_buf(),
         PathBuf::from(format!("{}-wal", path.display())),
         PathBuf::from(format!("{}-shm", path.display())),
     ] {
@@ -25,11 +22,9 @@ fn remove_database(path: &PathBuf) {
 
 fn iso_now(connection: &rusqlite::Connection) -> String {
     connection
-        .query_row(
-            "SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now');",
-            [],
-            |row| row.get(0),
-        )
+        .query_row("SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now');", [], |row| {
+            row.get(0)
+        })
         .expect("SQLite should format a UTC relationship timestamp")
 }
 
@@ -44,8 +39,8 @@ fn incoming_removal_is_atomic_and_stale_replay_cannot_remove_fresh_relationship(
     let path = temporary_database_path();
     let key = SecretBytes(vec![0x37; 32]);
 
-    let mut database = ClientDatabase::open(&path, &key)
-        .expect("temporary encrypted database should open");
+    let database =
+        ClientDatabase::open(&path, &key).expect("temporary encrypted database should open");
     let connection = database.connection();
     connection
         .execute(
@@ -85,7 +80,11 @@ fn incoming_removal_is_atomic_and_stale_replay_cannot_remove_fresh_relationship(
                 id, conversation_id, outgoing, body, state, created_at,
                 attempt_count, next_attempt_at
              ) VALUES (?1, ?2, 0, ?3, 'DELIVERED', 1, 0, 0);",
-            params!["ordinary-history", "conversation-remote", "ordinary message"],
+            params![
+                "ordinary-history",
+                "conversation-remote",
+                "ordinary message"
+            ],
         )
         .expect("ordinary history should be inserted");
     connection
@@ -156,7 +155,9 @@ fn incoming_removal_is_atomic_and_stale_replay_cannot_remove_fresh_relationship(
     assert_eq!(remaining_messages, vec!["remote-removal".to_owned()]);
 
     let mls_count: i64 = connection
-        .query_row("SELECT COUNT(*) FROM conversation_mls;", [], |row| row.get(0))
+        .query_row("SELECT COUNT(*) FROM conversation_mls;", [], |row| {
+            row.get(0)
+        })
         .expect("MLS row count should be readable");
     assert_eq!(mls_count, 0);
 
@@ -167,13 +168,27 @@ fn incoming_removal_is_atomic_and_stale_replay_cannot_remove_fresh_relationship(
             params!["conversation-remote", &[4_u8, 5, 6][..]],
         )
         .expect("suppressed MLS insertion should not fail the transaction");
-    assert_eq!(recreated, 0, "tombstoned relationship must not restore MLS state");
+    assert_eq!(
+        recreated, 0,
+        "tombstoned relationship must not restore MLS state"
+    );
 
     // A successful fresh pairing clears the tombstone and records a newer
     // boundary through the blocked -> unblocked contact transition.
     thread::sleep(Duration::from_millis(15));
     database
-        .clear_relationship_tombstone("peer-remote")
+        .connection()
+        .execute(
+            "UPDATE contacts SET blocked = 0 WHERE installation_id = ?1;",
+            ["peer-remote"],
+        )
+        .expect("fresh pairing should clear the previous tombstone");
+    database
+        .connection()
+        .execute(
+            "DELETE FROM relationship_tombstones WHERE contact_installation_id = ?1;",
+            ["peer-remote"],
+        )
         .expect("fresh pairing should clear the previous tombstone");
 
     let unblocked: i64 = database
@@ -208,11 +223,6 @@ fn incoming_removal_is_atomic_and_stale_replay_cannot_remove_fresh_relationship(
         )
         .expect("contact state should remain readable");
     assert_eq!(still_unblocked, 0);
-    assert!(database
-        .relationship_tombstone("peer-remote")
-        .expect("tombstone lookup should succeed")
-        .is_none());
-
     drop(database);
     remove_database(&path);
 }

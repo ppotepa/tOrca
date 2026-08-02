@@ -46,7 +46,9 @@ impl MigrationRunner {
     fn run_locked(&self, connection: &Connection) -> EngineResult<()> {
         for migration in self.migrations {
             if migration.version == 0 && !schema_migrations_table_exists(connection)? {
-                connection.execute_batch(migration.sql).map_err(sqlite_error)?;
+                connection
+                    .execute_batch(migration.sql)
+                    .map_err(sqlite_error)?;
             }
 
             let applied = applied_version(connection, migration.name)?;
@@ -60,7 +62,9 @@ impl MigrationRunner {
                 )));
             }
 
-            connection.execute_batch(migration.sql).map_err(sqlite_error)?;
+            connection
+                .execute_batch(migration.sql)
+                .map_err(sqlite_error)?;
             connection
                 .execute(
                     "INSERT OR IGNORE INTO schema_migrations (version, name) VALUES (?1, ?2);",
@@ -90,10 +94,7 @@ impl MigrationRunner {
     }
 }
 
-fn applied_version(
-    connection: &Connection,
-    migration_name: &str,
-) -> EngineResult<Option<i64>> {
+fn applied_version(connection: &Connection, migration_name: &str) -> EngineResult<Option<i64>> {
     connection
         .query_row(super::sqlite::MIGRATION_LOOKUP, [migration_name], |row| {
             row.get("version")

@@ -115,12 +115,48 @@ function Save-TorChatWindowsDiagnostics {
     return $root
 }
 
+function Get-TorChatWindowsApplicationReadiness {
+    param([Parameter(Mandatory = $true)][string]$RepositoryRoot)
+    $journalRoot = Join-Path $RepositoryRoot '.torchat\clients\desktop\engine-logs'
+    $latest = Get-ChildItem -LiteralPath $journalRoot -Filter 'startup-*.jsonl' -File -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+    if (-not $latest) {
+        return [pscustomobject]@{ Engine = $false; PeerEndpoint = $false; Relay = $false; Ready = $false }
+    }
+    $events = @(Get-Content -LiteralPath $latest.FullName -ErrorAction SilentlyContinue) |
+        ForEach-Object {
+            try { $_ | ConvertFrom-Json -ErrorAction Stop } catch { $null }
+        }
+    $engineReady = @($events | Where-Object {
+        $_.component -eq 'engine' -and $_.message -eq 'client engine actor started for Windows'
+    }).Count -gt 0
+    $peerEndpointReady = @($events | Where-Object {
+        $_.component -eq 'peer' -and $_.eventCode -eq 'peer_endpoint_changed' -and $_.message -match '(?:^|\s)status=Verified(?:\s|$)'
+    }).Count -gt 0
+    $relayReady = @($events | Where-Object {
+        $_.component -eq 'relay' -and $_.eventCode -eq 'connection_state_changed' -and $_.message -match '^Connected:'
+    }).Count -gt 0
+    [pscustomobject]@{
+        Engine = $engineReady
+        PeerEndpoint = $peerEndpointReady
+        Relay = $relayReady
+        Ready = $engineReady -and $peerEndpointReady -and $relayReady
+    }
+}
+
+function Test-TorChatWindowsApplicationReady {
+    param([Parameter(Mandatory = $true)][string]$RepositoryRoot)
+    return (Get-TorChatWindowsApplicationReadiness -RepositoryRoot $RepositoryRoot).Ready
+}
+
 function Start-TorChatWindowsClient {
     param(
         [Parameter(Mandatory = $true)]$Context,
         [Parameter(Mandatory = $true)]$EnvironmentState,
         [ValidateSet('preserve','reset')][string]$ClientDataPolicy = 'preserve',
-        [int]$ReadyAttempts = 50
+        [int]$ReadyAttempts = 50,
+        [int]$FunctionalReadyAttempts = 180
     )
     if ($env:OS -ne 'Windows_NT') { throw 'Windows client can only be started on Windows.' }
     [void](Stop-TorChatWindowsClient -Context $Context)
@@ -137,6 +173,12 @@ function Start-TorChatWindowsClient {
 
     $env:TORCHAT_TOR_BINARY = $tor.Binary
     $env:TORCHAT_TOR_DATA_DIR = $tor.DataDirectory
+    if ($Context.Environment -eq 'local') {
+        $relaySocksPort = [int]$EnvironmentState.Values['TORCHAT_SOCKS_PORT']
+        $env:TORCHAT_RELAY_SOCKS5_PROXY = "socks5h://127.0.0.1:$relaySocksPort"
+    } else {
+        Remove-Item Env:TORCHAT_RELAY_SOCKS5_PROXY -ErrorAction SilentlyContinue
+    }
     $env:TORCHAT_DESKTOP_PATH = $engine
     $env:TORCHAT_IDENTITY_FILE = Join-Path $Context.RepositoryRoot '.torchat\clients\desktop\identity.key'
     $env:TORCHAT_LOG_DIR = Join-Path $Context.RepositoryRoot '.torchat\logs'
@@ -159,6 +201,21 @@ function Start-TorChatWindowsClient {
         $diagnostics = Save-TorChatWindowsDiagnostics -Context $Context
         throw "Windows did not reach runtime readiness. Diagnostics: $diagnostics"
     }
+    $applicationReadiness = $null
+    $applicationReady = $false
+    for ($attempt = 1; $attempt -le $FunctionalReadyAttempts; $attempt++) {
+        $applicationReadiness = Get-TorChatWindowsApplicationReadiness -RepositoryRoot $Context.RepositoryRoot
+        $applicationReady = $applicationReadiness.Ready
+        $percent = [Math]::Min(99, [int](100 * $attempt / [Math]::Max(1,$FunctionalReadyAttempts)))
+        Write-TorChatStageProgress -Context $Context -Name 'Windows application readiness' -Percent $percent -Detail "engine=$($applicationReadiness.Engine) p2p=$($applicationReadiness.PeerEndpoint) relay=$($applicationReadiness.Relay)"
+        if ($applicationReady) { break }
+        if ($started.HasExited) { throw "Windows runner exited with code $($started.ExitCode)." }
+        Start-Sleep -Seconds 1
+    }
+    if (-not $applicationReady) {
+        $diagnostics = Save-TorChatWindowsDiagnostics -Context $Context
+        throw "Windows processes started, but onion/relay did not reach APPLICATION_READY. Diagnostics: $diagnostics"
+    }
     $runnerPid = [int]$runners[0].ProcessId
     $sidecarPid = [int]$sidecars[0].ProcessId
     Start-Sleep -Seconds 5
@@ -169,7 +226,7 @@ function Start-TorChatWindowsClient {
         $diagnostics = Save-TorChatWindowsDiagnostics -Context $Context
         throw "Windows runtime was not stable for five seconds. Diagnostics: $diagnostics"
     }
-    [pscustomobject]@{ State = 'Ready'; Code = 'WINDOWS_READY'; Message = "Windows ready (runner $runnerPid, sidecar $sidecarPid)"; RunnerPid = $runnerPid; SidecarPid = $sidecarPid }
+    [pscustomobject]@{ State = 'Ready'; Code = 'WINDOWS_READY'; Message = "Windows application ready (runner $runnerPid, sidecar $sidecarPid)"; RunnerPid = $runnerPid; SidecarPid = $sidecarPid }
 }
 
 function Get-TorChatWindowsStatus {
@@ -177,7 +234,8 @@ function Get-TorChatWindowsStatus {
     $runners = @(Get-TorChatWindowsRunnerProcesses -RepositoryRoot $Context.RepositoryRoot)
     $sidecars = @(Get-TorChatWindowsSidecarProcesses -RepositoryRoot $Context.RepositoryRoot)
     $tors = @(Get-TorChatWindowsTorProcesses -RepositoryRoot $Context.RepositoryRoot)
-    $ready = $runners.Count -eq 1 -and $sidecars.Count -eq 1
+    $ready = $runners.Count -eq 1 -and $sidecars.Count -eq 1 -and
+        (Test-TorChatWindowsApplicationReady -RepositoryRoot $Context.RepositoryRoot)
     [pscustomobject]@{
         State = if ($ready) { 'Ready' } else { 'Warning' }
         Code = if ($ready) { 'WINDOWS_RUNNING' } else { 'WINDOWS_NOT_READY' }

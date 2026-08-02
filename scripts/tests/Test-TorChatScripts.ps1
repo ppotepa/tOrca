@@ -4,7 +4,9 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $scriptsRoot = Split-Path -Parent $PSScriptRoot
-$files = @(Get-ChildItem -LiteralPath $scriptsRoot -Recurse -File -Include '*.ps1','*.psm1' | Sort-Object FullName)
+$files = @(Get-ChildItem -LiteralPath $scriptsRoot -Recurse -File |
+    Where-Object { $_.Extension -in @('.ps1', '.psm1') } |
+    Sort-Object FullName)
 $failures = New-Object System.Collections.ArrayList
 
 foreach ($file in $files) {
@@ -19,19 +21,19 @@ foreach ($file in $files) {
         Write-Host ("[PASS] {0}" -f $file.FullName.Substring($scriptsRoot.Length + 1)) -ForegroundColor Green
         continue
     }
-    foreach ($error in $errors) {
+    foreach ($parseError in $errors) {
         $record = [pscustomobject]@{
             File = $file.FullName
-            Line = $error.Extent.StartLineNumber
-            Column = $error.Extent.StartColumnNumber
-            Message = $error.Message
+            Line = $parseError.Extent.StartLineNumber
+            Column = $parseError.Extent.StartColumnNumber
+            Message = $parseError.Message
         }
         [void]$failures.Add($record)
         Write-Host ("[FAIL] {0}:{1}:{2} {3}" -f $file.FullName, $record.Line, $record.Column, $record.Message) -ForegroundColor Red
     }
 }
 
-$adapterNames = @(
+$removedEntryPoints = @(
     'start-dev.ps1',
     'redeploy.ps1',
     'full-deploy.ps1',
@@ -41,26 +43,56 @@ $adapterNames = @(
     'run-windows.ps1',
     'collect-logs.ps1'
 )
-foreach ($adapterName in $adapterNames) {
+foreach ($adapterName in $removedEntryPoints) {
     $adapterPath = Join-Path $scriptsRoot $adapterName
-    if (-not (Test-Path -LiteralPath $adapterPath)) { continue }
-    $content = Get-Content -LiteralPath $adapterPath -Raw
-    if ($content -match '&\s+[^\r\n]+\s+@arguments\b') {
+    if (Test-Path -LiteralPath $adapterPath) {
         $record = [pscustomobject]@{
             File = $adapterPath
             Line = 0
             Column = 0
-            Message = 'Adapter uses array splatting for named parameters; use a hashtable splat instead.'
+            Message = 'Removed entry point was restored. Use scripts\\torchat.ps1.'
         }
         [void]$failures.Add($record)
         Write-Host ("[FAIL] {0} {1}" -f $adapterName, $record.Message) -ForegroundColor Red
-    } else {
-        Write-Host ("[PASS] {0} named parameter forwarding" -f $adapterName) -ForegroundColor Green
     }
+}
+
+$entryPoint = Get-Content -LiteralPath (Join-Path $scriptsRoot 'torchat.ps1') -Raw
+$startupContracts = @(
+    @{
+        Pattern = "(?s)'redeploy'\s*\{.*?\`$OnionPolicy\s*=\s*'preserve'"
+        Message = 'redeploy must preserve the published relay onion'
+    },
+    @{
+        Pattern = "(?s)'deploy-clean'\s*\{.*?\`$OnionPolicy\s*=\s*'rotate'"
+        Message = 'deploy-clean must remain the explicit onion rotation workflow'
+    }
+)
+foreach ($contract in $startupContracts) {
+    if ($entryPoint -match $contract.Pattern) { continue }
+    [void]$failures.Add([pscustomobject]@{
+        File = (Join-Path $scriptsRoot 'torchat.ps1')
+        Line = 0
+        Column = 0
+        Message = $contract.Message
+    })
+    Write-Host ("[FAIL] torchat.ps1 {0}" -f $contract.Message) -ForegroundColor Red
+}
+
+$androidModulePath = Join-Path $scriptsRoot 'modules\TorChat.Android.psm1'
+$androidModule = Get-Content -LiteralPath $androidModulePath -Raw
+if ($androidModule -match "Where-Object\s*\{\s*`$_\s*-notmatch\s*'\\\._adb-tls-connect") {
+    [void]$failures.Add([pscustomobject]@{
+        File = $androidModulePath
+        Line = 0
+        Column = 0
+        Message = 'ADB mDNS transport serials must remain discoverable.'
+    })
+    Write-Host '[FAIL] TorChat.Android.psm1 filters a valid ADB mDNS device.' -ForegroundColor Red
 }
 
 if ($failures.Count -gt 0) {
     throw "PowerShell validation failed with $($failures.Count) error(s)."
 }
 
-Write-Host "Validated $($files.Count) PowerShell files and adapter forwarding." -ForegroundColor Cyan
+Write-Host "Validated $($files.Count) PowerShell files and the single public entry point." -ForegroundColor Cyan

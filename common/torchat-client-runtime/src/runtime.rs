@@ -97,6 +97,7 @@ where
         self.session.publish_tor_status(status);
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn report_transport_status(
         &mut self,
         component: crate::TransportComponent,
@@ -110,18 +111,19 @@ where
         endpoint: Option<String>,
         updated_at: i64,
     ) {
-        self.session.push_event(crate::RuntimeEvent::TransportStatusChanged {
-            component,
-            state,
-            detail: detail.into(),
-            progress,
-            latency_ms,
-            retry_attempt,
-            retry_in_ms,
-            generation,
-            endpoint,
-            updated_at,
-        });
+        self.session
+            .push_event(crate::RuntimeEvent::TransportStatusChanged {
+                component,
+                state,
+                detail: detail.into(),
+                progress,
+                latency_ms,
+                retry_attempt,
+                retry_in_ms,
+                generation,
+                endpoint,
+                updated_at,
+            });
     }
 
     pub fn apply_remote_profile(
@@ -157,18 +159,20 @@ where
         self.storage.profile()
     }
 
+    /// Compatibility helper for non-engine hosts. The production actor uses
+    /// `commit_nickname` after performing the network effect outside SQLite.
     pub fn set_nickname(&mut self, nickname: String) -> RuntimeResult<RuntimeProfile> {
-        let nickname = nickname.trim();
-        if nickname.len() < 2 || nickname.chars().count() > 32 {
-            return Err(RuntimeError::InvalidParams(
-                "nickname must contain 2-32 characters".to_owned(),
-            ));
-        }
+        let nickname = validate_nickname(nickname)?;
+        self.transport.update_profile(&nickname)?;
+        self.commit_nickname(nickname)
+    }
+
+    pub fn commit_nickname(&mut self, nickname: String) -> RuntimeResult<RuntimeProfile> {
+        let nickname = validate_nickname(nickname)?;
         let identity = self
             .storage
             .identity()?
             .ok_or_else(|| RuntimeError::Unavailable("runtime identity is not ready".to_owned()))?;
-        self.transport.update_profile(nickname)?;
         let profile = RuntimeProfile::from_identity(&identity, nickname.to_owned());
         self.storage.put_profile(profile.clone())?;
         self.session.push_event(RuntimeEvent::ProfileReady {
@@ -177,11 +181,24 @@ where
         Ok(profile)
     }
 
+    pub fn prepare_nickname(&self, nickname: String) -> RuntimeResult<String> {
+        validate_nickname(nickname)
+    }
+
     pub fn refresh_pairing_code(&mut self) -> RuntimeResult<crate::InviteCode> {
-        self.require_pairing_profile_ready()?;
+        self.prepare_refresh_pairing_code()?;
         let code = self.transport.refresh_pairing_code()?;
-        self.storage.put_pairing_code(code.clone())?;
+        self.commit_pairing_code(code.clone())?;
         Ok(code)
+    }
+
+    pub fn prepare_refresh_pairing_code(&self) -> RuntimeResult<()> {
+        self.require_pairing_profile_ready()
+    }
+
+    pub fn commit_pairing_code(&mut self, code: crate::InviteCode) -> RuntimeResult<()> {
+        self.storage.put_pairing_code(code.clone())?;
+        Ok(())
     }
 
     pub fn prepare_submit_pairing_code(&mut self, code: String) -> RuntimeResult<String> {
@@ -240,10 +257,7 @@ where
         Ok(())
     }
 
-    pub fn reconcile_outbox_pairing_contact(
-        &mut self,
-        installation_id: &str,
-    ) -> RuntimeResult<()> {
+    pub fn reconcile_outbox_pairing_contact(&mut self, installation_id: &str) -> RuntimeResult<()> {
         let contact = self
             .storage
             .contacts()?
@@ -290,7 +304,12 @@ where
 
     pub fn submit_pairing_code(&mut self, code: String) -> RuntimeResult<PairingItem> {
         let normalized = self.prepare_submit_pairing_code(code)?;
-        let item = normalize_pairing_item(self.transport.submit_pairing_code(&normalized)?);
+        let item = self.transport.submit_pairing_code(&normalized)?;
+        self.commit_submitted_pairing(item)
+    }
+
+    pub fn commit_submitted_pairing(&mut self, item: PairingItem) -> RuntimeResult<PairingItem> {
+        let item = normalize_pairing_item(item);
         self.storage.put_pairing_outbox(item.clone())?;
         self.session.push_event(RuntimeEvent::InviteStateChanged {
             pairing_id: Some(item.pairing_id.clone()),
@@ -376,6 +395,16 @@ where
         let sender = item
             .sender
             .ok_or_else(|| RuntimeError::Conflict("pairing sender does not exist".to_owned()))?;
+        if self
+            .storage
+            .contacts()?
+            .iter()
+            .any(|contact| contact.installation_id == sender.installation_id && !contact.blocked)
+        {
+            return Err(RuntimeError::Conflict(
+                "contact already exists; remove it before pairing again".to_owned(),
+            ));
+        }
         let capability = item.capability.ok_or_else(|| {
             RuntimeError::Conflict("pairing capability does not exist".to_owned())
         })?;
@@ -801,6 +830,31 @@ where
         Ok(contact)
     }
 
+    pub fn remove_relationship(
+        &mut self,
+        installation_id: &str,
+        preserve_history: bool,
+    ) -> RuntimeResult<()> {
+        if installation_id.trim().is_empty() {
+            return Err(RuntimeError::InvalidParams(
+                "contact installation id must not be empty".to_owned(),
+            ));
+        }
+        let removed_at = self.clock.now_ms();
+        self.storage
+            .remove_relationship(installation_id, removed_at, preserve_history)?;
+        self.session.push_event(RuntimeEvent::Changed {
+            kind: Some("contacts".to_owned()),
+        });
+        self.session.push_event(RuntimeEvent::Changed {
+            kind: Some("conversations".to_owned()),
+        });
+        self.session.push_event(RuntimeEvent::Changed {
+            kind: Some("messages".to_owned()),
+        });
+        Ok(())
+    }
+
     pub fn contact_accepts_messages(&self, installation_id: &str) -> RuntimeResult<bool> {
         Ok(!self
             .storage
@@ -1047,6 +1101,7 @@ where
         self.storage.put_message(message.clone())?;
         self.session.push_event(RuntimeEvent::MessageStateChanged {
             message_id: Some(parse_uuid(&message.id)?),
+            conversation_id: Some(message.conversation_id.clone()),
             state: Some(crate::MessageState::Queued),
         });
         self.prepare_message_send(message_id)
@@ -1089,6 +1144,7 @@ where
         self.storage.put_message(message.clone())?;
         self.session.push_event(RuntimeEvent::MessageStateChanged {
             message_id: Some(message_id),
+            conversation_id: Some(message.conversation_id.clone()),
             state: Some(crate::MessageState::Read),
         });
         Ok(message)
@@ -1131,7 +1187,9 @@ where
         if contact.blocked {
             return Err(RuntimeError::Conflict("contact is blocked".to_owned()));
         }
-        let message_id = Uuid::new_v4();
+        // UUIDv7 keeps the stable message identifier chronologically sortable
+        // when several messages share the same millisecond timestamp.
+        let message_id = Uuid::now_v7();
         let created_at = self.clock.now_ms();
         let message = ChatMessage {
             id: message_id.to_string(),
@@ -1158,6 +1216,7 @@ where
         self.storage.put_conversation(conversation)?;
         self.session.push_event(RuntimeEvent::MessageStateChanged {
             message_id: Some(message_id),
+            conversation_id: Some(message.conversation_id.clone()),
             state: Some(message.state.clone()),
         });
         self.session.push_event(RuntimeEvent::Changed {
@@ -1216,6 +1275,7 @@ where
             self.storage.put_message(message.clone())?;
             self.session.push_event(RuntimeEvent::MessageStateChanged {
                 message_id: Some(parse_uuid(&message.id)?),
+                conversation_id: Some(message.conversation_id.clone()),
                 state: Some(next_state),
             });
         }
@@ -1271,26 +1331,20 @@ where
                             "accepted pairing offer payload does not exist".to_owned(),
                         ));
                     }
-                    effects.push(
-                        pairing_send_effect(
-                            item.pairing_id,
-                            recipient_installation_id,
-                            crate::PairingSendKind::Offer,
-                            item.offer_payload,
-                        )
-                        .into(),
-                    );
+                    effects.push(pairing_send_effect(
+                        item.pairing_id,
+                        recipient_installation_id,
+                        crate::PairingSendKind::Offer,
+                        item.offer_payload,
+                    ));
                 }
                 InviteState::Rejected => {
-                    effects.push(
-                        pairing_send_effect(
-                            item.pairing_id,
-                            recipient_installation_id,
-                            crate::PairingSendKind::Rejection,
-                            None,
-                        )
-                        .into(),
-                    );
+                    effects.push(pairing_send_effect(
+                        item.pairing_id,
+                        recipient_installation_id,
+                        crate::PairingSendKind::Rejection,
+                        None,
+                    ));
                 }
                 _ => {}
             }
@@ -1388,10 +1442,12 @@ where
         self.storage.put_conversation(conversation)?;
         self.session.push_event(RuntimeEvent::MessageReceived {
             message_id: Some(message_id),
+            conversation_id: Some(conversation_id.to_owned()),
             text: Some(body.to_owned()),
         });
         self.session.push_event(RuntimeEvent::MessageStateChanged {
             message_id: Some(message_id),
+            conversation_id: Some(conversation_id.to_owned()),
             state: Some(message.state.clone()),
         });
         self.session
@@ -1432,6 +1488,7 @@ where
         self.storage.put_message(message.clone())?;
         self.session.push_event(RuntimeEvent::MessageStateChanged {
             message_id: Some(message_id),
+            conversation_id: Some(message.conversation_id.clone()),
             state: Some(next_state),
         });
         Ok(message)
@@ -1528,6 +1585,16 @@ where
         }
         Ok(())
     }
+}
+
+fn validate_nickname(nickname: String) -> RuntimeResult<String> {
+    let nickname = nickname.trim();
+    if nickname.len() < 2 || nickname.chars().count() > 32 {
+        return Err(RuntimeError::InvalidParams(
+            "nickname must contain 2-32 characters".to_owned(),
+        ));
+    }
+    Ok(nickname.to_owned())
 }
 
 fn transition_invite_state(
@@ -1973,17 +2040,20 @@ mod tests {
     #[test]
     fn submit_pairing_code_ignores_expired_outbox_item() {
         let mut runtime = runtime();
-        runtime.storage.put_pairing_outbox(PairingItem {
-            pairing_id: "expired-outbox".to_owned(),
-            sender: None,
-            capability: None,
-            expires_at: -1,
-            state: InviteState::Pending,
-            received: false,
-            available_actions: crate::pairing_available_actions(InviteState::Pending, false),
-            offer_invite_id: None,
-            offer_payload: None,
-        }).unwrap();
+        runtime
+            .storage
+            .put_pairing_outbox(PairingItem {
+                pairing_id: "expired-outbox".to_owned(),
+                sender: None,
+                capability: None,
+                expires_at: -1,
+                state: InviteState::Pending,
+                received: false,
+                available_actions: crate::pairing_available_actions(InviteState::Pending, false),
+                offer_invite_id: None,
+                offer_payload: None,
+            })
+            .unwrap();
 
         let item = runtime.submit_pairing_code("12345678".to_owned()).unwrap();
 
@@ -2049,7 +2119,10 @@ mod tests {
         let repaired = runtime.storage.pairing_outbox().unwrap()[0].clone();
         assert_eq!(repaired.state, InviteState::Completed);
         assert_eq!(
-            repaired.sender.as_ref().map(|value| value.installation_id.as_str()),
+            repaired
+                .sender
+                .as_ref()
+                .map(|value| value.installation_id.as_str()),
             Some("peer-1")
         );
     }
@@ -2165,13 +2238,11 @@ mod tests {
         assert_eq!(result.items.len(), 1);
         assert_eq!(result.acknowledgements.len(), 1);
         assert_eq!(result.acknowledgements[0].pairing_id, "pairing-1");
-        assert!(
-            !runtime.drain_events().into_iter().any(|event| matches!(
-                event,
-                RuntimeEvent::InviteReceived { pairing_id, .. }
-                    if pairing_id.as_deref() == Some("pairing-1")
-            ))
-        );
+        assert!(!runtime.drain_events().into_iter().any(|event| matches!(
+            event,
+            RuntimeEvent::InviteReceived { pairing_id, .. }
+                if pairing_id.as_deref() == Some("pairing-1")
+        )));
     }
 
     #[test]
@@ -2261,6 +2332,19 @@ mod tests {
     }
 
     #[test]
+    fn accept_pairing_rejects_an_existing_contact() {
+        let mut runtime = runtime();
+        runtime.storage.put_contact(contact()).unwrap();
+        let mut pairing = pairing("pairing-1", InviteState::Pending);
+        pairing.sender = Some(contact());
+        runtime.storage.put_pairing_inbox(pairing).unwrap();
+
+        let error = runtime.prepare_accept_pairing("pairing-1").unwrap_err();
+
+        assert!(error.to_string().contains("contact already exists"));
+    }
+
+    #[test]
     fn accept_pairing_prepared_persists_offer_artifacts() {
         let mut runtime = runtime();
         let mut pairing = pairing("pairing-1", InviteState::Pending);
@@ -2319,13 +2403,11 @@ mod tests {
             runtime.storage.pairing_outbox().unwrap()[0].state,
             InviteState::Completed
         );
-        assert!(
-            !runtime.drain_events().iter().any(|event| matches!(
-                event,
-                RuntimeEvent::InviteStateChanged { pairing_id, .. }
-                    if pairing_id.as_deref() == Some("pairing-1")
-            ))
-        );
+        assert!(!runtime.drain_events().iter().any(|event| matches!(
+            event,
+            RuntimeEvent::InviteStateChanged { pairing_id, .. }
+                if pairing_id.as_deref() == Some("pairing-1")
+        )));
     }
 
     #[test]
@@ -2358,7 +2440,10 @@ mod tests {
 
         let result = runtime.welcome_accepted(contact(), true, None).unwrap();
 
-        assert_eq!(result.conversation.status, crate::ConversationState::Verifying);
+        assert_eq!(
+            result.conversation.status,
+            crate::ConversationState::Verifying
+        );
         assert!(result.confirm_contact.is_none());
         assert_eq!(runtime.contacts().unwrap()[0].installation_id, "peer-1");
     }
@@ -2827,7 +2912,7 @@ mod tests {
             unread_after_first
         );
         assert_eq!(runtime.drain_events().len(), 0);
-        assert_eq!(event_count > 0, true);
+        assert!(event_count > 0);
     }
 
     #[test]

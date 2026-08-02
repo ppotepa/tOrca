@@ -7,17 +7,20 @@ void main() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
   });
 
-  test('automatic image download is private by default and persists', () async {
-    expect(
-      await ImageAttachmentPreferences.automaticDownloadEnabled(),
-      isFalse,
-    );
+  test(
+    'automatic encrypted image materialization is enabled by default',
+    () async {
+      expect(
+        await ImageAttachmentPreferences.automaticDownloadEnabled(),
+        isTrue,
+      );
 
-    await ImageAttachmentPreferences.setAutomaticDownloadEnabled(true);
+      await ImageAttachmentPreferences.setAutomaticDownloadEnabled(false);
 
-    expect(
-      await ImageAttachmentPreferences.automaticDownloadEnabled(),
-      isTrue,
-    );
-  });
+      expect(
+        await ImageAttachmentPreferences.automaticDownloadEnabled(),
+        isFalse,
+      );
+    },
+  );
 }

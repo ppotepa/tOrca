@@ -29,7 +29,10 @@ class ImageAttachmentPreferences {
 
   static Future<bool> automaticDownloadEnabled() async {
     final preferences = await SharedPreferences.getInstance();
-    return preferences.getBool(imageAutoDownloadPreferenceKey) ?? false;
+    // Image payloads are already part of the end-to-end encrypted message.
+    // "Download" only materializes that payload in the encrypted local cache,
+    // so automatic delivery is the safe and expected default.
+    return preferences.getBool(imageAutoDownloadPreferenceKey) ?? true;
   }
 
   static Future<void> setAutomaticDownloadEnabled(bool value) async {
@@ -71,63 +74,63 @@ class EncryptedImageStore {
       _serialized(() async => (await _file(messageId)).exists());
 
   Future<Uint8List?> read(String messageId) => _serialized(() async {
-        final file = await _file(messageId);
-        if (!await file.exists()) return null;
-        try {
-          final payload = await file.readAsBytes();
-          return await _decrypt(payload, messageId);
-        } catch (_) {
-          // A restored backup may contain files encrypted with an unavailable
-          // platform key. Treat such files as disposable cache, never as chat
-          // history, and let the inline encrypted message repopulate them.
-          try {
-            await file.delete();
-          } catch (_) {
-            // Cache cleanup is best effort. The failed read still returns null.
-          }
-          return null;
-        }
-      });
+    final file = await _file(messageId);
+    if (!await file.exists()) return null;
+    try {
+      final payload = await file.readAsBytes();
+      return await _decrypt(payload, messageId);
+    } catch (_) {
+      // A restored backup may contain files encrypted with an unavailable
+      // platform key. Treat such files as disposable cache, never as chat
+      // history, and let the inline encrypted message repopulate them.
+      try {
+        await file.delete();
+      } catch (_) {
+        // Cache cleanup is best effort. The failed read still returns null.
+      }
+      return null;
+    }
+  });
 
   Future<void> put(String messageId, Uint8List bytes) => _serialized(() async {
-        if (messageId.trim().isEmpty) {
-          throw const FormatException('Identyfikator wiadomości jest pusty.');
-        }
-        if (bytes.isEmpty) {
-          throw const FormatException('Obraz jest pusty.');
-        }
-        final file = await _file(messageId);
-        final encrypted = await _encrypt(bytes, messageId);
-        final temporary = File('${file.path}.tmp');
-        await temporary.writeAsBytes(encrypted, flush: true);
-        if (await file.exists()) await file.delete();
-        await temporary.rename(file.path);
-      });
+    if (messageId.trim().isEmpty) {
+      throw const FormatException('Identyfikator wiadomości jest pusty.');
+    }
+    if (bytes.isEmpty) {
+      throw const FormatException('Obraz jest pusty.');
+    }
+    final file = await _file(messageId);
+    final encrypted = await _encrypt(bytes, messageId);
+    final temporary = File('${file.path}.tmp');
+    await temporary.writeAsBytes(encrypted, flush: true);
+    if (await file.exists()) await file.delete();
+    await temporary.rename(file.path);
+  });
 
   Future<void> remove(String messageId) => _serialized(() async {
-        final file = await _file(messageId);
-        if (await file.exists()) await file.delete();
-      });
+    final file = await _file(messageId);
+    if (await file.exists()) await file.delete();
+  });
 
   Future<ImageCacheUsage> usage() => _serialized(() async {
-        final directory = await _directory();
-        var files = 0;
-        var bytes = 0;
-        await for (final entity in directory.list(followLinks: false)) {
-          if (entity is! File || !entity.path.endsWith(_extension)) continue;
-          files += 1;
-          bytes += await entity.length();
-        }
-        return ImageCacheUsage(files: files, bytes: bytes);
-      });
+    final directory = await _directory();
+    var files = 0;
+    var bytes = 0;
+    await for (final entity in directory.list(followLinks: false)) {
+      if (entity is! File || !entity.path.endsWith(_extension)) continue;
+      files += 1;
+      bytes += await entity.length();
+    }
+    return ImageCacheUsage(files: files, bytes: bytes);
+  });
 
   Future<void> clear() => _serialized(() async {
-        final directory = await _directoryProvider();
-        if (await directory.exists()) {
-          await directory.delete(recursive: true);
-        }
-        await directory.create(recursive: true);
-      });
+    final directory = await _directoryProvider();
+    if (await directory.exists()) {
+      await directory.delete(recursive: true);
+    }
+    await directory.create(recursive: true);
+  });
 
   Future<T> _serialized<T>(Future<T> Function() operation) {
     final completer = Completer<T>();
@@ -191,11 +194,7 @@ class EncryptedImageStore {
     offset += nonceLength;
     final mac = Mac(payload.sublist(offset, offset + macLength));
     offset += macLength;
-    final box = SecretBox(
-      payload.sublist(offset),
-      nonce: nonce,
-      mac: mac,
-    );
+    final box = SecretBox(payload.sublist(offset), nonce: nonce, mac: mac);
     final cleartext = await _cipher.decrypt(
       box,
       secretKey: await _keyProvider(),
@@ -218,7 +217,7 @@ class EncryptedImageStore {
         final bytes = base64Decode(encoded);
         if (bytes.length == 32) return SecretKey(bytes);
       } catch (_) {
-        // Replace malformed legacy key material below.
+        // Replace malformed key material below.
       }
     }
     final bytes = _randomBytes(32);

@@ -47,7 +47,8 @@ class _ThemedActivityIndicatorState extends State<ThemedActivityIndicator> {
   @override
   Widget build(BuildContext context) {
     final activity = context.activityTheme;
-    final reduceMotion = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    final reduceMotion =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
     final color = widget.color ?? Theme.of(context).colorScheme.primary;
     final labelStyle = Theme.of(context).textTheme.labelMedium?.copyWith(
       color: color,
@@ -65,7 +66,9 @@ class _ThemedActivityIndicatorState extends State<ThemedActivityIndicator> {
         : Text(
             activity.frames.isEmpty
                 ? '…'
-                : activity.frames[reduceMotion ? 0 : _frame % activity.frames.length],
+                : activity.frames[reduceMotion
+                      ? 0
+                      : _frame % activity.frames.length],
             style: labelStyle?.copyWith(fontSize: widget.compact ? 15 : 22),
           );
 

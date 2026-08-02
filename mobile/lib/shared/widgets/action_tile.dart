@@ -23,14 +23,10 @@ class ActionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => InfoTile(
-    leading: busy
-        ? const ThemedActivityIndicator(compact: true)
-        : leading,
+    leading: busy ? const ThemedActivityIndicator(compact: true) : leading,
     title: busy ? busyLabel ?? title : title,
     subtitle: subtitle,
     onTap: busy ? null : onTap,
-    trailing: busy
-        ? const SizedBox.shrink()
-        : const Icon(Icons.chevron_right),
+    trailing: busy ? const SizedBox.shrink() : const Icon(Icons.chevron_right),
   );
 }

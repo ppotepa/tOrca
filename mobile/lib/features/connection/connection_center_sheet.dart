@@ -24,11 +24,16 @@ class ConnectionCenterSheet extends ConsumerWidget {
     );
     final readiness = state.connectionReadiness;
     final summary = state.connectionSummary;
-    final contacts = snapshot?.contacts ?? state.contacts;
-    final conversations = snapshot?.conversations ?? state.conversations;
-    final queued = state.messages.where((message) =>
-        message.state == MessageState.queued ||
-        message.state == MessageState.sending).length;
+    final contacts = snapshot?.contacts ?? const <ContactRecord>[];
+    final conversations =
+        snapshot?.conversations ?? const <ConversationSummary>[];
+    final queued = state.messages
+        .where(
+          (message) =>
+              message.state == MessageState.queued ||
+              message.state == MessageState.sending,
+        )
+        .length;
     final failed = state.messages
         .where((message) => message.state == MessageState.failed)
         .length;
@@ -55,9 +60,15 @@ class ConnectionCenterSheet extends ConsumerWidget {
                 style: Theme.of(context).textTheme.titleLarge,
               ),
               const SizedBox(height: 4),
-              Text(summary.status, style: Theme.of(context).textTheme.titleSmall),
+              Text(
+                summary.status,
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
               const SizedBox(height: 2),
-              Text(summary.detail, style: Theme.of(context).textTheme.bodySmall),
+              Text(
+                summary.detail,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
               const SizedBox(height: 20),
               Text(
                 'Infrastruktura aplikacji',
@@ -161,8 +172,9 @@ class ConnectionCenterSheet extends ConsumerWidget {
 
   String _diagnosticText(AppState state, ApplicationSnapshot? snapshot) {
     final readiness = state.connectionReadiness;
-    final contacts = snapshot?.contacts ?? state.contacts;
-    final conversations = snapshot?.conversations ?? state.conversations;
+    final contacts = snapshot?.contacts ?? const <ContactRecord>[];
+    final conversations =
+        snapshot?.conversations ?? const <ConversationSummary>[];
     final components = readiness.components
         .map(
           (component) =>
@@ -240,8 +252,7 @@ class _StatusTile extends StatelessWidget {
     final normalized = state.toLowerCase();
     final color = normalized.contains('ready') || normalized == 'czysta'
         ? scheme.primary
-        : normalized.contains('error') ||
-              normalized.contains('failed')
+        : normalized.contains('error') || normalized.contains('failed')
         ? scheme.error
         : scheme.tertiary;
     return ListTile(
@@ -251,11 +262,7 @@ class _StatusTile extends StatelessWidget {
       subtitle: Text(detail),
       trailing: Text(
         trailing ?? state,
-        style: TextStyle(
-          color: color,
-          fontFamily: 'monospace',
-          fontSize: 11,
-        ),
+        style: TextStyle(color: color, fontFamily: 'monospace', fontSize: 11),
       ),
     );
   }

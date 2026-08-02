@@ -118,6 +118,48 @@ impl RuntimeSession {
     pub fn has_pending_events(&self) -> bool {
         !self.events.is_empty() || !self.staged_events.is_empty()
     }
+
+    /// Returns whether the current transaction changed a durable projection
+    /// visible to a client and the conversations whose projections changed.
+    /// Transport, Tor and ephemeral presence signals deliberately do not
+    /// advance the SQLite projection revision.
+    pub fn pending_projection_changes(&self) -> (bool, Vec<String>) {
+        let mut application = false;
+        let mut conversations = std::collections::BTreeSet::new();
+        for event in self.events.iter().chain(self.staged_events.iter()) {
+            match event {
+                RuntimeEvent::ProfileReady { .. }
+                | RuntimeEvent::InviteReceived { .. }
+                | RuntimeEvent::InviteStateChanged { .. }
+                | RuntimeEvent::PeerEndpointChanged { .. }
+                | RuntimeEvent::PeerConnectionChanged { .. }
+                | RuntimeEvent::Changed { .. } => application = true,
+                RuntimeEvent::MessageReceived {
+                    conversation_id, ..
+                }
+                | RuntimeEvent::MessageStateChanged {
+                    conversation_id, ..
+                }
+                | RuntimeEvent::ConversationReadChanged {
+                    conversation_id, ..
+                } => {
+                    application = true;
+                    if let Some(conversation_id) = conversation_id {
+                        conversations.insert(conversation_id.clone());
+                    }
+                }
+                RuntimeEvent::RuntimeReady { .. }
+                | RuntimeEvent::TorStatus { .. }
+                | RuntimeEvent::TransportStatusChanged { .. }
+                | RuntimeEvent::TypingChanged { .. }
+                | RuntimeEvent::PresenceChanged { .. }
+                | RuntimeEvent::RuntimeError { .. }
+                | RuntimeEvent::RuntimeLog { .. }
+                | RuntimeEvent::ProjectionChanged { .. } => {}
+            }
+        }
+        (application, conversations.into_iter().collect())
+    }
 }
 
 #[cfg(test)]
@@ -159,6 +201,21 @@ mod tests {
 
         assert_eq!(session.drain_events().len(), 1);
         assert!(!session.has_pending_events());
+    }
+
+    #[test]
+    fn transport_events_do_not_dirty_persistent_projections() {
+        let mut session = RuntimeSession::new();
+        session.begin_transaction();
+        session.push_event(RuntimeEvent::TorStatus {
+            phase: crate::RuntimeStatusPhase::Connected,
+            label: "ready".to_owned(),
+            detail: String::new(),
+            progress: Some(100),
+            latency_ms: None,
+            retry_attempt: 0,
+        });
+        assert_eq!(session.pending_projection_changes(), (false, Vec::new()));
     }
 
     #[test]

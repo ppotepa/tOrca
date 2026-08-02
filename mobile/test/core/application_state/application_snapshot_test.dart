@@ -5,6 +5,24 @@ import 'package:torchat_mobile/core/application_state/application_state_store.da
 import 'package:torchat_mobile/core/models/domain.dart';
 
 void main() {
+  test(
+    'application watcher retains state and cannot miss later snapshots',
+    () async {
+      final store = ApplicationStateStore();
+      store.hydrate(const ApplicationSnapshot(generation: 1));
+      final generations = <int?>[];
+
+      final subscription = store.watchApplication().listen(
+        (snapshot) => generations.add(snapshot?.generation),
+      );
+      store.hydrate(const ApplicationSnapshot(generation: 2));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(generations, [1, 2]);
+      subscription.cancel();
+    },
+  );
+
   test('store rejects snapshots older than the hydrated generation', () {
     final store = ApplicationStateStore();
     store.hydrate(

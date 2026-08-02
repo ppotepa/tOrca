@@ -566,7 +566,7 @@ _RetroPalette _retroPalette(
     (TorChatRetroPalette.arcade, false) => const _RetroPalette(
       primary: Color(0xffE52521),
       info: Color(0xff006FA6),
-      accent: Color(0xffA86F00),
+      accent: Color(0xffAA7200),
       background: Color(0xffF4F1E8),
       surface: Color(0xffFFFFFF),
       raisedSurface: Color(0xffFFF4C2),

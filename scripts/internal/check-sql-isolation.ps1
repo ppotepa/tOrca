@@ -8,6 +8,15 @@ $sqlRoots = @(
     (Join-Path $repoRoot 'mobile\android\app\src\main\assets\sql'),
     (Join-Path $repoRoot 'infra\db\migrations')
 )
+$connectionPragmas = Join-Path $repoRoot 'common\torchat-client-engine\sql\queries\connection_pragmas.sql'
+if (Test-Path -LiteralPath $connectionPragmas) {
+    $pragmas = Get-Content -LiteralPath $connectionPragmas -Raw
+    foreach ($forbidden in @('CREATE TABLE', 'CREATE TRIGGER', 'CREATE VIEW', 'ALTER TABLE', 'INSERT INTO')) {
+        if ($pragmas -match [regex]::Escape($forbidden)) {
+            throw "Connection pragmas contain schema/data SQL: $forbidden"
+        }
+    }
+}
 
 $forbidden = @(
     'message_state_update.sql',

@@ -6,26 +6,30 @@ use super::types::{PeerDeliveryTag, PeerOutboundCommand};
 
 #[derive(Default)]
 pub(super) struct CommandQueues {
-    messages: VecDeque<PeerOutboundCommand>,
-    receipts: VecDeque<PeerOutboundCommand>,
+    durable: VecDeque<PeerOutboundCommand>,
     endpoint_update: Option<PeerOutboundCommand>,
+    probe: Option<PeerOutboundCommand>,
     ephemeral: Option<PeerOutboundCommand>,
     dedupe: HashSet<String>,
-    message_streak: u8,
 }
 
 impl CommandQueues {
     pub(super) fn enqueue(&mut self, command: PeerOutboundCommand) {
-        if matches!(&command.delivery, PeerDeliveryTag::Message { .. }) {
+        if matches!(
+            &command.delivery,
+            PeerDeliveryTag::Message { .. } | PeerDeliveryTag::Receipt { .. }
+        ) {
             if self.insert_dedupe(&command) {
-                self.messages.push_back(command);
-            }
-        } else if matches!(&command.delivery, PeerDeliveryTag::Receipt { .. }) {
-            if self.insert_dedupe(&command) {
-                self.receipts.push_back(command);
+                // Message and receipt ciphertexts advance the same MLS state.
+                // Their encryption/enqueue order must therefore also be their
+                // wire order; prioritizing messages over earlier receipts can
+                // skip a generation at the receiver.
+                self.durable.push_back(command);
             }
         } else if matches!(&command.delivery, PeerDeliveryTag::EndpointUpdate) {
             self.endpoint_update = Some(command);
+        } else if matches!(&command.delivery, PeerDeliveryTag::Probe) {
+            self.probe = Some(command);
         } else {
             self.ephemeral = Some(command);
         }
@@ -45,50 +49,43 @@ impl CommandQueues {
     }
 
     pub(super) fn has_dial_worthy(&self) -> bool {
-        !self.messages.is_empty() || !self.receipts.is_empty() || self.endpoint_update.is_some()
+        !self.durable.is_empty() || self.endpoint_update.is_some() || self.probe.is_some()
     }
 
     pub(super) fn is_empty(&self) -> bool {
-        self.messages.is_empty()
-            && self.receipts.is_empty()
+        self.durable.is_empty()
             && self.endpoint_update.is_none()
+            && self.probe.is_none()
             && self.ephemeral.is_none()
     }
 
     pub(super) fn connection_template(&self) -> Option<&PeerOutboundCommand> {
-        self.messages
+        self.durable
             .front()
-            .or_else(|| self.receipts.front())
             .or(self.endpoint_update.as_ref())
+            .or(self.probe.as_ref())
     }
 
     pub(super) fn pop_next(&mut self, session_ready: bool) -> Option<PeerOutboundCommand> {
-        if !self.messages.is_empty()
-            && (self.message_streak < 8 || self.receipts.is_empty())
-        {
-            self.message_streak = self.message_streak.saturating_add(1);
-            return self.messages.pop_front();
-        }
-        if let Some(receipt) = self.receipts.pop_front() {
-            self.message_streak = 0;
-            return Some(receipt);
-        }
-        if let Some(message) = self.messages.pop_front() {
-            self.message_streak = self.message_streak.saturating_add(1);
-            return Some(message);
+        if let Some(durable) = self.durable.pop_front() {
+            return Some(durable);
         }
         self.endpoint_update
             .take()
+            .or_else(|| self.probe.take())
             .or_else(|| session_ready.then(|| self.ephemeral.take()).flatten())
     }
 
     pub(super) fn push_front(&mut self, command: PeerOutboundCommand) {
-        if matches!(&command.delivery, PeerDeliveryTag::Message { .. }) {
-            self.messages.push_front(command);
-        } else if matches!(&command.delivery, PeerDeliveryTag::Receipt { .. }) {
-            self.receipts.push_front(command);
+        if matches!(
+            &command.delivery,
+            PeerDeliveryTag::Message { .. } | PeerDeliveryTag::Receipt { .. }
+        ) {
+            self.durable.push_front(command);
         } else if matches!(&command.delivery, PeerDeliveryTag::EndpointUpdate) {
             self.endpoint_update = Some(command);
+        } else if matches!(&command.delivery, PeerDeliveryTag::Probe) {
+            self.probe = Some(command);
         } else {
             self.ephemeral = Some(command);
         }
@@ -100,11 +97,11 @@ impl CommandQueues {
 
     pub(super) fn drain_failed(&mut self) -> Vec<PeerOutboundCommand> {
         let mut commands = Vec::new();
-        commands.extend(self.messages.drain(..));
-        commands.extend(self.receipts.drain(..));
+        commands.extend(self.durable.drain(..));
         if let Some(command) = self.endpoint_update.take() {
             commands.push(command);
         }
+        self.probe = None;
         self.ephemeral = None;
         for command in &commands {
             self.complete(&command.delivery);
@@ -123,6 +120,7 @@ pub(super) struct ActiveDelivery {
 pub(super) struct EndpointProbe {
     pub(super) endpoint_sequence: Option<u64>,
     pub(super) sent_at: Instant,
+    pub(super) delivery: PeerDeliveryTag,
 }
 
 #[cfg(test)]
@@ -210,5 +208,33 @@ mod tests {
 
         assert!(queues.pop_next(true).is_some());
         assert!(queues.pop_next(true).is_none());
+    }
+
+    #[test]
+    fn durable_ciphertexts_preserve_mls_generation_order() {
+        let mut queues = CommandQueues::default();
+        let receipt_id = Uuid::new_v4();
+        let message_id = Uuid::new_v4();
+        queues.enqueue(command(
+            PeerDeliveryTag::Receipt {
+                message_id: receipt_id.to_string(),
+            },
+            receipt_id,
+        ));
+        queues.enqueue(command(
+            PeerDeliveryTag::Message {
+                message_id: message_id.to_string(),
+            },
+            message_id,
+        ));
+
+        assert!(matches!(
+            queues.pop_next(true).unwrap().delivery,
+            PeerDeliveryTag::Receipt { .. }
+        ));
+        assert!(matches!(
+            queues.pop_next(true).unwrap().delivery,
+            PeerDeliveryTag::Message { .. }
+        ));
     }
 }

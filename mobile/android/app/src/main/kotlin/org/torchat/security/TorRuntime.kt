@@ -26,6 +26,11 @@ data class TorRuntimeConfig(
  * support) and exposes its SOCKS port after its control socket is ready.
  */
 class TorRuntime(private val context: Context) {
+    private companion object {
+        val BOOTSTRAP_PROGRESS = Regex("\\bPROGRESS=(\\d+)")
+        val BOOTSTRAP_SUMMARY = Regex("\\bSUMMARY=\\\"([^\\\"]*)\\\"")
+    }
+
     private var service: TorService? = null
     private var connection: ServiceConnection? = null
     private var config: TorRuntimeConfig? = null
@@ -91,20 +96,22 @@ class TorRuntime(private val context: Context) {
                 if (attempt == 0 || socksPort > 0) {
                     Log.i("TorChat-Tor", "SOCKS probe attempt=$attempt servicePort=$publishedPort selected=$socksPort")
                 }
-                // The service publishes the port from Tor's control socket;
-                // the relay layer already has retry/backoff for circuit bootstrapping.
+                // The service publishes the port from Tor's control socket.
+                // Circuit readiness is verified below before the endpoint is
+                // exposed to the shared relay engine.
                 if (publishedPort > 0 || socksPort > 0) break
                 Thread.sleep(500)
             }
             Log.i("TorChat-Tor", "Native Tor SOCKS port detected: $socksPort")
             check(socksPort > 0) { "Native Tor did not publish a SOCKS port" }
 
-            Log.i("TorChat-Tor", "Tor SOCKS ready on port $socksPort; onion circuits are on demand")
-            // A listening SOCKS port proves that the local Tor process is
-            // usable, not that the first remote onion circuit has completed.
-            // Reporting 100 here made the UI show "Tor gotowy" and then
-            // regress while the shared engine was still connecting to relay.
-            onBootstrapProgress(85, "Tor SOCKS gotowy · rozgrzewanie obwodu relay")
+            // SOCKS availability is only a local process milestone. Wait for
+            // Tor's control-port bootstrap state before exposing it to the
+            // shared engine as a transport endpoint; otherwise the relay
+            // bootstrap starts against a cold circuit and exhausts long
+            // request/backoff windows on every fresh deploy.
+            awaitBootstrap(onBootstrapProgress)
+            Log.i("TorChat-Tor", "Tor bootstrap completed on SOCKS port $socksPort")
             return prepared.copy(socksPort = socksPort)
         } catch (error: Throwable) {
             failure = error
@@ -117,6 +124,37 @@ class TorRuntime(private val context: Context) {
         Socket().use { it.connect(InetSocketAddress("127.0.0.1", port), 500) }
         true
     }.getOrDefault(false)
+
+    private fun awaitBootstrap(onBootstrapProgress: (Int, String) -> Unit) {
+        var lastProgress = -1
+        var lastDetail = ""
+        for (attempt in 0 until 240) {
+            val bootstrap = runCatching {
+                service?.torControlConnection?.getInfo("status/bootstrap-phase")
+            }.getOrNull().orEmpty()
+            val progress = BOOTSTRAP_PROGRESS.find(bootstrap)
+                ?.groupValues
+                ?.getOrNull(1)
+                ?.toIntOrNull()
+                ?.coerceIn(0, 100)
+                ?: 0
+            val detail = BOOTSTRAP_SUMMARY.find(bootstrap)
+                ?.groupValues
+                ?.getOrNull(1)
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+                ?: if (progress >= 100) "Tor gotowy" else "Tor bootstrap: $progress%"
+            if (progress != lastProgress || detail != lastDetail || attempt == 0) {
+                Log.i("TorChat-Tor", "Tor bootstrap probe attempt=$attempt progress=$progress detail=$detail")
+                onBootstrapProgress(progress, detail)
+                lastProgress = progress
+                lastDetail = detail
+            }
+            if (progress >= 100) return
+            Thread.sleep(500)
+        }
+        error("Tor bootstrap did not reach 100% within 120 seconds")
+    }
 
     @Synchronized
     fun configureOnionService(

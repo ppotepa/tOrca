@@ -9,10 +9,10 @@ import '../../app/ui_operation_registry.dart';
 import '../../core/models/domain.dart';
 import '../../shared/async/busy_surface.dart';
 import '../../shared/async/themed_activity_indicator.dart';
-import '../../shared/formatters/conversation_display.dart';
 import '../../shared/formatters/message_timestamps.dart';
 import '../../shared/widgets/feature_header.dart';
 import '../../shared/widgets/identity_avatar.dart';
+import '../../shared/widgets/message_delivery_surface.dart';
 
 class ChatsView extends ConsumerStatefulWidget {
   const ChatsView({
@@ -153,17 +153,15 @@ class _ChatsViewState extends ConsumerState<ChatsView> {
     final panelState = messagesState.busy
         ? messagesState
         : openState.busy
-            ? openState
-            : startState;
+        ? openState
+        : startState;
 
     return BusySurface(
       state: panelState,
       presentation: widget.messages.isEmpty
           ? BusyPresentation.replace
           : BusyPresentation.overlay,
-      label: startState.busy
-          ? 'Uruchamianie rozmowy…'
-          : 'Ładowanie rozmowy…',
+      label: startState.busy ? 'Uruchamianie rozmowy…' : 'Ładowanie rozmowy…',
       child: Scaffold(
         backgroundColor: Colors.transparent,
         appBar: _ConversationHeader(
@@ -271,21 +269,30 @@ class _ConversationHeader extends StatelessWidget
   @override
   Widget build(BuildContext context) {
     final shell = context.shellTheme;
-    var conversationState = ConversationState.pending;
-    for (final conversation in conversations) {
-      if (conversation.contactId == contact.id) {
-        conversationState = conversation.state;
-        break;
-      }
-    }
-    final route = contact.peerConnectionStatus == PeerConnectionStatus.connected
-        ? 'bezpośrednio przez Tor P2P'
-        : 'przez Tor relay';
+    final route = switch (contact.transportPolicy) {
+      ContactTransportPolicy.relayOnly => 'przez Tor relay',
+      ContactTransportPolicy.peerWithRelayFallback =>
+        contact.peerConnectionStatus == PeerConnectionStatus.connected
+            ? 'bezpośrednio przez Tor P2P'
+            : 'P2P z awaryjnym relay',
+      ContactTransportPolicy.peerOnly => 'przez Tor P2P',
+    };
+    final peerConnected =
+        contact.peerConnectionStatus == PeerConnectionStatus.connected;
+    final peerState = switch (contact.peerConnectionStatus) {
+      PeerConnectionStatus.connecting => 'P2P łączy się',
+      PeerConnectionStatus.authenticating => 'P2P uwierzytelnia',
+      PeerConnectionStatus.backoff => 'P2P ponawia',
+      PeerConnectionStatus.connected => 'P2P połączony',
+      PeerConnectionStatus.offline => 'P2P offline',
+    };
     final presence = peerTyping
         ? 'pisze…'
+        : peerConnected
+        ? 'P2P połączony · $route'
         : peerOnline
-            ? 'online · $route'
-            : '${conversationState.presenceLabel} · $route';
+        ? 'online · $route'
+        : '$peerState · $route';
 
     return AppBar(
       toolbarHeight: 68,
@@ -343,10 +350,10 @@ class _ConversationHeader extends StatelessWidget
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                              color: peerTyping || peerOnline
-                                  ? context.statusTheme.success
-                                  : shell.navigationForeground,
-                            ),
+                          color: peerTyping || peerOnline
+                              ? context.statusTheme.success
+                              : shell.navigationForeground,
+                        ),
                       ),
                     ],
                   ),
@@ -375,9 +382,7 @@ class _ConversationHeader extends StatelessWidget
           icon: const ThemedIcon(Icons.more_vert),
           onSelected: (value) async {
             if (value == 'fingerprint') {
-              await Clipboard.setData(
-                ClipboardData(text: contact.fingerprint),
-              );
+              await Clipboard.setData(ClipboardData(text: contact.fingerprint));
             }
           },
           itemBuilder: (_) => const [
@@ -432,8 +437,8 @@ class _MessageTimeline extends StatelessWidget {
                 searchActive
                     ? 'Brak wiadomości pasujących do wyszukiwania.'
                     : canSend
-                        ? 'To początek rozmowy z ${contact.displayName}.'
-                        : 'Rozmowa oczekuje na bezpieczny handshake MLS.',
+                    ? 'To początek rozmowy z ${contact.displayName}.'
+                    : 'Rozmowa oczekuje na bezpieczny handshake MLS.',
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
@@ -457,12 +462,15 @@ class _MessageTimeline extends StatelessWidget {
             final next = index + 1 >= messages.length
                 ? null
                 : messages[index + 1];
-            final showDay = previous == null ||
+            final showDay =
+                previous == null ||
                 !isSameMessageDay(previous.createdAt, message.createdAt);
-            final startsGroup = previous == null ||
+            final startsGroup =
+                previous == null ||
                 previous.outgoing != message.outgoing ||
                 showDay;
-            final endsGroup = next == null ||
+            final endsGroup =
+                next == null ||
                 next.outgoing != message.outgoing ||
                 !isSameMessageDay(message.createdAt, next.createdAt);
 
@@ -493,7 +501,7 @@ class MessageBubble extends ConsumerWidget {
   const MessageBubble({
     super.key,
     required this.message,
-    required this.contactName,
+    this.contactName = '',
     required this.startsGroup,
     required this.endsGroup,
     required this.onRetry,
@@ -535,71 +543,74 @@ class MessageBubble extends ConsumerWidget {
         onSecondaryTapDown: busy
             ? null
             : (details) => _showMenu(context, details.globalPosition),
-        child: AnimatedOpacity(
-          duration: const Duration(milliseconds: 120),
-          opacity: busy ? .58 : 1,
-          child: Container(
-            constraints: const BoxConstraints(maxWidth: 720),
-            decoration: BoxDecoration(
-              color: background,
-              borderRadius: BorderRadius.only(
-                topLeft: Radius.circular(startsGroup ? radius : radius / 3),
-                topRight: Radius.circular(startsGroup ? radius : radius / 3),
-                bottomLeft: Radius.circular(
-                  mine || !endsGroup ? radius : radius / 4,
+        child: MessageDeliverySurface(
+          state: message.state,
+          child: AnimatedOpacity(
+            duration: const Duration(milliseconds: 120),
+            opacity: busy ? .58 : 1,
+            child: Container(
+              constraints: const BoxConstraints(maxWidth: 720),
+              decoration: BoxDecoration(
+                color: background,
+                borderRadius: BorderRadius.only(
+                  topLeft: Radius.circular(startsGroup ? radius : radius / 3),
+                  topRight: Radius.circular(startsGroup ? radius : radius / 3),
+                  bottomLeft: Radius.circular(
+                    mine || !endsGroup ? radius : radius / 4,
+                  ),
+                  bottomRight: Radius.circular(
+                    mine && endsGroup ? radius / 4 : radius,
+                  ),
                 ),
-                bottomRight: Radius.circular(
-                  mine && endsGroup ? radius / 4 : radius,
-                ),
+                border: theme.bubbleBorderWidth > 0
+                    ? Border.all(
+                        color: theme.composerBorder,
+                        width: theme.bubbleBorderWidth,
+                      )
+                    : null,
+                boxShadow: theme.bubbleShadow,
               ),
-              border: theme.bubbleBorderWidth > 0
-                  ? Border.all(
-                      color: theme.composerBorder,
-                      width: theme.bubbleBorderWidth,
-                    )
-                  : null,
-              boxShadow: theme.bubbleShadow,
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                if (startsGroup)
-                  _BubbleHeader(
-                    label: mine ? 'Ty' : contactName,
-                    foreground: foreground,
-                  ),
-                Padding(
-                  padding: theme.bubblePadding,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (message.replyTo != null) ...[
-                        _QuotedMessage(
-                          reply: message.replyTo!,
-                          foreground: foreground,
+              clipBehavior: Clip.antiAlias,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (startsGroup)
+                    _BubbleHeader(
+                      label: mine ? 'Ty' : contactName,
+                      foreground: foreground,
+                    ),
+                  Padding(
+                    padding: theme.bubblePadding,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (message.replyTo != null) ...[
+                          _QuotedMessage(
+                            reply: message.replyTo!,
+                            foreground: foreground,
+                          ),
+                          const SizedBox(height: 7),
+                        ],
+                        SelectableText(
+                          message.text,
+                          style: Theme.of(
+                            context,
+                          ).textTheme.bodyMedium?.copyWith(color: foreground),
                         ),
-                        const SizedBox(height: 7),
                       ],
-                      SelectableText(
-                        message.text,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: foreground,
-                            ),
-                      ),
-                    ],
+                    ),
                   ),
-                ),
-                _BubbleFooter(
-                  message: message,
-                  foreground: foreground,
-                  busyLabel: retryState.busy
-                      ? 'Ponawianie…'
-                      : deleteState.busy
-                          ? 'Usuwanie…'
-                          : null,
-                ),
-              ],
+                  _BubbleFooter(
+                    message: message,
+                    foreground: foreground,
+                    busyLabel: retryState.busy
+                        ? 'Ponawianie…'
+                        : deleteState.busy
+                        ? 'Usuwanie…'
+                        : null,
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -608,7 +619,8 @@ class MessageBubble extends ConsumerWidget {
   }
 
   Future<void> _showMenu(BuildContext context, Offset position) async {
-    final overlay = Overlay.of(context).context.findRenderObject()! as RenderBox;
+    final overlay =
+        Overlay.of(context).context.findRenderObject()! as RenderBox;
     final action = await showMenu<String>(
       context: context,
       position: RelativeRect.fromRect(
@@ -646,16 +658,16 @@ class _BubbleHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.fromLTRB(12, 7, 12, 6),
-        color: foreground.withValues(alpha: .055),
-        child: Text(
-          label,
-          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: foreground.withValues(alpha: .82),
-                fontWeight: FontWeight.w700,
-              ),
-        ),
-      );
+    padding: const EdgeInsets.fromLTRB(12, 7, 12, 6),
+    color: foreground.withValues(alpha: .055),
+    child: Text(
+      label,
+      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+        color: foreground.withValues(alpha: .82),
+        fontWeight: FontWeight.w700,
+      ),
+    ),
+  );
 }
 
 class _BubbleFooter extends StatelessWidget {
@@ -697,8 +709,8 @@ class _BubbleFooter extends StatelessWidget {
           Text(
             formatMessageTime(message.createdAt),
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: foreground.withValues(alpha: .72),
-                ),
+              color: foreground.withValues(alpha: .72),
+            ),
           ),
           const SizedBox(width: 7),
           Icon(icon, size: 14, color: foreground.withValues(alpha: .72)),
@@ -706,10 +718,10 @@ class _BubbleFooter extends StatelessWidget {
           Text(
             message.state.label,
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: message.state == MessageState.failed
-                      ? context.statusTheme.danger
-                      : foreground.withValues(alpha: .72),
-                ),
+              color: message.state == MessageState.failed
+                  ? context.statusTheme.danger
+                  : foreground.withValues(alpha: .72),
+            ),
           ),
         ],
       ),
@@ -762,6 +774,11 @@ class _ComposerDock extends StatelessWidget {
                   _ReplyPreview(message: replyTo!, onClose: onCancelReply),
                 CallbackShortcuts(
                   bindings: {
+                    SingleActivator(LogicalKeyboardKey.enter, shift: true): () {
+                      final value = composer.value;
+                      final selection = value.selection;
+                      composer.value = value.replaced(selection, '\n');
+                    },
                     const SingleActivator(LogicalKeyboardKey.enter): () {
                       if (canSend && hasText) onSend();
                     },
@@ -781,7 +798,10 @@ class _ComposerDock extends StatelessWidget {
                           : 'Rozmowa nie jest jeszcze gotowa',
                       filled: true,
                       fillColor: chat.composerBackground,
-                      prefixIcon: const ThemedIcon(Icons.lock_outline, size: 18),
+                      prefixIcon: const ThemedIcon(
+                        Icons.lock_outline,
+                        size: 18,
+                      ),
                       suffixIconConstraints: const BoxConstraints.tightFor(
                         width: 58,
                         height: 52,
@@ -820,46 +840,40 @@ class _ReplyPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        width: double.infinity,
-        margin: const EdgeInsets.only(bottom: 7),
-        padding: const EdgeInsets.fromLTRB(12, 7, 4, 7),
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surfaceContainerHighest,
-          border: Border(
-            left: BorderSide(
-              color: Theme.of(context).colorScheme.primary,
-              width: 3,
-            ),
+    width: double.infinity,
+    margin: const EdgeInsets.only(bottom: 7),
+    padding: const EdgeInsets.fromLTRB(12, 7, 4, 7),
+    decoration: BoxDecoration(
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      border: Border(
+        left: BorderSide(
+          color: Theme.of(context).colorScheme.primary,
+          width: 3,
+        ),
+      ),
+    ),
+    child: Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                message.outgoing ? 'Odpowiedź na Twoją wiadomość' : 'Odpowiedź',
+                style: Theme.of(context).textTheme.labelSmall,
+              ),
+              Text(message.text, maxLines: 1, overflow: TextOverflow.ellipsis),
+            ],
           ),
         ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    message.outgoing
-                        ? 'Odpowiedź na Twoją wiadomość'
-                        : 'Odpowiedź',
-                    style: Theme.of(context).textTheme.labelSmall,
-                  ),
-                  Text(
-                    message.text,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ),
-            IconButton(
-              tooltip: 'Anuluj odpowiedź',
-              onPressed: onClose,
-              icon: const ThemedIcon(Icons.close, size: 18),
-            ),
-          ],
+        IconButton(
+          tooltip: 'Anuluj odpowiedź',
+          onPressed: onClose,
+          icon: const ThemedIcon(Icons.close, size: 18),
         ),
-      );
+      ],
+    ),
+  );
 }
 
 class _QuotedMessage extends StatelessWidget {
@@ -870,21 +884,21 @@ class _QuotedMessage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
-        decoration: BoxDecoration(
-          color: foreground.withValues(alpha: .08),
-          border: Border(left: BorderSide(color: foreground, width: 3)),
-        ),
-        child: Text(
-          reply.text,
-          maxLines: 3,
-          overflow: TextOverflow.ellipsis,
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: foreground.withValues(alpha: .84),
-              ),
-        ),
-      );
+    width: double.infinity,
+    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+    decoration: BoxDecoration(
+      color: foreground.withValues(alpha: .08),
+      border: Border(left: BorderSide(color: foreground, width: 3)),
+    ),
+    child: Text(
+      reply.text,
+      maxLines: 3,
+      overflow: TextOverflow.ellipsis,
+      style: Theme.of(
+        context,
+      ).textTheme.bodySmall?.copyWith(color: foreground.withValues(alpha: .84)),
+    ),
+  );
 }
 
 class _DayDivider extends StatelessWidget {
@@ -894,22 +908,22 @@ class _DayDivider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Center(
-        child: Container(
-          margin: const EdgeInsets.symmetric(vertical: 12),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-          decoration: BoxDecoration(
-            color: context.shellTheme.surface,
-            border: Border.all(color: context.shellTheme.border),
-            borderRadius: context.effectsTheme.pixelated
-                ? BorderRadius.zero
-                : BorderRadius.circular(999),
-          ),
-          child: Text(
-            formatMessageDay(date),
-            style: Theme.of(context).textTheme.labelSmall,
-          ),
-        ),
-      );
+    child: Container(
+      margin: const EdgeInsets.symmetric(vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+      decoration: BoxDecoration(
+        color: context.shellTheme.surface,
+        border: Border.all(color: context.shellTheme.border),
+        borderRadius: context.effectsTheme.pixelated
+            ? BorderRadius.zero
+            : BorderRadius.circular(999),
+      ),
+      child: Text(
+        formatMessageDay(date),
+        style: Theme.of(context).textTheme.labelSmall,
+      ),
+    ),
+  );
 }
 
 class _InlineStatus extends StatelessWidget {
@@ -920,23 +934,23 @@ class _InlineStatus extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => AnimatedSize(
-        duration: const Duration(milliseconds: 140),
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+    duration: const Duration(milliseconds: 140),
+    child: Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      color: error
+          ? context.statusTheme.danger.withValues(alpha: .12)
+          : context.statusTheme.success.withValues(alpha: .1),
+      child: Text(
+        message,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
           color: error
-              ? context.statusTheme.danger.withValues(alpha: .12)
-              : context.statusTheme.success.withValues(alpha: .1),
-          child: Text(
-            message,
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: error
-                      ? context.statusTheme.danger
-                      : context.statusTheme.success,
-                ),
-          ),
+              ? context.statusTheme.danger
+              : context.statusTheme.success,
         ),
-      );
+      ),
+    ),
+  );
 }
 
 class _ConversationHome extends StatelessWidget {

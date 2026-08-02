@@ -189,20 +189,21 @@ function Invoke-TorChatPostBuildTorChecks {
     param(
         [Parameter(Mandatory = $true)]$Context,
         [Parameter(Mandatory = $true)]$EnvironmentState,
-        [Parameter(Mandatory = $true)][string]$Readiness
+        [Parameter(Mandatory = $true)][string]$Readiness,
+        [Parameter(Mandatory = $true)][string]$OnionPolicy
     )
     if ($Context.Environment -ne 'local') { return }
 
     $compose = Get-TorChatComposeContext -RepositoryRoot $Context.RepositoryRoot -EnvironmentState $EnvironmentState
-    $bootstrapRequired = $Readiness -eq 'strict'
+    $bootstrapRequired = $Readiness -eq 'strict' -or $OnionPolicy -eq 'rotate'
     $bootstrapTimeout = if ($Readiness -eq 'development') { 180 } else { 300 }
     Invoke-TorChatStage -Context $Context -Id 'tor.bootstrap' -Name 'Tor bootstrap' -Required:$bootstrapRequired -Action {
         Wait-TorChatBootstrap -Context $Context -ComposeContext $compose -TimeoutSeconds $bootstrapTimeout -Required:$bootstrapRequired
     }
 
-    $onionRequired = $Readiness -eq 'strict'
+    $onionRequired = $Readiness -eq 'strict' -or $OnionPolicy -eq 'rotate'
     $onionTimeout = switch ($Readiness) {
-        'development' { 45 }
+        'development' { if ($OnionPolicy -eq 'rotate') { 240 } else { 90 } }
         'onion' { 120 }
         'strict' { 240 }
         default { 45 }
@@ -284,7 +285,7 @@ function Invoke-TorChatDeployCommand {
     }
 
     if ($Context.Environment -eq 'local' -and $StackPolicy -eq 'ensure') {
-        Invoke-TorChatPostBuildTorChecks -Context $Context -EnvironmentState $EnvironmentState -Readiness $Readiness
+        Invoke-TorChatPostBuildTorChecks -Context $Context -EnvironmentState $EnvironmentState -Readiness $Readiness -OnionPolicy $OnionPolicy
     }
 
     # All stages above deliberately become no-ops in a dry run. Do not try to

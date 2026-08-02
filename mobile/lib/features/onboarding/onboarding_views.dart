@@ -10,8 +10,7 @@ import '../../core/models/domain.dart';
 import '../../shared/async/themed_activity_indicator.dart';
 import '../../shared/formatters/invite_code.dart';
 
-export 'onboarding_views_legacy.dart'
-    hide PairingCodeDialog, PairingCodeDialogState;
+export 'onboarding_support_views.dart';
 
 class PairingCodeDialog extends ConsumerStatefulWidget {
   const PairingCodeDialog({
@@ -107,8 +106,10 @@ class PairingCodeDialogState extends ConsumerState<PairingCodeDialog> {
         _code = code;
         _expiresAt = fresh?.expiresAt ?? 0;
         _ttlSeconds =
-            (_expiresAt - DateTime.now().millisecondsSinceEpoch ~/ 1000)
-                .clamp(1, 999999);
+            (_expiresAt - DateTime.now().millisecondsSinceEpoch ~/ 1000).clamp(
+              1,
+              999999,
+            );
       });
       widget.onChanged(code);
     } catch (error) {
@@ -245,10 +246,7 @@ class PairingCodeDialogState extends ConsumerState<PairingCodeDialog> {
                 onReject: _reject,
               )
             else
-              _PairingCode(
-                code: _code,
-                checkingRequest: _checkingRequest,
-              ),
+              _PairingCode(code: _code, checkingRequest: _checkingRequest),
             if (_request == null && !_completed && _expiresAt > 0) ...[
               const SizedBox(height: 10),
               Text(
@@ -306,6 +304,70 @@ class PairingCodeDialogState extends ConsumerState<PairingCodeDialog> {
   );
 }
 
+/// A recipient-side pairing prompt. Unlike [PairingCodeDialog], this dialog is
+/// driven by an already persisted inbox item and is safe to show after the
+/// original invite-code sheet has been closed.
+class IncomingPairingDialog extends StatefulWidget {
+  const IncomingPairingDialog({
+    super.key,
+    required this.request,
+    required this.onAccept,
+    required this.onReject,
+  });
+
+  final PairingItem request;
+  final Future<void> Function() onAccept;
+  final Future<void> Function() onReject;
+
+  @override
+  State<IncomingPairingDialog> createState() => _IncomingPairingDialogState();
+}
+
+class _IncomingPairingDialogState extends State<IncomingPairingDialog> {
+  bool _busy = false;
+  String _error = '';
+
+  Future<void> _run(Future<void> Function() action) async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _error = '';
+    });
+    try {
+      await action();
+      if (mounted) Navigator.of(context).pop();
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _error = error.toString();
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: !_busy,
+      child: AlertDialog(
+        title: const Text('Nowe zaproszenie do kontaktów'),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: _PendingPairingDecision(
+            request: widget.request,
+            processing: _busy,
+            awaitingContact: false,
+            error: _error,
+            onReject: () => _run(widget.onReject),
+            onAccept: () => _run(widget.onAccept),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _CompletedPairing extends StatelessWidget {
   const _CompletedPairing();
 
@@ -339,6 +401,7 @@ class _PendingPairingDecision extends StatelessWidget {
     required this.awaitingContact,
     required this.onAccept,
     required this.onReject,
+    this.error = '',
   });
 
   final PairingItem request;
@@ -346,6 +409,7 @@ class _PendingPairingDecision extends StatelessWidget {
   final bool awaitingContact;
   final VoidCallback onAccept;
   final VoidCallback onReject;
+  final String error;
 
   @override
   Widget build(BuildContext context) {
@@ -382,20 +446,25 @@ class _PendingPairingDecision extends StatelessWidget {
             children: [
               SelectableText(
                 request.peer!.fingerprint,
-                style: Theme.of(context)
-                    .textTheme
-                    .bodySmall
-                    ?.copyWith(fontFamily: 'monospace'),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
                 textAlign: TextAlign.center,
               ),
             ],
           ),
         ],
+        if (error.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Text(
+            error,
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
+            textAlign: TextAlign.center,
+          ),
+        ],
         const SizedBox(height: 18),
         if (processing)
-          const ThemedActivityIndicator(
-            label: 'Akceptowanie…',
-          )
+          const ThemedActivityIndicator(label: 'Akceptowanie…')
         else if (!awaitingContact)
           Row(
             children: [
@@ -422,10 +491,7 @@ class _PendingPairingDecision extends StatelessWidget {
 }
 
 class _PairingCode extends StatelessWidget {
-  const _PairingCode({
-    required this.code,
-    required this.checkingRequest,
-  });
+  const _PairingCode({required this.code, required this.checkingRequest});
 
   final String code;
   final bool checkingRequest;
@@ -440,9 +506,7 @@ class _PairingCode extends StatelessWidget {
           data: code,
           size: 240,
           backgroundColor: Theme.of(context).colorScheme.surface,
-          eyeStyle: QrEyeStyle(
-            color: Theme.of(context).colorScheme.onSurface,
-          ),
+          eyeStyle: QrEyeStyle(color: Theme.of(context).colorScheme.onSurface),
           dataModuleStyle: QrDataModuleStyle(
             color: Theme.of(context).colorScheme.onSurface,
           ),

@@ -8,20 +8,19 @@ void main() {
     final recovery = File(
       'lib/app/pairing_recovery_app_controller.dart',
     ).readAsStringSync();
+    final notifications = File(
+      'lib/app/notification_safe_app_controller.dart',
+    ).readAsStringSync();
 
     expect(
       wrapper,
-      contains("import 'pairing_recovery_app_controller.dart';"),
+      contains("import 'notification_safe_app_controller.dart';"),
     );
-    expect(wrapper, contains('() => PairingRecoveryAppController()'));
-    expect(
-      recovery,
-      contains('extends SequentialAppController'),
-    );
-    expect(
-      wrapper,
-      contains("export 'app_controller_legacy.dart' hide appControllerProvider"),
-    );
+    expect(wrapper, contains('() {'));
+    expect(wrapper, contains('return NotificationSafeAppController();'));
+    expect(notifications, contains('extends PairingRecoveryAppController'));
+    expect(recovery, contains('extends SequentialAppController'));
+    expect(wrapper, contains("export 'app_controller_base.dart';"));
   });
 
   test('warmup phases are awaited in canonical order', () {
@@ -32,9 +31,9 @@ void main() {
       'SequentialStartupPhase.engine',
       'SequentialStartupPhase.localData',
       'SequentialStartupPhase.tor',
-      'SequentialStartupPhase.relay',
       'SequentialStartupPhase.peerListener',
       'SequentialStartupPhase.onionService',
+      'SequentialStartupPhase.relay',
       'SequentialStartupPhase.communication',
       'SequentialStartupPhase.complete',
     ];
@@ -52,31 +51,45 @@ void main() {
     expect(source, contains('await _waitForOnionService(generation)'));
   });
 
-  test('startup owns the runtime event stream without repository side effects', () {
-    final source = File(
-      'lib/app/sequential_app_controller.dart',
-    ).readAsStringSync();
+  test(
+    'startup consumes canonical repository events with cache side effects',
+    () {
+      final source = File(
+        'lib/app/sequential_app_controller.dart',
+      ).readAsStringSync();
 
-    expect(source, contains('_events ??= _runtime.events.listen('));
-    expect(source, isNot(contains('_repository.events.listen(')));
-    expect(source, contains('onError: (Object error, StackTrace stackTrace)'));
-    expect(source, contains('Desktop runtime event stream closed during warmup'));
-    expect(source, contains('await _runtime.connect().timeout'));
-  });
+      expect(source, contains('_events ??= _repository.events.listen('));
+      expect(source, isNot(contains('_events ??= _runtime.events.listen(')));
+      expect(
+        source,
+        contains('onError: (Object error, StackTrace stackTrace)'),
+      );
+      expect(
+        source,
+        contains('Desktop runtime event stream closed during warmup'),
+      );
+      expect(source, contains('await _runtime.connect().timeout'));
+    },
+  );
 
-  test('startup refreshes are serialized and event refreshes are conflated', () {
-    final source = File(
-      'lib/app/sequential_app_controller.dart',
-    ).readAsStringSync();
+  test(
+    'startup refreshes are serialized and event refreshes are conflated',
+    () {
+      final source = File(
+        'lib/app/sequential_app_controller.dart',
+      ).readAsStringSync();
 
-    expect(source, contains('Future<void> _refreshTail'));
-    expect(source, contains('_refreshTail = _refreshTail.catchError'));
-    expect(source, contains('bool _eventRefreshQueued'));
-    expect(source, contains('while (_eventRefreshQueued && !_warming)'));
-    expect(source, contains('if (_warming)'));
-    expect(source, contains('_refreshAfterWarmup = true'));
-    expect(source, contains('await _repository.applicationSnapshot(force: true)'));
-  });
+      expect(source, contains('Future<void> _refreshTail'));
+      expect(source, contains('_refreshTail = _refreshTail.catchError'));
+      expect(source, contains('bool _eventRefreshQueued'));
+      expect(source, contains('while (_eventRefreshQueued && !_warming)'));
+      expect(source, contains('if (_warming)'));
+      expect(source, contains('_refreshAfterWarmup = true'));
+      expect(source, contains('await super.refreshData('));
+      expect(source, contains('final messageRefreshes = Set<String>.of('));
+      expect(source, contains('await _repository.messages('));
+    },
+  );
 
   test('contact endpoint cannot be mistaken for the local onion endpoint', () {
     final source = File(

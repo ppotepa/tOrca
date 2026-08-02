@@ -6,7 +6,9 @@ Wszystkie operacje deweloperskie są dostępne przez jeden publiczny entrypoint:
 .\scripts\torchat.ps1 <command> <target> [options]
 ```
 
-Logika wykonawcza znajduje się w `scripts/modules/*.psm1`. Pozostałe publiczne pliki `.ps1` są tymczasowymi adapterami zgodnościowymi i delegują do `torchat.ps1`.
+Logika wykonawcza znajduje się w `scripts/modules/*.psm1`. Nie uruchamiaj
+poszczególnych plików pomocniczych: jedynym publicznym wejściem jest
+`torchat.ps1`.
 
 ## Najczęstsze operacje
 
@@ -32,14 +34,6 @@ Logika wykonawcza znajduje się w `scripts/modules/*.psm1`. Pozostałe publiczne
 # Zbierz i wyeksportuj diagnostykę
 .\scripts\torchat.ps1 logs export
 ```
-
-Dotychczasowe polecenie nadal działa:
-
-```powershell
-.\scripts\redeploy.ps1
-```
-
-Jest teraz odpowiednikiem inteligentnego `deploy all` i domyślnie zachowuje onion, bazę serwera oraz dane klientów.
 
 ## Drzewo komend
 
@@ -72,8 +66,7 @@ torchat
 | `-Verbosity` | `quiet`, `normal`, `detailed`, `trace` | `normal` |
 
 `run` domyślnie zapewnia lokalny stack przed uruchomieniem klienta. Jeżeli
-relay już działa i ma być uruchomiony tylko klient, użyj
-`-SkipEnvironmentStart`.
+relay już działa i ma być uruchomiony tylko klient, użyj `-StackPolicy skip`.
 
 `status` oraz `logs collect/export` są diagnostyczne: awaria Docker Desktop
 jest raportowana jako stan częściowy i nie blokuje statusu Windows/Android ani
@@ -91,7 +84,7 @@ wywołanie kończy się jasnym błędem artefaktu.
 
 ## Reset danych
 
-Zwykły `stack start`, `deploy all` i `redeploy.ps1` nie usuwają wolumenów.
+Zwykły `stack start` oraz `deploy all` nie usuwają wolumenów.
 
 Reset PostgreSQL:
 
@@ -137,5 +130,54 @@ Przed pierwszym pełnym deployem można uruchomić:
 ```powershell
 .\scripts\tests\Test-TorChatScripts.ps1
 ```
+
+## Signed Android release
+
+Release APK builds never fall back to the debug keystore. Before invoking a
+release Gradle task, provide all four signing values:
+
+```powershell
+$env:TORCHAT_RELEASE_STORE_FILE = 'C:\secure\torchat-release.jks'
+$env:TORCHAT_RELEASE_STORE_PASSWORD = '...'
+$env:TORCHAT_RELEASE_KEY_ALIAS = 'torchat'
+$env:TORCHAT_RELEASE_KEY_PASSWORD = '...'
+Set-Location .\mobile
+flutter build apk --release
+```
+
+The repository deliberately contains no production signing material. Debug
+deploy commands continue to use the debug configuration.
+
+GitHub Actions can build the signed artifact only through the manual
+`signed_android_release` workflow input. Configure these repository secrets
+before running it:
+
+```text
+TORCHAT_RELEASE_KEYSTORE_BASE64
+TORCHAT_RELEASE_STORE_PASSWORD
+TORCHAT_RELEASE_KEY_ALIAS
+TORCHAT_RELEASE_KEY_PASSWORD
+```
+
+The workflow decodes the keystore only on the ephemeral runner, prints the
+release certificate, and archives the APK with its SHA-256 sidecar.
+
+## Two-engine Tor integration gate
+
+The finite integration peer is opt-in and never participates in ordinary
+developer deploys. It creates a second independent desktop engine and Tor
+data directory, pairs with the long-lived Torka peer, requires a direct onion
+connection, then verifies an encrypted `ping` -> `pong` exchange.
+
+```powershell
+.\scripts\tests\Test-TorChatTwoEngineIntegration.ps1
+```
+
+When the normal stack is already running, use
+`-UseExistingStack`; the probe then does not contend for the deploy mutex.
+
+The probe clears only its own `torka_integration_dev` Docker volume. It leaves
+the relay database, relay onion, persistent Torka identity and desktop/Android
+client state untouched. The mainline GitHub workflow runs this same probe.
 
 Test korzysta z parsera PowerShell i nie uruchamia żadnych narzędzi zewnętrznych.

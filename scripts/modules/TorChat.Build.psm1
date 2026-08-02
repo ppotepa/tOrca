@@ -44,7 +44,7 @@ function Get-TorChatInputHash {
         }
         foreach ($file in $files) {
             $relativePath = (Get-TorChatRelativePath -BasePath $RepositoryRoot -Path $file.FullName) -replace '\\', '/'
-            $fileHash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            $fileHash = (Get-TorChatFileSha256 -Path $file.FullName).ToLowerInvariant()
             $records.Add("$relativePath=$fileHash")
         }
     }
@@ -124,32 +124,36 @@ function Remove-TorChatDirectoryRobust {
             Start-Sleep -Milliseconds (250 * $attempt)
         }
     }
-    if ($env:OS -eq 'Windows_NT' -and (Get-Command robocopy -ErrorAction SilentlyContinue)) {
-        $empty = Join-Path ([IO.Path]::GetTempPath()) "torchat-empty-$PID-$([Guid]::NewGuid().ToString('N'))"
-        New-Item -ItemType Directory -Force -Path $empty | Out-Null
-        try {
-            & robocopy $empty $resolved /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
-            if ($LASTEXITCODE -gt 7) { throw "$Description cleanup mirror failed with robocopy exit $LASTEXITCODE." }
-        } finally {
-            Remove-Item -LiteralPath $empty -Recurse -Force -ErrorAction SilentlyContinue
-        }
-    }
-    Remove-Item -LiteralPath $resolved -Recurse -Force -ErrorAction Stop
+    # Cleanup is best-effort. The destination is synchronized below and must
+    # not make an otherwise valid Flutter build fail only because Windows,
+    # Defender, or an indexer still owns the directory handle.
+    Write-TorChatWarning "$Description remains locked; continuing with in-place synchronization."
 }
 
 function Stop-TorChatBuildProcesses {
     param([Parameter(Mandatory = $true)][string]$RepositoryRoot)
     if ($env:OS -ne 'Windows_NT') { return }
-    $repoPath = [IO.Path]::GetFullPath($RepositoryRoot)
-    foreach ($name in @('torchat_mobile.exe','torchat-desktop.exe')) {
-        $running = @(Get-CimInstance Win32_Process -Filter "Name='$name'" -ErrorAction SilentlyContinue | Where-Object {
-            $_.ExecutablePath -and [IO.Path]::GetFullPath($_.ExecutablePath).StartsWith($repoPath, [StringComparison]::OrdinalIgnoreCase)
-        })
-        foreach ($process in $running) {
-            Stop-Process -Id ([int]$process.ProcessId) -Force -ErrorAction SilentlyContinue
-        }
+    $repoPath = [IO.Path]::GetFullPath($RepositoryRoot).ToLowerInvariant()
+    $processes = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+        $name = if ($_.Name) { $_.Name.ToLowerInvariant() } else { '' }
+        $path = if ($_.ExecutablePath) { [IO.Path]::GetFullPath($_.ExecutablePath).ToLowerInvariant() } else { '' }
+        $command = if ($_.CommandLine) { $_.CommandLine.ToLowerInvariant() } else { '' }
+        # The Flutter runner can keep a DLL open while its command line has
+        # already disappeared (and its executable may come from a staging
+        # directory). Always stop TorChat-owned binaries by name; retain the
+        # repository guard for generic build tools.
+        (($name -in @('torchat_mobile.exe','torchat-desktop.exe')) -or
+          ($name -in @('flutter.exe','dart.exe','cmake.exe','msbuild.exe','ninja.exe') -and
+            ($path.StartsWith($repoPath) -or $command.Contains($repoPath) -or $command.Contains($repoPath.Replace('\','/')))))
+    } | Sort-Object ProcessId -Unique)
+    foreach ($process in $processes) {
+        # The WMI snapshot can race normal process shutdown. A PID which has
+        # already exited is success for this cleanup step and must not abort
+        # the entire build under PSNativeCommandUseErrorActionPreference.
+        try { & taskkill.exe /PID ([int]$process.ProcessId) /T /F 2>$null | Out-Null } catch { }
+        Stop-Process -Id ([int]$process.ProcessId) -Force -ErrorAction SilentlyContinue
     }
-    Start-Sleep -Milliseconds 500
+    if ($processes.Count -gt 0) { Start-Sleep -Milliseconds 1500 }
 }
 
 function Resolve-TorChatAndroidNdk {
@@ -407,10 +411,21 @@ function Build-TorChatWindowsClient {
     } finally {
         $env:TORCHAT_CONFIG_FILE = $previousConfig
     }
-    Remove-TorChatDirectoryRobust -Path $destinationBuild -Description 'Windows Flutter output directory'
+    # Do not recursively delete the fixed output directory. A running Flutter
+    # process can keep a DLL open and make Remove-Item fail for the whole tree.
+    # The build was produced in an isolated staging directory; update the
+    # destination in place after the process stop above.
     New-Item -ItemType Directory -Force -Path $destinationBuild | Out-Null
-    & robocopy $stagingBuild $destinationBuild /E /NFL /NDL /NJH /NJS /NP | Out-Null
-    if ($LASTEXITCODE -gt 7) { throw "Windows Flutter output copy failed with robocopy exit $LASTEXITCODE." }
+    $copyExit = 16
+    for ($attempt = 1; $attempt -le 5; $attempt++) {
+        & robocopy $stagingBuild $destinationBuild /E /R:2 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
+        $copyExit = $LASTEXITCODE
+        if ($copyExit -le 7) { break }
+        Write-TorChatWarning "Windows Flutter output synchronization attempt $attempt failed (robocopy exit $copyExit)."
+        Stop-TorChatBuildProcesses -RepositoryRoot $Context.RepositoryRoot
+        Start-Sleep -Milliseconds (500 * $attempt)
+    }
+    if ($copyExit -gt 7) { throw "Windows Flutter output copy failed after 5 attempts (robocopy exit $copyExit)." }
     if (-not (Test-Path -LiteralPath $artifact)) { throw "Windows client artifact missing: $artifact" }
     Set-TorChatBuildFresh -RepositoryRoot $Context.RepositoryRoot -Key "flutter-windows-$variant" -Hash $hash -Artifacts @($artifact)
     [pscustomobject]@{ State = 'Ready'; Code = 'WINDOWS_CLIENT_BUILT'; Message = $artifact; Artifact = $artifact }

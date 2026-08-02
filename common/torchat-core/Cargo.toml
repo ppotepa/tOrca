@@ -6,7 +6,7 @@ license.workspace = true
 description = "Platform-independent TorChat identity, protocol and encryption boundary"
 
 [lib]
-crate-type = ["lib", "cdylib", "staticlib"]
+crate-type = ["lib"]
 
 [dependencies]
 base64 = "0.22"

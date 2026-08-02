@@ -33,6 +33,7 @@ import org.torchat.generated.EngineContract
 import org.torchat.security.LocalSecretStore
 import org.torchat.security.TorRuntime
 import java.io.File
+import java.util.concurrent.ConcurrentLinkedDeque
 import java.util.LinkedHashSet
 
 /** Owns Tor, engine lifecycle and notifications outside the Flutter UI. */
@@ -78,7 +79,13 @@ class TorChatForegroundService : Service() {
                 }
                 publish(
                     mapOf(
-                        EngineContract.TYPE to EngineContract.TOR_STATUS,
+                        EngineContract.TYPE to EngineContract.TRANSPORT_STATUS_CHANGED,
+                        "component" to "relay",
+                        EngineContract.STATE to when (state) {
+                            "ready" -> "ready"
+                            "retrying" -> "backoff"
+                            else -> "starting"
+                        },
                         EngineContract.PHASE to phase,
                         EngineContract.LABEL to when (state) {
                             "ready" -> "Połączono z relayem przez Tor"
@@ -272,19 +279,28 @@ class TorChatForegroundService : Service() {
                     )
                     val snapshot = torStatusSnapshot(
                         phase = if (progress >= 100) {
-                            EngineContract.TRANSPORT_PHASE_CONNECTING
+                            EngineContract.TRANSPORT_PHASE_CONNECTED
                         } else {
                             EngineContract.TRANSPORT_PHASE_BOOTSTRAPPING
                         },
                         label = if (progress >= 100) {
-                            "Tor gotowy · łączenie z relayem"
+                            "Tor gotowy"
                         } else {
                             "Tor bootstrap: $progress%"
                         },
                         detail = summary,
-                        progress = (progress * 70 / 100).coerceIn(0, 70),
+                        progress = progress.coerceIn(0, 100),
                     )
-                    pendingTorStatuses.add(snapshot)
+                    // Publish each live status exactly once. Replaying every
+                    // buffered status after Tor becomes ready made the UI
+                    // move backwards from Done to Starting/Connecting. The
+                    // engine already receives the live stream; buffering is
+                    // only needed when it was not attached yet.
+                    if (engineReady.isCompleted) {
+                        pendingTorStatuses.clear()
+                    } else {
+                        pendingTorStatuses.add(snapshot)
+                    }
                     publishTorStatusFact(snapshot)
                     updateNotification("Tor bootstrap: $progress%")
                 }
@@ -292,7 +308,9 @@ class TorChatForegroundService : Service() {
             val socks5Url = "socks5h://127.0.0.1:${config.socksPort}"
             torReadyForOnion = true
             publishEngineFact(engineTorEndpointAvailableFactJson(socks5Url))
-            pendingTorStatuses.forEach(::publishTorStatusFact)
+            if (!engineReady.isCompleted) {
+                pendingTorStatuses.lastOrNull()?.let(::publishTorStatusFact)
+            }
             pendingTorStatuses.clear()
             if (!torReady.isCompleted) torReady.complete(Unit)
             startupLogger.write(
@@ -300,8 +318,8 @@ class TorChatForegroundService : Service() {
                 component = "tor",
                 eventCode = "tor_ready",
                 stage = "TOR_READY",
-                message = "Tor SOCKS ready; relay circuit verification pending",
-                state = "starting",
+                message = "Tor SOCKS ready; relay readiness is tracked separately",
+                state = "ready",
                 durationMs = System.currentTimeMillis() - startedAt,
             )
             pendingOnionAction?.also { action ->
@@ -407,7 +425,12 @@ class TorChatForegroundService : Service() {
 
     private fun publish(event: Map<String, Any?>) {
         val type = event[EngineContract.TYPE] as? String
-        if (type != null) lastRuntimeSnapshot[type] = event
+        if (type != null) {
+            runtimeEventBuffer.addLast(event)
+            while (runtimeEventBuffer.size > MAX_RUNTIME_EVENT_BUFFER) {
+                runtimeEventBuffer.pollFirst()
+            }
+        }
         eventListener?.invoke(event)
     }
 
@@ -516,7 +539,7 @@ class TorChatForegroundService : Service() {
         when (event.optString(EngineContract.TYPE)) {
             EngineContract.EVENT_CONNECTION -> {
                 val status = publishedEvents.firstOrNull()
-                when (status?.get(EngineContract.PHASE)?.toString().orEmpty()) {
+                when (status?.get("state")?.toString().orEmpty()) {
                     EngineContract.TRANSPORT_PHASE_CONNECTED -> {
                         if (!relayReady.isCompleted) relayReady.complete(Unit)
                         startupLogger.write(
@@ -740,6 +763,7 @@ class TorChatForegroundService : Service() {
         private const val NOTIFICATION_ID = 4101
         private const val ALERT_NOTIFICATION_BASE = 5100
         private const val MAX_PROCESSED_NOTIFICATION_IDS = 256
+        private const val MAX_RUNTIME_EVENT_BUFFER = 512
         private const val PROCESSED_NOTIFICATION_IDS_KEY =
             "flutter.torchat.notifications.android.processedIds"
         private const val ACTIVE_CONVERSATION_KEY =
@@ -753,11 +777,13 @@ class TorChatForegroundService : Service() {
         @Volatile private var relayReady = CompletableDeferred<Unit>()
         @Volatile var eventListener: ((Map<String, Any?>) -> Unit)? = null
         @Volatile var activeEngineHost: AndroidEngineHost? = null
-        private val lastRuntimeSnapshot =
-            java.util.concurrent.ConcurrentHashMap<String, Map<String, Any?>>()
+        // Reattach must replay every recent event, not only the last event per
+        // type. The previous map silently discarded updates for parallel
+        // conversations and made the UI appear stale until navigation.
+        private val runtimeEventBuffer = ConcurrentLinkedDeque<Map<String, Any?>>()
 
         fun runtimeSnapshot(): List<Map<String, Any?>> =
-            lastRuntimeSnapshot.values.toList()
+            runtimeEventBuffer.toList()
 
         fun readinessSnapshot(): Map<String, String> = mapOf(
             "PROCESS_STARTED" to deferredState(processStarted),

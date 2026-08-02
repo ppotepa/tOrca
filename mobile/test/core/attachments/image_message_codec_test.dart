@@ -49,7 +49,7 @@ void main() {
 
   test('rejects malformed and oversized image messages', () {
     expect(decodeImageMessageBody('hello'), isNull);
-    expect(decodeImageMessageBody('${imageMessagePrefix}{}'), isNull);
+    expect(decodeImageMessageBody('$imageMessagePrefix{}'), isNull);
 
     final oversized = PreparedImageAttachment(
       bytes: Uint8List(maximumImageAttachmentBytes + 1),

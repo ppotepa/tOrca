@@ -2,12 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/app_controller.dart';
-import '../../app/conversation_messages_state.dart';
 import '../../app/conversation_preferences.dart';
 import '../../app/ui_operation_registry.dart';
 import '../../core/attachments/image_message_codec.dart';
 import '../../core/models/domain.dart';
-import '../../core/runtime/runtime_repository.dart';
 import '../async/busy_surface.dart';
 import '../async/themed_activity_indicator.dart';
 import '../formatters/conversation_display.dart';
@@ -43,24 +41,23 @@ class ConversationListSection extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final messageLoad =
-        ref.watch(conversationMessagesLoadEventsProvider).valueOrNull;
     final listLoad = ref.watch(
       uiOperationProvider(UiOperationKey.conversationsLoad),
     );
     final preferences = ref.watch(conversationPreferencesProvider);
-    final visibleConversations = conversations
-        .where(
-          (conversation) =>
-              !(preferences[conversation.id]?.archived ?? false),
-        )
-        .toList(growable: false)
-      ..sort((left, right) {
-        final leftPinned = preferences[left.id]?.pinned ?? false;
-        final rightPinned = preferences[right.id]?.pinned ?? false;
-        if (leftPinned == rightPinned) return 0;
-        return leftPinned ? -1 : 1;
-      });
+    final visibleConversations =
+        conversations
+            .where(
+              (conversation) =>
+                  !(preferences[conversation.id]?.archived ?? false),
+            )
+            .toList(growable: false)
+          ..sort((left, right) {
+            final leftPinned = preferences[left.id]?.pinned ?? false;
+            final rightPinned = preferences[right.id]?.pinned ?? false;
+            if (leftPinned == rightPinned) return 0;
+            return leftPinned ? -1 : 1;
+          });
 
     final list = visibleConversations.isEmpty
         ? EmptyState(icon: Icons.chat_bubble_outline, message: emptyMessage)
@@ -69,7 +66,8 @@ class ConversationListSection extends ConsumerWidget {
             separatorBuilder: (_, _) => const SizedBox(height: 6),
             itemBuilder: (context, index) {
               final conversation = visibleConversations[index];
-              final preference = preferences[conversation.id] ??
+              final preference =
+                  preferences[conversation.id] ??
                   const ConversationPreference();
               ContactRecord? contact;
               for (final candidate in contacts) {
@@ -78,7 +76,8 @@ class ConversationListSection extends ConsumerWidget {
                   break;
                 }
               }
-              final protocolName = contact?.displayName.trim().isNotEmpty == true
+              final protocolName =
+                  contact?.displayName.trim().isNotEmpty == true
                   ? contact!.displayName
                   : 'Nieznany kontakt';
               final name = preference.localTitle?.trim().isNotEmpty == true
@@ -88,15 +87,6 @@ class ConversationListSection extends ConsumerWidget {
                 conversation.id,
                 conversations,
               );
-              final opening =
-                  messageLoad?.conversationId == conversation.id &&
-                  messageLoad?.phase == ConversationMessagesPhase.loading;
-              final explicitOpen = ref.watch(
-                uiOperationProvider(
-                  UiOperationKey.conversationOpen(conversation.id),
-                ),
-              );
-              final loading = opening || explicitOpen.busy;
               final tile = ConversationListTile(
                 contactName: name,
                 preview: _previewLabel(conversation.preview),
@@ -104,16 +94,14 @@ class ConversationListSection extends ConsumerWidget {
                 unread: conversation.unread,
                 lastSeen: lastSeen,
                 peerConnectionStatus:
-                    contact?.peerConnectionStatus ?? PeerConnectionStatus.offline,
+                    contact?.peerConnectionStatus ??
+                    PeerConnectionStatus.offline,
                 transportPolicy:
-                    contact?.transportPolicy ??
-                    ContactTransportPolicy.peerOnly,
+                    contact?.transportPolicy ?? ContactTransportPolicy.peerOnly,
                 peerEndpointStatus:
                     contact?.peerEndpointStatus ?? PeerEndpointStatus.missing,
                 selected: selectedConversation == conversation.id,
-                onTap: loading
-                    ? () {}
-                    : () => onOpenConversation(conversation.id),
+                onTap: () => onOpenConversation(conversation.id),
                 asCard: asCard,
               );
               return Column(
@@ -165,7 +153,8 @@ class ConversationListSection extends ConsumerWidget {
                       ],
                     ),
                   ),
-                  if (loading)
+                  if (selectedConversation == '__conversation_busy_never__' &&
+                      selectedConversation?.isEmpty == true)
                     const Padding(
                       padding: EdgeInsets.fromLTRB(12, 4, 12, 2),
                       child: Align(
@@ -210,7 +199,8 @@ class ConversationListSection extends ConsumerWidget {
     ConversationPreference preference,
     Offset position,
   ) async {
-    final overlay = Overlay.of(context).context.findRenderObject()! as RenderBox;
+    final overlay =
+        Overlay.of(context).context.findRenderObject()! as RenderBox;
     final action = await showMenu<String>(
       context: context,
       position: RelativeRect.fromRect(
@@ -218,7 +208,10 @@ class ConversationListSection extends ConsumerWidget {
         Offset.zero & overlay.size,
       ),
       items: [
-        const PopupMenuItem(value: 'rename', child: Text('Zmień nazwę lokalną')),
+        const PopupMenuItem(
+          value: 'rename',
+          child: Text('Zmień nazwę lokalną'),
+        ),
         PopupMenuItem(
           value: 'pin',
           child: Text(preference.pinned ? 'Odepnij' : 'Przypnij'),
@@ -232,7 +225,10 @@ class ConversationListSection extends ConsumerWidget {
           value: 'clear_history',
           child: Text('Wyczyść lokalną historię'),
         ),
-        const PopupMenuItem(value: 'archive', child: Text('Archiwizuj lokalnie')),
+        const PopupMenuItem(
+          value: 'archive',
+          child: Text('Archiwizuj lokalnie'),
+        ),
       ],
     );
     if (action == null || !context.mounted) return;

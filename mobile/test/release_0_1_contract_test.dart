@@ -9,7 +9,10 @@ void main() {
     final controller = source('lib/app/pairing_recovery_app_controller.dart');
     expect(controller, contains('_promoteTrustedPairingContacts'));
     expect(controller, contains('await super.verifyContact(contact.id)'));
-    expect(controller, contains('await super.openOrStartConversation(contact)'));
+    expect(
+      controller,
+      contains('await super.openOrStartConversation(contact)'),
+    );
   });
 
   test('active chat has user-friendly scroll behavior', () {
@@ -17,16 +20,19 @@ void main() {
     expect(chat, contains('_nearBottomThreshold'));
     expect(chat, contains('_unseenMessageCount'));
     expect(chat, contains('keyboard_arrow_down'));
-    expect(chat, contains('ownMessageAdded || _nearBottom'));
+    expect(chat, contains('added.any((message) => message.outgoing)'));
   });
 
   test('image messages are bounded and rendered locally', () {
     final codec = source('lib/core/attachments/image_message_codec.dart');
     final picker = source('lib/core/attachments/image_attachment_picker.dart');
-    final bubble = source('lib/features/chats/image_message_bubble.dart');
+    final bubble = source('lib/features/chats/release_message_bubble.dart');
     expect(codec, contains('maximumImageAttachmentBytes = 50 * 1024'));
     expect(codec, contains('encodeJpg'));
-    expect(picker, contains("allowedExtensions: const ['jpg', 'jpeg', 'png', 'webp']"));
+    expect(
+      picker,
+      contains("allowedExtensions: const ['jpg', 'jpeg', 'png', 'webp']"),
+    );
     expect(bubble, contains('decodeImageMessageBody'));
   });
 
@@ -43,7 +49,7 @@ void main() {
   test('notification and privacy settings are enforced', () {
     final settings = source('lib/features/account/settings_view.dart');
     final policy = File(
-      'android/app/src/main/kotlin/org/torchat/mobile/NotificationPreferencePolicy.kt',
+      'android/app/src/main/kotlin/org/torchat/mobile/AndroidNotificationPolicy.kt',
     ).readAsStringSync();
     expect(settings, contains('torchat.notifications.messages'));
     expect(settings, contains('torchat.notifications.pairing'));

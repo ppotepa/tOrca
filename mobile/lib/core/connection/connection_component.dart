@@ -7,13 +7,7 @@ enum ConnectionComponent {
   onionService,
 }
 
-enum ConnectionComponentState {
-  pending,
-  starting,
-  ready,
-  degraded,
-  failed,
-}
+enum ConnectionComponentState { pending, starting, ready, degraded, failed }
 
 class ConnectionComponentStatus {
   const ConnectionComponentStatus({
@@ -79,7 +73,9 @@ extension ConnectionComponentDisplay on ConnectionComponent {
     ConnectionComponent.localData => 'Tożsamość i zaszyfrowana baza lokalna',
     ConnectionComponent.tor => 'Proces Tor i lokalny endpoint SOCKS',
     ConnectionComponent.relay => 'Połączenie sterujące z relayem onion',
-    ConnectionComponent.peerListener => 'Lokalny serwer przyjmujący połączenia peer',
-    ConnectionComponent.onionService => 'Adres onion publikowany dla tego urządzenia',
+    ConnectionComponent.peerListener =>
+      'Lokalny serwer przyjmujący połączenia peer',
+    ConnectionComponent.onionService =>
+      'Adres onion publikowany dla tego urządzenia',
   };
 }

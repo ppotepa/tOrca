@@ -39,7 +39,10 @@ void main() {
   test('copyWith preserves reduced motion unless explicitly changed', () {
     const enabled = TorChatThemePreferences(reducedMotion: true);
 
-    expect(enabled.copyWith(family: TorChatThemeFamily.retro).reducedMotion, isTrue);
+    expect(
+      enabled.copyWith(family: TorChatThemeFamily.retro).reducedMotion,
+      isTrue,
+    );
     expect(enabled.copyWith(reducedMotion: false).reducedMotion, isFalse);
   });
 }

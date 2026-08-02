@@ -26,18 +26,18 @@ class ConversationPreference {
     bool? muted,
     bool? archived,
   }) => ConversationPreference(
-        localTitle: clearLocalTitle ? null : localTitle ?? this.localTitle,
-        pinned: pinned ?? this.pinned,
-        muted: muted ?? this.muted,
-        archived: archived ?? this.archived,
-      );
+    localTitle: clearLocalTitle ? null : localTitle ?? this.localTitle,
+    pinned: pinned ?? this.pinned,
+    muted: muted ?? this.muted,
+    archived: archived ?? this.archived,
+  );
 
   Map<String, dynamic> toJson() => {
-        if (localTitle != null) 'localTitle': localTitle,
-        'pinned': pinned,
-        'muted': muted,
-        'archived': archived,
-      };
+    if (localTitle != null) 'localTitle': localTitle,
+    'pinned': pinned,
+    'muted': muted,
+    'archived': archived,
+  };
 
   factory ConversationPreference.fromJson(Map<String, dynamic> json) =>
       ConversationPreference(
@@ -50,10 +50,11 @@ class ConversationPreference {
       );
 }
 
-final conversationPreferencesProvider = NotifierProvider<
-    ConversationPreferencesController, Map<String, ConversationPreference>>(
-  ConversationPreferencesController.new,
-);
+final conversationPreferencesProvider =
+    NotifierProvider<
+      ConversationPreferencesController,
+      Map<String, ConversationPreference>
+    >(ConversationPreferencesController.new);
 
 class ConversationPreferencesController
     extends Notifier<Map<String, ConversationPreference>> {
@@ -74,7 +75,11 @@ class ConversationPreferencesController
   Future<void> setTitle(String conversationId, String? title) async {
     final normalized = title?.trim();
     if (normalized != null && normalized.runes.length > 48) {
-      throw ArgumentError.value(title, 'title', 'Maximum length is 48 characters');
+      throw ArgumentError.value(
+        title,
+        'title',
+        'Maximum length is 48 characters',
+      );
     }
     _put(
       conversationId,

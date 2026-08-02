@@ -15,11 +15,11 @@ final class RuntimeProblemClassification {
   final String code;
 
   bool get userVisible => switch (disposition) {
-        RuntimeProblemDisposition.fatal ||
-        RuntimeProblemDisposition.localOperation => true,
-        RuntimeProblemDisposition.connectionStatus ||
-        RuntimeProblemDisposition.diagnosticOnly => false,
-      };
+    RuntimeProblemDisposition.fatal ||
+    RuntimeProblemDisposition.localOperation => true,
+    RuntimeProblemDisposition.connectionStatus ||
+    RuntimeProblemDisposition.diagnosticOnly => false,
+  };
 }
 
 RuntimeProblemClassification classifyRuntimeProblem(String message) {

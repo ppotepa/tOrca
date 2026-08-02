@@ -150,6 +150,12 @@ class MainActivity : FlutterActivity() {
     }
 
     private suspend fun readyEngineHost(): AndroidEngineHost {
+        // Once the foreground service has published its host, the Rust actor and
+        // event pump are already live.  Do not wait on a secondary readiness
+        // latch here: it can belong to a service generation that is being
+        // restarted, turning a local profile command into an artificial 10 s
+        // timeout before it ever reaches the engine.
+        TorChatForegroundService.activeEngineHost?.let { return it }
         TorChatForegroundService.awaitLocalReady()
         return TorChatForegroundService.activeEngineHost
             ?: error("Client engine host is not ready")
@@ -160,6 +166,10 @@ class MainActivity : FlutterActivity() {
             EngineContract.CONNECT -> connect(result)
             EngineContract.GET_IDENTITY -> submitQueryResult(result, EngineContract.COMMAND_GET_IDENTITY)
             EngineContract.GET_PROFILE -> submitQueryResult(result, EngineContract.COMMAND_GET_PROFILE)
+            EngineContract.GET_APPLICATION_SNAPSHOT -> submitQueryResult(
+                result,
+                EngineContract.COMMAND_GET_APPLICATION_SNAPSHOT,
+            )
             EngineContract.REFRESH_PAIRING_CODE -> submitCommandResult(
                 result,
                 engineCommand(EngineContract.COMMAND_REFRESH_PAIRING_CODE),
@@ -242,6 +252,10 @@ class MainActivity : FlutterActivity() {
             EngineContract.GET_PEER_ENDPOINT -> submitQueryResult(
                 result,
                 EngineContract.COMMAND_GET_PEER_ENDPOINT,
+            )
+            EngineContract.GET_STARTUP_READINESS -> submitQueryResult(
+                result,
+                EngineContract.COMMAND_GET_STARTUP_READINESS,
             )
             EngineContract.RETRY_PEER_CONNECTION -> submitCommandResult(
                 result,

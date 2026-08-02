@@ -1,27 +1,27 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:shared_preferences/shared_preferences.dart';
-
 import 'core/application_state/application_snapshot.dart';
-import 'core/application_state/application_state_store.dart';
 import 'windows_runtime.dart';
 export 'core/models/domain.dart';
 import 'core/models/domain.dart';
-
-const _sessionNicknameKey = 'torchat.session.nickname';
 
 /// Optional capability for platforms whose native process outlives Flutter UI.
 abstract interface class RuntimeAttachmentProvider {
   Future<Map<String, dynamic>?> runtimeSnapshot();
 }
 
+abstract interface class RuntimeProjectionProvider {
+  Future<ApplicationSnapshot?> applicationSnapshot();
+}
+
 /// Platform-neutral contract consumed by the Flutter UI.
-abstract interface class ClientRuntime {
+abstract class ClientRuntime {
   Stream<RuntimeEvent> get events;
   Future<bool> connect();
   Future<RuntimeIdentity?> identity();
   Future<RuntimeProfile?> profile();
+  Future<StartupReadinessSnapshot> startupReadiness();
   Future<InviteCode?> refreshPairingCode();
   Future<RuntimeProfile> setNickname(String nickname);
   Future<PairingItem> submitPairingCode(String code);
@@ -39,6 +39,10 @@ abstract interface class ClientRuntime {
     required bool blocked,
     ContactTransportPolicy? transportPolicy,
   });
+  Future<void> removeRelationship(
+    String installationId, {
+    required bool preserveHistory,
+  }) async {}
   Future<List<ContactRecord>> contacts();
   Future<List<ConversationSummary>> conversations();
   Future<List<ChatMessage>> messages(String id);
@@ -59,111 +63,27 @@ abstract interface class ClientRuntime {
 }
 
 final class _SessionAwareClientRuntime
-    implements ClientRuntime, RuntimeAttachmentProvider {
+    implements
+        ClientRuntime,
+        RuntimeAttachmentProvider,
+        RuntimeProjectionProvider {
   _SessionAwareClientRuntime(this._delegate);
 
   final ClientRuntime _delegate;
 
-  Future<void> _checkpoint(RuntimeProfile? profile) async {
-    final nickname = profile?.nickname.trim() ?? '';
-    if (nickname.length < 2) return;
-    final preferences = await SharedPreferences.getInstance();
-    await preferences.setString(_sessionNicknameKey, nickname);
+  @override
+  Future<ApplicationSnapshot?> applicationSnapshot() async {
+    final provider = _delegate;
+    if (provider is! RuntimeProjectionProvider) return null;
+    return (provider as RuntimeProjectionProvider).applicationSnapshot();
   }
 
   @override
   Future<Map<String, dynamic>?> runtimeSnapshot() async {
-    Map<String, dynamic>? snapshot;
-    if (_delegate case final RuntimeAttachmentProvider provider) {
-      snapshot = await provider.runtimeSnapshot();
-    }
-    snapshot ??= await _composeSnapshotFromDelegate();
-    if (snapshot != null) {
-      await _hydrateSnapshot(snapshot);
-      return snapshot;
-    }
-
-    final preferences = await SharedPreferences.getInstance();
-    final nickname = preferences.getString(_sessionNicknameKey)?.trim() ?? '';
-    if (nickname.length < 2) return null;
-    return <String, dynamic>{
-      'serviceAlive': false,
-      'localDataReady': false,
-      'checkpointOnly': true,
-      'profile': <String, dynamic>{'nickname': nickname},
-    };
-  }
-
-  Future<Map<String, dynamic>?> _composeSnapshotFromDelegate() async {
-    try {
-      final values = await Future.wait<Object?>([
-        _delegate.identity(),
-        _delegate.profile(),
-        _delegate.contacts(),
-        _delegate.conversations(),
-        _delegate.peerEndpointAvailable(),
-      ]);
-      final identity = values[0] as RuntimeIdentity?;
-      final profile = values[1] as RuntimeProfile?;
-      if (identity == null || profile == null) return null;
-      final contacts = values[2] as List<ContactRecord>;
-      final conversations = values[3] as List<ConversationSummary>;
-      return <String, dynamic>{
-        'serviceAlive': true,
-        'localDataReady': true,
-        'generation': DateTime.now().microsecondsSinceEpoch,
-        'createdAtMs': DateTime.now().millisecondsSinceEpoch,
-        'identity': _identityMap(identity),
-        'profile': _profileMap(profile),
-        'contacts': contacts.map(_contactMap).toList(growable: false),
-        'conversations': conversations
-            .map(_conversationMap)
-            .toList(growable: false),
-        'peerEndpointAvailable': values[4] as bool,
-      };
-    } catch (_) {
-      return null;
-    }
-  }
-
-  Future<void> _hydrateSnapshot(Map<String, dynamic> raw) async {
-    final identityMap = _map(raw['identity']);
-    final profileMap = _map(raw['profile']);
-    if (identityMap == null || profileMap == null) return;
-
-    final identity = RuntimeIdentity.fromMap(identityMap);
-    final profile = RuntimeProfile.fromMap(profileMap);
-    final contacts = _mapList(raw['contacts'])
-        .map(ContactRecord.fromMap)
-        .toList(growable: false);
-    final conversations = _mapList(raw['conversations'])
-        .map(ConversationSummary.fromMap)
-        .toList(growable: false);
-    final generation = _intValue(raw['generation']) == 0
-        ? DateTime.now().microsecondsSinceEpoch
-        : _intValue(raw['generation']);
-
-    final current = ApplicationStateStore.shared.current;
-    if (current != null &&
-        current.identity.installationId.isNotEmpty &&
-        identity.installationId.isNotEmpty &&
-        current.identity.installationId != identity.installationId) {
-      ApplicationStateStore.shared.clear();
-    }
-    ApplicationStateStore.shared.hydrate(
-      ApplicationSnapshot(
-        generation: generation,
-        createdAtMs: _intValue(raw['createdAtMs']),
-        identity: identity,
-        profile: profile,
-        contacts: List.unmodifiable(contacts),
-        conversations: List.unmodifiable(conversations),
-        pendingInbox: _intValue(raw['pendingInbox']),
-        pendingOutbox: _intValue(raw['pendingOutbox']),
-        peerEndpointAvailable: raw['peerEndpointAvailable'] == true,
-      ),
-    );
-    await _checkpoint(profile);
+    if (_delegate is! RuntimeAttachmentProvider) return null;
+    // This snapshot is bootstrap metadata only. RuntimeRepository owns the
+    // canonical typed projection and is the sole ApplicationStateStore writer.
+    return (_delegate as RuntimeAttachmentProvider).runtimeSnapshot();
   }
 
   @override
@@ -173,19 +93,15 @@ final class _SessionAwareClientRuntime
   @override
   Future<RuntimeIdentity?> identity() => _delegate.identity();
   @override
-  Future<RuntimeProfile?> profile() async {
-    final value = await _delegate.profile();
-    await _checkpoint(value);
-    return value;
-  }
+  Future<RuntimeProfile?> profile() => _delegate.profile();
+  @override
+  Future<StartupReadinessSnapshot> startupReadiness() =>
+      _delegate.startupReadiness();
   @override
   Future<InviteCode?> refreshPairingCode() => _delegate.refreshPairingCode();
   @override
-  Future<RuntimeProfile> setNickname(String nickname) async {
-    final value = await _delegate.setNickname(nickname);
-    await _checkpoint(value);
-    return value;
-  }
+  Future<RuntimeProfile> setNickname(String nickname) =>
+      _delegate.setNickname(nickname);
   @override
   Future<PairingItem> submitPairingCode(String code) =>
       _delegate.submitPairingCode(code);
@@ -218,6 +134,14 @@ final class _SessionAwareClientRuntime
     muted: muted,
     blocked: blocked,
     transportPolicy: transportPolicy,
+  );
+  @override
+  Future<void> removeRelationship(
+    String installationId, {
+    required bool preserveHistory,
+  }) => _delegate.removeRelationship(
+    installationId,
+    preserveHistory: preserveHistory,
   );
   @override
   Future<List<ContactRecord>> contacts() => _delegate.contacts();
@@ -271,7 +195,8 @@ final class _SessionAwareClientRuntime
 }
 
 /// Keeps process-backed desktop calls on one ordered command stream.
-final class _SerializedClientRuntime implements ClientRuntime {
+final class _SerializedClientRuntime
+    implements ClientRuntime, RuntimeProjectionProvider {
   _SerializedClientRuntime(this._delegate);
 
   final ClientRuntime _delegate;
@@ -290,6 +215,13 @@ final class _SerializedClientRuntime implements ClientRuntime {
   }
 
   @override
+  Future<ApplicationSnapshot?> applicationSnapshot() {
+    final provider = _delegate;
+    if (provider is! RuntimeProjectionProvider) return Future.value(null);
+    return _run((provider as RuntimeProjectionProvider).applicationSnapshot);
+  }
+
+  @override
   Stream<RuntimeEvent> get events => _delegate.events;
   @override
   Future<bool> connect() => _run(_delegate.connect);
@@ -298,7 +230,11 @@ final class _SerializedClientRuntime implements ClientRuntime {
   @override
   Future<RuntimeProfile?> profile() => _run(_delegate.profile);
   @override
-  Future<InviteCode?> refreshPairingCode() => _run(_delegate.refreshPairingCode);
+  Future<StartupReadinessSnapshot> startupReadiness() =>
+      _run(_delegate.startupReadiness);
+  @override
+  Future<InviteCode?> refreshPairingCode() =>
+      _run(_delegate.refreshPairingCode);
   @override
   Future<RuntimeProfile> setNickname(String nickname) =>
       _run(() => _delegate.setNickname(nickname));
@@ -338,6 +274,17 @@ final class _SerializedClientRuntime implements ClientRuntime {
     ),
   );
   @override
+  @override
+  Future<void> removeRelationship(
+    String installationId, {
+    required bool preserveHistory,
+  }) => _run(
+    () => _delegate.removeRelationship(
+      installationId,
+      preserveHistory: preserveHistory,
+    ),
+  );
+  @override
   Future<List<ContactRecord>> contacts() => _run(_delegate.contacts);
   @override
   Future<List<ConversationSummary>> conversations() =>
@@ -359,11 +306,7 @@ final class _SerializedClientRuntime implements ClientRuntime {
     String text, {
     String? replyToMessageId,
   }) => _run(
-    () => _delegate.sendMessage(
-      id,
-      text,
-      replyToMessageId: replyToMessageId,
-    ),
+    () => _delegate.sendMessage(id, text, replyToMessageId: replyToMessageId),
   );
   @override
   Future<void> retryMessage(String messageId) =>
@@ -396,60 +339,6 @@ final class _SerializedClientRuntime implements ClientRuntime {
   Future<void> updateAppVisibility(bool foreground) =>
       _run(() => _delegate.updateAppVisibility(foreground));
 }
-
-Map<String, dynamic>? _map(Object? value) =>
-    value is Map ? Map<String, dynamic>.from(value) : null;
-
-List<Map<String, dynamic>> _mapList(Object? value) =>
-    (value as List? ?? const [])
-        .whereType<Map>()
-        .map((item) => Map<String, dynamic>.from(item))
-        .toList(growable: false);
-
-int _intValue(Object? value) {
-  if (value is int) return value;
-  if (value is num) return value.toInt();
-  return int.tryParse(value?.toString() ?? '') ?? 0;
-}
-
-Map<String, dynamic> _identityMap(RuntimeIdentity value) => {
-  'installationId': value.installationId,
-  'publicKey': value.publicKey,
-  'fingerprint': value.fingerprint,
-};
-
-Map<String, dynamic> _profileMap(RuntimeProfile value) => {
-  'installationId': value.installationId,
-  'nickname': value.nickname,
-  'publicKey': value.publicKey,
-  'fingerprint': value.fingerprint,
-};
-
-Map<String, dynamic> _contactMap(ContactRecord value) => {
-  'installationId': value.id,
-  'nickname': value.nickname,
-  'publicKey': value.publicKey,
-  'fingerprint': value.fingerprint,
-  'localAlias': value.localAlias,
-  'muted': value.muted,
-  'blocked': value.blocked,
-  'verification': value.verified ? 'VERIFIED' : 'UNVERIFIED',
-  'peerEndpointStatus': value.peerEndpointStatus.name
-      .replaceAllMapped(RegExp(r'([A-Z])'), (match) => '_${match[1]}')
-      .toUpperCase(),
-  'peerConnectionStatus': value.peerConnectionStatus.name.toUpperCase(),
-  'lastPeerConnectedAt': value.lastPeerConnectedAt,
-  'transportPolicy': value.transportPolicy.wireValue,
-};
-
-Map<String, dynamic> _conversationMap(ConversationSummary value) => {
-  'id': value.id,
-  'contactInstallationId': value.contactId,
-  'status': value.state.wireValue,
-  'lastMessagePreview': value.preview,
-  'lastMessageAt': value.lastMessageAt,
-  'unreadCount': value.unread,
-};
 
 ClientRuntime createClientRuntime() {
   final platform = createPlatformRuntime();

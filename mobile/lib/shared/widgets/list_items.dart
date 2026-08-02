@@ -90,28 +90,32 @@ class ConversationListTile extends StatelessWidget {
           ],
         ],
       ),
-      trailing: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          PeerTransportIndicator(
-            connectionStatus: peerConnectionStatus,
-            transportPolicy: transportPolicy,
-            endpointStatus: peerEndpointStatus,
-          ),
-          Text(
-            formatMessageTime(lastMessageAt),
-            style: Theme.of(context).textTheme.labelSmall,
-          ),
-          if (hasUnread) ...[
-            const SizedBox(height: 4),
-            CounterBadge(
-              count: unread,
-              glow: true,
-              color: unreadTheme.unreadBorder,
+      trailing: FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: Alignment.centerRight,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            PeerTransportIndicator(
+              connectionStatus: peerConnectionStatus,
+              transportPolicy: transportPolicy,
+              endpointStatus: peerEndpointStatus,
             ),
+            Text(
+              formatMessageTime(lastMessageAt),
+              style: Theme.of(context).textTheme.labelSmall,
+            ),
+            if (hasUnread) ...[
+              const SizedBox(height: 2),
+              CounterBadge(
+                count: unread,
+                glow: true,
+                color: unreadTheme.unreadBorder,
+              ),
+            ],
           ],
-        ],
+        ),
       ),
     );
     return asCard ? Card(child: tile) : tile;

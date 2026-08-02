@@ -14,6 +14,7 @@ use torchat_client_engine::TorPhase;
 use crate::process_lock::TorDataLock;
 
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct TorStatus {
     pub phase: TorPhase,
     pub label: String,
@@ -32,6 +33,7 @@ enum TorLogSeverity {
     Fatal,
 }
 
+#[allow(dead_code)]
 pub struct TorRuntime {
     child: Option<Arc<Mutex<Child>>>,
     data_dir_lock: Option<TorDataLock>,
@@ -71,7 +73,11 @@ impl TorRuntime {
         )
     }
 
-    pub fn start(binary: &Path, data_dir: &Path) -> Result<(Self, mpsc::Receiver<TorStatus>)> {
+    pub fn start(
+        binary: &Path,
+        data_dir: &Path,
+        outbound_socks_url: Option<String>,
+    ) -> Result<(Self, mpsc::Receiver<TorStatus>)> {
         if !binary.is_file() {
             bail!("Tor binary not found: {}", binary.display())
         }
@@ -215,32 +221,35 @@ impl TorRuntime {
         });
         let status_tx = tx.clone();
         let child_status = child.clone();
-        std::thread::spawn(move || loop {
-            let exited = child_status
-                .lock()
-                .ok()
-                .and_then(|mut child| child.try_wait().ok().flatten());
-            if let Some(status) = exited {
-                let _ = status_tx.send(TorStatus {
-                    phase: TorPhase::Failed,
-                    label: format!("embedded Tor exited: {status}"),
-                    detail: String::new(),
-                    progress: 0,
-                    #[cfg(test)]
-                    latency_ms: None,
-                    #[cfg(test)]
-                    retry_attempt: 0,
-                });
-                break;
+        std::thread::spawn(move || {
+            loop {
+                let exited = child_status
+                    .lock()
+                    .ok()
+                    .and_then(|mut child| child.try_wait().ok().flatten());
+                if let Some(status) = exited {
+                    let _ = status_tx.send(TorStatus {
+                        phase: TorPhase::Failed,
+                        label: format!("embedded Tor exited: {status}"),
+                        detail: String::new(),
+                        progress: 0,
+                        #[cfg(test)]
+                        latency_ms: None,
+                        #[cfg(test)]
+                        retry_attempt: 0,
+                    });
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(250));
             }
-            std::thread::sleep(std::time::Duration::from_millis(250));
         });
 
         Ok((
             Self {
                 child: Some(child),
                 data_dir_lock: Some(data_dir_lock),
-                socks_url: format!("socks5h://127.0.0.1:{socks_port}"),
+                socks_url: outbound_socks_url
+                    .unwrap_or_else(|| format!("socks5h://127.0.0.1:{socks_port}")),
                 control_port: Some(control_port),
                 data_dir: Some(data_dir.to_path_buf()),
                 onion_mapping: Mutex::new(None),
@@ -283,8 +292,7 @@ impl TorRuntime {
         let service_dir = data_dir
             .join("onion-service")
             .join(format!("generation-{generation}"));
-        fs::create_dir_all(&service_dir)
-            .context("create persistent onion service directory")?;
+        fs::create_dir_all(&service_dir).context("create persistent onion service directory")?;
 
         let cookie_path = data_dir.join("control_auth_cookie");
         let cookie = wait_for_file(&cookie_path, std::time::Duration::from_secs(15))?;
@@ -302,9 +310,7 @@ impl TorRuntime {
         };
         let lines = control_command_lines(
             &mut control,
-            &format!(
-                "ADD_ONION {key} Flags=Detach Port={virtual_port},127.0.0.1:{local_port}",
-            ),
+            &format!("ADD_ONION {key} Flags=Detach Port={virtual_port},127.0.0.1:{local_port}",),
         )?;
         let service_id = lines
             .iter()
@@ -341,6 +347,7 @@ impl TorRuntime {
     }
 
     #[cfg(test)]
+    #[allow(dead_code)]
     pub fn readiness(&self) -> Arc<AtomicBool> {
         self.ready.clone()
     }
@@ -365,10 +372,7 @@ fn control_command(stream: &mut BufReader<TcpStream>, command: &str) -> Result<(
     Ok(())
 }
 
-fn control_command_lines(
-    stream: &mut BufReader<TcpStream>,
-    command: &str,
-) -> Result<Vec<String>> {
+fn control_command_lines(stream: &mut BufReader<TcpStream>, command: &str) -> Result<Vec<String>> {
     stream
         .get_mut()
         .write_all(format!("{command}\r\n").as_bytes())

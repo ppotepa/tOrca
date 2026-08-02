@@ -2,14 +2,14 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'app_controller_legacy.dart' as legacy;
+import 'app_controller_base.dart' as base;
 import 'desktop_window_lifecycle.dart';
 import 'notification_safe_app_controller.dart';
 
-export 'app_controller_legacy.dart' hide appControllerProvider;
+export 'app_controller_base.dart';
 
 final appControllerProvider =
-    NotifierProvider<NotificationSafeAppController, legacy.AppState>(() {
-  unawaited(DesktopWindowLifecycle.initialize());
-  return NotificationSafeAppController();
-});
+    NotifierProvider<NotificationSafeAppController, base.AppState>(() {
+      unawaited(DesktopWindowLifecycle.initialize());
+      return NotificationSafeAppController();
+    });

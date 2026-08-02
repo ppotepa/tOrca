@@ -18,6 +18,9 @@ pub use writer::RelayWriterConfig;
 #[derive(Clone, Debug)]
 pub enum RelayEvent {
     Connected,
+    PairingAvailable {
+        pairing_id: uuid::Uuid,
+    },
     Backoff {
         attempt: u32,
         retry_in_ms: u64,

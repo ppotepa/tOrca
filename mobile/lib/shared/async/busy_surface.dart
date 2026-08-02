@@ -100,7 +100,8 @@ class _BusySurfaceState extends State<BusySurface> {
     final effectiveLabel = widget.label.isNotEmpty
         ? widget.label
         : widget.state.label;
-    final reduceMotion = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    final reduceMotion =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
     final duration = reduceMotion
         ? Duration.zero
         : const Duration(milliseconds: 150);
@@ -170,10 +171,9 @@ class _BusySurfaceState extends State<BusySurface> {
               duration: duration,
               opacity: _indicatorVisible ? 1 : 0,
               child: ColoredBox(
-                color: Theme.of(context)
-                    .colorScheme
-                    .surface
-                    .withValues(alpha: activity.overlayOpacity),
+                color: Theme.of(context).colorScheme.surface.withValues(
+                  alpha: activity.overlayOpacity,
+                ),
                 child: Center(
                   child: ThemedActivityIndicator(label: effectiveLabel),
                 ),

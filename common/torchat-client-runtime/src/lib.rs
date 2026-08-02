@@ -16,7 +16,8 @@ pub mod storage;
 pub mod transport;
 
 pub use application_snapshot::{
-    APPLICATION_SNAPSHOT_SCHEMA_VERSION, ApplicationSnapshot, PairingSummary, UiCheckpoint,
+    APPLICATION_SNAPSHOT_SCHEMA_VERSION, ApplicationSnapshot, ConversationProjection,
+    PairingSummary, ProjectionStamp, UiCheckpoint,
 };
 pub use clock::{RuntimeClock, SystemRuntimeClock};
 pub use collections::{
@@ -24,7 +25,8 @@ pub use collections::{
     runtime_messages_from_iter, runtime_pairing_items_from_iter,
 };
 pub use contract::{
-    RuntimeEvent, RuntimeStatusPhase, RuntimeType, TransportComponent, TransportProbeState,
+    RuntimeEvent, RuntimeStatusPhase, RuntimeType, StartupReadinessSnapshot, TransportComponent,
+    TransportProbeState,
 };
 pub use error::{RuntimeError, RuntimeResult};
 pub use logic::RuntimeConversationUpdate;
@@ -38,9 +40,9 @@ pub use logic::{
 };
 pub use message_rules::{message_state_after_transport_outcome, message_state_on_send_prepare};
 pub use models::{
-    ChatMessage, ContactRecord, ContactTransportPolicy, ConversationState, ConversationSummary, InviteCode, InviteState,
-    MessageReply, MessageSendEffect, MessageState, MessageTransportOutcome,
-    PairingAcknowledgeEffect, PairingAvailableAction, PairingCancelEffect,
+    ChatMessage, ContactRecord, ContactTransportPolicy, ConversationState, ConversationSummary,
+    InviteCode, InviteState, MessageReply, MessageSendEffect, MessageState,
+    MessageTransportOutcome, PairingAcknowledgeEffect, PairingAvailableAction, PairingCancelEffect,
     PairingConfirmContactEffect, PairingItem, PairingPeerOutcome, PairingPreparation,
     PairingSendEffect, PairingSendKind, PairingSyncResult, PeerConnectionStatus,
     PeerEndpointStatus, ReceiptSendEffect, RuntimeBootstrap, RuntimeEnvelope, RuntimeFixture,
@@ -111,7 +113,7 @@ mod tests {
     }
 
     #[test]
-    fn canonical_states_reject_legacy_aliases() {
+    fn canonical_states_reject_noncanonical_aliases() {
         assert!(serde_json::from_str::<crate::models::MessageState>("\"PENDING\"").is_err());
         assert!(serde_json::from_str::<ConversationState>("\"NEW\"").is_err());
     }

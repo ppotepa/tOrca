@@ -21,8 +21,8 @@ void main() {
     expect(readiness.localData.state, ConnectionComponentState.ready);
     expect(readiness.tor.state, ConnectionComponentState.ready);
     expect(readiness.relay.state, ConnectionComponentState.starting);
-    expect(readiness.peerListener.state, ConnectionComponentState.pending);
-    expect(readiness.onionService.state, ConnectionComponentState.pending);
+    expect(readiness.peerListener.state, ConnectionComponentState.ready);
+    expect(readiness.onionService.state, ConnectionComponentState.ready);
   });
 
   test('early endpoint readiness is released only in its own phases', () {

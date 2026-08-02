@@ -92,11 +92,7 @@ class WindowsRuntime extends Object
         .transform(const LineSplitter())
         .listen(
           (line) {
-            _writeLog(
-              logSink,
-              generation,
-              'STDOUT ${_wireSummary(line)}',
-            );
+            _writeLog(logSink, generation, 'STDOUT ${_wireSummary(line)}');
             if (!_owns(process, generation)) return;
             _onLine(line);
           },
@@ -106,8 +102,7 @@ class WindowsRuntime extends Object
             _failCurrent(process, generation, error, stackTrace);
           },
           onDone: () {
-            final expected =
-                _stopping && _stoppingGeneration == generation;
+            final expected = _stopping && _stoppingGeneration == generation;
             _writeLog(
               logSink,
               generation,
@@ -228,8 +223,7 @@ class WindowsRuntime extends Object
 
   void _writeLog(IOSink? sink, int generation, String message) {
     if (sink == null) return;
-    final deployRunId =
-        Platform.environment['TORCHAT_DEPLOY_RUN_ID']?.trim();
+    final deployRunId = Platform.environment['TORCHAT_DEPLOY_RUN_ID']?.trim();
     sink.writeln(
       '${DateTime.now().toIso8601String()} '
       'deployRunId=${deployRunId?.isNotEmpty == true ? deployRunId : '-'} '
@@ -240,7 +234,9 @@ class WindowsRuntime extends Object
   String _wireSummary(String line) {
     try {
       final decoded = jsonDecode(line);
-      if (decoded is! Map) return 'non_object bytes=${utf8.encode(line).length}';
+      if (decoded is! Map) {
+        return 'non_object bytes=${utf8.encode(line).length}';
+      }
       final type = decoded[EngineContract.type]?.toString() ?? 'unknown';
       final requestId = decoded[EngineContract.requestId]?.toString();
       final runtime = decoded[EngineContract.event];
@@ -366,6 +362,9 @@ class WindowsRuntime extends Object
       EngineContract.getProfile => {
         EngineContract.type: EngineContract.commandGetProfile,
       },
+      EngineContract.getApplicationSnapshot => {
+        EngineContract.type: EngineContract.commandGetApplicationSnapshot,
+      },
       EngineContract.pairingInbox => {
         EngineContract.type: EngineContract.commandPairingInbox,
       },
@@ -384,6 +383,9 @@ class WindowsRuntime extends Object
       },
       EngineContract.getPeerEndpoint => {
         EngineContract.type: EngineContract.commandGetPeerEndpoint,
+      },
+      EngineContract.getStartupReadiness => {
+        EngineContract.type: EngineContract.commandGetStartupReadiness,
       },
       EngineContract.retryPeerConnection => {
         EngineContract.type: EngineContract.commandRetryPeerConnection,
@@ -438,6 +440,13 @@ class WindowsRuntime extends Object
         EngineContract.blocked: params[EngineContract.blocked] == true,
         if (params[EngineContract.transportPolicy] != null)
           EngineContract.transportPolicy: text(EngineContract.transportPolicy),
+      },
+      EngineContract.removeRelationship => {
+        EngineContract.type: EngineContract.commandRemoveRelationship,
+        EngineContract.commandInstallationId: text(
+          EngineContract.argInstallationId,
+        ),
+        'preserveHistory': params['preserveHistory'] == true,
       },
       EngineContract.startConversation => {
         EngineContract.type: EngineContract.commandStartConversation,
@@ -510,6 +519,7 @@ class WindowsRuntime extends Object
     final command = _engineCommand(method, params);
     final request = {
       EngineContract.requestId: id,
+      EngineContract.commandId: id,
       EngineContract.command: command,
     };
     if (method == EngineContract.shutdown) {

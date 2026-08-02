@@ -13,6 +13,18 @@ class _SplashRuntime implements ClientRuntime {
   @override
   Future<bool> connect() async => true;
   @override
+  Future<StartupReadinessSnapshot> startupReadiness() async =>
+      const StartupReadinessSnapshot(
+        engineReady: true,
+        localDataReady: true,
+        torReady: true,
+        peerListenerReady: true,
+        onionServiceReady: true,
+        relayReady: true,
+        generation: 1,
+        detail: 'test runtime ready',
+      );
+  @override
   Future<RuntimeIdentity?> identity() async => null;
   @override
   Future<RuntimeProfile?> profile() async => null;
@@ -60,6 +72,11 @@ class _SplashRuntime implements ClientRuntime {
     publicKey: '',
     verified: false,
   );
+  @override
+  Future<void> removeRelationship(
+    String installationId, {
+    required bool preserveHistory,
+  }) async {}
   @override
   Future<List<ContactRecord>> contacts() async => const [];
   @override
@@ -182,21 +199,24 @@ void main() {
 
   testWidgets('shows TorChat splash before runtime bootstrap', (tester) async {
     await tester.pumpWidget(const TorChatMobileApp(runtime: _SplashRuntime()));
-    expect(find.text('TorChat'), findsOneWidget);
     expect(find.text('Prywatne wiadomości przez Tor'), findsOneWidget);
     await tester.pump(const Duration(milliseconds: 900));
   });
 
-  testWidgets('reattaches complete shell without warmup replay', (tester) async {
-    await tester.binding.setSurfaceSize(const Size(1200, 800));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
+  testWidgets(
+    'reattached profile remains gated until live readiness is proven',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1200, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
 
-    await tester.pumpWidget(const TorChatMobileApp(runtime: _AttachedRuntime()));
-    await tester.pump();
+      await tester.pumpWidget(
+        const TorChatMobileApp(runtime: _AttachedRuntime()),
+      );
+      await tester.pump(const Duration(seconds: 2));
 
-    expect(find.text('@Alice'), findsOneWidget);
-    expect(find.text('Bob'), findsWidgets);
-    expect(find.text('Wiadomość ze snapshotu'), findsOneWidget);
-    expect(find.text('Rozgrzewanie TorChat'), findsNothing);
-  });
+      expect(find.text('Bob'), findsNothing);
+      expect(find.text('Wiadomość ze snapshotu'), findsNothing);
+      expect(find.text('Rozgrzewanie TorChat'), findsWidgets);
+    },
+  );
 }

@@ -1,13 +1,14 @@
 use torchat_client_engine::{
-    event::{ResponsePayload, ResponseResult},
     ConnectionSnapshot, ConnectionState, EngineCommand, EngineCommandEnvelope, EngineEvent,
     PlatformFact,
+    event::{ResponsePayload, ResponseResult},
 };
 
 #[test]
 fn send_message_command_round_trips_without_losing_correlation_fields() {
     let envelope = EngineCommandEnvelope {
         request_id: "request-1".to_owned(),
+        command_id: None,
         command: EngineCommand::SendMessage {
             conversation_id: "conversation-1".to_owned(),
             body: "hello".to_owned(),

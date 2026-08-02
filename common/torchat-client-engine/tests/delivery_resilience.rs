@@ -2,27 +2,22 @@ use std::{fs, path::PathBuf};
 
 use rusqlite::params;
 use torchat_client_engine::{
-    ClientDatabase,
-    config::SecretBytes,
-    storage::InboundEnvelopeStoreResult,
+    ClientDatabase, config::SecretBytes, storage::InboundEnvelopeStoreResult,
 };
 use torchat_core::{Identity, peer_protocol::PeerMessageEnvelope};
 use uuid::Uuid;
 
 fn temporary_database_path(test_name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!(
-        "torchat-{test_name}-{}.sqlite3",
-        Uuid::new_v4()
-    ))
+    std::env::temp_dir().join(format!("torchat-{test_name}-{}.sqlite3", Uuid::new_v4()))
 }
 
 fn database_key() -> SecretBytes {
     SecretBytes(vec![0x6b; 32])
 }
 
-fn remove_database(path: &PathBuf) {
+fn remove_database(path: &std::path::Path) {
     for candidate in [
-        path.clone(),
+        path.to_path_buf(),
         PathBuf::from(format!("{}-wal", path.display())),
         PathBuf::from(format!("{}-shm", path.display())),
     ] {
@@ -72,20 +67,16 @@ fn in_flight_outbound_delivery_requeues_after_database_restart_without_duplicati
     let key = database_key();
 
     {
-        let database = ClientDatabase::open(&path, &key)
-            .expect("encrypted database should open");
+        let database = ClientDatabase::open(&path, &key).expect("encrypted database should open");
         insert_outbound_fixture(&database);
         database
-            .enqueue_outbound_delivery(
-                "outbound-message",
-                "peer-delivery",
-                7,
-                100,
-            )
+            .enqueue_outbound_delivery("outbound-message", "peer-delivery", 7, 100)
             .expect("delivery should be enqueued");
-        assert!(database
-            .claim_outbound_delivery("outbound-message", 50_000, 60_000)
-            .expect("delivery should be claimable"));
+        assert!(
+            database
+                .claim_outbound_delivery("outbound-message", 50_000, 60_000)
+                .expect("delivery should be claimable")
+        );
 
         let claimed = database
             .outbound_delivery("outbound-message")
@@ -94,23 +85,38 @@ fn in_flight_outbound_delivery_requeues_after_database_restart_without_duplicati
         assert_eq!(claimed.state, "IN_FLIGHT");
         assert_eq!(claimed.attempt_count, 1);
         assert_eq!(claimed.ack_deadline, Some(60_000));
+
+        database
+            .connection()
+            .execute(
+                "UPDATE outbound_deliveries SET ack_deadline = ?2 WHERE message_id = ?1",
+                params!["outbound-message", i64::MAX],
+            )
+            .expect("lease should be extendable");
+        assert!(
+            !database
+                .claim_outbound_delivery("outbound-message", i64::MAX, i64::MAX)
+                .expect("active delivery lookup should succeed")
+        );
+        assert_eq!(
+            database
+                .outbound_delivery("outbound-message")
+                .unwrap()
+                .unwrap()
+                .attempt_count,
+            1
+        );
     }
 
     {
-        let database = ClientDatabase::open(&path, &key)
-            .expect("encrypted database should reopen");
+        let database = ClientDatabase::open(&path, &key).expect("encrypted database should reopen");
         database
             .requeue_peer_deliveries(1_000)
             .expect("restart recovery should requeue in-flight deliveries");
 
         // Re-enqueueing the same public message id is intentionally idempotent.
         database
-            .enqueue_outbound_delivery(
-                "outbound-message",
-                "peer-delivery",
-                7,
-                100,
-            )
+            .enqueue_outbound_delivery("outbound-message", "peer-delivery", 7, 100)
             .expect("duplicate enqueue should be harmless");
 
         let due = database
@@ -155,8 +161,7 @@ fn inbound_peer_envelope_is_idempotent_across_restart_and_rejects_mutation() {
     );
 
     {
-        let database = ClientDatabase::open(&path, &key)
-            .expect("encrypted database should open");
+        let database = ClientDatabase::open(&path, &key).expect("encrypted database should open");
         assert_eq!(
             database
                 .store_inbound_peer_envelope(&envelope, 201)
@@ -166,8 +171,7 @@ fn inbound_peer_envelope_is_idempotent_across_restart_and_rejects_mutation() {
     }
 
     {
-        let database = ClientDatabase::open(&path, &key)
-            .expect("encrypted database should reopen");
+        let database = ClientDatabase::open(&path, &key).expect("encrypted database should reopen");
         assert_eq!(
             database
                 .store_inbound_peer_envelope(&envelope, 202)

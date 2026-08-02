@@ -37,14 +37,34 @@ void main() {
     expect(runtime.pairingOutboxCalls, 1);
   });
 
+  test(
+    'refresh returns its transaction snapshot when cache is invalidated',
+    () async {
+      final runtime = _SnapshotRuntime();
+      final repository = RuntimeRepository(runtime);
+
+      final refresh = repository.refresh(includePairing: true);
+      repository.invalidateLocalCache();
+      final result = await refresh;
+
+      expect(result.local.contacts.single.id, 'bob');
+      expect(result.local.conversations.single.id, 'conversation');
+    },
+  );
+
   test('message reads are lazy and reuse the in-memory LRU', () async {
     final runtime = _SnapshotRuntime();
     final repository = RuntimeRepository(runtime);
     final phases = <ConversationMessagesPhase>[];
+    final revisions = <int>[];
     final subscription = repository.messageLoadStates.listen(
       (state) => phases.add(state.phase),
     );
+    final messageSubscription = repository.applicationState
+        .watchMessages('conversation')
+        .listen((snapshot) => revisions.add(snapshot.revision));
     addTearDown(subscription.cancel);
+    addTearDown(messageSubscription.cancel);
 
     final first = await repository.messages('conversation');
     final second = await repository.messages('conversation');
@@ -52,21 +72,167 @@ void main() {
     expect(first.single.text, 'message');
     expect(second.single.text, 'message');
     expect(runtime.messageCalls, 1);
+    expect(revisions, [0, 1]);
     expect(phases, [
       ConversationMessagesPhase.loading,
       ConversationMessagesPhase.ready,
     ]);
   });
 
+  test(
+    'a complete live projection replaces stale history atomically',
+    () async {
+      final runtime = _SnapshotRuntime(
+        messageBatches: [
+          const [
+            ChatMessage(
+              id: 'old-1',
+              text: 'first',
+              outgoing: false,
+              state: MessageState.delivered,
+              createdAt: '2026-08-02T10:00:00Z',
+            ),
+            ChatMessage(
+              id: 'old-2',
+              text: 'second',
+              outgoing: true,
+              state: MessageState.sent,
+              createdAt: '2026-08-02T10:01:00Z',
+            ),
+          ],
+          const [
+            ChatMessage(
+              id: 'new-3',
+              text: 'latest',
+              outgoing: false,
+              state: MessageState.delivered,
+              createdAt: '2026-08-02T10:02:00Z',
+            ),
+          ],
+        ],
+      );
+      final repository = RuntimeRepository(runtime);
+
+      await repository.messages('conversation');
+      repository.invalidateMessages('conversation');
+      final refreshed = await repository.messages('conversation', force: true);
+
+      expect(refreshed.map((message) => message.id), ['new-3']);
+      expect(
+        repository.applicationState
+            .messages('conversation')
+            .map((message) => message.id),
+        ['new-3'],
+      );
+    },
+  );
+
+  test(
+    'live projection updates message state without duplicating the message',
+    () async {
+      final runtime = _SnapshotRuntime(
+        messageBatches: [
+          const [
+            ChatMessage(
+              id: 'outgoing',
+              text: 'hello',
+              outgoing: true,
+              state: MessageState.sending,
+              createdAt: '2026-08-02T10:00:00Z',
+            ),
+          ],
+          const [
+            ChatMessage(
+              id: 'outgoing',
+              text: 'hello',
+              outgoing: true,
+              state: MessageState.delivered,
+              createdAt: '2026-08-02T10:00:00Z',
+            ),
+          ],
+        ],
+      );
+      final repository = RuntimeRepository(runtime);
+
+      await repository.messages('conversation');
+      repository.invalidateMessages('conversation');
+      final refreshed = await repository.messages('conversation', force: true);
+
+      expect(refreshed, hasLength(1));
+      expect(refreshed.single.state, MessageState.delivered);
+    },
+  );
+
+  test(
+    'live projection publishes every persisted message without reopening',
+    () async {
+      final runtime = _SnapshotRuntime(
+        messageBatches: [
+          const [
+            ChatMessage(
+              id: 'one',
+              text: 'one',
+              outgoing: true,
+              state: MessageState.sent,
+              createdAt: '2026-08-02T10:00:00Z',
+            ),
+          ],
+          const [
+            ChatMessage(
+              id: 'one',
+              text: 'one',
+              outgoing: true,
+              state: MessageState.delivered,
+              createdAt: '2026-08-02T10:00:00Z',
+            ),
+            ChatMessage(
+              id: 'two',
+              text: 'two',
+              outgoing: false,
+              state: MessageState.delivered,
+              createdAt: '2026-08-02T10:00:01Z',
+            ),
+            ChatMessage(
+              id: 'three',
+              text: 'three',
+              outgoing: true,
+              state: MessageState.queued,
+              createdAt: '2026-08-02T10:00:02Z',
+            ),
+          ],
+        ],
+      );
+      final repository = RuntimeRepository(runtime);
+      final snapshots = <ConversationMessagesSnapshot>[];
+      final subscription = repository.applicationState
+          .watchMessages('conversation')
+          .listen(snapshots.add);
+      addTearDown(subscription.cancel);
+
+      await repository.messages('conversation');
+      repository.invalidateMessages('conversation');
+      await repository.messages('conversation', force: true);
+
+      expect(snapshots.last.messages.map((message) => message.text), [
+        'one',
+        'two',
+        'three',
+      ]);
+      expect(
+        snapshots.last.messages
+            .singleWhere((message) => message.id == 'one')
+            .state,
+        MessageState.delivered,
+      );
+    },
+  );
+
   test('changed native identity clears retained shell snapshot', () async {
     ApplicationStateStore.shared.hydrate(
       const ApplicationSnapshot(
         generation: 10,
         identity: RuntimeIdentity(installationId: 'old'),
-        profile: RuntimeProfile(
-          installationId: 'old',
-          nickname: 'Old profile',
-        ),
+        profile: RuntimeProfile(installationId: 'old', nickname: 'Old profile'),
       ),
     );
     final runtime = _SnapshotRuntime(installationId: 'new');
@@ -77,23 +243,69 @@ void main() {
 
     expect(snapshot.identity.installationId, 'new');
     expect(snapshot.profile.nickname, 'Alice');
-    expect(ApplicationStateStore.shared.current?.identity.installationId, 'new');
+    expect(
+      ApplicationStateStore.shared.current?.identity.installationId,
+      'new',
+    );
+  });
+
+  test('peer connection event is the canonical live contact status', () async {
+    final runtime = _SnapshotRuntime();
+    addTearDown(runtime.dispose);
+    final repository = RuntimeRepository(runtime);
+    final event = repository.events.first;
+
+    runtime.emit(
+      const PeerConnectionChangedEvent(
+        contactId: 'bob',
+        status: PeerConnectionStatus.connected,
+      ),
+    );
+    await event;
+
+    final contacts = await repository.contacts();
+    expect(
+      contacts.single.peerConnectionStatus,
+      PeerConnectionStatus.connected,
+    );
   });
 }
 
 class _SnapshotRuntime implements ClientRuntime {
-  _SnapshotRuntime({this.installationId = 'local'});
+  _SnapshotRuntime({
+    this.installationId = 'local',
+    List<List<ChatMessage>> messageBatches = const [],
+  }) : _messageBatches = List<List<ChatMessage>>.of(messageBatches);
 
   final String installationId;
   int pairingInboxCalls = 0;
   int pairingOutboxCalls = 0;
   int messageCalls = 0;
+  final List<List<ChatMessage>> _messageBatches;
+  final StreamController<RuntimeEvent> _events =
+      StreamController<RuntimeEvent>.broadcast();
 
   @override
-  Stream<RuntimeEvent> get events => const Stream.empty();
+  Stream<RuntimeEvent> get events => _events.stream;
+
+  void emit(RuntimeEvent event) => _events.add(event);
+
+  Future<void> dispose() => _events.close();
 
   @override
   Future<bool> connect() async => true;
+  @override
+  Future<StartupReadinessSnapshot> startupReadiness() async =>
+      const StartupReadinessSnapshot(
+        engineReady: true,
+        localDataReady: true,
+        torReady: true,
+        peerListenerReady: true,
+        onionServiceReady: true,
+        relayReady: true,
+        generation: 1,
+        detail: 'test runtime ready',
+      );
 
   @override
   Future<RuntimeIdentity?> identity() async => RuntimeIdentity(
@@ -120,6 +332,12 @@ class _SnapshotRuntime implements ClientRuntime {
       verified: true,
     ),
   ];
+
+  @override
+  Future<void> removeRelationship(
+    String installationId, {
+    required bool preserveHistory,
+  }) async {}
 
   @override
   Future<List<ConversationSummary>> conversations() async => const [
@@ -155,6 +373,7 @@ class _SnapshotRuntime implements ClientRuntime {
   @override
   Future<List<ChatMessage>> messages(String id) async {
     messageCalls += 1;
+    if (_messageBatches.isNotEmpty) return _messageBatches.removeAt(0);
     return const [
       ChatMessage(
         id: 'message',

@@ -119,43 +119,43 @@ class _ImageStorageSettingsSectionState
 
   @override
   Widget build(BuildContext context) => ActionSection(
-        title: 'OBRAZY I CACHE',
-        child: Column(
-          children: [
-            ThemedSwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Automatycznie pobieraj obrazy'),
-              subtitle: const Text(
-                'Zapisuje przychodzące obrazy w lokalnym magazynie AES-GCM',
-              ),
-              value: _automaticDownload,
-              onChanged: _loading || _saving ? null : _setAutomaticDownload,
-            ),
-            const Divider(),
-            InfoTile(
-              leading: const ThemedIcon(Icons.lock_outline),
-              title: 'Zaszyfrowany cache',
-              subtitle: _loading
-                  ? 'Obliczanie użycia…'
-                  : '${_usage.files} plików · ${_usage.formattedBytes}',
-            ),
-            const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: _loading || _clearing || _usage.files == 0
-                    ? null
-                    : _clearCache,
-                icon: _clearing
-                    ? const SizedBox.square(
-                        dimension: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const ThemedIcon(Icons.delete_sweep_outlined),
-                label: Text(_clearing ? 'Czyszczenie…' : 'Wyczyść cache obrazów'),
-              ),
-            ),
-          ],
+    title: 'OBRAZY I CACHE',
+    child: Column(
+      children: [
+        ThemedSwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Automatycznie pobieraj obrazy'),
+          subtitle: const Text(
+            'Zapisuje przychodzące obrazy w lokalnym magazynie AES-GCM',
+          ),
+          value: _automaticDownload,
+          onChanged: _loading || _saving ? null : _setAutomaticDownload,
         ),
-      );
+        const Divider(),
+        InfoTile(
+          leading: const ThemedIcon(Icons.lock_outline),
+          title: 'Zaszyfrowany cache',
+          subtitle: _loading
+              ? 'Obliczanie użycia…'
+              : '${_usage.files} plików · ${_usage.formattedBytes}',
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed: _loading || _clearing || _usage.files == 0
+                ? null
+                : _clearCache,
+            icon: _clearing
+                ? const SizedBox.square(
+                    dimension: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const ThemedIcon(Icons.delete_sweep_outlined),
+            label: Text(_clearing ? 'Czyszczenie…' : 'Wyczyść cache obrazów'),
+          ),
+        ),
+      ],
+    ),
+  );
 }

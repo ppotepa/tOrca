@@ -63,8 +63,6 @@ class BusyIconButton extends StatelessWidget {
   Widget build(BuildContext context) => IconButton(
     tooltip: tooltip,
     onPressed: busy ? null : onPressed,
-    icon: busy
-        ? const ThemedActivityIndicator(compact: true)
-        : icon,
+    icon: busy ? const ThemedActivityIndicator(compact: true) : icon,
   );
 }

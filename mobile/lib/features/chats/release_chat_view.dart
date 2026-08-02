@@ -175,13 +175,17 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
   List<ChatMessage> get _visibleMessages {
     final query = _search.text.trim().toLowerCase();
     if (query.isNotEmpty) {
-      return widget.messages.where((message) {
-        if (isImageMessageBody(message.text)) return query == 'obraz';
-        return message.text.toLowerCase().contains(query);
-      }).toList(growable: false);
+      return widget.messages
+          .where((message) {
+            if (isImageMessageBody(message.text)) return query == 'obraz';
+            return message.text.toLowerCase().contains(query);
+          })
+          .toList(growable: false);
     }
     if (widget.messages.length <= _visibleMessageLimit) return widget.messages;
-    return widget.messages.sublist(widget.messages.length - _visibleMessageLimit);
+    return widget.messages.sublist(
+      widget.messages.length - _visibleMessageLimit,
+    );
   }
 
   void _composerChanged() {
@@ -259,7 +263,9 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
   }
 
   Future<void> _restoreInitialPosition(String conversationId) async {
-    if (conversationId.isEmpty || widget.messages.isEmpty || _loadingOlder) return;
+    if (conversationId.isEmpty || widget.messages.isEmpty || _loadingOlder) {
+      return;
+    }
     final preferences = await SharedPreferences.getInstance();
     final savedOffset = preferences.getDouble(
       '$_scrollPositionPrefix$conversationId',
@@ -415,17 +421,15 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
     final panelState = messagesState.busy
         ? messagesState
         : openState.busy
-            ? openState
-            : startState;
+        ? openState
+        : startState;
 
     return BusySurface(
       state: panelState,
       presentation: widget.messages.isEmpty
           ? BusyPresentation.replace
           : BusyPresentation.overlay,
-      label: startState.busy
-          ? 'Uruchamianie rozmowy…'
-          : 'Ładowanie rozmowy…',
+      label: startState.busy ? 'Uruchamianie rozmowy…' : 'Ładowanie rozmowy…',
       child: Scaffold(
         backgroundColor: Colors.transparent,
         appBar: AppBar(
@@ -467,11 +471,12 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
                             widget.peerTyping
                                 ? 'pisze…'
                                 : widget.peerOnline
-                                    ? 'online · ${_routeLabel(contact)}'
-                                    : 'offline · ${_routeLabel(contact)}',
+                                ? 'online · ${_routeLabel(contact)}'
+                                : 'offline · ${_routeLabel(contact)}',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                            style: Theme.of(context).textTheme.labelSmall
+                                ?.copyWith(
                                   color: widget.peerTyping || widget.peerOnline
                                       ? context.statusTheme.success
                                       : context.shellTheme.navigationForeground,
@@ -598,7 +603,8 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
                 '${widget.contacts.length} kontaktów · '
                 '${widget.conversations.length} rozmów',
               ),
-              if (!widget.showConversationListWhenEmpty && recent.isNotEmpty) ...[
+              if (!widget.showConversationListWhenEmpty &&
+                  recent.isNotEmpty) ...[
                 const SizedBox(height: 24),
                 for (final conversation in recent)
                   ListTile(
@@ -672,12 +678,15 @@ class _MessageTimeline extends StatelessWidget {
             final next = index + 1 >= messages.length
                 ? null
                 : messages[index + 1];
-            final showDay = previous == null ||
+            final showDay =
+                previous == null ||
                 !isSameMessageDay(previous.createdAt, message.createdAt);
-            final startsGroup = previous == null ||
+            final startsGroup =
+                previous == null ||
                 previous.outgoing != message.outgoing ||
                 showDay;
-            final endsGroup = next == null ||
+            final endsGroup =
+                next == null ||
                 next.outgoing != message.outgoing ||
                 !isSameMessageDay(message.createdAt, next.createdAt);
 
@@ -751,9 +760,9 @@ class _Composer extends StatelessWidget {
                     margin: const EdgeInsets.only(bottom: 7),
                     padding: const EdgeInsets.fromLTRB(12, 7, 4, 7),
                     decoration: BoxDecoration(
-                      color: Theme.of(context)
-                          .colorScheme
-                          .surfaceContainerHighest,
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.surfaceContainerHighest,
                       border: Border(
                         left: BorderSide(
                           color: Theme.of(context).colorScheme.primary,
@@ -818,8 +827,8 @@ class _Composer extends StatelessWidget {
                             suffixIcon: FilledButton(
                               onPressed:
                                   enabled && controller.text.trim().isNotEmpty
-                                      ? onSend
-                                      : null,
+                                  ? onSend
+                                  : null,
                               child: sending
                                   ? const ThemedActivityIndicator(compact: true)
                                   : const ThemedIcon(Icons.send, size: 19),
@@ -847,20 +856,18 @@ class _InlineStatus extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        color: error
-            ? context.statusTheme.danger.withValues(alpha: .12)
-            : context.statusTheme.success.withValues(alpha: .1),
-        child: Text(
-          message,
-          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: error
-                    ? context.statusTheme.danger
-                    : context.statusTheme.success,
-              ),
-        ),
-      );
+    width: double.infinity,
+    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+    color: error
+        ? context.statusTheme.danger.withValues(alpha: .12)
+        : context.statusTheme.success.withValues(alpha: .1),
+    child: Text(
+      message,
+      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+        color: error ? context.statusTheme.danger : context.statusTheme.success,
+      ),
+    ),
+  );
 }
 
 class _DayDivider extends StatelessWidget {
@@ -870,28 +877,32 @@ class _DayDivider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Center(
-        child: Container(
-          margin: const EdgeInsets.symmetric(vertical: 12),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-          decoration: BoxDecoration(
-            color: context.shellTheme.surface,
-            border: Border.all(color: context.shellTheme.border),
-            borderRadius: context.effectsTheme.pixelated
-                ? BorderRadius.zero
-                : BorderRadius.circular(999),
-          ),
-          child: Text(
-            formatMessageDay(date),
-            style: Theme.of(context).textTheme.labelSmall,
-          ),
-        ),
-      );
+    child: Container(
+      margin: const EdgeInsets.symmetric(vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+      decoration: BoxDecoration(
+        color: context.shellTheme.surface,
+        border: Border.all(color: context.shellTheme.border),
+        borderRadius: context.effectsTheme.pixelated
+            ? BorderRadius.zero
+            : BorderRadius.circular(999),
+      ),
+      child: Text(
+        formatMessageDay(date),
+        style: Theme.of(context).textTheme.labelSmall,
+      ),
+    ),
+  );
 }
 
-String _routeLabel(ContactRecord contact) =>
+String _routeLabel(ContactRecord contact) => switch (contact.transportPolicy) {
+  ContactTransportPolicy.relayOnly => 'Tor relay',
+  ContactTransportPolicy.peerWithRelayFallback =>
     contact.peerConnectionStatus == PeerConnectionStatus.connected
         ? 'Tor P2P'
-        : 'Tor relay';
+        : 'Tor P2P + relay fallback',
+  ContactTransportPolicy.peerOnly => 'Tor P2P',
+};
 
 String _contactName(String id, List<ContactRecord> contacts) {
   for (final contact in contacts) {

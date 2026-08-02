@@ -42,12 +42,14 @@ internal class RelaySupervisor(
                     component = "relay",
                     eventCode = "relay_supervisor_started",
                     stage = "RELAY_READY",
-                    message = "Shared Rust relay supervisor accepted startup",
+                    message = "Shared Rust relay supervisor accepted startup; awaiting authenticated connection",
                     attempt = 1,
-                    state = "ready",
+                    state = "starting",
                     durationMs = System.currentTimeMillis() - startedAt,
                 )
-                onState("ready", 1, "Nadzorca relay działa w engine")
+                // Command acceptance is not transport readiness. Only the
+                // engine connection event may publish the ready state.
+                onState("connecting", 1, "Relay supervisor active; awaiting authenticated connection")
             }.onFailure { error ->
                 // A failed startup command is reported, but it is not retried
                 // here. The shared actor owns its retry schedule.

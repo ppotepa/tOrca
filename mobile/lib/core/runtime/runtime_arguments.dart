@@ -35,6 +35,14 @@ class RuntimeArguments {
     EngineContract.transportPolicy: ?transportPolicy,
   });
 
+  factory RuntimeArguments.relationshipRemoval(
+    String installationId, {
+    required bool preserveHistory,
+  }) => RuntimeArguments._({
+    EngineContract.argInstallationId: installationId,
+    'preserveHistory': preserveHistory,
+  });
+
   factory RuntimeArguments.id(String id) =>
       RuntimeArguments._({EngineContract.argId: id});
 

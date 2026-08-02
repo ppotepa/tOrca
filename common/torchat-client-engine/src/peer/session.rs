@@ -8,7 +8,10 @@ use tokio::{
 };
 use tokio_tungstenite::{WebSocketStream, tungstenite::Message};
 use torchat_client_runtime::PeerConnectionStatus;
-use torchat_core::{Identity, peer_protocol::{PeerEndpointBundle, PeerFrame}};
+use torchat_core::{
+    Identity,
+    peer_protocol::{PeerEndpointBundle, PeerFrame},
+};
 use uuid::Uuid;
 
 use crate::{EngineError, EngineResult};
@@ -95,13 +98,8 @@ impl PeerTransportHandle {
                 sessions.insert(installation_id.clone(), session_tx);
                 let events = event_tx.clone();
                 tokio::spawn(async move {
-                    run_contact_session(
-                        identity_private_key,
-                        installation_id,
-                        session_rx,
-                        events,
-                    )
-                    .await;
+                    run_contact_session(identity_private_key, installation_id, session_rx, events)
+                        .await;
                 });
             }
         });
@@ -171,10 +169,6 @@ async fn run_contact_session(
         while let Ok(command) = commands.try_recv() {
             queues.enqueue(command);
         }
-        // Ephemeral state is useful only when an authenticated session already
-        // exists. It must never spend seconds dialing before a real message.
-        queues.drop_ephemeral_without_session();
-
         while !queues.has_dial_worthy() {
             if !channel_open {
                 return;
@@ -275,13 +269,7 @@ async fn run_connected_session(
             {
                 queues.complete(&failed_delivery);
                 if failed_delivery.is_durable() {
-                    fail_delivery(
-                        installation_id,
-                        failed_delivery,
-                        events,
-                        error.clone(),
-                    )
-                    .await;
+                    fail_delivery(installation_id, failed_delivery, events, error.clone()).await;
                 }
                 fail_active_deliveries(
                     installation_id,
@@ -339,15 +327,14 @@ async fn run_connected_session(
 
         if now >= next_keepalive {
             let nonce = random_u64();
-            let write_result = match torchat_core::peer_protocol::encode_frame(
-                &PeerFrame::Ping { nonce },
-            ) {
-                Ok(frame) => sink
-                    .send(Message::Binary(frame.into()))
-                    .await
-                    .map_err(|error| format!("write peer websocket keepalive: {error}")),
-                Err(error) => Err(error),
-            };
+            let write_result =
+                match torchat_core::peer_protocol::encode_frame(&PeerFrame::Ping { nonce }) {
+                    Ok(frame) => sink
+                        .send(Message::Binary(frame.into()))
+                        .await
+                        .map_err(|error| format!("write peer websocket keepalive: {error}")),
+                    Err(error) => Err(error),
+                };
             if let Err(error) = write_result {
                 fail_active_deliveries(
                     installation_id,
@@ -512,13 +499,7 @@ async fn fail_active_deliveries(
 ) {
     for (_, delivery) in active.drain() {
         queues.complete(&delivery.delivery);
-        fail_delivery(
-            installation_id,
-            delivery.delivery,
-            events,
-            error.to_owned(),
-        )
-        .await;
+        fail_delivery(installation_id, delivery.delivery, events, error.to_owned()).await;
     }
     // PERSISTED is the durability boundary. Losing the socket while awaiting
     // DELIVERED must never schedule the same ciphertext for another delivery.
@@ -533,13 +514,7 @@ async fn fail_queued_commands(
 ) {
     for command in queues.drain_failed() {
         if command.delivery.is_durable() {
-            fail_delivery(
-                installation_id,
-                command.delivery,
-                events,
-                error.to_owned(),
-            )
-            .await;
+            fail_delivery(installation_id, command.delivery, events, error.to_owned()).await;
         }
     }
 }

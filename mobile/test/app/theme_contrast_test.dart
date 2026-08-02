@@ -34,11 +34,7 @@ void main() {
           ];
           for (final pair in pairs) {
             expect(
-              contrastRatio(
-                pair.$1,
-                pair.$2,
-                backdrop: scheme.surface,
-              ),
+              contrastRatio(pair.$1, pair.$2, backdrop: scheme.surface),
               greaterThanOrEqualTo(4.5),
               reason: '${pair.$1} / ${pair.$2} in ${theme.brightness}',
             );
@@ -48,9 +44,12 @@ void main() {
     }
   }
 
-  test('accessible foreground selects the stronger black or white contrast', () {
-    const green = Color(0xff187a52);
-    final foreground = accessibleForeground(green);
-    expect(contrastRatio(green, foreground), greaterThanOrEqualTo(4.5));
-  });
+  test(
+    'accessible foreground selects the stronger black or white contrast',
+    () {
+      const green = Color(0xff187a52);
+      final foreground = accessibleForeground(green);
+      expect(contrastRatio(green, foreground), greaterThanOrEqualTo(4.5));
+    },
+  );
 }

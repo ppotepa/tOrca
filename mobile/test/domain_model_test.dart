@@ -92,7 +92,8 @@ void main() {
   test('runtime payload maps peer endpoint bundle into typed model', () {
     final endpoint = RuntimePayload.fromMap({
       'installationId': 'install-1',
-      'onionAddress': 'abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcd.onion',
+      'onionAddress':
+          'abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcd.onion',
       'virtualPort': 443,
       'sequence': 7,
       'issuedAt': 123456,
@@ -105,35 +106,32 @@ void main() {
     expect(endpoint.capabilities, ['peer_message_v1']);
   });
 
-  test('runtime payload decodes typed peer status events from runtime fields', () {
-    final endpointEvent = RuntimePayload.fromMap({
-      'type': 'peer_endpoint_changed',
-      'contactId': 'contact-1',
-      'status': 'VERIFIED',
-    }).runtimeEvent();
-    expect(endpointEvent, isA<PeerEndpointChangedEvent>());
-    expect(
-      (endpointEvent as PeerEndpointChangedEvent).status,
-      PeerEndpointStatus.verified,
-    );
+  test(
+    'runtime payload decodes typed peer status events from runtime fields',
+    () {
+      final endpointEvent = RuntimePayload.fromMap({
+        'type': 'peer_endpoint_changed',
+        'contactId': 'contact-1',
+        'status': 'VERIFIED',
+      }).runtimeEvent();
+      expect(endpointEvent, isA<PeerEndpointChangedEvent>());
+      expect(
+        (endpointEvent as PeerEndpointChangedEvent).status,
+        PeerEndpointStatus.verified,
+      );
 
-    final connectionEvent = RuntimePayload.fromMap({
-      'type': 'peer_connection_changed',
-      'contactId': 'contact-1',
-      'status': 'BACKOFF',
-      'retryInMs': 2500,
-    }).runtimeEvent();
-    expect(connectionEvent, isA<PeerConnectionChangedEvent>());
-    final typedEvent = connectionEvent as PeerConnectionChangedEvent;
-    expect(
-      typedEvent.status,
-      PeerConnectionStatus.backoff,
-    );
-    expect(
-      typedEvent.retryInMs,
-      2500,
-    );
-  });
+      final connectionEvent = RuntimePayload.fromMap({
+        'type': 'peer_connection_changed',
+        'contactId': 'contact-1',
+        'status': 'BACKOFF',
+        'retryInMs': 2500,
+      }).runtimeEvent();
+      expect(connectionEvent, isA<PeerConnectionChangedEvent>());
+      final typedEvent = connectionEvent as PeerConnectionChangedEvent;
+      expect(typedEvent.status, PeerConnectionStatus.backoff);
+      expect(typedEvent.retryInMs, 2500);
+    },
+  );
 
   test('runtime line preserves runtime error event payload', () {
     final line = EngineLine.parse(
@@ -227,13 +225,13 @@ void main() {
     expect(InviteState.fromValue('accepted'), InviteState.accepted);
   });
 
-  test('message state parser rejects legacy aliases and unknown values', () {
+  test('message state parser rejects obsolete aliases and unknown values', () {
     expect(MessageState.fromValue('QUEUED'), MessageState.queued);
     expect(() => MessageState.fromValue('PENDING'), throwsFormatException);
     expect(() => MessageState.fromValue('unknown'), throwsFormatException);
   });
 
-  test('conversation state parser rejects legacy and unknown values', () {
+  test('conversation state parser rejects obsolete and unknown values', () {
     expect(
       ConversationSummary.fromMap(const {
         'id': 'conversation-1',
@@ -260,57 +258,60 @@ void main() {
     );
   });
 
-  test('startup transitions allow late readiness updates and keep error terminal', () {
-    var steps = initialStartupSteps();
-    steps = transitionStartupStep(
-      steps,
-      StartupStepKind.engine,
-      StartupStepState.running,
-      'engine',
-    );
-    final rejectedTor = transitionStartupStep(
-      steps,
-      StartupStepKind.tor,
-      StartupStepState.running,
-      'tor',
-    );
-    expect(rejectedTor[1].state, StartupStepState.running);
+  test(
+    'startup transitions allow late readiness updates and keep error terminal',
+    () {
+      var steps = initialStartupSteps();
+      steps = transitionStartupStep(
+        steps,
+        StartupStepKind.engine,
+        StartupStepState.running,
+        'engine',
+      );
+      final rejectedTor = transitionStartupStep(
+        steps,
+        StartupStepKind.tor,
+        StartupStepState.running,
+        'tor',
+      );
+      expect(rejectedTor[2].state, StartupStepState.running);
 
-    steps = transitionStartupStep(
-      steps,
-      StartupStepKind.engine,
-      StartupStepState.error,
-      'migration failed',
-    );
-    final lateTor = transitionStartupStep(
-      steps,
-      StartupStepKind.tor,
-      StartupStepState.ready,
-      'late event',
-    );
-    expect(lateTor.first.state, StartupStepState.error);
-    expect(lateTor[1].state, StartupStepState.blocked);
-    expect(
-      lateTor.where((step) => step.state == StartupStepState.running),
-      isEmpty,
-    );
+      steps = transitionStartupStep(
+        steps,
+        StartupStepKind.engine,
+        StartupStepState.error,
+        'migration failed',
+      );
+      final lateTor = transitionStartupStep(
+        steps,
+        StartupStepKind.tor,
+        StartupStepState.ready,
+        'late event',
+      );
+      expect(lateTor.first.state, StartupStepState.error);
+      expect(lateTor[1].state, StartupStepState.blocked);
+      expect(
+        lateTor.where((step) => step.state == StartupStepState.running),
+        isEmpty,
+      );
 
-    final recoveredEngine = transitionStartupStep(
-      steps,
-      StartupStepKind.engine,
-      StartupStepState.ready,
-      'recovered',
-    );
-    expect(recoveredEngine.first.state, StartupStepState.ready);
-    expect(recoveredEngine.first.detail, 'recovered');
+      final recoveredEngine = transitionStartupStep(
+        steps,
+        StartupStepKind.engine,
+        StartupStepState.ready,
+        'recovered',
+      );
+      expect(recoveredEngine.first.state, StartupStepState.ready);
+      expect(recoveredEngine.first.detail, 'recovered');
 
-    final blockedPeer = transitionStartupStep(
-      steps,
-      StartupStepKind.peerListener,
-      StartupStepState.ready,
-      'late peer',
-    );
-    expect(blockedPeer.first.state, StartupStepState.error);
-    expect(blockedPeer[2].state, StartupStepState.blocked);
-  });
+      final blockedPeer = transitionStartupStep(
+        steps,
+        StartupStepKind.peerListener,
+        StartupStepState.ready,
+        'late peer',
+      );
+      expect(blockedPeer.first.state, StartupStepState.error);
+      expect(blockedPeer[3].state, StartupStepState.blocked);
+    },
+  );
 }

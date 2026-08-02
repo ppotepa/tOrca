@@ -14,8 +14,8 @@ use torchat_client_runtime::PeerConnectionStatus;
 use torchat_core::{
     Identity, PROTOCOL_VERSION,
     peer_protocol::{
-        PEER_PATH, PeerAckKind, PeerClientHello, PeerClientProof, PeerFrame,
-        PeerMessageEnvelope, handshake_transcript,
+        PEER_PATH, PeerAckKind, PeerClientHello, PeerClientProof, PeerFrame, PeerMessageEnvelope,
+        handshake_transcript,
     },
     verify_signature,
 };
@@ -59,7 +59,10 @@ where
         latest_endpoint_sequence = Some(update.endpoint.sequence);
     }
 
-    if matches!(&command.delivery, PeerDeliveryTag::EndpointUpdate) {
+    if matches!(
+        &command.delivery,
+        PeerDeliveryTag::EndpointUpdate | PeerDeliveryTag::Probe
+    ) {
         let nonce = command.sequence;
         sink.send(Message::Binary(
             torchat_core::peer_protocol::encode_frame(&PeerFrame::Ping { nonce })?.into(),
@@ -71,6 +74,7 @@ where
             EndpointProbe {
                 endpoint_sequence: latest_endpoint_sequence,
                 sent_at: Instant::now(),
+                delivery: command.delivery,
             },
         );
         return Ok(());
@@ -170,6 +174,14 @@ where
                         queues.complete(&delivery.delivery);
                     }
                 }
+                PeerAckKind::Rejected => {
+                    if let Some(delivery) = active
+                        .remove(&message_id)
+                        .or_else(|| awaiting_delivered.remove(&message_id))
+                    {
+                        queues.complete(&delivery.delivery);
+                    }
+                }
             }
         }
         PeerFrame::Pong { nonce } => {
@@ -179,7 +191,7 @@ where
             if let Some(probe) = endpoint_probes.remove(&nonce) {
                 let _ = events
                     .send(PeerTransportEvent::Ack {
-                        delivery: PeerDeliveryTag::EndpointUpdate,
+                        delivery: probe.delivery,
                         kind: PeerAckKind::Persisted,
                         contact_installation_id: installation_id.to_owned(),
                         endpoint_sequence: probe.endpoint_sequence,

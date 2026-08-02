@@ -42,6 +42,14 @@ $strawberryPerl = "C:\Strawberry\perl\bin"
 foreach ($candidate in @($msysPerl, $gitPerl, $strawberryPerl)) {
     if (Test-Path -LiteralPath (Join-Path $candidate "perl.exe")) {
         $env:PATH = "$candidate;$env:PATH"
+        if ($candidate -eq $msysPerl) {
+            # openssl-src invokes make through the MSYS shell.  A bare command
+            # keeps MSYS from mangling a native Windows Perl path (C:\\...)
+            # into an invalid C:... path inside generated Makefiles.
+            $env:PERL = "perl"
+            $env:OPENSSL_SRC_PERL = "perl"
+            $env:PATH = "C:\\msys64\\usr\\bin;$env:PATH"
+        }
         break
     }
 }
@@ -95,6 +103,13 @@ if (-not (Test-Path -LiteralPath $clang) -or -not (Test-Path -LiteralPath $clang
 [Environment]::SetEnvironmentVariable("RANLIB_$($RustTarget.Replace('-', '_'))", $ranlib, "Process")
 [Environment]::SetEnvironmentVariable("CFLAGS_$RustTarget", "--target=$RustTarget" + "21", "Process")
 [Environment]::SetEnvironmentVariable("CFLAGS_$($RustTarget.Replace('-', '_'))", "--target=$RustTarget" + "21", "Process")
+# OpenSSL's MSYS makefile must invoke tools by command name, not by a
+# Windows path containing a drive colon.  Keep cc-rs on the explicit native
+# target variables above, while giving openssl-src stable tool names.
+$env:PATH = "$llvmBin;$env:PATH"
+$env:CC = "clang.exe"
+$env:AR = "llvm-ar.exe"
+$env:RANLIB = "llvm-ranlib.exe"
 
 $out = Join-Path $jni $abi
 $libraryPath = Join-Path $out "libtorchat_client_engine.so"

@@ -9,8 +9,10 @@ AppLaunchPhase resolveLaunchPhase({
 }) {
   final hasNickname = profile.nickname.trim().length >= 2;
 
-  // A returning user can enter the local shell without network access.
-  if (hasNickname && connection.localCoreReady) {
+  // Startup is a hard communication gate for returning users too. A retained
+  // nickname must never bypass Tor, relay, peer listener or local onion
+  // publication during a new runtime generation.
+  if (hasNickname && connection.communicationReady) {
     return AppLaunchPhase.running;
   }
 

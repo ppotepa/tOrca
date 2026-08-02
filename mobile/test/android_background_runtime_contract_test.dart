@@ -12,7 +12,10 @@ void main() {
       manifest,
       contains('android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING'),
     );
-    expect(manifest, contains('android:foregroundServiceType="remoteMessaging"'));
+    expect(
+      manifest,
+      contains('android:foregroundServiceType="remoteMessaging"'),
+    );
     expect(manifest, contains('android:stopWithTask="false"'));
     expect(manifest, isNot(contains('FOREGROUND_SERVICE_DATA_SYNC')));
     expect(manifest, isNot(contains('foregroundServiceType="dataSync"')));
@@ -51,8 +54,7 @@ void main() {
     expect(bridge, contains('EngineContract.listConversations'));
     expect(bridge, contains('peerEndpointAvailable'));
     expect(bridge, isNot(contains('EngineContract.listMessages')));
-    expect(runtime, contains('ApplicationStateStore.shared.hydrate'));
-    expect(runtime, contains("'contacts'"));
-    expect(runtime, contains("'conversations'"));
+    expect(runtime, isNot(contains('ApplicationStateStore.shared.hydrate')));
+    expect(runtime, contains('RuntimeRepository owns the'));
   });
 }
