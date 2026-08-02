@@ -4,6 +4,7 @@ use std::{
 };
 
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 use tokio::sync::mpsc;
 use tokio::time::{Duration, Instant};
@@ -35,16 +36,27 @@ use crate::{
         ConnectionSnapshot, ConnectionState, NotificationRequest, ResponsePayload, ResponseResult,
     },
     peer::{PeerDeliveryTag, PeerOutboundCommand, PeerTransportEvent, PeerTransportHandle},
+    probing::{ProbeCoordinator, ProbeKey, ProbeStatus},
     relay::{EngineRelay, RelayEvent, SharedRelayActor},
     storage::{
-        DeliveryReceiptRecord, InboundEnvelopeStoreResult, PairingResponseRecord,
-        PeerEndpointBootstrapRecord, PendingContactConfirmationRecord, PendingLocalInviteMlsRecord,
+        CapabilityDeliveryRecord, DeliveryReceiptRecord, InboundEnvelopeStoreResult,
+        PairingResponseRecord, PeerEndpointBootstrapRecord, PendingApplicationEnvelopeRecord,
+        PendingContactConfirmationRecord, PendingLocalInviteMlsRecord,
         PendingPeerEndpointInboxRecord, PendingWelcomeRecord, ReceivedEnvelopeRecord,
         RetryDeadline, RetryKind, SqliteRuntimeStorage,
     },
 };
 
 mod connection;
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ContactCapabilityStatusResponse {
+    contact_id: String,
+    capability_id: String,
+    sequence: u64,
+    status: torchat_client_runtime::CapabilityStatus,
+}
 
 #[derive(Clone, Debug)]
 enum PendingRelayDelivery {
@@ -62,6 +74,7 @@ enum PendingRelayDelivery {
     },
     Ephemeral {
         installation_id: String,
+        delivery_id: Option<String>,
     },
     PeerEndpointBootstrap {
         installation_id: String,
@@ -167,7 +180,7 @@ pub struct ClientEngineActor {
     /// the actor is busy with peer traffic or UI requests.
     relay_poll_at: Instant,
     relay_retry_at: Option<Instant>,
-    peer_probe_at: Instant,
+    probe_coordinator: ProbeCoordinator,
     relay_retry_attempt: u32,
     relay_bootstrap_in_flight: bool,
     relay_control_queue: Vec<PendingRelayControl>,
@@ -240,7 +253,7 @@ impl ClientEngineActor {
             background_restricted: false,
             relay_poll_at: Instant::now() + RELAY_POLL_INTERVAL,
             relay_retry_at: None,
-            peer_probe_at: Instant::now() + Duration::from_secs(30),
+            probe_coordinator: ProbeCoordinator::new(Instant::now() + Duration::from_secs(30)),
             relay_retry_attempt: 0,
             relay_bootstrap_in_flight: false,
             relay_control_queue: Vec::new(),
@@ -266,15 +279,28 @@ impl ClientEngineActor {
             peer_transport.set_local_endpoint(endpoint);
         }
         for contact in self.list_contacts()? {
+            self.probe_coordinator.ensure(
+                ProbeKey::contact(contact.installation_id.clone()),
+                Instant::now(),
+            );
             if let Some(endpoint) = self
                 .database
                 .contact_peer_endpoint(&contact.installation_id)?
             {
-                peer_transport.authorize_contact(&endpoint);
+                self.database
+                    .ensure_contact_endpoint_capability(&contact.installation_id)?;
+                let (capability_id, secret) =
+                    self.local_capability_credentials(&contact.installation_id)?;
+                peer_transport.authorize_contact(&endpoint, capability_id, secret);
             }
         }
         let local_port = peer_transport.local_port();
         self.peer_transport = Some(peer_transport);
+        for contact in self.list_contacts()? {
+            for event in self.drain_pending_pre_welcome(&contact.installation_id)? {
+                let _ = events.send(EngineEvent::Runtime { event }).await;
+            }
+        }
         for event in self.recover_pending_inbound_peer_envelopes()? {
             let _ = events.send(EngineEvent::Runtime { event }).await;
         }
@@ -327,7 +353,7 @@ impl ClientEngineActor {
             } else {
                 Duration::from_secs(120)
             };
-            let peer_probe_at = self.peer_probe_at;
+            let peer_probe_at = self.probe_coordinator.next_round_at();
             let retry_deadline = self.next_retry_deadline()?;
             let retry_wakeup_at = self.next_retry_wakeup_at(retry_deadline)?;
             let retry_sleep_deadline =
@@ -353,8 +379,21 @@ impl ClientEngineActor {
                     self.relay_poll_at = Instant::now() + relay_poll_interval;
                 }
                 _ = tokio::time::sleep_until(peer_probe_at) => {
+                    // Pairing expiry is local and must not depend on a relay
+                    // status event or a UI refresh. This also prevents ACKed
+                    // invitations from remaining pending forever offline.
+                    if let Ok((_, runtime_events)) = self.with_runtime(|runtime| {
+                        runtime.expire_pending_pairings()
+                    }) {
+                        for event in runtime_events {
+                            let _ = events.send(EngineEvent::Runtime { event }).await;
+                        }
+                    }
+                    let _ = self.retry_capability_deliveries();
                     let _ = self.queue_endpoint_update_probes();
-                    self.peer_probe_at = Instant::now() + peer_probe_interval;
+                    let _ = self.queue_presence_heartbeats();
+                    let now = Instant::now();
+                    self.probe_coordinator.schedule_round(now, peer_probe_interval);
                 }
                 _ = tokio::time::sleep_until(relay_retry_wakeup_at), if self.relay_retry_at.is_some() && !self.relay_bootstrap_in_flight => {
                     self.start_relay_bootstrap(relay_bootstrap_outcomes.clone());
@@ -615,6 +654,89 @@ impl ClientEngineActor {
                     });
                 Ok((ResponsePayload::Empty, Vec::new(), None))
             }
+            EngineCommand::GetContactEndpointCapability { installation_id } => {
+                let capability_id = self
+                    .database
+                    .ensure_contact_endpoint_capability(&installation_id)?;
+                let (_, _, sequence, status) = self
+                    .database
+                    .contact_endpoint_capability(&installation_id)?
+                    .ok_or_else(|| EngineError::Storage("capability was not persisted".into()))?;
+                Ok((
+                    json_response(ContactCapabilityStatusResponse {
+                        contact_id: installation_id,
+                        capability_id,
+                        sequence,
+                        status,
+                    })?,
+                    Vec::new(),
+                    None,
+                ))
+            }
+            EngineCommand::RotateContactEndpointCapability { installation_id } => {
+                self.database
+                    .revoke_contact_endpoint_capability(&installation_id)?;
+                let capability_id = self
+                    .database
+                    .ensure_contact_endpoint_capability(&installation_id)?;
+                let _ = self.queue_relay_endpoint_bootstraps();
+                let _ = self.send_capability_offer(&installation_id);
+                let (_, _, sequence, status) = self
+                    .database
+                    .contact_endpoint_capability(&installation_id)?
+                    .ok_or_else(|| EngineError::Storage("capability was not persisted".into()))?;
+                let events = vec![
+                    torchat_client_runtime::RuntimeEvent::ContactCapabilityChanged {
+                        contact_id: installation_id.clone(),
+                        capability_id: capability_id.clone(),
+                        sequence,
+                        status: status.clone(),
+                    },
+                ];
+                Ok((
+                    json_response(ContactCapabilityStatusResponse {
+                        contact_id: installation_id,
+                        capability_id,
+                        sequence,
+                        status,
+                    })?,
+                    events,
+                    None,
+                ))
+            }
+            EngineCommand::RevokeContactEndpointCapability { installation_id } => {
+                if let Some((capability_id, _, sequence, _)) = self
+                    .database
+                    .contact_endpoint_capability(&installation_id)?
+                {
+                    let _ = self.send_ephemeral_payload(
+                        &installation_id,
+                        ApplicationPayloadV1::CapabilityRevoked {
+                            version: torchat_core::PROTOCOL_VERSION,
+                            capability_id,
+                            sequence,
+                            revoked_at: unix_secs(),
+                        },
+                    );
+                }
+                self.database
+                    .revoke_contact_endpoint_capability(&installation_id)?;
+                self.database
+                    .complete_capability_deliveries_for_contact(&installation_id)?;
+                self.active_peer_sessions.remove(&installation_id);
+                Ok((
+                    ResponsePayload::Empty,
+                    vec![
+                        torchat_client_runtime::RuntimeEvent::ContactCapabilityChanged {
+                            contact_id: installation_id,
+                            capability_id: String::new(),
+                            sequence: 0,
+                            status: torchat_client_runtime::CapabilityStatus::Revoked,
+                        },
+                    ],
+                    None,
+                ))
+            }
             EngineCommand::SetNickname { .. }
             | EngineCommand::RefreshPairingCode
             | EngineCommand::SubmitPairingCode { .. } => Err(EngineError::Unsupported(
@@ -777,34 +899,13 @@ impl ClientEngineActor {
                 conversation_id,
                 typing,
             } => {
-                self.send_ephemeral_payload(
-                    &conversation_id,
-                    ApplicationPayloadV1::Typing {
-                        version: torchat_core::PROTOCOL_VERSION,
-                        sent_at: unix_ms(),
-                        typing,
-                    },
-                )?;
-                // Ephemeral frames are intentionally not dial-worthy on their
-                // own. Start a lightweight authenticated session when typing
-                // begins so the indicator is not silently dropped while the
-                // contact is otherwise idle.
-                if typing {
-                    let _ = self.queue_peer_probe(&conversation_id);
-                }
+                self.queue_peer_typing(&conversation_id, typing)?;
                 Ok((ResponsePayload::Empty, Vec::new(), None))
             }
             EngineCommand::SetPresence { online } => {
                 let peers = self.conversations.keys().cloned().collect::<Vec<_>>();
                 for peer in peers {
-                    self.send_ephemeral_payload(
-                        &peer,
-                        ApplicationPayloadV1::Presence {
-                            version: torchat_core::PROTOCOL_VERSION,
-                            sent_at: unix_ms(),
-                            online,
-                        },
-                    )?;
+                    self.queue_peer_presence(&peer, online)?;
                 }
                 Ok((ResponsePayload::Empty, Vec::new(), None))
             }
@@ -1208,6 +1309,7 @@ impl ClientEngineActor {
                 self.local_peer_endpoint = Some(endpoint);
                 let _ = self.queue_endpoint_update_probes();
                 let _ = self.queue_relay_endpoint_bootstraps();
+                let _ = self.send_capability_offers_for_contacts();
                 let mut events = vec![torchat_client_runtime::RuntimeEvent::PeerEndpointChanged {
                     contact_id: self.identity.installation_id(),
                     status: torchat_client_runtime::PeerEndpointStatus::Verified,
@@ -1401,6 +1503,8 @@ impl ClientEngineActor {
                     PeerDeliveryTag::Ephemeral => "ephemeral",
                     PeerDeliveryTag::Probe => "probe",
                     PeerDeliveryTag::EndpointUpdate => "endpoint-update",
+                    PeerDeliveryTag::Presence { .. } => "presence",
+                    PeerDeliveryTag::Typing { .. } => "typing",
                 };
                 self.pending_engine_events.push(EngineEvent::Log {
                     log: EngineLogEvent {
@@ -1448,6 +1552,8 @@ impl ClientEngineActor {
                     PeerDeliveryTag::Ephemeral => Ok(Vec::new()),
                     PeerDeliveryTag::Probe => Ok(Vec::new()),
                     PeerDeliveryTag::EndpointUpdate => Ok(Vec::new()),
+                    PeerDeliveryTag::Presence { .. } => Ok(Vec::new()),
+                    PeerDeliveryTag::Typing { .. } => Ok(Vec::new()),
                 }
             }
             PeerTransportEvent::EndpointUpdated { endpoint } => {
@@ -1463,8 +1569,12 @@ impl ClientEngineActor {
                     .validate_successor(&previous, unix_secs())
                     .map_err(EngineError::InvalidCommand)?;
                 self.database.put_contact_peer_endpoint(&endpoint)?;
+                self.database
+                    .ensure_contact_endpoint_capability(&endpoint.installation_id)?;
                 if let Some(peer) = &self.peer_transport {
-                    peer.authorize_contact(&endpoint);
+                    let (capability_id, secret) =
+                        self.local_capability_credentials(&endpoint.installation_id)?;
+                    peer.authorize_contact(&endpoint, capability_id, secret);
                 }
                 let contact_id = endpoint.installation_id.clone();
                 let _ = self.queue_peer_probe(&contact_id);
@@ -1475,6 +1585,32 @@ impl ClientEngineActor {
                     },
                 ])
             }
+            PeerTransportEvent::PresenceChanged {
+                installation_id,
+                online,
+                observed_at,
+            } => {
+                if online {
+                    self.database
+                        .record_contact_seen(&installation_id, observed_at)?;
+                }
+                Ok(vec![
+                    torchat_client_runtime::RuntimeEvent::PresenceChanged {
+                        contact_id: installation_id,
+                        online,
+                        observed_at,
+                    },
+                ])
+            }
+            PeerTransportEvent::TypingChanged {
+                installation_id,
+                typing,
+                expires_at,
+            } => Ok(vec![torchat_client_runtime::RuntimeEvent::TypingChanged {
+                conversation_id: installation_id,
+                typing,
+                expires_at,
+            }]),
             PeerTransportEvent::IngressError { error } => {
                 let level = if is_expected_peer_shutdown(&error) {
                     "info"
@@ -1533,6 +1669,25 @@ impl ClientEngineActor {
                 {
                     return Ok(Vec::new());
                 }
+                let probe_key = ProbeKey::contact(installation_id.clone());
+                let now = Instant::now();
+                self.probe_coordinator.ensure(probe_key.clone(), now);
+                let probe_status = match status {
+                    PeerConnectionStatus::Connected => ProbeStatus::Online,
+                    PeerConnectionStatus::Connecting | PeerConnectionStatus::Authenticating => {
+                        ProbeStatus::Checking
+                    }
+                    PeerConnectionStatus::Backoff | PeerConnectionStatus::Offline => {
+                        ProbeStatus::Offline
+                    }
+                };
+                self.probe_coordinator.record_result(
+                    &probe_key,
+                    now,
+                    probe_status,
+                    None,
+                    Duration::from_secs(30),
+                );
                 if status == PeerConnectionStatus::Connected {
                     self.database
                         .mark_peer_connected(&installation_id, unix_secs())?;
@@ -1834,6 +1989,8 @@ impl ClientEngineActor {
                 self.retry_pending_welcomes()?;
                 self.retry_pending_contact_confirmations()?;
                 self.queue_relay_endpoint_bootstraps()?;
+                self.send_capability_offers_for_contacts()?;
+                self.retry_capability_deliveries()?;
                 Ok((
                     runtime_events,
                     Some(self.connection_snapshot("relay connected")),
@@ -1974,7 +2131,7 @@ impl ClientEngineActor {
         let socks5_url = self.socks5_url.clone().ok_or_else(|| {
             EngineError::Transport("Tor SOCKS endpoint is not available".to_owned())
         })?;
-        let local_endpoint = self.local_peer_endpoint.as_ref().ok_or_else(|| {
+        let local_endpoint = self.local_peer_endpoint.clone().ok_or_else(|| {
             EngineError::Transport("local onion service is not available".to_owned())
         })?;
         let endpoint = self
@@ -2027,10 +2184,13 @@ impl ClientEngineActor {
             }
         }
 
+        let local_endpoint = self.local_endpoint_for_contact(recipient, &local_endpoint)?;
         let command = PeerOutboundCommand {
             peer_public_key: endpoint.identity_public_key.clone(),
+            capability_id: endpoint_capability_id(&endpoint),
+            capability_secret: self.peer_capability_secret(recipient, &endpoint)?,
             endpoint,
-            local_endpoint: local_endpoint.clone(),
+            local_endpoint,
             endpoint_updates: self.database.pending_endpoint_updates(recipient)?,
             message_id,
             conversation_id: conversation_id.to_owned(),
@@ -2073,10 +2233,15 @@ impl ClientEngineActor {
                 continue;
             };
             let probe_id = uuid::Uuid::new_v4();
+            let local_endpoint_for_contact =
+                self.local_endpoint_for_contact(&contact.installation_id, &local_endpoint)?;
             transport.try_send(PeerOutboundCommand {
                 peer_public_key: endpoint.identity_public_key.clone(),
+                capability_id: endpoint_capability_id(&endpoint),
+                capability_secret: self
+                    .peer_capability_secret(&contact.installation_id, &endpoint)?,
                 endpoint,
-                local_endpoint: local_endpoint.clone(),
+                local_endpoint: local_endpoint_for_contact,
                 endpoint_updates: updates,
                 message_id: probe_id,
                 conversation_id: contact.installation_id,
@@ -2089,6 +2254,17 @@ impl ClientEngineActor {
                 delivery: PeerDeliveryTag::Probe,
                 socks5_url: socks5_url.clone(),
             })?;
+        }
+        Ok(())
+    }
+
+    fn queue_presence_heartbeats(&mut self) -> EngineResult<()> {
+        if !self.network_online || self.socks5_url.is_none() || self.local_peer_endpoint.is_none() {
+            return Ok(());
+        }
+        let online = self.app_foreground && !self.background_restricted;
+        for contact in self.list_contacts()? {
+            let _ = self.queue_peer_presence(&contact.installation_id, online);
         }
         Ok(())
     }
@@ -2113,8 +2289,11 @@ impl ClientEngineActor {
             return Ok(());
         };
         let probe_id = uuid::Uuid::new_v4();
+        let local_endpoint = self.local_endpoint_for_contact(recipient, &local_endpoint)?;
         let command = PeerOutboundCommand {
             peer_public_key: endpoint.identity_public_key.clone(),
+            capability_id: endpoint_capability_id(&endpoint),
+            capability_secret: self.peer_capability_secret(recipient, &endpoint)?,
             endpoint,
             local_endpoint,
             endpoint_updates: self.database.pending_endpoint_updates(recipient)?,
@@ -2124,6 +2303,58 @@ impl ClientEngineActor {
             created_at: unix_secs(),
             ciphertext: Vec::new(),
             delivery: PeerDeliveryTag::Probe,
+            socks5_url,
+        };
+        self.peer_transport
+            .as_ref()
+            .ok_or_else(|| EngineError::Transport("peer listener is not running".to_owned()))?
+            .try_send(command)
+    }
+
+    fn queue_peer_presence(&mut self, recipient: &str, online: bool) -> EngineResult<()> {
+        self.queue_peer_control(recipient, PeerDeliveryTag::Presence { online })
+    }
+
+    fn queue_peer_typing(&mut self, recipient: &str, typing: bool) -> EngineResult<()> {
+        self.queue_peer_control(recipient, PeerDeliveryTag::Typing { typing })
+    }
+
+    fn queue_peer_control(
+        &mut self,
+        recipient: &str,
+        delivery: PeerDeliveryTag,
+    ) -> EngineResult<()> {
+        if matches!(
+            self.contact_transport_policy(recipient)?,
+            ContactTransportPolicy::RelayOnly
+        ) || !self.network_online
+        {
+            return Ok(());
+        }
+        let Some(socks5_url) = self.socks5_url.clone() else {
+            return Ok(());
+        };
+        let Some(local_endpoint) = self.local_peer_endpoint.clone() else {
+            return Ok(());
+        };
+        let Some(endpoint) = self.database.contact_peer_endpoint(recipient)? else {
+            return Ok(());
+        };
+        let control_id = uuid::Uuid::new_v4();
+        let local_endpoint = self.local_endpoint_for_contact(recipient, &local_endpoint)?;
+        let command = PeerOutboundCommand {
+            peer_public_key: endpoint.identity_public_key.clone(),
+            capability_id: endpoint_capability_id(&endpoint),
+            capability_secret: self.peer_capability_secret(recipient, &endpoint)?,
+            endpoint,
+            local_endpoint,
+            endpoint_updates: self.database.pending_endpoint_updates(recipient)?,
+            message_id: control_id,
+            conversation_id: recipient.to_owned(),
+            sequence: stable_message_sequence(control_id),
+            created_at: unix_secs(),
+            ciphertext: Vec::new(),
+            delivery,
             socks5_url,
         };
         self.peer_transport
@@ -2143,37 +2374,32 @@ impl ClientEngineActor {
         let protocol_nickname =
             protocol_nickname(&self.identity.installation_id(), &profile.nickname);
         for contact in self.list_contacts()? {
-            if self
-                .database
-                .contact_peer_endpoint(&contact.installation_id)?
-                .is_some()
-            {
-                continue;
-            }
+            let local_endpoint_for_contact =
+                self.local_endpoint_for_contact(&contact.installation_id, &local_endpoint)?;
             let payload = RelayPayloadV1::peer_endpoint_bootstrap(
                 &self.identity,
                 &protocol_nickname,
                 contact.installation_id.clone(),
-                local_endpoint.clone(),
+                local_endpoint_for_contact.clone(),
             )
             .encode()
             .map_err(EngineError::InvalidCommand)?;
             self.database.put_peer_endpoint_bootstrap(
                 &contact.installation_id,
                 payload.as_bytes(),
-                local_endpoint.sequence,
+                local_endpoint_for_contact.sequence,
             )?;
             if let Err(error) = self.send_peer_endpoint_bootstrap(PeerEndpointBootstrapRecord {
                 contact_installation_id: contact.installation_id.clone(),
                 payload: payload.into_bytes(),
-                endpoint_sequence: local_endpoint.sequence,
+                endpoint_sequence: local_endpoint_for_contact.sequence,
                 attempt_count: 0,
                 next_attempt_at: 0,
                 last_error: None,
             }) {
                 self.database.record_peer_endpoint_bootstrap_error(
                     &contact.installation_id,
-                    local_endpoint.sequence,
+                    local_endpoint_for_contact.sequence,
                     &error.to_string(),
                 )?;
                 self.pending_engine_events.push(EngineEvent::Log {
@@ -2188,6 +2414,24 @@ impl ClientEngineActor {
             }
         }
         Ok(())
+    }
+
+    fn local_endpoint_for_contact(
+        &mut self,
+        contact_installation_id: &str,
+        endpoint: &PeerEndpointBundle,
+    ) -> EngineResult<PeerEndpointBundle> {
+        let capability_id = self
+            .database
+            .ensure_contact_endpoint_capability(contact_installation_id)?;
+        let marker = format!("contact_endpoint_v1:{capability_id}");
+        let mut endpoint = endpoint.clone();
+        if !endpoint.capabilities.iter().any(|value| value == &marker) {
+            endpoint.sequence = endpoint.sequence.saturating_add(1);
+            endpoint.capabilities.push(marker);
+            endpoint.signature = self.identity.sign(&endpoint.signing_bytes());
+        }
+        Ok(endpoint)
     }
 
     fn send_peer_endpoint_bootstrap(
@@ -2242,6 +2486,7 @@ impl ClientEngineActor {
             &payload,
             PendingRelayDelivery::Ephemeral {
                 installation_id: recipient_installation_id.to_owned(),
+                delivery_id: None,
             },
         )
     }
@@ -2364,7 +2609,25 @@ impl ClientEngineActor {
                 }
                 Ok(Vec::new())
             }
-            Some(PendingRelayDelivery::Ephemeral { installation_id }) => {
+            Some(PendingRelayDelivery::Ephemeral {
+                installation_id,
+                delivery_id,
+            }) => {
+                if let Some(delivery_id) = delivery_id {
+                    if !matches!(
+                        outcome,
+                        MessageTransportOutcome::Forwarded
+                            | MessageTransportOutcome::Delivered
+                            | MessageTransportOutcome::PeerPersisted
+                            | MessageTransportOutcome::PeerDelivered
+                    ) {
+                        self.database.record_capability_delivery_error(
+                            &delivery_id,
+                            unix_ms() + retry_backoff_ms(1),
+                            &format!("capability relay outcome: {outcome:?}"),
+                        )?;
+                    }
+                }
                 self.pending_engine_events.push(EngineEvent::Log {
                     log: EngineLogEvent {
                         level: match outcome {
@@ -2693,8 +2956,15 @@ impl ClientEngineActor {
             return Ok(Vec::new());
         }
         self.database.put_contact_peer_endpoint(&endpoint)?;
+        self.database
+            .ensure_contact_endpoint_capability(&endpoint.installation_id)?;
         if let Some(transport) = &self.peer_transport {
-            transport.authorize_contact(&endpoint);
+            // Endpoint delivery can race with contact creation. Mint the
+            // local per-contact capability idempotently before authorizing
+            // the listener; a missing row must not leave the peer unusable.
+            let (capability_id, secret) =
+                self.local_capability_credentials(&endpoint.installation_id)?;
+            transport.authorize_contact(&endpoint, capability_id, secret);
         }
         let contact_id = endpoint.installation_id.clone();
         let _ = self.queue_peer_probe(&contact_id);
@@ -2762,9 +3032,28 @@ impl ClientEngineActor {
             return Ok(Vec::new());
         }
 
-        let mut conversation = self.conversations.remove(&peer).ok_or_else(|| {
-            EngineError::InvalidCommand("message received before MLS Welcome".to_owned())
-        })?;
+        let Some(mut conversation) = self.conversations.remove(&peer) else {
+            let envelope_json = serde_json::to_string(&envelope)
+                .map_err(|error| EngineError::Serialization(error.to_string()))?;
+            self.database
+                .put_pending_application_envelope(&PendingApplicationEnvelopeRecord {
+                    sender_installation_id: peer.clone(),
+                    message_id: message_id.to_string(),
+                    envelope_json,
+                    ciphertext,
+                    ciphertext_hash,
+                    received_at: unix_ms(),
+                })?;
+            self.pending_engine_events.push(EngineEvent::Log {
+                log: EngineLogEvent {
+                    level: "info".to_owned(),
+                    message: format!(
+                        "application envelope deferred until MLS Welcome contact={peer}"
+                    ),
+                },
+            });
+            return Ok(Vec::new());
+        };
         let snapshot_before = conversation
             .snapshot()
             .map_err(|error| EngineError::Storage(error.to_string()))?;
@@ -2935,6 +3224,144 @@ impl ClientEngineActor {
                         let _ = removed_at;
                         Ok(())
                     })?;
+                    Ok((events, None))
+                }
+                ApplicationPayloadV1::CapabilityOffer {
+                    capability_id,
+                    secret,
+                    sequence,
+                    issued_at,
+                    expires_at,
+                    ..
+                } => {
+                    let secret = URL_SAFE_NO_PAD.decode(secret).map_err(|_| {
+                        EngineError::InvalidCommand("invalid capability secret".into())
+                    })?;
+                    if secret.len() < 16 || capability_id.len() != 16 {
+                        return Err(EngineError::InvalidCommand(
+                            "invalid endpoint capability payload".into(),
+                        ));
+                    }
+                    let had_peer_capability = self
+                        .database
+                        .peer_endpoint_capability_secret(&peer, &capability_id)?
+                        .is_some();
+                    let (_, mut events) = self.with_runtime(|runtime| {
+                        runtime.storage_mut().put_peer_endpoint_capability(
+                            &peer,
+                            &capability_id,
+                            &secret,
+                            sequence,
+                            issued_at,
+                            expires_at,
+                        )?;
+                        runtime
+                            .storage_mut()
+                            .put_conversation_mls_snapshot(&peer, &snapshot_after)?;
+                        runtime
+                            .storage_mut()
+                            .put_received_envelope(&envelope_record)?;
+                        Ok(())
+                    })?;
+                    events.push(
+                        torchat_client_runtime::RuntimeEvent::ContactCapabilityChanged {
+                            contact_id: peer.clone(),
+                            capability_id: capability_id.clone(),
+                            sequence,
+                            status: torchat_client_runtime::CapabilityStatus::Active,
+                        },
+                    );
+                    // If this is the first grant received from the peer, make
+                    // the exchange symmetric. Duplicate offers do not trigger
+                    // another offer, preventing an acknowledgement loop.
+                    if !had_peer_capability {
+                        if let Err(error) = self.send_capability_offer(&peer) {
+                            self.pending_engine_events.push(EngineEvent::Log {
+                                log: EngineLogEvent {
+                                    level: "warn".to_owned(),
+                                    message: format!(
+                                        "symmetric capability offer deferred contact={} error={error}",
+                                        peer
+                                    ),
+                                },
+                            });
+                        }
+                    }
+                    if let Err(error) = self.send_ephemeral_payload(
+                        &peer,
+                        ApplicationPayloadV1::CapabilityOfferAck {
+                            version: torchat_core::PROTOCOL_VERSION,
+                            capability_id,
+                            sequence,
+                        },
+                    ) {
+                        self.pending_engine_events.push(EngineEvent::Log {
+                            log: EngineLogEvent {
+                                level: "warn".to_owned(),
+                                message: format!(
+                                    "capability acknowledgement deferred contact={} error={error}",
+                                    peer
+                                ),
+                            },
+                        });
+                    }
+                    let _ = self.queue_peer_probe(&peer);
+                    Ok((events, None))
+                }
+                ApplicationPayloadV1::CapabilityOfferAck {
+                    capability_id,
+                    sequence,
+                    ..
+                } => {
+                    // This is the application-level acknowledgement for the
+                    // durable offer. Relay Forwarded only proves relay
+                    // acceptance, not that the peer installed the secret.
+                    self.database
+                        .complete_capability_deliveries_for_contact(&peer)?;
+                    let (_, mut events) = self.with_runtime(|runtime| {
+                        runtime
+                            .storage_mut()
+                            .put_conversation_mls_snapshot(&peer, &snapshot_after)?;
+                        runtime
+                            .storage_mut()
+                            .put_received_envelope(&envelope_record)?;
+                        Ok(())
+                    })?;
+                    events.push(
+                        torchat_client_runtime::RuntimeEvent::ContactCapabilityChanged {
+                            contact_id: peer.clone(),
+                            capability_id,
+                            sequence,
+                            status: torchat_client_runtime::CapabilityStatus::Active,
+                        },
+                    );
+                    Ok((events, None))
+                }
+                ApplicationPayloadV1::CapabilityRevoked {
+                    capability_id,
+                    sequence,
+                    ..
+                } => {
+                    let (_, mut events) = self.with_runtime(|runtime| {
+                        runtime
+                            .storage_mut()
+                            .revoke_peer_endpoint_capability(&peer)?;
+                        runtime
+                            .storage_mut()
+                            .put_conversation_mls_snapshot(&peer, &snapshot_after)?;
+                        runtime
+                            .storage_mut()
+                            .put_received_envelope(&envelope_record)?;
+                        Ok(())
+                    })?;
+                    events.push(
+                        torchat_client_runtime::RuntimeEvent::ContactCapabilityChanged {
+                            contact_id: peer.clone(),
+                            capability_id,
+                            sequence,
+                            status: torchat_client_runtime::CapabilityStatus::Revoked,
+                        },
+                    );
                     Ok((events, None))
                 }
             }
@@ -3237,7 +3664,18 @@ impl ClientEngineActor {
         // Keep these signals off until they use a non-ratcheting authenticated
         // channel or the same durable delivery semantics as chat messages.
         const EPHEMERAL_MLS_DELIVERY_SAFE: bool = false;
-        if !EPHEMERAL_MLS_DELIVERY_SAFE {
+        let capability_frame = matches!(
+            &application,
+            ApplicationPayloadV1::CapabilityOffer { .. }
+                | ApplicationPayloadV1::CapabilityOfferAck { .. }
+                | ApplicationPayloadV1::CapabilityRevoked { .. }
+        );
+        if capability_frame && self.connection_state != ConnectionState::Connected {
+            return Err(EngineError::Transport(
+                "relay is not ready for capability bootstrap".to_owned(),
+            ));
+        }
+        if !EPHEMERAL_MLS_DELIVERY_SAFE && !capability_frame {
             let feature = match application {
                 ApplicationPayloadV1::Typing { .. } => "typing indicators",
                 ApplicationPayloadV1::Presence { .. } => "presence signals",
@@ -3283,15 +3721,65 @@ impl ClientEngineActor {
         };
         self.conversations
             .insert(conversation_id.to_owned(), conversation);
-        self.dispatch_ephemeral_payload(conversation_id, payload)
+        let requires_ack = matches!(application, ApplicationPayloadV1::CapabilityOffer { .. });
+        if let Err(error) = self.dispatch_ephemeral_payload(
+            conversation_id,
+            payload,
+            capability_frame,
+            requires_ack,
+        ) {
+            let restored = DirectConversation::restore(&snapshot_before)
+                .map_err(|restore| EngineError::Storage(restore.to_string()))?;
+            self.database
+                .put_conversation_mls_snapshot(conversation_id, &snapshot_before)?;
+            self.conversations
+                .insert(conversation_id.to_owned(), restored);
+            return Err(error);
+        }
+        Ok(())
     }
 
     fn dispatch_ephemeral_payload(
         &mut self,
         installation_id: &str,
         payload: String,
+        capability_frame: bool,
+        requires_ack: bool,
     ) -> EngineResult<()> {
         let policy = self.contact_transport_policy(installation_id)?;
+        // Capability control frames bootstrap the proof required by the P2P
+        // handshake. They must not be sent through that not-yet-authorized
+        // P2P channel. The relay only sees an opaque MLS ciphertext.
+        if capability_frame {
+            if self.connection_state != ConnectionState::Connected {
+                return Err(EngineError::Transport(
+                    "relay is not ready for capability bootstrap".to_owned(),
+                ));
+            }
+            let relay_envelope_id = uuid::Uuid::new_v4();
+            let delivery_id = requires_ack.then(|| relay_envelope_id.to_string());
+            if let Some(delivery_id) = &delivery_id {
+                self.database
+                    .put_capability_delivery(&CapabilityDeliveryRecord {
+                        delivery_id: delivery_id.clone(),
+                        contact_installation_id: installation_id.to_owned(),
+                        payload: payload.as_bytes().to_vec(),
+                        attempt_count: 0,
+                        next_attempt_at: unix_ms(),
+                        last_error: None,
+                        created_at: unix_ms(),
+                    })?;
+            }
+            return self.queue_relay_envelope(
+                relay_envelope_id,
+                installation_id,
+                &payload,
+                PendingRelayDelivery::Ephemeral {
+                    installation_id: installation_id.to_owned(),
+                    delivery_id,
+                },
+            );
+        }
         let peer_result = if matches!(policy, ContactTransportPolicy::RelayOnly) {
             Err(EngineError::Transport(
                 "peer route disabled by contact policy".to_owned(),
@@ -3320,6 +3808,7 @@ impl ClientEngineActor {
                         &payload,
                         PendingRelayDelivery::Ephemeral {
                             installation_id: installation_id.to_owned(),
+                            delivery_id: None,
                         },
                     )
                     .is_ok()
@@ -4167,6 +4656,10 @@ impl ClientEngineActor {
             .insert(card.installation_id.clone(), conversation);
         self.crypto_blocked_peers.remove(&card.installation_id);
         runtime_events.extend(self.apply_pending_peer_endpoint(&card.installation_id)?);
+        // A capability or message frame may have arrived through the relay
+        // while Welcome was still being committed. Replay those frames now
+        // that the MLS conversation is available.
+        runtime_events.extend(self.drain_pending_pre_welcome(&card.installation_id)?);
         if let Some(confirm) = result.confirm_contact {
             self.database.put_pending_contact_confirmation(
                 &confirm.pairing_id,
@@ -4200,7 +4693,167 @@ impl ClientEngineActor {
             }
         }
         let _ = self.queue_relay_endpoint_bootstraps();
+        // Exchange the per-contact endpoint secret only after the MLS
+        // conversation has been committed. The offer is MLS-encrypted.
+        if let Err(error) = self.send_capability_offer(&card.installation_id) {
+            self.pending_engine_events.push(EngineEvent::Log {
+                log: EngineLogEvent {
+                    level: "warn".to_owned(),
+                    message: format!(
+                        "capability offer deferred contact={} error={error}",
+                        card.installation_id
+                    ),
+                },
+            });
+        }
         Ok(runtime_events)
+    }
+
+    fn drain_pending_pre_welcome(
+        &mut self,
+        contact_installation_id: &str,
+    ) -> EngineResult<Vec<torchat_client_runtime::RuntimeEvent>> {
+        let pending = self
+            .database
+            .pending_application_envelopes(contact_installation_id)?;
+        if pending.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut events = Vec::new();
+        for record in pending {
+            let envelope: RelayEnvelope = serde_json::from_str(&record.envelope_json)
+                .map_err(|error| EngineError::Serialization(error.to_string()))?;
+            let message_id = record.message_id.clone();
+            let ciphertext = record.ciphertext.clone();
+            match self.handle_application_envelope(envelope, ciphertext) {
+                Ok(mut replayed) => {
+                    self.database.remove_pending_application_envelope(
+                        contact_installation_id,
+                        &message_id,
+                    )?;
+                    events.append(&mut replayed);
+                }
+                Err(error) => {
+                    self.pending_engine_events.push(EngineEvent::Log {
+                        log: EngineLogEvent {
+                            level: "warn".to_owned(),
+                            message: format!(
+                                "deferred application envelope replay failed contact={} error={error}",
+                                contact_installation_id
+                            ),
+                        },
+                    });
+                }
+            }
+        }
+        Ok(events)
+    }
+
+    fn send_capability_offer(&mut self, contact_installation_id: &str) -> EngineResult<()> {
+        if !self.conversations.contains_key(contact_installation_id) {
+            return Err(EngineError::Transport(
+                "capability bootstrap is waiting for MLS Welcome".to_owned(),
+            ));
+        }
+        if self
+            .database
+            .has_capability_delivery_for_contact(contact_installation_id)?
+        {
+            return Ok(());
+        }
+        self.database
+            .ensure_contact_endpoint_capability(contact_installation_id)?;
+        let Some((capability_id, secret, sequence, _status)) = self
+            .database
+            .contact_endpoint_capability(contact_installation_id)?
+        else {
+            return Err(EngineError::Storage(
+                "contact capability was not created".to_owned(),
+            ));
+        };
+        self.send_ephemeral_payload(
+            contact_installation_id,
+            ApplicationPayloadV1::CapabilityOffer {
+                version: torchat_core::PROTOCOL_VERSION,
+                capability_id,
+                secret: URL_SAFE_NO_PAD.encode(secret),
+                sequence,
+                issued_at: unix_secs(),
+                expires_at: None,
+            },
+        )
+    }
+
+    fn send_capability_offers_for_contacts(&mut self) -> EngineResult<()> {
+        if self.connection_state != ConnectionState::Connected {
+            return Ok(());
+        }
+        for contact in self.list_contacts()? {
+            let remote_capability_ready = self
+                .database
+                .contact_peer_endpoint(&contact.installation_id)?
+                .map(|endpoint| {
+                    self.peer_capability_secret(&contact.installation_id, &endpoint)
+                        .map(|secret| !secret.is_empty())
+                })
+                .transpose()?
+                .unwrap_or(false);
+            if self.conversations.contains_key(&contact.installation_id) && !remote_capability_ready
+            {
+                if self
+                    .database
+                    .has_capability_delivery_for_contact(&contact.installation_id)?
+                {
+                    continue;
+                }
+                if let Err(error) = self.send_capability_offer(&contact.installation_id) {
+                    self.pending_engine_events.push(EngineEvent::Log {
+                        log: EngineLogEvent {
+                            level: "warn".to_owned(),
+                            message: format!(
+                                "capability bootstrap deferred contact={} error={error}",
+                                contact.installation_id
+                            ),
+                        },
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn retry_capability_deliveries(&mut self) -> EngineResult<()> {
+        if self.connection_state != ConnectionState::Connected {
+            return Ok(());
+        }
+        for record in self.database.due_capability_deliveries(unix_ms())? {
+            let next_attempt = unix_ms() + retry_backoff_ms(record.attempt_count);
+            if !self
+                .database
+                .claim_capability_delivery(&record.delivery_id, next_attempt, None)?
+            {
+                continue;
+            }
+            let envelope_id =
+                uuid::Uuid::parse_str(&record.delivery_id).unwrap_or_else(|_| uuid::Uuid::new_v4());
+            if let Err(error) = self.queue_relay_envelope(
+                envelope_id,
+                &record.contact_installation_id,
+                std::str::from_utf8(&record.payload)
+                    .map_err(|value| EngineError::Serialization(value.to_string()))?,
+                PendingRelayDelivery::Ephemeral {
+                    installation_id: record.contact_installation_id.clone(),
+                    delivery_id: Some(record.delivery_id.clone()),
+                },
+            ) {
+                self.database.record_capability_delivery_error(
+                    &record.delivery_id,
+                    next_attempt,
+                    &error.to_string(),
+                )?;
+            }
+        }
+        Ok(())
     }
 
     fn fresh_mls_member(&self) -> EngineResult<MlsMember> {
@@ -4392,6 +5045,45 @@ fn stable_message_sequence(message_id: uuid::Uuid) -> u64 {
     let mut sequence = [0_u8; 8];
     sequence.copy_from_slice(&bytes[..8]);
     u64::from_be_bytes(sequence).max(1)
+}
+
+fn endpoint_capability_id(endpoint: &PeerEndpointBundle) -> String {
+    endpoint
+        .capabilities
+        .iter()
+        .find_map(|value| value.strip_prefix("contact_endpoint_v1:"))
+        .unwrap_or_default()
+        .to_owned()
+}
+
+impl ClientEngineActor {
+    fn local_capability_credentials(
+        &self,
+        contact_installation_id: &str,
+    ) -> EngineResult<(String, Vec<u8>)> {
+        self.database
+            .contact_endpoint_capability(contact_installation_id)?
+            .map(|(id, secret, _, _)| (id, secret))
+            .ok_or_else(|| {
+                EngineError::Storage(format!(
+                    "local endpoint capability is missing for contact {contact_installation_id}"
+                ))
+            })
+    }
+
+    fn peer_capability_secret(
+        &self,
+        contact_installation_id: &str,
+        endpoint: &PeerEndpointBundle,
+    ) -> EngineResult<Vec<u8>> {
+        Ok(self
+            .database
+            .peer_endpoint_capability_secret(
+                contact_installation_id,
+                &endpoint_capability_id(endpoint),
+            )?
+            .unwrap_or_default())
+    }
 }
 
 fn encode_pairing_response_payload(

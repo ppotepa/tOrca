@@ -12,6 +12,33 @@ The code percentage covers production implementation only. Manual Tor/P2P
 validation and externally supplied Android signing credentials are tracked
 separately and are intentionally not part of this code-only pass.
 
+## Endpoint capability hardening
+
+- [x] Per-contact capability records with 16-character public IDs and
+  SQLCipher-protected secret material (`018_contact_endpoint_capabilities.sql`).
+- [x] Peer endpoint bundles carry the contact-scoped capability marker and
+  authenticated handshake transcripts include the capability ID.
+- [x] MLS-encrypted `CapabilityOffer` is emitted after a contact conversation
+  is committed; the receiver validates and stores the peer secret in the
+  separate `019_peer_endpoint_capabilities.sql` table and sends an encrypted
+  acknowledgement.
+- [x] Public engine commands and generated Dart/Kotlin/Windows mappings for
+  get, rotate and revoke capability.
+- [x] Contact details UI displays capability status/ID/sequence and provides
+  rotate/revoke actions.
+- [x] Add proof-of-possession HMAC to the peer hello. The receiver verifies
+  the HMAC against the locally issued contact grant and rejects missing or
+  invalid proof; there is no unauthenticated P2P bootstrap window.
+- [x] Keep inbound and outbound grants directionally separate: inbound uses
+  the local capability ID/secret, outbound uses the remote endpoint marker
+  and the secret received from that peer.
+- [x] Bootstrap capability control frames as opaque MLS ciphertext through
+  relay even for `PeerOnly`, before opening the capability-protected P2P
+  session. Relay readiness is checked before advancing the MLS ratchet and a
+  failed enqueue restores both the in-memory and persisted MLS snapshot.
+- [x] Retry missing capability offers after relay recovery and local onion
+  readiness; receiving a capability immediately wakes an authenticated probe.
+
 ## P0 - correctness and availability
 
 - [x] **P0-01 Relay effects outside SQLite transactions and actor waits**
@@ -186,6 +213,15 @@ they are not used to block the clean-code completion percentage.
 - [x] Prevent retry attempts from publishing relay/onion readiness before Tor reaches bootstrap completion.
 - [ ] Verify on-device recovery after Wi-Fi/LTE loss and a cold Tor start.
 
+## Android background reattach status
+
+- [x] Map Android relay connection phases to the canonical `TransportProbeState`
+  values consumed by Flutter (`READY`, `STARTING`, `DEGRADED`, `OFFLINE`, `ERROR`).
+- [x] Keep one latest Tor/relay status per component for Activity reattach
+  instead of replaying stale status history as current readiness.
+- [x] Reset retained status snapshots when the service generation stops.
+- [ ] Verify minimize, resume and process recreation on a physical Android device.
+
 ## Repository cleanup
 
 - [x] Removed 19 physically empty legacy/source placeholder directories after
@@ -218,3 +254,100 @@ they are not used to block the clean-code completion percentage.
 - [x] Isolate live message/status animations with repaint boundaries
 - [x] Add open-chat live-history regression test
 - [ ] Verify Android ↔ desktop live conversation after fresh deploy
+
+## Responsive navigation and Android back
+
+- [x] Keep the compact/mobile conversation list visible when the desktop
+  sidebar is not mounted.
+- [x] Add a regression test for the chat list at a 360 px viewport width.
+- [x] Intercept Android system back while a conversation is open and return to
+  the chat list before allowing the activity to background.
+- [x] Return from Contacts/other top-level destinations to Chats before
+  leaving the application.
+- [x] Preserve native Android backgrounding only at the root of the app.
+- [ ] Verify gesture back, three-button back and Activity recreation on a
+  physical Android device.
+
+## Chat layout polish
+
+- [x] Increase the expanded desktop rail width so navigation labels are not
+  clipped in narrow workspaces.
+- [x] Keep the active chat at the bottom when new messages arrive while the
+  user is already near the end of the timeline.
+- [x] Show an explicit "new messages / scroll to bottom" action when the user
+  is reading older messages.
+- [x] Limit rendered image thumbnails to a 200 px maximum edge while keeping
+  the full-resolution preview available on tap.
+
+## QoL batch: composer and timeline
+
+- [x] Selecting images creates a composer draft instead of sending immediately.
+- [x] Support up to four prepared image attachments with per-item removal.
+- [x] Send caption and images sequentially through the existing message path.
+- [x] Add older-message loading near the top of the timeline with offset
+  preservation and a busy indicator.
+- [x] Keep the timeline cache close to the viewport so image bubbles are
+  materialized lazily by the list builder.
+- [ ] Persist unfinished attachment drafts across an application restart.
+
+## Centralized probing
+
+- [x] Add a reusable Rust `ProbeCoordinator` with shared probe kinds,
+  per-target state, in-flight deduplication and exponential backoff.
+- [x] Move peer probe scheduling ownership into `ClientEngineActor` instead of
+  maintaining a standalone peer-probe deadline.
+- [x] Feed peer connection results into the coordinator so all peer checks use
+  the same `Unknown/Checking/Online/Offline` semantics.
+- [ ] Expose the coordinator snapshot as a generated runtime event for the
+  Flutter contact list, conversation header and connection panel.
+- [ ] Add relay, onion-service and engine probes to the same coordinator.
+
+## Contact presence and control frames
+
+- [x] Add authenticated peer control frames for presence, typing and probe
+  response without advancing the MLS ratchet.
+- [x] Route lifecycle presence and typing commands through the peer transport
+  instead of the disabled MLS ephemeral path.
+- [x] Preserve observed presence timestamps in the Flutter session state and
+  show `ostatnio widziany` in the active conversation header.
+- [x] Persist presence timestamps in the canonical contact projection and expose
+  them through `ContactRecord.lastSeenAt`.
+- [ ] Add full relay/onion/engine probe snapshots to the generated contract.
+- [x] Add privacy controls for presence, typing and last-seen visibility.
+- [x] Send periodic authenticated presence heartbeats from the engine probe
+  cadence, respecting foreground/background availability.
+
+## Per-contact P2P capabilities
+
+- [x] Generate and persist a separate 16-character capability ID per contact.
+- [x] Attach the signed capability marker to endpoint bootstrap bundles.
+- [x] Require the capability ID during authenticated inbound peer handshake.
+- [x] Add migration 018 and engine-side capability storage/revocation hooks.
+- [x] Exchange a private capability secret inside the post-pairing MLS payload.
+- [x] Add user-facing capability rotation/revocation commands to the generated
+  contract.
+
+## Pairing and P2P bootstrap hardening
+
+- [x] Keep pairing refresh requests pending through startup warmup; an invite
+  event can no longer be replaced by a generic post-warmup refresh.
+- [x] Remove the stale `ApplicationStateStore` fallback for pairing inbox and
+  outbox projections, so an authoritative empty result cannot resurrect an
+  acknowledged or expired invite.
+- [x] Expire locally persisted invitations on the engine probe cadence even
+  when relay connectivity is unavailable.
+- [x] Buffer MLS application envelopes received before Welcome and replay them
+  after the contact conversation is committed.
+- [x] Ensure a local per-contact capability exists before endpoint
+  authorization, including startup and endpoint rotation paths.
+- [x] Emit diagnostics when symmetric capability offers or acknowledgements
+  are deferred instead of silently discarding the error.
+- [x] Invalidate cached relay sessions after HTTP 401 and force a fresh
+  challenge/register bootstrap.
+- [x] Replace in-memory pre-Welcome buffering with a durable encrypted inbox
+  for process-crash recovery (MLS ciphertext remains opaque to storage).
+- [x] Move capability offers/ACKs into a durable per-contact outbox with retry
+  state and replay after relay reconnect or engine restart.
+- [ ] Verify a fresh Android-to-desktop and desktop-to-Android pairing after a
+  clean deploy; existing databases may contain capability records from the
+  previous proof-direction implementation.

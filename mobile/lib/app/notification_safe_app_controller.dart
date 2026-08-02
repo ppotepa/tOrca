@@ -67,6 +67,10 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
       if (!preferences.containsKey('torchat.privacy.readReceipts')) {
         await preferences.setBool('torchat.privacy.readReceipts', false);
       }
+      state = state.copyWith(
+        lastSeenEnabled:
+            preferences.getBool('torchat.privacy.lastSeen') ?? true,
+      );
     } on MissingPluginException {
       // A host can attach the platform plugins after the engine starts. The
       // preference is only a persistence hint; it must not block runtime boot.
@@ -88,10 +92,10 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
     _hideRemovedRelationships();
   }
 
-  Future<int> loadOlderMessages(String conversationId) async {
+  Future<OlderMessagesResult> loadOlderMessages(String conversationId) async {
     if (conversationId.isEmpty ||
         state.selectedConversationId != conversationId) {
-      return 0;
+      return const OlderMessagesResult(loadedCount: 0, hasMore: false);
     }
     final repository = ref.read(base.runtimeRepositoryProvider);
     final currentMessages = await repository.messages(
@@ -104,9 +108,12 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
       before: before,
       limit: defaultMessagePageSize,
     );
-    if (page.messages.isEmpty) return 0;
+    if (page.messages.isEmpty) {
+      return OlderMessagesResult(loadedCount: 0, hasMore: page.hasMore);
+    }
 
-    return repository.mergeOlderMessagePage(conversationId, page);
+    final loaded = await repository.mergeOlderMessagePage(conversationId, page);
+    return OlderMessagesResult(loadedCount: loaded, hasMore: page.hasMore);
   }
 
   @override

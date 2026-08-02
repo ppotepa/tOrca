@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -15,6 +16,7 @@ pub const PEER_PATH: &str = "/v1/peer";
 pub const MAX_TRANSPORT_CIPHERTEXT_BYTES: usize = 128 * 1024;
 pub const MAX_PEER_FRAME_BYTES: usize = 256 * 1024;
 pub const MAX_PREAUTH_FRAME_BYTES: usize = 8 * 1024;
+type CapabilityHmac = Hmac<Sha256>;
 
 const ENDPOINT_DOMAIN: &[u8] = b"torchat-peer-endpoint-v1";
 const HANDSHAKE_DOMAIN: &[u8] = b"torchat-peer-handshake-v1";
@@ -204,7 +206,34 @@ pub struct PeerClientHello {
     pub protocol_version: u16,
     pub installation_id: String,
     pub endpoint_sequence: u64,
+    #[serde(default)]
+    pub capability_id: String,
+    #[serde(default)]
+    pub capability_proof: String,
     pub nonce: [u8; 32],
+}
+
+pub fn capability_proof(secret: &[u8], hello: &PeerClientHello) -> String {
+    let mut mac = CapabilityHmac::new_from_slice(secret).expect("HMAC accepts arbitrary keys");
+    mac.update(b"torchat-peer-capability-v1");
+    mac.update(hello.installation_id.as_bytes());
+    mac.update(&hello.endpoint_sequence.to_be_bytes());
+    mac.update(hello.capability_id.as_bytes());
+    mac.update(&hello.nonce);
+    URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes())
+}
+
+pub fn verify_capability_proof(secret: &[u8], hello: &PeerClientHello) -> bool {
+    let Ok(proof) = URL_SAFE_NO_PAD.decode(&hello.capability_proof) else {
+        return false;
+    };
+    let mut mac = CapabilityHmac::new_from_slice(secret).expect("HMAC accepts arbitrary keys");
+    mac.update(b"torchat-peer-capability-v1");
+    mac.update(hello.installation_id.as_bytes());
+    mac.update(&hello.endpoint_sequence.to_be_bytes());
+    mac.update(hello.capability_id.as_bytes());
+    mac.update(&hello.nonce);
+    mac.verify_slice(&proof).is_ok()
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -238,6 +267,7 @@ pub fn handshake_transcript(
     push_u16(&mut bytes, client.protocol_version);
     push_str(&mut bytes, &client.installation_id);
     push_u64(&mut bytes, client.endpoint_sequence);
+    push_str(&mut bytes, &client.capability_id);
     push_bytes(&mut bytes, &client.nonce);
     push_str(&mut bytes, server_installation_id);
     push_u64(&mut bytes, server_endpoint_sequence);
@@ -363,6 +393,14 @@ pub struct PeerAck {
     pub ciphertext_hash: [u8; 32],
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum PeerPresenceState {
+    Online,
+    Away,
+    Offline,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(
     tag = "type",
@@ -370,16 +408,56 @@ pub struct PeerAck {
     rename_all_fields = "camelCase"
 )]
 pub enum PeerFrame {
-    ClientHello { hello: PeerClientHello },
-    ServerChallenge { challenge: PeerServerChallenge },
-    ClientProof { proof: PeerClientProof },
-    HandshakeAccepted { session_id: Uuid },
-    Message { envelope: PeerMessageEnvelope },
-    Ack { ack: PeerAck },
-    EndpointUpdate { update: PeerEndpointUpdate },
-    Ping { nonce: u64 },
-    Pong { nonce: u64 },
-    ProtocolError { code: String },
+    ClientHello {
+        hello: PeerClientHello,
+    },
+    ServerChallenge {
+        challenge: PeerServerChallenge,
+    },
+    ClientProof {
+        proof: PeerClientProof,
+    },
+    HandshakeAccepted {
+        session_id: Uuid,
+    },
+    Message {
+        envelope: PeerMessageEnvelope,
+    },
+    Ack {
+        ack: PeerAck,
+    },
+    EndpointUpdate {
+        update: PeerEndpointUpdate,
+    },
+    Ping {
+        nonce: u64,
+    },
+    Pong {
+        nonce: u64,
+    },
+    Presence {
+        state: PeerPresenceState,
+        sent_at: i64,
+        expires_at: i64,
+        nonce: u64,
+    },
+    Typing {
+        typing: bool,
+        sent_at: i64,
+        expires_at: i64,
+        nonce: u64,
+    },
+    ProbeRequest {
+        nonce: u64,
+    },
+    ProbeResponse {
+        nonce: u64,
+        presence: PeerPresenceState,
+        observed_at: i64,
+    },
+    ProtocolError {
+        code: String,
+    },
 }
 
 pub fn encode_frame(frame: &PeerFrame) -> Result<Vec<u8>, String> {
@@ -470,6 +548,8 @@ mod tests {
             protocol_version: PROTOCOL_VERSION,
             installation_id: client.installation_id(),
             endpoint_sequence: 1,
+            capability_id: String::new(),
+            capability_proof: String::new(),
             nonce: [7; 32],
         };
         let session_id = Uuid::new_v4();
@@ -493,6 +573,24 @@ mod tests {
         let signature = server.sign(&first);
         assert!(verify_signature(&server.public_key(), &first, &signature));
         assert!(!verify_signature(&server.public_key(), &second, &signature));
+    }
+
+    #[test]
+    fn capability_proof_binds_hello_and_secret() {
+        let identity = Identity::generate();
+        let mut hello = PeerClientHello {
+            protocol_version: PROTOCOL_VERSION,
+            installation_id: identity.installation_id(),
+            endpoint_sequence: 1,
+            capability_id: "1234567890abcdef".to_owned(),
+            capability_proof: String::new(),
+            nonce: [4; 32],
+        };
+        hello.capability_proof = capability_proof(b"secret", &hello);
+        assert!(verify_capability_proof(b"secret", &hello));
+        assert!(!verify_capability_proof(b"wrong-secret", &hello));
+        hello.nonce[0] ^= 1;
+        assert!(!verify_capability_proof(b"secret", &hello));
     }
 
     #[test]

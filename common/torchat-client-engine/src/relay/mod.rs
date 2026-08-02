@@ -38,6 +38,7 @@ pub enum RelayEvent {
 
 pub trait EngineRelay: Send {
     fn set_socks5_url(&mut self, socks5_url: Option<String>);
+    fn invalidate_session(&mut self) {}
     fn shutdown(&mut self);
     fn ensure_session(&mut self) -> RuntimeResult<()>;
     fn update_profile(&mut self, nickname: &str) -> RuntimeResult<()>;
@@ -65,6 +66,8 @@ pub struct NoopEngineRelay;
 
 impl EngineRelay for NoopEngineRelay {
     fn set_socks5_url(&mut self, _socks5_url: Option<String>) {}
+
+    fn invalidate_session(&mut self) {}
 
     fn shutdown(&mut self) {}
 

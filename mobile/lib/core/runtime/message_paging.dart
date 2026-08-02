@@ -4,6 +4,13 @@ const _messagePagePrefix = 'torchat-page-v1\t';
 const _messageAllPrefix = 'torchat-all-v1\t';
 const defaultMessagePageSize = 50;
 
+class OlderMessagesResult {
+  const OlderMessagesResult({required this.loadedCount, required this.hasMore});
+
+  final int loadedCount;
+  final bool hasMore;
+}
+
 class RuntimeMessagePage {
   const RuntimeMessagePage({required this.messages, required this.hasMore});
 

@@ -7,9 +7,7 @@ import '../../app/ui_operation_registry.dart';
 import '../../core/attachments/image_message_codec.dart';
 import '../../core/models/domain.dart';
 import '../async/busy_surface.dart';
-import '../async/themed_activity_indicator.dart';
 import '../formatters/conversation_display.dart';
-import '../../app/theme/widgets/themed_icon.dart';
 import 'empty_state.dart';
 import 'feature_header.dart';
 import 'list_items.dart';
@@ -103,6 +101,8 @@ class ConversationListSection extends ConsumerWidget {
                 selected: selectedConversation == conversation.id,
                 onTap: () => onOpenConversation(conversation.id),
                 asCard: asCard,
+                pinned: preference.pinned,
+                muted: preference.muted,
               );
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -125,46 +125,8 @@ class ConversationListSection extends ConsumerWidget {
                       preference,
                       details.globalPosition,
                     ),
-                    child: Stack(
-                      children: [
-                        tile,
-                        if (preference.pinned || preference.muted)
-                          Positioned(
-                            right: 8,
-                            bottom: 7,
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                if (preference.pinned)
-                                  const ThemedIcon(
-                                    Icons.push_pin_outlined,
-                                    size: 13,
-                                  ),
-                                if (preference.pinned && preference.muted)
-                                  const SizedBox(width: 5),
-                                if (preference.muted)
-                                  const ThemedIcon(
-                                    Icons.notifications_off_outlined,
-                                    size: 13,
-                                  ),
-                              ],
-                            ),
-                          ),
-                      ],
-                    ),
+                    child: tile,
                   ),
-                  if (selectedConversation == '__conversation_busy_never__' &&
-                      selectedConversation?.isEmpty == true)
-                    const Padding(
-                      padding: EdgeInsets.fromLTRB(12, 4, 12, 2),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: ThemedActivityIndicator(
-                          label: 'Otwieranie rozmowy…',
-                          compact: true,
-                        ),
-                      ),
-                    ),
                 ],
               );
             },

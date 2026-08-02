@@ -178,7 +178,7 @@ class _ReleaseMessageBubbleState extends State<ReleaseMessageBubble> {
           child: MessageDeliverySurface(
             state: message.state,
             child: Container(
-              constraints: const BoxConstraints(maxWidth: 420),
+              constraints: const BoxConstraints(maxWidth: 240),
               clipBehavior: Clip.antiAlias,
               decoration: BoxDecoration(
                 color: background,
@@ -288,13 +288,15 @@ class _ReleaseMessageBubbleState extends State<ReleaseMessageBubble> {
     }
     if (_loading) {
       return SizedBox(
-        height: 180,
+        width: 200,
+        height: 200,
         child: Center(child: CircularProgressIndicator(color: foreground)),
       );
     }
     if (_imageBytes == null) {
       return SizedBox(
-        height: 180,
+        width: 200,
+        height: 200,
         child: Center(
           child: FilledButton.tonalIcon(
             onPressed: () => _loadImage(force: true),
@@ -306,15 +308,19 @@ class _ReleaseMessageBubbleState extends State<ReleaseMessageBubble> {
     }
     return Hero(
       tag: 'image-message-${message.id}',
-      child: Image.memory(
-        _imageBytes!,
-        fit: BoxFit.cover,
-        gaplessPlayback: true,
-        filterQuality: FilterQuality.medium,
-        errorBuilder: (_, _, _) => Container(
-          height: 180,
-          alignment: Alignment.center,
-          child: ThemedIcon(Icons.broken_image_outlined, color: foreground),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 200, maxHeight: 200),
+        child: Image.memory(
+          _imageBytes!,
+          fit: BoxFit.contain,
+          gaplessPlayback: true,
+          filterQuality: FilterQuality.medium,
+          errorBuilder: (_, _, _) => Container(
+            width: 200,
+            height: 200,
+            alignment: Alignment.center,
+            child: ThemedIcon(Icons.broken_image_outlined, color: foreground),
+          ),
         ),
       ),
     );

@@ -159,7 +159,13 @@ function Test-TorChatAndroidServiceRunning {
 
 function Test-TorChatAndroidEngineReady {
     param([Parameter(Mandatory = $true)][string]$Device, [Parameter(Mandatory = $true)][int]$AppPid)
-    $logs = (& adb -s $Device logcat -d --pid=$AppPid -v brief 2>$null | Out-String)
+    # The foreground service normally shares the application process, but OEMs
+    # can briefly report a different PID while the service is being attached.
+    # Check both the Activity PID and the engine/service tags so readiness does
+    # not fail during that hand-off.
+    $appLogs = (& adb -s $Device logcat -d --pid=$AppPid -v brief 2>$null | Out-String)
+    $engineLogs = (& adb -s $Device logcat -d -v brief 'TorChat-Engine:*' 'TorChat-Lifecycle:*' '*:S' 2>$null | Out-String)
+    $logs = "$appLogs`n$engineLogs"
     return ($logs -match 'engine_initialized' -or $logs -match 'Foreground service client engine initialized')
 }
 
@@ -307,6 +313,18 @@ function Start-TorChatAndroidClient {
     $engineReady = $false
     for ($attempt = 1; $attempt -le $ReadyAttempts; $attempt++) {
         Start-Sleep -Milliseconds 500
+        # A few OEM builds can leave the first Activity launch in a restore
+        # transition without delivering onStart/onCreate's service request.
+        # Relaunching the already-idempotent singleTask Activity is safe and
+        # gives it a second opportunity to hand off to the foreground service.
+        if ($attempt -eq 10 -and -not $serviceReady) {
+            @(& adb -s $resolvedDevice shell am start -S -W -n org.torchat.mobile/.MainActivity `
+                    --es deploy_run_id $Context.RunId 2>&1) |
+                Out-File -LiteralPath (Join-Path $Context.LogDirectory 'adb-retry-start-10.log') -Encoding utf8
+        } elseif ($attempt -eq 25 -and -not $serviceReady) {
+            @(& adb -s $resolvedDevice shell am start -n org.torchat.mobile/.MainActivity 2>&1) |
+                Out-File -LiteralPath (Join-Path $Context.LogDirectory 'adb-retry-start-25.log') -Encoding utf8
+        }
         $appPid = Get-TorChatAndroidAppPid -Device $resolvedDevice
         $activityReady = Test-TorChatAndroidActivityResumed -Device $resolvedDevice
         $serviceReady = Test-TorChatAndroidServiceRunning -Device $resolvedDevice

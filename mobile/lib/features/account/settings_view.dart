@@ -59,6 +59,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
   bool _readReceipts = false;
   bool _typing = true;
   bool _presence = true;
+  bool _lastSeen = true;
   bool _autostart = false;
 
   @override
@@ -97,6 +98,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
       _readReceipts = store.getBool('torchat.privacy.readReceipts') ?? false;
       _typing = store.getBool('torchat.privacy.typing') ?? true;
       _presence = store.getBool('torchat.privacy.presence') ?? true;
+      _lastSeen = store.getBool('torchat.privacy.lastSeen') ?? true;
       _autostart = autostart;
     });
   }
@@ -408,6 +410,14 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                   _presence,
                   'torchat.privacy.presence',
                   (value) => _presence = value,
+                ),
+                _toggle(
+                  'Ostatnio widziany',
+                  'Udostępnia czas ostatniej aktywności kontaktom',
+                  _lastSeen,
+                  'torchat.privacy.lastSeen',
+                  (value) => _lastSeen = value,
+                  enabled: _presence,
                 ),
               ],
             ),

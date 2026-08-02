@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../app/app_theme.dart';
+import '../../app/app_controller_base.dart';
 import '../../app/ui_operation_registry.dart';
 import '../../core/models/domain.dart';
 import '../../shared/async/busy_action_button.dart';
@@ -206,6 +207,10 @@ class ContactsView extends ConsumerWidget {
     final alias = TextEditingController(text: contact.localAlias ?? '');
     var muted = contact.muted;
     var transportPolicy = contact.transportPolicy;
+    var capabilityFuture = ref
+        .read(clientRuntimeProvider)
+        .contactEndpointCapability(contact.id);
+    var capabilityBusy = false;
     return showDialog<void>(
       context: context,
       builder: (dialogContext) => Consumer(
@@ -235,6 +240,103 @@ class ContactsView extends ConsumerWidget {
                         '${_peerConnectionLabel(contact.peerConnectionStatus)}',
                       ),
                       Text('Aktualna trasa: ${_effectiveRouteLabel(contact)}'),
+                      const SizedBox(height: 12),
+                      const Divider(),
+                      Text(
+                        'Capability endpointu P2P',
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                      const SizedBox(height: 4),
+                      FutureBuilder<ContactEndpointCapabilityStatus>(
+                        future: capabilityFuture,
+                        builder: (context, snapshot) {
+                          if (snapshot.connectionState ==
+                              ConnectionState.waiting) {
+                            return const LinearProgressIndicator();
+                          }
+                          if (snapshot.hasError || !snapshot.hasData) {
+                            return const Text('Status capability niedostępny');
+                          }
+                          final capability = snapshot.data!;
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Stan: ${capability.status.name.toUpperCase()}',
+                              ),
+                              Text('ID: ${capability.capabilityId}'),
+                              Text('Sekwencja: ${capability.sequence}'),
+                              const SizedBox(height: 6),
+                              Wrap(
+                                spacing: 8,
+                                children: [
+                                  OutlinedButton.icon(
+                                    onPressed: capabilityBusy
+                                        ? null
+                                        : () async {
+                                            setDialogState(
+                                              () => capabilityBusy = true,
+                                            );
+                                            try {
+                                              await ref
+                                                  .read(clientRuntimeProvider)
+                                                  .rotateContactEndpointCapability(
+                                                    contact.id,
+                                                  );
+                                              capabilityFuture = ref
+                                                  .read(clientRuntimeProvider)
+                                                  .contactEndpointCapability(
+                                                    contact.id,
+                                                  );
+                                            } finally {
+                                              if (context.mounted) {
+                                                setDialogState(
+                                                  () => capabilityBusy = false,
+                                                );
+                                              }
+                                            }
+                                          },
+                                    icon: const ThemedIcon(Icons.refresh),
+                                    label: const Text('Rotuj'),
+                                  ),
+                                  OutlinedButton.icon(
+                                    onPressed:
+                                        capabilityBusy ||
+                                            capability.status ==
+                                                CapabilityStatus.revoked
+                                        ? null
+                                        : () async {
+                                            setDialogState(
+                                              () => capabilityBusy = true,
+                                            );
+                                            try {
+                                              await ref
+                                                  .read(clientRuntimeProvider)
+                                                  .revokeContactEndpointCapability(
+                                                    contact.id,
+                                                  );
+                                              capabilityFuture = ref
+                                                  .read(clientRuntimeProvider)
+                                                  .contactEndpointCapability(
+                                                    contact.id,
+                                                  );
+                                            } finally {
+                                              if (context.mounted) {
+                                                setDialogState(
+                                                  () => capabilityBusy = false,
+                                                );
+                                              }
+                                            }
+                                          },
+                                    icon: const ThemedIcon(Icons.block),
+                                    label: const Text('Unieważnij'),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          );
+                        },
+                      ),
                       if (kDebugMode) ...[
                         const SizedBox(height: 12),
                         const Divider(),

@@ -31,6 +31,11 @@ abstract class ClientRuntime {
   Future<bool> peerEndpointAvailable();
   Future<void> retryPeerConnection(String installationId);
   Future<void> rotatePeerEndpoint();
+  Future<ContactEndpointCapabilityStatus> contactEndpointCapability(
+    String installationId,
+  ) async => throw UnsupportedError('contact capability status unavailable');
+  Future<void> rotateContactEndpointCapability(String installationId) async {}
+  Future<void> revokeContactEndpointCapability(String installationId) async {}
   Future<void> verifyContact(String installationId);
   Future<ContactRecord> updateContactSettings(
     String installationId, {
@@ -118,6 +123,16 @@ final class _SessionAwareClientRuntime
       _delegate.retryPeerConnection(installationId);
   @override
   Future<void> rotatePeerEndpoint() => _delegate.rotatePeerEndpoint();
+  @override
+  Future<ContactEndpointCapabilityStatus> contactEndpointCapability(
+    String installationId,
+  ) => _delegate.contactEndpointCapability(installationId);
+  @override
+  Future<void> rotateContactEndpointCapability(String installationId) =>
+      _delegate.rotateContactEndpointCapability(installationId);
+  @override
+  Future<void> revokeContactEndpointCapability(String installationId) =>
+      _delegate.revokeContactEndpointCapability(installationId);
   @override
   Future<void> verifyContact(String installationId) =>
       _delegate.verifyContact(installationId);
@@ -254,6 +269,16 @@ final class _SerializedClientRuntime
       _run(() => _delegate.retryPeerConnection(installationId));
   @override
   Future<void> rotatePeerEndpoint() => _run(_delegate.rotatePeerEndpoint);
+  @override
+  Future<ContactEndpointCapabilityStatus> contactEndpointCapability(
+    String installationId,
+  ) => _run(() => _delegate.contactEndpointCapability(installationId));
+  @override
+  Future<void> rotateContactEndpointCapability(String installationId) =>
+      _run(() => _delegate.rotateContactEndpointCapability(installationId));
+  @override
+  Future<void> revokeContactEndpointCapability(String installationId) =>
+      _run(() => _delegate.revokeContactEndpointCapability(installationId));
   @override
   Future<void> verifyContact(String installationId) =>
       _run(() => _delegate.verifyContact(installationId));

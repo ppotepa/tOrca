@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../client_runtime.dart';
 import '../core/application_state/application_snapshot.dart';
@@ -53,6 +54,8 @@ class AppState {
     this.notice = '',
     this.typingContacts = const {},
     this.onlineContacts = const {},
+    this.lastSeenContacts = const {},
+    this.lastSeenEnabled = true,
     this.applicationSnapshot,
     this.pairingInboxItems = const [],
     this.pairingOutboxItems = const [],
@@ -69,15 +72,14 @@ class AppState {
   List<ContactRecord> get contacts => applicationSnapshot?.contacts ?? const [];
   List<ConversationSummary> get conversations =>
       applicationSnapshot?.conversations ?? const [];
-  // Keep the store fallback for callers that construct a transient AppState
-  // directly (for example notifications/tests). Controller-owned state is
-  // still the normal source after RuntimeRepository.refresh().
-  List<PairingItem> get inbox => pairingInboxItems.isNotEmpty
-      ? pairingInboxItems
-      : ApplicationStateStore.shared.pairingInbox;
-  List<PairingItem> get outbox => pairingOutboxItems.isNotEmpty
-      ? pairingOutboxItems
-      : ApplicationStateStore.shared.pairingOutbox;
+  // Pairing projections are authoritative, including an explicit empty list.
+  // Falling back to a process singleton resurrected expired/acknowledged
+  // invitations and made the modal depend on a restart.
+  List<PairingItem> get inbox => pairingInboxItems;
+  List<PairingItem> get outbox => pairingOutboxItems;
+  // Message views still use the conversation store until the projection
+  // coordinator owns message windows completely. Keep this compatibility
+  // accessor, but do not use the store as a fallback for pairing state.
   List<ChatMessage> get messages =>
       ApplicationStateStore.shared.messages(selectedConversationId ?? '');
   final InviteCode? ownInvite;
@@ -92,6 +94,8 @@ class AppState {
   final String notice;
   final Map<String, bool> typingContacts;
   final Map<String, bool> onlineContacts;
+  final Map<String, int> lastSeenContacts;
+  final bool lastSeenEnabled;
 
   int get activeInviteCount => inbox.pendingCount;
 
@@ -139,6 +143,8 @@ class AppState {
     String? notice,
     Map<String, bool>? typingContacts,
     Map<String, bool>? onlineContacts,
+    Map<String, int>? lastSeenContacts,
+    bool? lastSeenEnabled,
     ApplicationSnapshot? applicationSnapshot,
     List<PairingItem>? pairingInboxItems,
     List<PairingItem>? pairingOutboxItems,
@@ -159,6 +165,8 @@ class AppState {
     notice: notice ?? this.notice,
     typingContacts: typingContacts ?? this.typingContacts,
     onlineContacts: onlineContacts ?? this.onlineContacts,
+    lastSeenContacts: lastSeenContacts ?? this.lastSeenContacts,
+    lastSeenEnabled: lastSeenEnabled ?? this.lastSeenEnabled,
     applicationSnapshot: applicationSnapshot ?? this.applicationSnapshot,
     pairingInboxItems: pairingInboxItems ?? this.pairingInboxItems,
     pairingOutboxItems: pairingOutboxItems ?? this.pairingOutboxItems,
@@ -364,15 +372,28 @@ abstract class AppController extends Notifier<AppState> {
   }
 
   Future<void> setTyping(bool typing) async {
-    // Disabled until ephemeral MLS signals have durable, ratchet-safe
-    // delivery. Do not submit a command which the engine explicitly rejects.
-    return;
+    final conversationId = state.selectedConversationId;
+    if (conversationId == null || conversationId.isEmpty) return;
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      if (!(preferences.getBool('torchat.privacy.typing') ?? true)) return;
+      await _repository.setTyping(conversationId, typing);
+    } catch (_) {
+      // Typing is a best-effort control signal. It must never block sending
+      // durable messages or surface a transport error in the chat composer.
+    }
   }
 
   Future<void> updateVisibility(bool foreground) async {
     await _repository.updateAppVisibility(foreground);
-    // Presence currently uses the same disabled ephemeral channel as typing.
-    // Platform visibility still drives lifecycle and background execution.
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      final enabled = preferences.getBool('torchat.privacy.presence') ?? true;
+      await _repository.setPresence(foreground && enabled);
+    } catch (_) {
+      // Presence is best-effort and will be retried on the next lifecycle
+      // transition or peer probe.
+    }
   }
 
   Future<void> submitPairingCode(String code) async {

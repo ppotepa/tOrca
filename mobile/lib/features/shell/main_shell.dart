@@ -4,8 +4,10 @@ import 'package:flutter/services.dart';
 import '../../app/app_theme.dart';
 import '../../core/connection/connection_readiness.dart';
 import '../../core/models/domain.dart';
+import '../../core/runtime/message_paging.dart';
 import '../../shared/widgets/counter_badge.dart';
 import '../chats/release_chat_view.dart';
+import '../chats/composer_draft.dart';
 import '../contacts/contacts_view.dart';
 import 'desktop/desktop_workspace.dart';
 import '../../shared/widgets/tor_status_bar.dart';
@@ -43,6 +45,7 @@ class MainShell extends StatelessWidget {
     required this.onTypingChanged,
     required this.onRetryMessage,
     required this.onDeleteMessage,
+    required this.onLoadOlderMessages,
     required this.onVerifyContact,
     required this.onUpdateContactSettings,
     required this.onBack,
@@ -51,6 +54,8 @@ class MainShell extends StatelessWidget {
     required this.onRetryTor,
     required this.typingContacts,
     required this.onlineContacts,
+    this.lastSeenContacts = const {},
+    this.lastSeenEnabled = true,
     this.onOpenConnectionCenter,
   });
 
@@ -77,10 +82,12 @@ class MainShell extends StatelessWidget {
   final ValueChanged<MobileTab> onTab;
   final VoidCallback onSearch;
   final VoidCallback onBack;
-  final ValueChanged<String?> onSend;
+  final Future<void> Function(ComposerDraft draft) onSend;
   final ValueChanged<bool> onTypingChanged;
   final ValueChanged<String> onRetryMessage;
   final ValueChanged<String> onDeleteMessage;
+  final Future<OlderMessagesResult> Function(String conversationId)
+  onLoadOlderMessages;
   final ValueChanged<String> onVerifyContact;
   final Future<void> Function(
     ContactRecord,
@@ -100,6 +107,8 @@ class MainShell extends StatelessWidget {
   final VoidCallback? onOpenConnectionCenter;
   final Map<String, bool> typingContacts;
   final Map<String, bool> onlineContacts;
+  final Map<String, int> lastSeenContacts;
+  final bool lastSeenEnabled;
 
   VoidCallback get _openConnectionCenter =>
       onOpenConnectionCenter ?? onRetryTor;
@@ -133,6 +142,8 @@ class MainShell extends StatelessWidget {
           onTypingChanged: onTypingChanged,
           onRetryMessage: onRetryMessage,
           onDeleteMessage: onDeleteMessage,
+          onLoadOlderMessages: () =>
+              onLoadOlderMessages(selectedConversation ?? ''),
           onBack: onBack,
           error: error,
           notice: notice,
@@ -153,6 +164,21 @@ class MainShell extends StatelessWidget {
               (selectedContact!.peerConnectionStatus ==
                       PeerConnectionStatus.connected ||
                   (onlineContacts[selectedContact!.id] ?? false)),
+          lastSeenAt: selectedContact == null || !lastSeenEnabled
+              ? null
+              : lastSeenContacts[selectedContact!.id] ??
+                    int.tryParse(selectedContact!.lastSeenAt ?? ''),
+          headerStatus: desktop
+              ? null
+              : TransportStatusDock(
+                  embeddedInHeader: true,
+                  phase: phase,
+                  peerStatus: peerServerStatus,
+                  readiness: readiness,
+                  transportStatuses: transportStatuses,
+                  latencyMs: latencyMs,
+                  onOpenConnectionCenter: _openConnectionCenter,
+                ),
         )
       : ContactsView(
           saved: contacts,
@@ -220,41 +246,57 @@ class MainShell extends StatelessWidget {
           }
 
           return Scaffold(
-            appBar: AppBar(
-              title: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('TorChat'),
-                  Text(
-                    '@$nickname',
-                    style: Theme.of(context).textTheme.labelSmall,
-                  ),
-                ],
-              ),
-              actions: [
-                IconButton(
-                  tooltip: 'Konto',
-                  onPressed: onOpenAccount,
-                  icon: const ThemedIcon(Icons.person_outline, size: 18),
-                ),
-                IconButton(
-                  tooltip: 'Ustawienia',
-                  onPressed: onOpenSettings,
-                  icon: const ThemedIcon(Icons.settings_outlined, size: 18),
-                ),
-              ],
-            ),
+            appBar: selectedConversation == null
+                ? AppBar(
+                    title: Row(
+                      children: [
+                        Flexible(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('TorChat'),
+                              Text(
+                                '@$nickname',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.labelSmall,
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        TransportStatusDock(
+                          embeddedInHeader: true,
+                          phase: phase,
+                          peerStatus: peerServerStatus,
+                          readiness: readiness,
+                          transportStatuses: transportStatuses,
+                          latencyMs: latencyMs,
+                          onOpenConnectionCenter: _openConnectionCenter,
+                        ),
+                      ],
+                    ),
+                    actions: [
+                      IconButton(
+                        tooltip: 'Konto',
+                        onPressed: onOpenAccount,
+                        icon: const ThemedIcon(Icons.person_outline, size: 18),
+                      ),
+                      IconButton(
+                        tooltip: 'Ustawienia',
+                        onPressed: onOpenSettings,
+                        icon: const ThemedIcon(
+                          Icons.settings_outlined,
+                          size: 18,
+                        ),
+                      ),
+                    ],
+                  )
+                : null,
             body: SafeArea(
               child: Column(
                 children: [
-                  TransportStatusDock(
-                    phase: phase,
-                    peerStatus: peerServerStatus,
-                    readiness: readiness,
-                    transportStatuses: transportStatuses,
-                    latencyMs: latencyMs,
-                    onOpenConnectionCenter: _openConnectionCenter,
-                  ),
                   Expanded(
                     child: Padding(
                       padding: selectedConversation == null

@@ -716,6 +716,7 @@ fn wire_keys() -> &'static [(&'static str, &'static str)] {
         ("PEER_ENDPOINT_STATUS", "peerEndpointStatus"),
         ("PEER_CONNECTION_STATUS", "peerConnectionStatus"),
         ("LAST_PEER_CONNECTED_AT", "lastPeerConnectedAt"),
+        ("LAST_SEEN_AT", "lastSeenAt"),
         ("TRANSPORT_POLICY", "transportPolicy"),
         ("CONTACT_INSTALLATION_ID", "contactInstallationId"),
         ("LAST_MESSAGE_PREVIEW", "lastMessagePreview"),

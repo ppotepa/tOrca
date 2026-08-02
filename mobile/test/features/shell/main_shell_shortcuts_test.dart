@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:torchat_mobile/core/models/domain.dart';
+import 'package:torchat_mobile/core/runtime/message_paging.dart';
 import 'package:torchat_mobile/features/shell/main_shell.dart';
 
 void main() {
@@ -47,10 +48,12 @@ void main() {
             onStartConversation: (_) {},
             onScanInvite: () {},
             onShowInvite: () {},
-            onSend: (_) {},
+            onSend: (_) async {},
             onTypingChanged: (_) {},
             onRetryMessage: (_) {},
             onDeleteMessage: (_) {},
+            onLoadOlderMessages: (_) async =>
+                const OlderMessagesResult(loadedCount: 0, hasMore: false),
             onVerifyContact: (_) {},
             onUpdateContactSettings: (_, _, _, _, _) async {},
             onBack: () => back += 1,

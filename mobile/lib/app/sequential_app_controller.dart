@@ -202,8 +202,18 @@ class SequentialAppController extends base.AppController {
       if (_startup.generation == generation) {
         _warming = false;
         if (_startupComplete) {
+          // Events can arrive while the readiness gate is warming. Preserve
+          // the strongest requested refresh so an invite is not hidden until
+          // the next app restart.
+          final needsPairing = _refreshAfterWarmup ||
+              _eventRefreshNeedsPairing;
           _refreshAfterWarmup = false;
-          unawaited(refreshData());
+          unawaited(
+            refreshData(
+              forcePairing: needsPairing,
+              allowAutoTorka: false,
+            ),
+          );
         } else if (_refreshAfterWarmup) {
           _refreshAfterWarmup = false;
           _scheduleEventRefresh();
@@ -321,11 +331,16 @@ class SequentialAppController extends base.AppController {
         } else if (type == EngineContract.presenceChanged) {
           final contactId = payload[EngineContract.contactId]?.toString();
           if (contactId != null && contactId.isNotEmpty) {
+            final observedAt = (payload[EngineContract.observedAt] as num?)
+                ?.toInt();
             state = state.copyWith(
               onlineContacts: {
                 ...state.onlineContacts,
                 contactId: payload[EngineContract.online] == true,
               },
+              lastSeenContacts: observedAt == null
+                  ? null
+                  : {...state.lastSeenContacts, contactId: observedAt},
             );
           }
         } else {
@@ -354,16 +369,16 @@ class SequentialAppController extends base.AppController {
             // Message events are self-addressing. Never infer a conversation
             // from the currently selected UI route: an event for another
             // contact would otherwise refresh or overwrite the open chat.
-            final conversationId =
-                payload[EngineContract.conversationId]?.toString();
+            final conversationId = payload[EngineContract.conversationId]
+                ?.toString();
             if (conversationId != null && conversationId.isNotEmpty) {
               _repository.invalidateMessages(conversationId);
               _eventMessageRefreshes.add(conversationId);
             } else {
               // A malformed/legacy event cannot be safely routed. Recover by
               // refreshing the application projection, without assigning it
-              // to the active conversation.
-              _eventRefreshNeedsPairing = false;
+              // to the active conversation. Do not clear a pending pairing
+              // refresh here: unrelated events must never suppress an invite.
             }
           } else if (changeKind.startsWith('messages:')) {
             final conversationId = changeKind.substring('messages:'.length);
@@ -389,6 +404,9 @@ class SequentialAppController extends base.AppController {
         }
         _scheduleEventRefresh();
       case PeerConnectionChangedEvent():
+        _repository.invalidateLocalCache();
+        _scheduleEventRefresh();
+      case ContactCapabilityChangedEvent():
         _repository.invalidateLocalCache();
         _scheduleEventRefresh();
       case RuntimeErrorEvent(:final message):

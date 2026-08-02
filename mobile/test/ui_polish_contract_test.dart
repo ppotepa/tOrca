@@ -13,22 +13,28 @@ void main() {
     expect(shell, isNot(contains('ActionStatusStrip')));
   });
 
-  test('desktop workspace is compact resizable and separates groups', () {
-    final workspace = File(
-      'lib/features/shell/desktop/desktop_workspace.dart',
-    ).readAsStringSync();
-    final splitter = File(
-      'lib/features/shell/desktop/resizable_split_pane.dart',
-    ).readAsStringSync();
+  test(
+    'desktop workspace is compact and resizable without placeholder tabs',
+    () {
+      final workspace = File(
+        'lib/features/shell/desktop/desktop_workspace.dart',
+      ).readAsStringSync();
+      final splitter = File(
+        'lib/features/shell/desktop/resizable_split_pane.dart',
+      ).readAsStringSync();
 
-    expect(workspace, contains('ResizableSplitPane('));
-    expect(workspace, contains("'Grupy'"));
-    expect(workspace, contains('Nie mieszamy ich ze zwykłymi czatami'));
-    expect(workspace, contains("'TorChat'"));
-    expect(workspace, isNot(contains('PeerServerIndicator')));
-    expect(splitter, contains('SystemMouseCursors.resizeColumn'));
-    expect(splitter, contains('torchat.desktop.sidebar.width'));
-  });
+      expect(workspace, contains('ResizableSplitPane('));
+      expect(workspace, isNot(contains("'Grupy'")));
+      expect(
+        workspace,
+        isNot(contains('Nie mieszamy ich ze zwykłymi czatami')),
+      );
+      expect(workspace, contains("'TorChat'"));
+      expect(workspace, isNot(contains('PeerServerIndicator')));
+      expect(splitter, contains('SystemMouseCursors.resizeColumn'));
+      expect(splitter, contains('torchat.desktop.sidebar.width'));
+    },
+  );
 
   test('active chat UI has no voice or video controls', () {
     final chat = File('lib/features/chats/chats_view.dart').readAsStringSync();

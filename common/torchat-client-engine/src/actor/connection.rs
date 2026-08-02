@@ -286,6 +286,14 @@ impl ClientEngineActor {
                 }
             }
             Err(error) => {
+                let error_text = error.to_string().to_ascii_lowercase();
+                if error_text.contains("http 401") || error_text.contains("unauthorized") {
+                    // A stale bearer token cannot recover through ordinary
+                    // backoff. Force a fresh challenge/register session.
+                    self.relay.invalidate_session();
+                    self.advance_connection_generation();
+                    self.schedule_relay_bootstrap_now();
+                }
                 if outcome.respond {
                     let _ = events
                         .send(EngineEvent::Response {

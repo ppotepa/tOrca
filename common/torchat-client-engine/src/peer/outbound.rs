@@ -15,7 +15,7 @@ use torchat_core::{
     Identity, PROTOCOL_VERSION,
     peer_protocol::{
         PEER_PATH, PeerAckKind, PeerClientHello, PeerClientProof, PeerFrame, PeerMessageEnvelope,
-        handshake_transcript,
+        PeerPresenceState, capability_proof, handshake_transcript,
     },
     verify_signature,
 };
@@ -42,6 +42,44 @@ pub(super) async fn send_outbound_command<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
+    let now = unix_millis();
+    match &command.delivery {
+        PeerDeliveryTag::Presence { online } => {
+            sink.send(Message::Binary(
+                torchat_core::peer_protocol::encode_frame(&PeerFrame::Presence {
+                    state: if *online {
+                        PeerPresenceState::Online
+                    } else {
+                        PeerPresenceState::Offline
+                    },
+                    sent_at: now,
+                    expires_at: now + 45_000,
+                    nonce: command.sequence,
+                })?
+                .into(),
+            ))
+            .await
+            .map_err(|error| format!("write peer presence: {error}"))?;
+            queues.complete(&command.delivery);
+            return Ok(());
+        }
+        PeerDeliveryTag::Typing { typing } => {
+            sink.send(Message::Binary(
+                torchat_core::peer_protocol::encode_frame(&PeerFrame::Typing {
+                    typing: *typing,
+                    sent_at: now,
+                    expires_at: now + 5_000,
+                    nonce: command.sequence,
+                })?
+                .into(),
+            ))
+            .await
+            .map_err(|error| format!("write peer typing: {error}"))?;
+            queues.complete(&command.delivery);
+            return Ok(());
+        }
+        _ => {}
+    }
     let mut latest_endpoint_sequence = None;
     for update in &command.endpoint_updates {
         if update.endpoint.sequence <= *sent_endpoint_sequence {
@@ -59,16 +97,31 @@ where
         latest_endpoint_sequence = Some(update.endpoint.sequence);
     }
 
-    if matches!(
-        &command.delivery,
-        PeerDeliveryTag::EndpointUpdate | PeerDeliveryTag::Probe
-    ) {
+    if matches!(&command.delivery, PeerDeliveryTag::EndpointUpdate) {
         let nonce = command.sequence;
         sink.send(Message::Binary(
             torchat_core::peer_protocol::encode_frame(&PeerFrame::Ping { nonce })?.into(),
         ))
         .await
         .map_err(|error| format!("write peer endpoint probe: {error}"))?;
+        endpoint_probes.insert(
+            nonce,
+            EndpointProbe {
+                endpoint_sequence: latest_endpoint_sequence,
+                sent_at: Instant::now(),
+                delivery: command.delivery,
+            },
+        );
+        return Ok(());
+    }
+
+    if matches!(&command.delivery, PeerDeliveryTag::Probe) {
+        let nonce = command.sequence;
+        sink.send(Message::Binary(
+            torchat_core::peer_protocol::encode_frame(&PeerFrame::ProbeRequest { nonce })?.into(),
+        ))
+        .await
+        .map_err(|error| format!("write peer probe request: {error}"))?;
         endpoint_probes.insert(
             nonce,
             EndpointProbe {
@@ -110,6 +163,13 @@ where
         );
     }
     Ok(())
+}
+
+fn unix_millis() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as i64)
+        .unwrap_or_default()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -206,6 +266,66 @@ where
             .await
             .map_err(|error| format!("write peer pong: {error}"))?;
         }
+        PeerFrame::Presence {
+            state, expires_at, ..
+        } => {
+            let online =
+                !matches!(state, PeerPresenceState::Offline) && expires_at >= unix_millis();
+            events
+                .send(PeerTransportEvent::PresenceChanged {
+                    installation_id: installation_id.to_owned(),
+                    online,
+                    observed_at: unix_millis(),
+                })
+                .await
+                .map_err(|_| "peer event queue closed".to_owned())?;
+        }
+        PeerFrame::Typing {
+            typing, expires_at, ..
+        } => {
+            events
+                .send(PeerTransportEvent::TypingChanged {
+                    installation_id: installation_id.to_owned(),
+                    typing: typing && expires_at >= unix_millis(),
+                    expires_at,
+                })
+                .await
+                .map_err(|_| "peer event queue closed".to_owned())?;
+        }
+        PeerFrame::ProbeRequest { nonce } => {
+            sink.send(Message::Binary(
+                torchat_core::peer_protocol::encode_frame(&PeerFrame::ProbeResponse {
+                    nonce,
+                    presence: PeerPresenceState::Online,
+                    observed_at: unix_millis(),
+                })?
+                .into(),
+            ))
+            .await
+            .map_err(|error| format!("write peer probe response: {error}"))?;
+        }
+        PeerFrame::ProbeResponse {
+            nonce, presence, ..
+        } => {
+            if let Some(probe) = endpoint_probes.remove(&nonce) {
+                let _ = events
+                    .send(PeerTransportEvent::Ack {
+                        delivery: probe.delivery,
+                        kind: PeerAckKind::Persisted,
+                        contact_installation_id: installation_id.to_owned(),
+                        endpoint_sequence: probe.endpoint_sequence,
+                    })
+                    .await;
+            }
+            events
+                .send(PeerTransportEvent::PresenceChanged {
+                    installation_id: installation_id.to_owned(),
+                    online: !matches!(presence, PeerPresenceState::Offline),
+                    observed_at: unix_millis(),
+                })
+                .await
+                .map_err(|_| "peer event queue closed".to_owned())?;
+        }
         PeerFrame::EndpointUpdate { .. } | PeerFrame::Message { .. } => {}
         _ => return Err("unexpected outbound peer frame".to_owned()),
     }
@@ -268,8 +388,14 @@ pub(super) async fn connect_outbound(
         protocol_version: PROTOCOL_VERSION,
         installation_id: identity.installation_id(),
         endpoint_sequence: command.local_endpoint.sequence,
+        capability_id: command.capability_id.clone(),
+        capability_proof: String::new(),
         nonce,
     };
+    let mut hello = hello;
+    if !command.capability_secret.is_empty() {
+        hello.capability_proof = capability_proof(&command.capability_secret, &hello);
+    }
     super::wire::send_frame(
         &mut websocket,
         PeerFrame::ClientHello {

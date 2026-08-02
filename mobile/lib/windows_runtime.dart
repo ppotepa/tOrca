@@ -396,6 +396,26 @@ class WindowsRuntime extends Object
       EngineContract.rotatePeerEndpoint => {
         EngineContract.type: EngineContract.commandRotatePeerEndpoint,
       },
+      EngineContract.getContactEndpointCapability => {
+        EngineContract.type: EngineContract.commandGetContactEndpointCapability,
+        EngineContract.commandInstallationId: text(
+          EngineContract.argInstallationId,
+        ),
+      },
+      EngineContract.rotateContactEndpointCapability => {
+        EngineContract.type:
+            EngineContract.commandRotateContactEndpointCapability,
+        EngineContract.commandInstallationId: text(
+          EngineContract.argInstallationId,
+        ),
+      },
+      EngineContract.revokeContactEndpointCapability => {
+        EngineContract.type:
+            EngineContract.commandRevokeContactEndpointCapability,
+        EngineContract.commandInstallationId: text(
+          EngineContract.argInstallationId,
+        ),
+      },
       EngineContract.setNickname => {
         EngineContract.type: EngineContract.commandSetNickname,
         EngineContract.nickname: text(EngineContract.nickname),

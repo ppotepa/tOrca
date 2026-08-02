@@ -40,8 +40,8 @@ pub use logic::{
 };
 pub use message_rules::{message_state_after_transport_outcome, message_state_on_send_prepare};
 pub use models::{
-    ChatMessage, ContactRecord, ContactTransportPolicy, ConversationState, ConversationSummary,
-    InviteCode, InviteState, MessageReply, MessageSendEffect, MessageState,
+    CapabilityStatus, ChatMessage, ContactRecord, ContactTransportPolicy, ConversationState,
+    ConversationSummary, InviteCode, InviteState, MessageReply, MessageSendEffect, MessageState,
     MessageTransportOutcome, PairingAcknowledgeEffect, PairingAvailableAction, PairingCancelEffect,
     PairingConfirmContactEffect, PairingItem, PairingPeerOutcome, PairingPreparation,
     PairingSendEffect, PairingSendKind, PairingSyncResult, PeerConnectionStatus,

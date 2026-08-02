@@ -21,6 +21,7 @@ class TransportStatusDock extends StatefulWidget {
     this.phase = TransportPhase.starting,
     this.peerStatus = PeerServerStatus.starting,
     this.desktop = false,
+    this.embeddedInHeader = false,
     this.latencyMs,
     this.onOpenConnectionCenter,
   });
@@ -32,6 +33,7 @@ class TransportStatusDock extends StatefulWidget {
   final TransportPhase phase;
   final PeerServerStatus peerStatus;
   final bool desktop;
+  final bool embeddedInHeader;
   final int? latencyMs;
   final VoidCallback? onOpenConnectionCenter;
 
@@ -68,8 +70,12 @@ class _TransportStatusDockState extends State<TransportStatusDock>
 
   bool _expanded = false;
 
-  bool get _showDetails =>
-      _expanded || _hasBusySegment || _hasWarningSegment || _hasErrorSegment;
+  // The header dock stays compact even while a probe is busy or degraded.
+  // Busy state is communicated by the spinner/glow; verbose diagnostics are
+  // opt-in via tap so the status rail never becomes a full-screen panel.
+  // A dock embedded in an AppBar must never grow horizontally. Detailed
+  // diagnostics belong to the connection center, not to the title row.
+  bool get _showDetails => !widget.embeddedInHeader && _expanded;
 
   @override
   void initState() {
@@ -121,59 +127,82 @@ class _TransportStatusDockState extends State<TransportStatusDock>
         .toList(growable: false);
 
     final theme = Theme.of(context);
+    final embedded = widget.embeddedInHeader;
+    final dock = Material(
+      color: theme.colorScheme.surfaceContainerLowest,
+      elevation: embedded ? 4 : 10,
+      shadowColor: theme.colorScheme.shadow.withValues(
+        alpha: embedded ? .28 : .38,
+      ),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(embedded ? 11 : 14),
+        side: BorderSide(color: theme.dividerColor.withValues(alpha: .78)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap:
+            widget.onOpenConnectionCenter ??
+            () => setState(() => _expanded = !_expanded),
+        child: AnimatedSize(
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+          child: Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal: _showDetails ? 5 : (embedded ? 2 : 3),
+              vertical: _showDetails ? 4 : (embedded ? 2 : 3),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (var index = 0; index < segments.length; index++) ...[
+                  SizedBox(
+                    width: _showDetails
+                        ? (widget.desktop ? 112 : 96)
+                        : (embedded ? 27 : 28),
+                    child: _ConnectionSegment(
+                      segment: segments[index],
+                      desktop: widget.desktop,
+                      phase: phase,
+                      showDetails: _showDetails,
+                    ),
+                  ),
+                  if (index < segments.length - 1)
+                    SizedBox(
+                      height: _showDetails ? 32 : (embedded ? 20 : 22),
+                      child: VerticalDivider(
+                        width: 1,
+                        thickness: 1,
+                        color: theme.dividerColor.withValues(alpha: .62),
+                      ),
+                    ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
     return RepaintBoundary(
       child: Semantics(
         label:
             'Stan komunikacji: ${segments.map((segment) => '${segment.label}: ${segment.detail}').join(', ')}',
         button: true,
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(
-            widget.desktop ? 10 : 8,
-            0,
-            widget.desktop ? 10 : 8,
-            4,
-          ),
-          child: Material(
-            color: theme.colorScheme.surfaceContainerLowest,
-            elevation: 5,
-            shadowColor: theme.colorScheme.shadow.withValues(alpha: .28),
-            shape: RoundedRectangleBorder(
-              borderRadius: const BorderRadius.vertical(
-                bottom: Radius.circular(14),
+        child: Align(
+          alignment: embedded ? Alignment.center : Alignment.topCenter,
+          child: Padding(
+            padding: embedded
+                ? EdgeInsets.zero
+                : const EdgeInsets.only(top: 4, bottom: 6),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                // The header indicator is deliberately a floating island,
+                // never a row that consumes the whole application width.
+                maxWidth: embedded
+                    ? (_showDetails ? 300 : 132)
+                    : (widget.desktop ? 360 : 300),
+                minWidth: _showDetails ? 220 : 96,
               ),
-              side: BorderSide(color: theme.dividerColor.withValues(alpha: .7)),
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: InkWell(
-              onTap:
-                  widget.onOpenConnectionCenter ??
-                  () => setState(() => _expanded = !_expanded),
-              child: AnimatedSize(
-                duration: const Duration(milliseconds: 220),
-                curve: Curves.easeOutCubic,
-                child: Row(
-                  children: [
-                    for (var index = 0; index < segments.length; index++) ...[
-                      Expanded(
-                        child: _ConnectionSegment(
-                          segment: segments[index],
-                          desktop: widget.desktop,
-                          phase: phase,
-                          showDetails: _showDetails,
-                        ),
-                      ),
-                      if (index < segments.length - 1)
-                        VerticalDivider(
-                          width: 1,
-                          thickness: 1,
-                          indent: 9,
-                          endIndent: 9,
-                          color: theme.dividerColor.withValues(alpha: .62),
-                        ),
-                    ],
-                  ],
-                ),
-              ),
+              child: dock,
             ),
           ),
         ),
@@ -234,7 +263,10 @@ class _ConnectionSegment extends StatelessWidget {
       label: '${segment.label}: ${segment.detail}',
       child: Padding(
         padding: EdgeInsets.symmetric(
-          horizontal: desktop ? 12 : 10,
+          // Compact cells are intentionally icon-only. Keep their internal
+          // inset smaller than the cell width so a busy spinner never forces
+          // a RenderFlex overflow on narrow/mobile layouts.
+          horizontal: showDetails ? (desktop ? 12 : 10) : 2,
           vertical: showDetails ? 8 : 6,
         ),
         child: Stack(
@@ -264,6 +296,10 @@ class _ConnectionSegment extends StatelessWidget {
               ),
             ),
             Row(
+              mainAxisSize: showDetails ? MainAxisSize.max : MainAxisSize.min,
+              mainAxisAlignment: showDetails
+                  ? MainAxisAlignment.start
+                  : MainAxisAlignment.center,
               children: [
                 Stack(
                   alignment: Alignment.center,
@@ -280,23 +316,23 @@ class _ConnectionSegment extends StatelessWidget {
                     Icon(segment.icon, size: 16, color: tone),
                   ],
                 ),
-                const SizedBox(width: 7),
-                Expanded(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        segment.label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: tone,
-                          fontSize: desktop ? 11 : 12,
-                          fontWeight: FontWeight.w700,
+                if (showDetails) ...[
+                  const SizedBox(width: 7),
+                  Flexible(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          segment.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: tone,
+                            fontSize: desktop ? 11 : 12,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
-                      ),
-                      if (showDetails) ...[
                         const SizedBox(height: 1),
                         Text(
                           segment.detail,
@@ -308,15 +344,16 @@ class _ConnectionSegment extends StatelessWidget {
                           ),
                         ),
                       ],
-                    ],
+                    ),
                   ),
-                ),
+                ],
               ],
             ),
-            Align(
-              alignment: Alignment.bottomCenter,
-              child: Container(height: 2, color: tone.withValues(alpha: .72)),
-            ),
+            if (showDetails)
+              Align(
+                alignment: Alignment.bottomCenter,
+                child: Container(height: 2, color: tone.withValues(alpha: .72)),
+              ),
           ],
         ),
       ),

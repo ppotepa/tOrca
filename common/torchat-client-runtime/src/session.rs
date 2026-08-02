@@ -133,6 +133,7 @@ impl RuntimeSession {
                 | RuntimeEvent::InviteStateChanged { .. }
                 | RuntimeEvent::PeerEndpointChanged { .. }
                 | RuntimeEvent::PeerConnectionChanged { .. }
+                | RuntimeEvent::ContactCapabilityChanged { .. }
                 | RuntimeEvent::Changed { .. } => application = true,
                 RuntimeEvent::MessageReceived {
                     conversation_id, ..

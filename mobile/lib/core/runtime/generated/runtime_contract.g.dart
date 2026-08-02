@@ -55,6 +55,7 @@ abstract final class EngineContract {
   static const peerEndpointStatus = 'peerEndpointStatus';
   static const peerConnectionStatus = 'peerConnectionStatus';
   static const lastPeerConnectedAt = 'lastPeerConnectedAt';
+  static const lastSeenAt = 'lastSeenAt';
   static const transportPolicy = 'transportPolicy';
   static const contactInstallationId = 'contactInstallationId';
   static const lastMessagePreview = 'lastMessagePreview';
@@ -127,6 +128,11 @@ abstract final class EngineContract {
   static const getPeerEndpoint = 'getPeerEndpoint';
   static const retryPeerConnection = 'retryPeerConnection';
   static const rotatePeerEndpoint = 'rotatePeerEndpoint';
+  static const getContactEndpointCapability = 'getContactEndpointCapability';
+  static const rotateContactEndpointCapability =
+      'rotateContactEndpointCapability';
+  static const revokeContactEndpointCapability =
+      'revokeContactEndpointCapability';
   static const setNickname = 'setNickname';
   static const refreshPairingCode = 'refreshPairingCode';
   static const submitPairingCode = 'submitPairingCode';
@@ -163,6 +169,12 @@ abstract final class EngineContract {
   static const commandGetPeerEndpoint = 'get_peer_endpoint';
   static const commandRetryPeerConnection = 'retry_peer_connection';
   static const commandRotatePeerEndpoint = 'rotate_peer_endpoint';
+  static const commandGetContactEndpointCapability =
+      'get_contact_endpoint_capability';
+  static const commandRotateContactEndpointCapability =
+      'rotate_contact_endpoint_capability';
+  static const commandRevokeContactEndpointCapability =
+      'revoke_contact_endpoint_capability';
   static const commandSetNickname = 'set_nickname';
   static const commandRefreshPairingCode = 'refresh_pairing_code';
   static const commandSubmitPairingCode = 'submit_pairing_code';
@@ -207,7 +219,8 @@ abstract final class EngineContract {
   static const factAppVisibilityChanged = 'app_visibility_changed';
   static const factNetworkChanged = 'network_changed';
   static const factPowerModeChanged = 'power_mode_changed';
-  static const factBackgroundExecutionRestricted = 'background_execution_restricted';
+  static const factBackgroundExecutionRestricted =
+      'background_execution_restricted';
 
   static const torPhaseStarting = 'starting';
   static const torPhaseBootstrapping = 'bootstrapping';
@@ -227,6 +240,7 @@ abstract final class EngineContract {
   static const presenceChanged = 'presence_changed';
   static const peerEndpointChanged = 'peer_endpoint_changed';
   static const peerConnectionChanged = 'peer_connection_changed';
+  static const contactCapabilityChanged = 'contact_capability_changed';
   static const changed = 'changed';
   static const runtimeError = 'runtime_error';
   static const runtimeLog = 'runtime_log';
@@ -288,7 +302,8 @@ abstract final class EngineContract {
   static const outcomePermanentFailure = 'PERMANENT_FAILURE';
 
   static const contactTransportPolicyPeerOnly = 'PEER_ONLY';
-  static const contactTransportPolicyPeerWithRelayFallback = 'PEER_WITH_RELAY_FALLBACK';
+  static const contactTransportPolicyPeerWithRelayFallback =
+      'PEER_WITH_RELAY_FALLBACK';
   static const contactTransportPolicyRelayOnly = 'RELAY_ONLY';
 
   static const pairingOutcomeOfferReceived = 'OFFER_RECEIVED';

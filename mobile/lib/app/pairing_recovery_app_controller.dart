@@ -42,9 +42,10 @@ class PairingRecoveryAppController extends SequentialAppController {
     await super.initialize();
     _finishFromController(UiOperationKey.contactsLoad, 'Ładowanie kontaktów');
     _finishFromController(UiOperationKey.conversationsLoad, 'Ładowanie rozmów');
-    if (state.transport.connected) {
-      await _synchronizePairing(force: true);
-    }
+    // Pairing state is local durable state and must be reconciled after every
+    // engine attach, even when the relay status event is delayed or stale.
+    // The synchronizer handles a temporary relay outage and retries later.
+    await _synchronizePairing(force: true);
   }
 
   @override
@@ -287,7 +288,7 @@ class PairingRecoveryAppController extends SequentialAppController {
   }
 
   void _schedulePairingSync({required bool force}) {
-    if (!state.transport.connected || state.isLoading) return;
+    if (state.isLoading) return;
     _pairingSyncQueued = true;
     if (_pairingSyncInFlight != null) return;
 
@@ -310,7 +311,6 @@ class PairingRecoveryAppController extends SequentialAppController {
   }
 
   Future<void> _synchronizePairing({required bool force}) async {
-    if (!state.transport.connected) return;
     final last = _lastPairingSync;
     if (!force &&
         last != null &&

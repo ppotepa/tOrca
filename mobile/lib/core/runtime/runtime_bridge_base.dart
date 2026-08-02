@@ -68,9 +68,8 @@ mixin RuntimeBridgeMethods implements ClientRuntime, RuntimeProjectionProvider {
     final conversations = (map['conversations'] as List? ?? const [])
         .whereType<Map>()
         .map(
-          (item) => ConversationSummary.fromMap(
-            Map<String, dynamic>.from(item),
-          ),
+          (item) =>
+              ConversationSummary.fromMap(Map<String, dynamic>.from(item)),
         )
         .toList(growable: false);
     final pairing = map['pairingSummary'] is Map
@@ -183,6 +182,34 @@ mixin RuntimeBridgeMethods implements ClientRuntime, RuntimeProjectionProvider {
   @override
   Future<void> rotatePeerEndpoint() =>
       callRuntime(EngineContract.rotatePeerEndpoint);
+
+  @override
+  Future<ContactEndpointCapabilityStatus> contactEndpointCapability(
+    String installationId,
+  ) async {
+    final raw = await callRuntime(
+      EngineContract.getContactEndpointCapability,
+      RuntimeArguments.installationId(installationId),
+    );
+    if (raw is! Map) throw const FormatException('Invalid capability response');
+    return ContactEndpointCapabilityStatus.fromMap(
+      Map<String, dynamic>.from(raw),
+    );
+  }
+
+  @override
+  Future<void> rotateContactEndpointCapability(String installationId) =>
+      callRuntime(
+        EngineContract.rotateContactEndpointCapability,
+        RuntimeArguments.installationId(installationId),
+      );
+
+  @override
+  Future<void> revokeContactEndpointCapability(String installationId) =>
+      callRuntime(
+        EngineContract.revokeContactEndpointCapability,
+        RuntimeArguments.installationId(installationId),
+      );
 
   @override
   Future<void> verifyContact(String installationId) => callRuntime(

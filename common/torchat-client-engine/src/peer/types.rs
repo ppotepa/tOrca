@@ -24,6 +24,8 @@ pub enum PeerDeliveryTag {
     Ephemeral,
     Probe,
     EndpointUpdate,
+    Presence { online: bool },
+    Typing { typing: bool },
 }
 
 impl PeerDeliveryTag {
@@ -31,7 +33,11 @@ impl PeerDeliveryTag {
         match self {
             Self::Message { message_id } => Some(format!("message:{message_id}")),
             Self::Receipt { message_id } => Some(format!("receipt:{message_id}")),
-            Self::Ephemeral | Self::Probe | Self::EndpointUpdate => None,
+            Self::Ephemeral
+            | Self::Probe
+            | Self::EndpointUpdate
+            | Self::Presence { .. }
+            | Self::Typing { .. } => None,
         }
     }
 
@@ -46,6 +52,8 @@ impl PeerDeliveryTag {
 #[derive(Clone, Debug)]
 pub struct PeerOutboundCommand {
     pub endpoint: PeerEndpointBundle,
+    pub capability_id: String,
+    pub capability_secret: Vec<u8>,
     pub peer_public_key: String,
     pub local_endpoint: PeerEndpointBundle,
     pub endpoint_updates: Vec<PeerEndpointUpdate>,
@@ -72,6 +80,16 @@ pub enum PeerTransportEvent {
     },
     EndpointUpdated {
         endpoint: PeerEndpointBundle,
+    },
+    PresenceChanged {
+        installation_id: String,
+        online: bool,
+        observed_at: i64,
+    },
+    TypingChanged {
+        installation_id: String,
+        typing: bool,
+        expires_at: i64,
     },
     IngressError {
         error: String,
@@ -107,6 +125,10 @@ impl Drop for PeerSessionLease {
 pub(super) struct AuthorizedPeer {
     pub(super) public_key: String,
     pub(super) endpoint: PeerEndpointBundle,
+    /// Capability issued locally to this peer. Inbound handshakes must
+    /// present this identifier and prove possession of this secret.
+    pub(super) inbound_capability_id: String,
+    pub(super) capability_secret: Vec<u8>,
 }
 
 #[derive(Default)]

@@ -510,6 +510,7 @@ class ContactRecord {
     this.peerEndpointStatus = PeerEndpointStatus.missing,
     this.peerConnectionStatus = PeerConnectionStatus.offline,
     this.lastPeerConnectedAt,
+    this.lastSeenAt,
     this.transportPolicy = ContactTransportPolicy.peerOnly,
   });
   final String id;
@@ -524,6 +525,7 @@ class ContactRecord {
   final PeerEndpointStatus peerEndpointStatus;
   final PeerConnectionStatus peerConnectionStatus;
   final String? lastPeerConnectedAt;
+  final String? lastSeenAt;
   final ContactTransportPolicy transportPolicy;
 
   String get displayName =>
@@ -549,6 +551,7 @@ class ContactRecord {
       map,
       EngineContract.lastPeerConnectedAt,
     ),
+    lastSeenAt: _optionalString(map, EngineContract.lastSeenAt),
     transportPolicy: ContactTransportPolicy.fromValue(
       map[EngineContract.transportPolicy]?.toString(),
     ),
@@ -567,6 +570,7 @@ class ContactRecord {
     PeerEndpointStatus? peerEndpointStatus,
     PeerConnectionStatus? peerConnectionStatus,
     Object? lastPeerConnectedAt = _contactRecordSentinel,
+    Object? lastSeenAt = _contactRecordSentinel,
     ContactTransportPolicy? transportPolicy,
   }) => ContactRecord(
     id: id ?? this.id,
@@ -587,6 +591,9 @@ class ContactRecord {
     lastPeerConnectedAt: identical(lastPeerConnectedAt, _contactRecordSentinel)
         ? this.lastPeerConnectedAt
         : lastPeerConnectedAt as String?,
+    lastSeenAt: identical(lastSeenAt, _contactRecordSentinel)
+        ? this.lastSeenAt
+        : lastSeenAt as String?,
     transportPolicy: transportPolicy ?? this.transportPolicy,
   );
 }
@@ -631,6 +638,46 @@ enum PeerEndpointStatus {
     EngineContract.peerEndpointStatusInvalid => invalid,
     _ => missing,
   };
+}
+
+enum CapabilityStatus {
+  missing,
+  pending,
+  active,
+  rotating,
+  revoked,
+  expired;
+
+  static CapabilityStatus fromValue(String? value) => switch (value) {
+    'MISSING' => missing,
+    'PENDING' => pending,
+    'ROTATING' => rotating,
+    'REVOKED' => revoked,
+    'EXPIRED' => expired,
+    _ => active,
+  };
+}
+
+class ContactEndpointCapabilityStatus {
+  const ContactEndpointCapabilityStatus({
+    required this.contactId,
+    required this.capabilityId,
+    required this.sequence,
+    required this.status,
+  });
+
+  final String contactId;
+  final String capabilityId;
+  final int sequence;
+  final CapabilityStatus status;
+
+  factory ContactEndpointCapabilityStatus.fromMap(Map<String, dynamic> map) =>
+      ContactEndpointCapabilityStatus(
+        contactId: map['contactId']?.toString() ?? '',
+        capabilityId: map['capabilityId']?.toString() ?? '',
+        sequence: (map['sequence'] as num?)?.toInt() ?? 0,
+        status: CapabilityStatus.fromValue(map['status']?.toString()),
+      );
 }
 
 enum PeerConnectionStatus {
@@ -949,6 +996,20 @@ class PeerConnectionChangedEvent extends RuntimeEvent {
   final String contactId;
   final PeerConnectionStatus status;
   final int? retryInMs;
+}
+
+class ContactCapabilityChangedEvent extends RuntimeEvent {
+  const ContactCapabilityChangedEvent({
+    required this.contactId,
+    required this.capabilityId,
+    required this.sequence,
+    required this.status,
+  });
+
+  final String contactId;
+  final String capabilityId;
+  final int sequence;
+  final CapabilityStatus status;
 }
 
 class DataChangedEvent extends RuntimeEvent {

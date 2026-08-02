@@ -64,6 +64,10 @@ private fun mapRelayConnectionEvent(event: GeneratedEngineEvent): JSONObject {
     return JSONObject()
         .put(EngineContract.TYPE, EngineContract.TRANSPORT_STATUS_CHANGED)
         .put("component", "relay")
+        // Runtime TransportProbeState is a separate contract from the
+        // connection phase.  Flutter accepts READY/STARTING/DEGRADED/
+        // OFFLINE/ERROR here; sending the lower-case engine phase (for
+        // example "connected") is decoded as ERROR by the Dart parser.
         .put("state", connectionProbeState(state))
         .put(EngineContract.DETAIL, label)
         .put(EngineContract.RETRY_ATTEMPT, retryAttempt)
@@ -100,15 +104,15 @@ private fun relayStatusLabel(state: String, detail: String): String {
 }
 
 private fun connectionProbeState(state: String): String = when (state) {
-    EngineContract.CONNECTION_STATE_WAITING_FOR_TOR -> EngineContract.TRANSPORT_PHASE_STARTING
+    EngineContract.CONNECTION_STATE_WAITING_FOR_TOR -> "STARTING"
     EngineContract.CONNECTION_STATE_DISCONNECTED,
-    EngineContract.CONNECTION_STATE_STOPPED -> EngineContract.TRANSPORT_PHASE_OFFLINE
+    EngineContract.CONNECTION_STATE_STOPPED -> "OFFLINE"
     EngineContract.CONNECTION_STATE_CONNECTING,
     EngineContract.CONNECTION_STATE_AUTHENTICATING,
-    EngineContract.CONNECTION_STATE_WAITING_FOR_READY -> EngineContract.TRANSPORT_PHASE_CONNECTING
-    EngineContract.CONNECTION_STATE_CONNECTED -> EngineContract.TRANSPORT_PHASE_CONNECTED
-    EngineContract.CONNECTION_STATE_BACKOFF -> EngineContract.TRANSPORT_PHASE_RECONNECTING
-    else -> EngineContract.TRANSPORT_PHASE_ERROR
+    EngineContract.CONNECTION_STATE_WAITING_FOR_READY -> "STARTING"
+    EngineContract.CONNECTION_STATE_CONNECTED -> "READY"
+    EngineContract.CONNECTION_STATE_BACKOFF -> "DEGRADED"
+    else -> "ERROR"
 }
 
 private fun JSONObject.toRuntimeMap(): Map<String, Any?> = keys().asSequence().associateWith { key ->

@@ -6,6 +6,7 @@ pub mod error;
 pub mod event;
 mod logging;
 pub mod peer;
+pub mod probing;
 pub mod relay;
 pub mod storage;
 

@@ -1106,7 +1106,7 @@ void main() {
               ],
               composer: TextEditingController(),
               onOpenConversation: (_) {},
-              onSend: (_) {},
+              onSend: (_) async {},
               onTypingChanged: (_) {},
               onRetryMessage: (_) {},
               onDeleteMessage: (_) {},
@@ -1296,6 +1296,19 @@ class _EventRuntime implements ClientRuntime {
 
   @override
   Future<void> verifyContact(String installationId) async {}
+  @override
+  Future<ContactEndpointCapabilityStatus> contactEndpointCapability(
+    String installationId,
+  ) async => const ContactEndpointCapabilityStatus(
+    contactId: '',
+    capabilityId: '',
+    sequence: 0,
+    status: CapabilityStatus.missing,
+  );
+  @override
+  Future<void> rotateContactEndpointCapability(String installationId) async {}
+  @override
+  Future<void> revokeContactEndpointCapability(String installationId) async {}
 
   @override
   Future<ContactRecord> updateContactSettings(
@@ -1589,6 +1602,20 @@ class _StatefulRuntime implements ClientRuntime {
         )
         .toList();
   }
+
+  @override
+  Future<ContactEndpointCapabilityStatus> contactEndpointCapability(
+    String installationId,
+  ) async => const ContactEndpointCapabilityStatus(
+    contactId: '',
+    capabilityId: '',
+    sequence: 0,
+    status: CapabilityStatus.missing,
+  );
+  @override
+  Future<void> rotateContactEndpointCapability(String installationId) async {}
+  @override
+  Future<void> revokeContactEndpointCapability(String installationId) async {}
 
   @override
   Future<ContactRecord> updateContactSettings(

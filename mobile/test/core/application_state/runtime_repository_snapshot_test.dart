@@ -410,6 +410,19 @@ class _SnapshotRuntime implements ClientRuntime {
   @override
   Future<void> verifyContact(String installationId) async {}
   @override
+  Future<ContactEndpointCapabilityStatus> contactEndpointCapability(
+    String installationId,
+  ) async => const ContactEndpointCapabilityStatus(
+    contactId: '',
+    capabilityId: '',
+    sequence: 0,
+    status: CapabilityStatus.missing,
+  );
+  @override
+  Future<void> rotateContactEndpointCapability(String installationId) async {}
+  @override
+  Future<void> revokeContactEndpointCapability(String installationId) async {}
+  @override
   Future<ContactRecord> updateContactSettings(
     String installationId, {
     String? localAlias,

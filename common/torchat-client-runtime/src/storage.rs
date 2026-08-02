@@ -45,6 +45,25 @@ pub trait RuntimeStorage {
     fn expedite_retry_after_ready(&mut self) -> RuntimeResult<()> {
         Ok(())
     }
+    fn put_peer_endpoint_capability(
+        &mut self,
+        _contact_installation_id: &str,
+        _capability_id: &str,
+        _secret: &[u8],
+        _sequence: u64,
+        _issued_at: i64,
+        _expires_at: Option<i64>,
+    ) -> RuntimeResult<()> {
+        Err(crate::RuntimeError::Unavailable(
+            "peer endpoint capabilities are not supported by this storage".to_owned(),
+        ))
+    }
+    fn revoke_peer_endpoint_capability(
+        &mut self,
+        _contact_installation_id: &str,
+    ) -> RuntimeResult<()> {
+        Ok(())
+    }
 
     fn message(&self, message_id: &str) -> RuntimeResult<Option<ChatMessage>> {
         for conversation in self.conversations()? {

@@ -20,6 +20,8 @@ class ConversationListTile extends StatelessWidget {
     this.transportPolicy = ContactTransportPolicy.peerOnly,
     this.peerEndpointStatus = PeerEndpointStatus.missing,
     this.asCard = false,
+    this.pinned = false,
+    this.muted = false,
   });
 
   final String contactName;
@@ -33,6 +35,8 @@ class ConversationListTile extends StatelessWidget {
   final ContactTransportPolicy transportPolicy;
   final PeerEndpointStatus peerEndpointStatus;
   final bool asCard;
+  final bool pinned;
+  final bool muted;
 
   @override
   Widget build(BuildContext context) {
@@ -90,9 +94,8 @@ class ConversationListTile extends StatelessWidget {
           ],
         ],
       ),
-      trailing: FittedBox(
-        fit: BoxFit.scaleDown,
-        alignment: Alignment.centerRight,
+      trailing: SizedBox(
+        width: 72,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.end,
@@ -104,14 +107,32 @@ class ConversationListTile extends StatelessWidget {
             ),
             Text(
               formatMessageTime(lastMessageAt),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: Theme.of(context).textTheme.labelSmall,
             ),
-            if (hasUnread) ...[
+            if (hasUnread || pinned || muted) ...[
               const SizedBox(height: 2),
-              CounterBadge(
-                count: unread,
-                glow: true,
-                color: unreadTheme.unreadBorder,
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (pinned)
+                    const ThemedIcon(Icons.push_pin_outlined, size: 12),
+                  if (pinned && muted) const SizedBox(width: 4),
+                  if (muted)
+                    const ThemedIcon(
+                      Icons.notifications_off_outlined,
+                      size: 12,
+                    ),
+                  if ((pinned || muted) && hasUnread) const SizedBox(width: 5),
+                  if (hasUnread)
+                    CounterBadge(
+                      count: unread,
+                      glow: true,
+                      color: unreadTheme.unreadBorder,
+                    ),
+                ],
               ),
             ],
           ],
@@ -144,12 +165,18 @@ class ContactListTile extends StatelessWidget {
       contentPadding: EdgeInsets.zero,
       onTap: () => onTap(contact),
       leading: IdentityAvatar(label: contact.displayName),
-      title: Text(contact.displayName),
+      title: Text(
+        contact.displayName,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
       subtitle: Text(
         subtitle ??
             (contact.verified
                 ? 'Gotowy do rozmowy'
                 : 'Fingerprint niepotwierdzony'),
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
       ),
       trailing: trailing ?? const Icon(Icons.chevron_right),
       titleAlignment: ListTileTitleAlignment.center,

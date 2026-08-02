@@ -1,7 +1,9 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/services.dart';
 
 import 'app/app_controller.dart';
 import 'app/app_theme.dart';
@@ -21,6 +23,7 @@ import 'features/onboarding/connection_warmup_screen.dart';
 import 'features/onboarding/nickname_onboarding_screen.dart';
 import 'features/onboarding/onboarding_views.dart';
 import 'features/shell/main_shell.dart';
+import 'features/chats/composer_draft.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -405,15 +408,18 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
     await ref.read(appControllerProvider.notifier).submitPairingCode(value);
   }
 
-  void _sendMessage(String? replyToMessageId) {
-    final text = _composer.text.trim();
-    if (text.isEmpty) return;
-    _composer.clear();
-    unawaited(
-      ref
-          .read(appControllerProvider.notifier)
-          .sendMessage(text, replyToMessageId: replyToMessageId),
-    );
+  Future<void> _sendMessage(ComposerDraft draft) async {
+    if (draft.isEmpty) return;
+    final controller = ref.read(appControllerProvider.notifier);
+    if (draft.caption.trim().isNotEmpty) {
+      await controller.sendMessage(
+        draft.caption.trim(),
+        replyToMessageId: draft.replyToMessageId,
+      );
+    }
+    for (final attachment in draft.attachments) {
+      await controller.sendMessage(attachment.attachment.toMessageBody());
+    }
   }
 
   void _openAccount() {
@@ -496,6 +502,30 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
         ),
       ),
     );
+  }
+
+  /// Handles the Android system back gesture before the root route is popped.
+  ///
+  /// The app keeps the active conversation and the selected top-level tab in
+  /// controller state rather than in Navigator routes. Without this bridge,
+  /// Android sees a single root route and immediately backgrounds the whole
+  /// application, even when the user is visibly inside a conversation.
+  Future<void> _handleSystemBack() async {
+    if (!mounted) return;
+    final controller = ref.read(appControllerProvider.notifier);
+    final state = ref.read(appControllerProvider);
+    if (state.selectedConversationId != null) {
+      controller.closeConversation();
+      return;
+    }
+    if (state.destination != MainDestination.chats) {
+      controller.selectDestination(MainDestination.chats);
+      return;
+    }
+
+    // At the root of the app the native Android behaviour is intentional:
+    // leave the Flutter activity and keep the foreground service alive.
+    await SystemNavigator.pop();
   }
 
   Future<void> _editNickname() async {
@@ -611,7 +641,7 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
     final conversations =
         snapshot?.conversations ?? const <ConversationSummary>[];
     final selectedContact = state.selectedContact(contacts, conversations);
-    return MainShell(
+    final shell = MainShell(
       tab: switch (state.destination) {
         MainDestination.contacts => MobileTab.contacts,
         _ => MobileTab.chats,
@@ -650,6 +680,7 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
       onTypingChanged: controller.setTyping,
       onRetryMessage: controller.retryMessage,
       onDeleteMessage: controller.deleteMessageLocal,
+      onLoadOlderMessages: controller.loadOlderMessages,
       onVerifyContact: controller.verifyContact,
       onUpdateContactSettings: controller.updateContactSettings,
       onBack: controller.closeConversation,
@@ -658,6 +689,18 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
       onRetryTor: _showTransportStatus,
       typingContacts: state.typingContacts,
       onlineContacts: state.onlineContacts,
+      lastSeenContacts: state.lastSeenContacts,
+      lastSeenEnabled: state.lastSeenEnabled,
     );
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      return PopScope<void>(
+        canPop: false,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop) unawaited(_handleSystemBack());
+        },
+        child: shell,
+      );
+    }
+    return shell;
   }
 }

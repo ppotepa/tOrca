@@ -131,6 +131,7 @@ mod tests {
                     peer_connection_status: PeerConnectionStatus::Offline,
                     transport_policy: ContactTransportPolicy::PeerOnly,
                     last_peer_connected_at: None,
+                    last_seen_at: None,
                     dev: None,
                 },
                 ContactRecord {
@@ -146,6 +147,7 @@ mod tests {
                     peer_connection_status: PeerConnectionStatus::Connected,
                     transport_policy: ContactTransportPolicy::PeerOnly,
                     last_peer_connected_at: None,
+                    last_seen_at: None,
                     dev: None,
                 },
             ],

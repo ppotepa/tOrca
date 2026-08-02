@@ -91,6 +91,34 @@ pub enum ApplicationPayloadV1 {
         #[serde(rename = "preserveHistory")]
         preserve_history: bool,
     },
+
+    CapabilityOffer {
+        version: u16,
+        #[serde(rename = "capabilityId")]
+        capability_id: String,
+        secret: String,
+        sequence: u64,
+        #[serde(rename = "issuedAt")]
+        issued_at: i64,
+        #[serde(rename = "expiresAt")]
+        expires_at: Option<i64>,
+    },
+
+    CapabilityOfferAck {
+        version: u16,
+        #[serde(rename = "capabilityId")]
+        capability_id: String,
+        sequence: u64,
+    },
+
+    CapabilityRevoked {
+        version: u16,
+        #[serde(rename = "capabilityId")]
+        capability_id: String,
+        sequence: u64,
+        #[serde(rename = "revokedAt")]
+        revoked_at: i64,
+    },
 }
 
 impl ApplicationPayloadV1 {

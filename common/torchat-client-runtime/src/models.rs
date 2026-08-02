@@ -76,6 +76,17 @@ pub enum PeerEndpointStatus {
     Invalid,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum CapabilityStatus {
+    Missing,
+    Pending,
+    Active,
+    Rotating,
+    Revoked,
+    Expired,
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum PeerConnectionStatus {
@@ -119,6 +130,8 @@ pub struct ContactRecord {
     pub transport_policy: ContactTransportPolicy,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_peer_connected_at: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_seen_at: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dev: Option<String>,
 }

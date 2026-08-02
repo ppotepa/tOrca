@@ -1,4 +1,5 @@
 use rusqlite::{OptionalExtension, Transaction, params};
+use sha2::{Digest, Sha256};
 use torchat_client_runtime::{
     ChatMessage, ContactRecord, ConversationState, ConversationSummary, InviteCode, InviteState,
     MessageState, PairingItem, PeerConnectionStatus, PeerEndpointStatus, ReceiptSendEffect,
@@ -38,6 +39,61 @@ impl<'db> SqliteRuntimeStorage<'db> {
             .expect("sqlite runtime storage transaction must exist for rollback")
             .rollback()
             .map_err(storage_engine_error)?;
+        Ok(())
+    }
+
+    fn put_peer_endpoint_capability(
+        &mut self,
+        contact_installation_id: &str,
+        capability_id: &str,
+        secret: &[u8],
+        sequence: u64,
+        issued_at: i64,
+        expires_at: Option<i64>,
+    ) -> RuntimeResult<()> {
+        let secret_hash = Sha256::digest(secret).to_vec();
+        self.tx()
+            .execute(
+                "INSERT INTO peer_endpoint_capabilities (
+                    contact_installation_id, capability_id, secret_hash,
+                    secret_ciphertext, sequence, issued_at, expires_at, updated_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, unixepoch())
+                 ON CONFLICT(contact_installation_id) DO UPDATE SET
+                    capability_id = excluded.capability_id,
+                    secret_hash = excluded.secret_hash,
+                    secret_ciphertext = excluded.secret_ciphertext,
+                    sequence = excluded.sequence,
+                    issued_at = excluded.issued_at,
+                    expires_at = excluded.expires_at,
+                    revoked_at = NULL,
+                    updated_at = unixepoch()
+                 WHERE excluded.sequence >= peer_endpoint_capabilities.sequence;",
+                rusqlite::params![
+                    contact_installation_id,
+                    capability_id,
+                    secret_hash,
+                    secret,
+                    sequence as i64,
+                    issued_at,
+                    expires_at
+                ],
+            )
+            .map_err(storage_error)?;
+        Ok(())
+    }
+
+    fn revoke_peer_endpoint_capability(
+        &mut self,
+        contact_installation_id: &str,
+    ) -> RuntimeResult<()> {
+        self.tx()
+            .execute(
+                "UPDATE peer_endpoint_capabilities
+                 SET revoked_at = unixepoch(), updated_at = unixepoch()
+                 WHERE contact_installation_id = ?1;",
+                [contact_installation_id],
+            )
+            .map_err(storage_error)?;
         Ok(())
     }
 
@@ -423,6 +479,33 @@ impl<'db> SqliteRuntimeStorage<'db> {
 }
 
 impl RuntimeStorage for SqliteRuntimeStorage<'_> {
+    fn put_peer_endpoint_capability(
+        &mut self,
+        contact_installation_id: &str,
+        capability_id: &str,
+        secret: &[u8],
+        sequence: u64,
+        issued_at: i64,
+        expires_at: Option<i64>,
+    ) -> RuntimeResult<()> {
+        SqliteRuntimeStorage::put_peer_endpoint_capability(
+            self,
+            contact_installation_id,
+            capability_id,
+            secret,
+            sequence,
+            issued_at,
+            expires_at,
+        )
+    }
+
+    fn revoke_peer_endpoint_capability(
+        &mut self,
+        contact_installation_id: &str,
+    ) -> RuntimeResult<()> {
+        SqliteRuntimeStorage::revoke_peer_endpoint_capability(self, contact_installation_id)
+    }
+
     fn identity(&self) -> RuntimeResult<Option<RuntimeIdentity>> {
         self.get_setting_json(SETTING_IDENTITY)
     }
@@ -578,6 +661,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                     peer_endpoint_status: PeerEndpointStatus::Missing,
                     peer_connection_status: PeerConnectionStatus::Offline,
                     last_peer_connected_at: None,
+                    last_seen_at: None,
                     transport_policy: Default::default(),
                     dev: None,
                 }),
@@ -699,6 +783,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                     peer_endpoint_status: PeerEndpointStatus::Missing,
                     peer_connection_status: PeerConnectionStatus::Offline,
                     last_peer_connected_at: None,
+                    last_seen_at: None,
                     transport_policy: Default::default(),
                     dev: None,
                 }),
@@ -771,7 +856,8 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                              AND p.last_connected_at >= (unixepoch() - 120) THEN 1
                             ELSE 0
                         END AS has_recent_peer_connection,
-                        p.last_connected_at
+                        p.last_connected_at,
+                        c.last_seen_at
                  FROM contacts c
                  LEFT JOIN contact_peer_endpoints p
                    ON p.contact_installation_id = c.installation_id
@@ -794,6 +880,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                     row.get::<_, i64>("has_pending_peer_exchange")?,
                     row.get::<_, i64>("has_recent_peer_connection")?,
                     row.get::<_, Option<i64>>("last_connected_at")?,
+                    row.get::<_, Option<i64>>("last_seen_at")?,
                 ))
             })
             .map_err(storage_error)?;
@@ -812,6 +899,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                 has_pending_peer_exchange,
                 has_recent_peer_connection,
                 last_peer_connected_at,
+                last_seen_at,
             ) = row.map_err(storage_error)?;
             Ok(ContactRecord {
                 installation_id,
@@ -839,6 +927,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                 transport_policy: serde_json::from_str(&format!("\"{transport_policy}\""))
                     .unwrap_or_default(),
                 last_peer_connected_at,
+                last_seen_at,
                 dev: None,
             })
         })
@@ -850,9 +939,9 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
             .execute(
                 "INSERT INTO contacts (
                     installation_id, nickname, public_key, fingerprint, key_package,
-                    verification, source, local_alias, muted, blocked, transport_policy, created_at, updated_at
+                    verification, source, local_alias, muted, blocked, transport_policy, last_seen_at, created_at, updated_at
                  ) VALUES (
-                    ?1, ?2, ?3, ?4, NULL, ?5, 'runtime', ?6, ?7, ?8, ?9, unixepoch(), unixepoch()
+                    ?1, ?2, ?3, ?4, NULL, ?5, 'runtime', ?6, ?7, ?8, ?9, ?10, unixepoch(), unixepoch()
                  )
                  ON CONFLICT(installation_id) DO UPDATE SET
                     nickname = excluded.nickname,
@@ -863,6 +952,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                     muted = excluded.muted,
                     blocked = excluded.blocked,
                     transport_policy = excluded.transport_policy,
+                    last_seen_at = COALESCE(excluded.last_seen_at, contacts.last_seen_at),
                     updated_at = unixepoch();",
                 params![
                     contact.installation_id,
@@ -874,6 +964,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                     if contact.muted { 1 } else { 0 },
                     if contact.blocked { 1 } else { 0 },
                     serde_json::to_string(&contact.transport_policy).unwrap_or_else(|_| "\"PEER_ONLY\"".to_owned()).trim_matches('"'),
+                    contact.last_seen_at,
                 ],
             )
             .map_err(storage_error)?;

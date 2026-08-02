@@ -85,6 +85,15 @@ pub enum EngineCommand {
         installation_id: String,
     },
     RotatePeerEndpoint,
+    GetContactEndpointCapability {
+        installation_id: String,
+    },
+    RotateContactEndpointCapability {
+        installation_id: String,
+    },
+    RevokeContactEndpointCapability {
+        installation_id: String,
+    },
     SetNickname {
         nickname: String,
     },

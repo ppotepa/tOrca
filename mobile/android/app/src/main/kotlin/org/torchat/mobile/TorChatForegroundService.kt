@@ -37,6 +37,7 @@ import org.torchat.security.LocalSecretStore
 import org.torchat.security.TorRuntime
 import java.io.File
 import java.util.concurrent.ConcurrentLinkedDeque
+import java.util.concurrent.ConcurrentHashMap
 import java.util.LinkedHashSet
 
 /** Owns Tor, engine lifecycle and notifications outside the Flutter UI. */
@@ -86,9 +87,13 @@ class TorChatForegroundService : Service() {
                         EngineContract.TYPE to EngineContract.TRANSPORT_STATUS_CHANGED,
                         "component" to "relay",
                         EngineContract.STATE to when (state) {
-                            "ready" -> "ready"
-                            "retrying" -> "backoff"
-                            else -> "starting"
+                            // TransportProbeState is encoded in screaming
+                            // snake case.  Lower-case connection phases are
+                            // reserved for engine connection snapshots and
+                            // decode as ERROR on the Flutter side.
+                            "ready" -> "READY"
+                            "retrying" -> "DEGRADED"
+                            else -> "STARTING"
                         },
                         EngineContract.PHASE to phase,
                         EngineContract.LABEL to when (state) {
@@ -456,6 +461,8 @@ class TorChatForegroundService : Service() {
         starting = false
         torStarting = false
         activeEngineHost = null
+        runtimeEventBuffer.clear()
+        runtimeLatestStatus.clear()
         val stopped = IllegalStateException("TorChat service stopped")
         completeExceptionally(engineReady, stopped)
         completeExceptionally(localDataReady, stopped)
@@ -482,6 +489,15 @@ class TorChatForegroundService : Service() {
     private fun publish(event: Map<String, Any?>) {
         val type = event[EngineContract.TYPE] as? String
         if (type != null) {
+            when (type) {
+                EngineContract.TOR_STATUS -> runtimeLatestStatus["tor"] = event
+                EngineContract.TRANSPORT_STATUS_CHANGED -> {
+                    val component = event["component"]?.toString().orEmpty()
+                    if (component.isNotEmpty()) {
+                        runtimeLatestStatus["transport:$component"] = event
+                    }
+                }
+            }
             runtimeEventBuffer.addLast(event)
             while (runtimeEventBuffer.size > MAX_RUNTIME_EVENT_BUFFER) {
                 runtimeEventBuffer.pollFirst()
@@ -837,9 +853,24 @@ class TorChatForegroundService : Service() {
         // type. The previous map silently discarded updates for parallel
         // conversations and made the UI appear stale until navigation.
         private val runtimeEventBuffer = ConcurrentLinkedDeque<Map<String, Any?>>()
+        /**
+         * Readiness is state, not a replayable history.  Keeping the latest
+         * value per component prevents Activity reattach from ending on an
+         * old reconnect/error event after the service stayed alive in the
+         * background.
+         */
+        private val runtimeLatestStatus = ConcurrentHashMap<String, Map<String, Any?>>()
 
-        fun runtimeSnapshot(): List<Map<String, Any?>> =
-            runtimeEventBuffer.toList()
+        fun runtimeSnapshot(): List<Map<String, Any?>> {
+            val history = runtimeEventBuffer.filter { event ->
+                val type = event[EngineContract.TYPE]
+                type != EngineContract.TOR_STATUS &&
+                    type != EngineContract.TRANSPORT_STATUS_CHANGED
+            }
+            return history + runtimeLatestStatus.entries
+                .sortedBy { it.key }
+                .map { it.value }
+        }
 
         fun readinessSnapshot(): Map<String, String> = mapOf(
             "PROCESS_STARTED" to deferredState(processStarted),
@@ -858,6 +889,8 @@ class TorChatForegroundService : Service() {
 
         private fun resetReadinessIfStopped() {
             if (activeEngineHost != null) return
+            runtimeEventBuffer.clear()
+            runtimeLatestStatus.clear()
             if (processStarted.isCompleted) processStarted = CompletableDeferred()
             if (engineReady.isCompleted) engineReady = CompletableDeferred()
             if (localDataReady.isCompleted) localDataReady = CompletableDeferred()

@@ -336,6 +336,17 @@ where
         self.merge_pairing_inbox(remote)
     }
 
+    /// Expire locally persisted invitations even when the relay is offline.
+    /// The relay removes an invitation after ACK, so local state must own the
+    /// final deadline and emit the state transition independently.
+    pub fn expire_pending_pairings(&mut self) -> RuntimeResult<()> {
+        let mut inbox = self.storage.pairing_inbox()?;
+        let mut outbox = self.storage.pairing_outbox()?;
+        self.expire_pairing_items(&mut inbox, true)?;
+        self.expire_pairing_items(&mut outbox, false)?;
+        Ok(())
+    }
+
     pub fn merge_pairing_inbox(
         &mut self,
         remote: Vec<PairingItem>,
@@ -1925,6 +1936,7 @@ mod tests {
             peer_endpoint_status: crate::PeerEndpointStatus::Missing,
             peer_connection_status: crate::PeerConnectionStatus::Offline,
             last_peer_connected_at: None,
+            last_seen_at: None,
             verification: VerificationState::Verified,
             transport_policy: Default::default(),
             dev: None,

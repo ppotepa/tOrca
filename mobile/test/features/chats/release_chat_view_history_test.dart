@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:torchat_mobile/core/models/domain.dart';
+import 'package:torchat_mobile/core/runtime/message_paging.dart';
 import 'package:torchat_mobile/features/chats/release_chat_view.dart';
 
 void main() {
@@ -42,10 +43,12 @@ void main() {
               messages: messages,
               composer: composer,
               onOpenConversation: (_) {},
-              onSend: (_) {},
+              onSend: (_) async {},
               onTypingChanged: (_) {},
               onRetryMessage: (_) {},
               onDeleteMessage: (_) {},
+              onLoadOlderMessages: () async =>
+                  const OlderMessagesResult(loadedCount: 0, hasMore: false),
               onBack: () {},
               error: '',
               notice: '',
@@ -75,6 +78,47 @@ void main() {
     expect(find.text('wiadomość 1'), findsOneWidget);
     expect(find.text('wiadomość 2'), findsOneWidget);
     expect(find.text('wiadomość 3'), findsOneWidget);
+    composer.dispose();
+  });
+
+  testWidgets('compact conversation home keeps the chat list visible', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final composer = TextEditingController();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        child: MaterialApp(
+          home: SizedBox(
+            width: 360,
+            height: 760,
+            child: ReleaseChatView(
+              selected: null,
+              contacts: const [contact],
+              conversations: const [conversation],
+              messages: const [],
+              composer: composer,
+              onOpenConversation: (_) {},
+              onSend: (_) async {},
+              onTypingChanged: (_) {},
+              onRetryMessage: (_) {},
+              onDeleteMessage: (_) {},
+              onLoadOlderMessages: () async =>
+                  const OlderMessagesResult(loadedCount: 0, hasMore: false),
+              onBack: () {},
+              error: '',
+              notice: '',
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Ostatnie rozmowy'), findsOneWidget);
+    expect(find.text('Ala'), findsOneWidget);
+    expect(find.text('wiadomość'), findsOneWidget);
     composer.dispose();
   });
 }

@@ -125,13 +125,20 @@ impl PeerTransportHandle {
         }
     }
 
-    pub fn authorize_contact(&self, endpoint: &PeerEndpointBundle) {
+    pub fn authorize_contact(
+        &self,
+        endpoint: &PeerEndpointBundle,
+        inbound_capability_id: String,
+        capability_secret: Vec<u8>,
+    ) {
         if let Ok(mut authorized) = self.state.authorized.write() {
             authorized.insert(
                 endpoint.installation_id.clone(),
                 AuthorizedPeer {
                     public_key: endpoint.identity_public_key.clone(),
                     endpoint: endpoint.clone(),
+                    inbound_capability_id,
+                    capability_secret,
                 },
             );
         }

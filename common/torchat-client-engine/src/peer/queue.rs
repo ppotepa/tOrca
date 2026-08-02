@@ -147,6 +147,8 @@ mod tests {
     fn command(delivery: PeerDeliveryTag, message_id: Uuid) -> PeerOutboundCommand {
         PeerOutboundCommand {
             endpoint: endpoint(),
+            capability_id: String::new(),
+            capability_secret: Vec::new(),
             peer_public_key: "key".to_owned(),
             local_endpoint: endpoint(),
             endpoint_updates: Vec::new(),

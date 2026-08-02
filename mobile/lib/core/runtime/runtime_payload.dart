@@ -128,6 +128,13 @@ class RuntimePayload {
           retryInMs:
               intValue('retryInMs') ?? intValue(EngineContract.retryInMs),
         );
+      case EngineContract.contactCapabilityChanged:
+        return ContactCapabilityChangedEvent(
+          contactId: string(EngineContract.contactId) ?? '',
+          capabilityId: string('capabilityId') ?? '',
+          sequence: intValue(EngineContract.sequence) ?? 0,
+          status: CapabilityStatus.fromValue(string(EngineContract.status)),
+        );
       default:
         if (type == null || type.isEmpty) {
           throw FormatException('missing runtime event type');

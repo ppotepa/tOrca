@@ -5,7 +5,6 @@ import '../../../core/models/domain.dart';
 import '../../../shared/widgets/contact_list_section.dart';
 import '../../../shared/widgets/conversation_list_section.dart';
 import '../../../shared/widgets/counter_badge.dart';
-import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/feature_header.dart';
 import '../../../shared/widgets/identity_section.dart';
 import '../../../shared/widgets/info_tile.dart';
@@ -53,7 +52,10 @@ class DesktopWorkspace extends StatefulWidget {
 }
 
 class _DesktopWorkspaceState extends State<DesktopWorkspace> {
-  bool _inspectorOpen = false;
+  // Keep the inspector visible for an active conversation by default.  It is
+  // still user-toggleable from the header, but the desktop layout must expose
+  // delivery/connection details without requiring a hidden discovery action.
+  bool _inspectorOpen = true;
   bool _railExpanded = true;
 
   int get _unreadTotal => widget.conversations.totalUnread;
@@ -62,7 +64,12 @@ class _DesktopWorkspaceState extends State<DesktopWorkspace> {
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
       final compactRail = constraints.maxWidth < 900 || !_railExpanded;
-      final canShowInspector = constraints.maxWidth >= 1320;
+      // Keep the details panel available on ordinary 1080p desktop windows;
+      // the previous 1320 px gate silently removed it on common laptop
+      // resolutions.  Below this width the conversation remains usable in a
+      // single-column layout and the header toggle can still be used when the
+      // window grows again.
+      final canShowInspector = constraints.maxWidth >= 1280;
       final selected = widget.selectedContact;
       final showInspector =
           canShowInspector && _inspectorOpen && selected != null;
@@ -70,7 +77,12 @@ class _DesktopWorkspaceState extends State<DesktopWorkspace> {
       return Row(
         children: [
           SizedBox(
-            width: compactRail ? 68 : 116,
+            // The expanded rail needs enough room for the labels and their
+            // icons.  A 116 px rail looked fine at large sizes but clipped
+            // "Kontakty" and "Ustawienia" as soon as the workspace became
+            // narrower.  Compact mode remains icon-only for truly narrow
+            // windows.
+            width: compactRail ? 68 : 164,
             child: _CompactNavigationRail(
               compact: compactRail,
               tab: widget.tab,
@@ -112,10 +124,13 @@ class _DesktopWorkspaceState extends State<DesktopWorkspace> {
                                   ),
                           ),
                         ),
-                        if (selected != null)
+                        if (selected != null && canShowInspector)
                           Positioned(
-                            top: 10,
-                            right: 10,
+                            // Keep the inspector affordance out of the
+                            // conversation AppBar action row. It behaves as a
+                            // floating side tab below the 68 px header.
+                            top: 78,
+                            right: 12,
                             child: Tooltip(
                               message: showInspector
                                   ? 'Ukryj szczegóły'
@@ -328,8 +343,6 @@ class _RailItem extends StatelessWidget {
   }
 }
 
-enum _ConversationMode { chats, groups }
-
 class _ConversationSidebar extends StatefulWidget {
   const _ConversationSidebar({
     required this.conversations,
@@ -349,7 +362,6 @@ class _ConversationSidebar extends StatefulWidget {
 
 class _ConversationSidebarState extends State<_ConversationSidebar> {
   final _search = TextEditingController();
-  _ConversationMode _mode = _ConversationMode.chats;
 
   @override
   void dispose() {
@@ -385,10 +397,8 @@ class _ConversationSidebarState extends State<_ConversationSidebar> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           FeatureHeader(
-            title: _mode == _ConversationMode.chats ? 'Czaty' : 'Grupy',
-            subtitle: _mode == _ConversationMode.chats
-                ? '${widget.conversations.length} rozmów'
-                : 'Osobna przestrzeń grupowa',
+            title: 'Czaty',
+            subtitle: '${widget.conversations.length} rozmów',
           ),
           const SizedBox(height: 12),
           TextField(
@@ -401,47 +411,19 @@ class _ConversationSidebarState extends State<_ConversationSidebar> {
             ),
           ),
           const SizedBox(height: 10),
-          SegmentedButton<_ConversationMode>(
-            showSelectedIcon: false,
-            segments: const [
-              ButtonSegment(
-                value: _ConversationMode.chats,
-                label: Text('Czaty'),
-                icon: ThemedIcon(Icons.chat_bubble_outline, size: 16),
-              ),
-              ButtonSegment(
-                value: _ConversationMode.groups,
-                label: Text('Grupy'),
-                icon: ThemedIcon(Icons.groups_outlined, size: 16),
-              ),
-            ],
-            selected: {_mode},
-            onSelectionChanged: (value) => setState(() => _mode = value.first),
-          ),
-          const SizedBox(height: 12),
           Expanded(
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 160),
-              child: _mode == _ConversationMode.groups
-                  ? const EmptyState(
-                      key: ValueKey('groups-empty'),
-                      icon: Icons.groups_outlined,
-                      message:
-                          'Grupy będą wyświetlane w osobnej sekcji.\nNie mieszamy ich ze zwykłymi czatami.',
-                    )
-                  : ConversationListSection(
-                      key: const ValueKey('chat-list'),
-                      title: 'Czaty',
-                      conversations: _filtered,
-                      contacts: widget.contacts,
-                      selectedConversation: widget.selectedConversation,
-                      onOpenConversation: widget.onOpenConversation,
-                      asCard: false,
-                      showHeader: false,
-                      emptyMessage: _search.text.trim().isEmpty
-                          ? 'Nie masz jeszcze rozmów.'
-                          : 'Brak rozmów pasujących do wyszukiwania.',
-                    ),
+            child: ConversationListSection(
+              key: const ValueKey('chat-list'),
+              title: 'Czaty',
+              conversations: _filtered,
+              contacts: widget.contacts,
+              selectedConversation: widget.selectedConversation,
+              onOpenConversation: widget.onOpenConversation,
+              asCard: false,
+              showHeader: false,
+              emptyMessage: _search.text.trim().isEmpty
+                  ? 'Nie masz jeszcze rozmów.'
+                  : 'Brak rozmów pasujących do wyszukiwania.',
             ),
           ),
         ],
@@ -611,9 +593,9 @@ class _ConversationInspector extends StatelessWidget {
   Widget build(BuildContext context) {
     final shell = context.shellTheme;
     return Container(
-      color: shell.surface,
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
       decoration: BoxDecoration(
+        color: shell.surface,
         border: Border(
           left: BorderSide(color: shell.border, width: shell.borderWidth),
         ),
@@ -682,6 +664,12 @@ class _ConversationInspector extends StatelessWidget {
                       contact.lastPeerConnectedAt?.trim().isNotEmpty == true
                       ? contact.lastPeerConnectedAt!
                       : 'Brak zapisanej sesji',
+                ),
+                InfoTile(
+                  title: 'Ostatnio widziany',
+                  subtitle: contact.lastSeenAt?.trim().isNotEmpty == true
+                      ? contact.lastSeenAt!
+                      : 'Brak danych',
                 ),
               ],
             ),

@@ -15,7 +15,7 @@ class AndroidEngineEventMapperTest {
 
         val published = mapEngineEventToPublishedEvents(event).single()
 
-        assertEquals(EngineContract.TRANSPORT_PHASE_CONNECTED, published["state"])
+        assertEquals("READY", published["state"])
         assertEquals("Relay połączony", published[EngineContract.DETAIL])
     }
 
@@ -29,7 +29,7 @@ class AndroidEngineEventMapperTest {
 
         val published = mapEngineEventToPublishedEvents(event).single()
 
-        assertEquals(EngineContract.TRANSPORT_PHASE_RECONNECTING, published["state"])
+        assertEquals("DEGRADED", published["state"])
         assertEquals(detail, published[EngineContract.DETAIL])
     }
 

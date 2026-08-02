@@ -310,6 +310,11 @@ impl EngineRelay for SharedRelayActor {
         self.session_token = None;
     }
 
+    fn invalidate_session(&mut self) {
+        self.shutdown_writer();
+        self.session_token = None;
+    }
+
     fn shutdown(&mut self) {
         self.shutdown_writer();
         self.session_token = None;
@@ -417,6 +422,7 @@ impl EngineRelay for SharedRelayActor {
                 peer_endpoint_status: torchat_client_runtime::PeerEndpointStatus::Missing,
                 peer_connection_status: torchat_client_runtime::PeerConnectionStatus::Offline,
                 last_peer_connected_at: None,
+                last_seen_at: None,
                 transport_policy: Default::default(),
                 dev: None,
             }),
@@ -467,6 +473,7 @@ impl EngineRelay for SharedRelayActor {
                     peer_endpoint_status: torchat_client_runtime::PeerEndpointStatus::Missing,
                     peer_connection_status: torchat_client_runtime::PeerConnectionStatus::Offline,
                     last_peer_connected_at: None,
+                    last_seen_at: None,
                     transport_policy: Default::default(),
                     dev: None,
                 }),
@@ -944,6 +951,7 @@ impl RelayResponseExt for Response {
 }
 
 fn relay_status_error(status: StatusCode, message: String) -> RuntimeError {
+    let message = format!("relay HTTP {}: {message}", status.as_u16());
     match status {
         StatusCode::BAD_REQUEST | StatusCode::UNPROCESSABLE_ENTITY => {
             RuntimeError::InvalidParams(message)
@@ -968,19 +976,19 @@ mod tests {
     fn relay_statuses_preserve_domain_error_categories() {
         assert_eq!(
             relay_status_error(StatusCode::BAD_REQUEST, "invalid code".to_owned()),
-            RuntimeError::InvalidParams("invalid code".to_owned()),
+            RuntimeError::InvalidParams("relay HTTP 400: invalid code".to_owned()),
         );
         assert_eq!(
             relay_status_error(StatusCode::NOT_FOUND, "expired code".to_owned()),
-            RuntimeError::NotFound("expired code".to_owned()),
+            RuntimeError::NotFound("relay HTTP 404: expired code".to_owned()),
         );
         assert_eq!(
             relay_status_error(StatusCode::CONFLICT, "already pending".to_owned()),
-            RuntimeError::Conflict("already pending".to_owned()),
+            RuntimeError::Conflict("relay HTTP 409: already pending".to_owned()),
         );
         assert_eq!(
             relay_status_error(StatusCode::TOO_MANY_REQUESTS, "try later".to_owned()),
-            RuntimeError::Unavailable("try later".to_owned()),
+            RuntimeError::Unavailable("relay HTTP 429: try later".to_owned()),
         );
     }
 

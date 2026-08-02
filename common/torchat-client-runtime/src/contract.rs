@@ -121,6 +121,14 @@ pub enum RuntimeEvent {
         #[serde(default, rename = "retryInMs")]
         retry_in_ms: Option<u64>,
     },
+    ContactCapabilityChanged {
+        #[serde(rename = "contactId")]
+        contact_id: String,
+        #[serde(rename = "capabilityId")]
+        capability_id: String,
+        sequence: u64,
+        status: crate::models::CapabilityStatus,
+    },
     Changed {
         #[serde(default)]
         kind: Option<String>,

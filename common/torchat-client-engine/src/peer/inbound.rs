@@ -14,8 +14,8 @@ use tokio_tungstenite::{
 use torchat_core::{
     Identity, PROTOCOL_VERSION,
     peer_protocol::{
-        PEER_PATH, PeerAck, PeerAckKind, PeerEndpointBundle, PeerFrame, PeerServerChallenge,
-        handshake_transcript,
+        PEER_PATH, PeerAck, PeerAckKind, PeerEndpointBundle, PeerFrame, PeerPresenceState,
+        PeerServerChallenge, handshake_transcript,
     },
     verify_signature,
 };
@@ -143,11 +143,19 @@ pub(super) async fn serve_inbound(
                 update.validate(&peer_endpoint, unix_secs())?;
                 peer_endpoint = update.endpoint.clone();
                 if let Ok(mut authorized) = state.authorized.write() {
+                    let previous_authorization = authorized.get(&peer_id).cloned();
                     authorized.insert(
                         peer_id.clone(),
                         AuthorizedPeer {
                             public_key: peer_key.clone(),
                             endpoint: peer_endpoint.clone(),
+                            inbound_capability_id: previous_authorization
+                                .as_ref()
+                                .map(|value| value.inbound_capability_id.clone())
+                                .unwrap_or_default(),
+                            capability_secret: previous_authorization
+                                .map(|value| value.capability_secret)
+                                .unwrap_or_default(),
                         },
                     );
                 }
@@ -163,6 +171,51 @@ pub(super) async fn serve_inbound(
                     .send(PeerFrame::Pong { nonce })
                     .await
                     .map_err(|_| "peer websocket writer stopped".to_owned())?;
+            }
+            PeerFrame::Presence {
+                state, expires_at, ..
+            } => {
+                events
+                    .send(PeerTransportEvent::PresenceChanged {
+                        installation_id: peer_id.clone(),
+                        online: !matches!(state, PeerPresenceState::Offline)
+                            && expires_at >= unix_secs() * 1000,
+                        observed_at: unix_secs() * 1000,
+                    })
+                    .await
+                    .map_err(|_| "engine peer event queue is closed".to_owned())?;
+            }
+            PeerFrame::Typing {
+                typing, expires_at, ..
+            } => {
+                events
+                    .send(PeerTransportEvent::TypingChanged {
+                        installation_id: peer_id.clone(),
+                        typing: typing && expires_at >= unix_secs() * 1000,
+                        expires_at,
+                    })
+                    .await
+                    .map_err(|_| "engine peer event queue is closed".to_owned())?;
+            }
+            PeerFrame::ProbeRequest { nonce } => {
+                writer_tx
+                    .send(PeerFrame::ProbeResponse {
+                        nonce,
+                        presence: PeerPresenceState::Online,
+                        observed_at: unix_secs() * 1000,
+                    })
+                    .await
+                    .map_err(|_| "peer websocket writer stopped".to_owned())?;
+            }
+            PeerFrame::ProbeResponse { presence, .. } => {
+                events
+                    .send(PeerTransportEvent::PresenceChanged {
+                        installation_id: peer_id.clone(),
+                        online: !matches!(presence, PeerPresenceState::Offline),
+                        observed_at: unix_secs() * 1000,
+                    })
+                    .await
+                    .map_err(|_| "engine peer event queue is closed".to_owned())?;
             }
             PeerFrame::Pong { .. } | PeerFrame::Ack { .. } => {}
             _ => return Err("unexpected authenticated peer frame".into()),
@@ -233,6 +286,17 @@ async fn authenticate_inbound(
         .ok_or_else(|| "peer is not an authorized contact".to_owned())?;
     if hello.endpoint_sequence < authorized.endpoint.sequence {
         return Err("peer endpoint sequence is stale".into());
+    }
+    if hello.capability_id.is_empty() || hello.capability_id != authorized.inbound_capability_id {
+        return Err("peer capability is not authorized".into());
+    }
+    if authorized.capability_secret.is_empty()
+        || !torchat_core::peer_protocol::verify_capability_proof(
+            &authorized.capability_secret,
+            &hello,
+        )
+    {
+        return Err("peer capability proof is invalid".into());
     }
 
     let server_nonce = random_nonce();

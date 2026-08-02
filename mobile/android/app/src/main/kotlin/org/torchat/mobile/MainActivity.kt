@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -40,7 +41,7 @@ class MainActivity : FlutterActivity() {
         if (clean) serviceIntent.putExtra("clean_state", true)
         intent.removeExtra("reset_dev_state")
         intent.removeExtra("clean_state")
-        ContextCompat.startForegroundService(this, serviceIntent)
+        ensureForegroundService(serviceIntent)
         handleNotificationIntent(intent)
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED
@@ -53,6 +54,31 @@ class MainActivity : FlutterActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleNotificationIntent(intent)
+    }
+
+    /**
+     * Some Android/OEM builds can defer the start requested from onCreate
+     * while restoring the Flutter activity or showing a runtime permission
+     * dialog. Re-assert the idempotent foreground-service start when the
+     * activity becomes visible; the service owns the single engine session and
+     * ignores duplicate starts while it is already running.
+     */
+    override fun onStart() {
+        super.onStart()
+        val serviceIntent = Intent(this, TorChatForegroundService::class.java)
+            .putExtra("deploy_run_id", intent.getStringExtra("deploy_run_id"))
+        ensureForegroundService(serviceIntent)
+    }
+
+    private fun ensureForegroundService(serviceIntent: Intent) {
+        runCatching { ContextCompat.startForegroundService(this, serviceIntent) }
+            .onFailure { error ->
+                Log.e(
+                    "TorChat-Engine",
+                    "Unable to request TorChatForegroundService start: ${error.message}",
+                    error,
+                )
+            }
     }
 
     override fun configureFlutterEngine(engine: FlutterEngine) {
@@ -270,6 +296,23 @@ class MainActivity : FlutterActivity() {
                 result,
                 engineCommand(EngineContract.COMMAND_ROTATE_PEER_ENDPOINT),
                 discardPayload = true,
+            )
+            EngineContract.GET_CONTACT_ENDPOINT_CAPABILITY,
+            EngineContract.ROTATE_CONTACT_ENDPOINT_CAPABILITY,
+            EngineContract.REVOKE_CONTACT_ENDPOINT_CAPABILITY -> submitCommandResult(
+                result,
+                engineCommand(
+                    when (call.method) {
+                        EngineContract.GET_CONTACT_ENDPOINT_CAPABILITY ->
+                            EngineContract.COMMAND_GET_CONTACT_ENDPOINT_CAPABILITY
+                        EngineContract.ROTATE_CONTACT_ENDPOINT_CAPABILITY ->
+                            EngineContract.COMMAND_ROTATE_CONTACT_ENDPOINT_CAPABILITY
+                        else -> EngineContract.COMMAND_REVOKE_CONTACT_ENDPOINT_CAPABILITY
+                    },
+                ).put(
+                    EngineContract.COMMAND_INSTALLATION_ID,
+                    call.argument<String>(EngineContract.ARG_INSTALLATION_ID).orEmpty(),
+                ),
             )
             EngineContract.LIST_CONTACTS -> submitQueryResult(
                 result,

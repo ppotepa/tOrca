@@ -367,10 +367,10 @@ class _ConversationHeader extends StatelessWidget
             child: ThemedActivityIndicator(compact: true),
           )
         else if (onVerify != null)
-          TextButton.icon(
+          IconButton(
+            tooltip: 'Zweryfikuj kontakt',
             onPressed: onVerify,
-            icon: const ThemedIcon(Icons.verified_user_outlined, size: 16),
-            label: const Text('Zweryfikuj'),
+            icon: const ThemedIcon(Icons.verified_user_outlined, size: 19),
           ),
         IconButton(
           tooltip: searching ? 'Zamknij wyszukiwanie' : 'Szukaj',

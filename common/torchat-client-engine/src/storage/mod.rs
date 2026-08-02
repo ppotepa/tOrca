@@ -6,8 +6,9 @@ pub mod transaction;
 pub use migrations::{Migration, MigrationRunner};
 pub use runtime_storage::SqliteRuntimeStorage;
 pub use sqlite::{
-    ClientDatabase, DeliveryReceiptRecord, InboundEnvelopeStoreResult, InboundPeerEnvelopeRecord,
-    OutboundDeliveryRecord, PairingResponseRecord, PeerEndpointBootstrapRecord,
+    CapabilityDeliveryRecord, ClientDatabase, DeliveryReceiptRecord, InboundEnvelopeStoreResult,
+    InboundPeerEnvelopeRecord, OutboundDeliveryRecord, PairingResponseRecord,
+    PeerEndpointBootstrapRecord, PendingApplicationEnvelopeRecord,
     PendingContactConfirmationRecord, PendingLocalInviteMlsRecord, PendingPeerEndpointInboxRecord,
     PendingWelcomeRecord, ReceivedEnvelopeRecord, RetryDeadline, RetryKind, StoredMessageRecord,
 };

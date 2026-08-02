@@ -10,10 +10,12 @@ import '../../app/ui_operation_registry.dart';
 import '../../core/attachments/image_attachment_picker.dart';
 import '../../core/attachments/image_message_codec.dart';
 import '../../core/models/domain.dart';
+import '../../core/runtime/message_paging.dart';
 import '../../shared/async/busy_surface.dart';
 import '../../shared/async/themed_activity_indicator.dart';
 import '../../shared/formatters/message_timestamps.dart';
 import '../../shared/widgets/identity_avatar.dart';
+import 'composer_draft.dart';
 import 'release_message_bubble.dart';
 
 class ReleaseChatView extends ConsumerStatefulWidget {
@@ -29,6 +31,7 @@ class ReleaseChatView extends ConsumerStatefulWidget {
     required this.onTypingChanged,
     required this.onRetryMessage,
     required this.onDeleteMessage,
+    required this.onLoadOlderMessages,
     required this.onBack,
     required this.error,
     required this.notice,
@@ -36,6 +39,8 @@ class ReleaseChatView extends ConsumerStatefulWidget {
     this.canSend = false,
     this.peerTyping = false,
     this.peerOnline = false,
+    this.lastSeenAt,
+    this.headerStatus,
   });
 
   final ContactRecord? selected;
@@ -44,10 +49,11 @@ class ReleaseChatView extends ConsumerStatefulWidget {
   final List<ChatMessage> messages;
   final TextEditingController composer;
   final ValueChanged<String> onOpenConversation;
-  final ValueChanged<String?> onSend;
+  final Future<void> Function(ComposerDraft draft) onSend;
   final ValueChanged<bool> onTypingChanged;
   final ValueChanged<String> onRetryMessage;
   final ValueChanged<String> onDeleteMessage;
+  final Future<OlderMessagesResult> Function() onLoadOlderMessages;
   final VoidCallback onBack;
   final String error;
   final String notice;
@@ -55,6 +61,8 @@ class ReleaseChatView extends ConsumerStatefulWidget {
   final bool canSend;
   final bool peerTyping;
   final bool peerOnline;
+  final int? lastSeenAt;
+  final Widget? headerStatus;
 
   @override
   ConsumerState<ReleaseChatView> createState() => _ReleaseChatViewState();
@@ -75,6 +83,9 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
   bool _nearBottom = true;
   bool _initialScrollApplied = false;
   bool _preparingImage = false;
+  bool _loadingOlder = false;
+  bool _hasOlderMessages = true;
+  final List<ComposerAttachment> _draftAttachments = <ComposerAttachment>[];
   int _unseenMessageCount = 0;
   int _restoreGeneration = 0;
   bool _restoreInFlight = false;
@@ -193,6 +204,12 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
   void _handleScroll() {
     if (!_scroll.hasClients) return;
     _scheduleScrollPersist();
+    if (_scroll.position.pixels <= 240 &&
+        !_loadingOlder &&
+        _hasOlderMessages &&
+        widget.messages.isNotEmpty) {
+      unawaited(_loadOlderMessages());
+    }
     if (!_initialScrollApplied) return;
 
     final remaining = _scroll.position.maxScrollExtent - _scroll.offset;
@@ -205,6 +222,30 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
       _nearBottom = nextNearBottom;
       if (_nearBottom) _unseenMessageCount = 0;
     });
+  }
+
+  Future<void> _loadOlderMessages() async {
+    if (_loadingOlder || !_hasOlderMessages || !mounted) return;
+    final beforePixels = _scroll.hasClients ? _scroll.position.pixels : 0.0;
+    final beforeExtent = _scroll.hasClients
+        ? _scroll.position.maxScrollExtent
+        : 0.0;
+    setState(() => _loadingOlder = true);
+    try {
+      final result = await widget.onLoadOlderMessages();
+      _hasOlderMessages = result.hasMore;
+      if (result.loadedCount > 0 && mounted) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || !_scroll.hasClients) return;
+          final delta = _scroll.position.maxScrollExtent - beforeExtent;
+          _scroll.jumpTo(
+            (beforePixels + delta).clamp(0.0, _scroll.position.maxScrollExtent),
+          );
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _loadingOlder = false);
+    }
   }
 
   Future<void> _restoreInitialPosition(
@@ -305,20 +346,33 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
     }
   }
 
-  Future<void> _pickAndSendImage() async {
+  Future<void> _pickAttachments() async {
     if (_preparingImage || !widget.canSend) return;
     setState(() {
       _preparingImage = true;
       _attachmentError = '';
     });
     try {
-      final prepared = await pickPreparedImageAttachment();
+      final prepared = await pickPreparedImageAttachments();
       if (prepared == null || !mounted) return;
-      final draft = widget.composer.text;
-      widget.composer.text = prepared.toMessageBody();
-      widget.onSend(null);
-      widget.composer.text = draft;
-      _scheduleAnimatedBottomScroll();
+      final remaining = maxComposerAttachments - _draftAttachments.length;
+      if (prepared.length > remaining) {
+        throw StateError(
+          'Wiadomość może zawierać maksymalnie $maxComposerAttachments obrazów.',
+        );
+      }
+      setState(() {
+        _draftAttachments.addAll(
+          prepared.map(
+            (attachment) => ComposerAttachment(
+              attachment: attachment,
+              // The prepared JPEG is already bounded to 50 KiB; reusing it
+              // keeps the draft lightweight and avoids a second decode.
+              previewBytes: attachment.bytes,
+            ),
+          ),
+        );
+      });
     } catch (error) {
       if (mounted) {
         setState(() {
@@ -337,6 +391,7 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
   Widget build(BuildContext context) {
     final contact = widget.selected;
     if (contact == null) return _buildConversationHome(context);
+    final compactHeader = MediaQuery.sizeOf(context).width < 420;
 
     final conversationId = _conversationId;
     final openState = ref.watch(
@@ -405,7 +460,9 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
                                 ? 'pisze…'
                                 : widget.peerOnline
                                 ? 'online · ${_routeLabel(contact)}'
-                                : 'offline · ${_routeLabel(contact)}',
+                                : widget.lastSeenAt == null
+                                ? 'offline · ${_routeLabel(contact)}'
+                                : 'ostatnio widziany ${_lastSeenLabel(widget.lastSeenAt!)} · ${_routeLabel(contact)}',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: Theme.of(context).textTheme.labelSmall
@@ -421,30 +478,52 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
                   ],
                 ),
           actions: [
-            IconButton(
-              tooltip: _searching ? 'Zamknij wyszukiwanie' : 'Szukaj',
-              onPressed: () => setState(() {
-                _searching = !_searching;
-                if (!_searching) _search.clear();
-              }),
-              icon: ThemedIcon(_searching ? Icons.close : Icons.search),
-            ),
-            PopupMenuButton<String>(
-              tooltip: 'Opcje rozmowy',
-              icon: const ThemedIcon(Icons.more_vert),
-              onSelected: (value) async {
-                if (value == 'fingerprint') {
-                  await Clipboard.setData(
-                    ClipboardData(text: contact.fingerprint),
-                  );
-                }
-              },
-              itemBuilder: (_) => const [
-                PopupMenuItem(
-                  value: 'fingerprint',
-                  child: Text('Kopiuj fingerprint'),
+            if (widget.headerStatus != null)
+              Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: Center(child: widget.headerStatus!),
+              ),
+            if (!compactHeader)
+              Padding(
+                padding: const EdgeInsets.only(right: 2),
+                child: IconButton(
+                  visualDensity: VisualDensity.compact,
+                  tooltip: _searching ? 'Zamknij wyszukiwanie' : 'Szukaj',
+                  onPressed: _toggleSearch,
+                  icon: ThemedIcon(_searching ? Icons.close : Icons.search),
                 ),
-              ],
+              ),
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: PopupMenuButton<String>(
+                tooltip: 'Opcje rozmowy',
+                icon: const ThemedIcon(Icons.more_vert),
+                padding: EdgeInsets.zero,
+                onSelected: (value) async {
+                  if (value == 'search') {
+                    _toggleSearch();
+                    return;
+                  }
+                  if (value == 'fingerprint') {
+                    await Clipboard.setData(
+                      ClipboardData(text: contact.fingerprint),
+                    );
+                  }
+                },
+                itemBuilder: (_) => [
+                  if (compactHeader)
+                    PopupMenuItem(
+                      value: 'search',
+                      child: Text(
+                        _searching ? 'Zamknij wyszukiwanie' : 'Szukaj',
+                      ),
+                    ),
+                  const PopupMenuItem(
+                    value: 'fingerprint',
+                    child: Text('Kopiuj fingerprint'),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
@@ -471,17 +550,34 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
                           setState(() => _replyingTo = message),
                     ),
                   ),
+                  if (_loadingOlder)
+                    const Positioned(
+                      top: 6,
+                      left: 0,
+                      right: 0,
+                      child: Center(
+                        child: ThemedActivityIndicator(
+                          label: 'Ładowanie starszych wiadomości…',
+                          compact: true,
+                        ),
+                      ),
+                    ),
                   if (!_nearBottom || _unseenMessageCount > 0)
                     Positioned(
                       right: 18,
                       bottom: 14,
-                      child: FilledButton.tonalIcon(
-                        onPressed: _scheduleAnimatedBottomScroll,
-                        icon: const ThemedIcon(Icons.keyboard_arrow_down),
-                        label: Text(
-                          _unseenMessageCount > 0
-                              ? '$_unseenMessageCount nowe'
-                              : 'Najnowsze',
+                      child: Tooltip(
+                        message: _unseenMessageCount > 0
+                            ? '$_unseenMessageCount nowych wiadomości'
+                            : 'Przewiń na dół',
+                        child: Badge(
+                          isLabelVisible: _unseenMessageCount > 0,
+                          label: Text('$_unseenMessageCount'),
+                          child: FloatingActionButton.small(
+                            heroTag: 'conversation-scroll-bottom',
+                            onPressed: _scheduleAnimatedBottomScroll,
+                            child: const ThemedIcon(Icons.keyboard_arrow_down),
+                          ),
                         ),
                       ),
                     ),
@@ -491,16 +587,29 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
             _Composer(
               controller: widget.composer,
               replyTo: _replyingTo,
-              enabled: widget.canSend && !sendState.busy,
+              enabled: widget.canSend,
               sending: sendState.busy,
               preparingImage: _preparingImage,
-              onAttach: _pickAndSendImage,
+              attachments: _draftAttachments,
+              onRemoveAttachment: (index) =>
+                  setState(() => _draftAttachments.removeAt(index)),
+              onAttach: _pickAttachments,
               onChanged: _typingChanged,
               onCancelReply: () => setState(() => _replyingTo = null),
-              onSend: () {
+              onSend: () async {
                 final replyId = _replyingTo?.id;
                 setState(() => _replyingTo = null);
-                widget.onSend(replyId);
+                final draft = ComposerDraft(
+                  caption: widget.composer.text.trim(),
+                  attachments: List.unmodifiable(_draftAttachments),
+                  replyToMessageId: replyId,
+                );
+                await widget.onSend(draft);
+                if (!mounted) return;
+                _draftAttachments.clear();
+                widget.composer.clear();
+                widget.onTypingChanged(false);
+                setState(() {});
                 _scheduleAnimatedBottomScroll();
               },
             ),
@@ -509,6 +618,11 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
       ),
     );
   }
+
+  void _toggleSearch() => setState(() {
+    _searching = !_searching;
+    if (!_searching) _search.clear();
+  });
 
   Widget _buildConversationHome(BuildContext context) {
     final recent = widget.conversations.take(4).toList(growable: false);
@@ -536,22 +650,37 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
                 '${widget.contacts.length} kontaktów · '
                 '${widget.conversations.length} rozmów',
               ),
-              if (!widget.showConversationListWhenEmpty &&
-                  recent.isNotEmpty) ...[
+              // The compact/mobile shell renders the conversation home in
+              // this widget instead of mounting the desktop sidebar.  Keep
+              // the list independent from the back-navigation flag: that
+              // flag only controls the app bar, and must never hide chats on
+              // narrow windows.
+              if (recent.isNotEmpty) ...[
                 const SizedBox(height: 24),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Ostatnie rozmowy',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+                const SizedBox(height: 8),
                 for (final conversation in recent)
-                  ListTile(
-                    leading: const ThemedIcon(Icons.chat_bubble_outline),
-                    title: Text(
-                      _contactName(conversation.contactId, widget.contacts),
+                  Material(
+                    type: MaterialType.transparency,
+                    child: ListTile(
+                      leading: const ThemedIcon(Icons.chat_bubble_outline),
+                      title: Text(
+                        _contactName(conversation.contactId, widget.contacts),
+                      ),
+                      subtitle: Text(
+                        _previewLabel(conversation.preview),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      trailing: const ThemedIcon(Icons.chevron_right),
+                      onTap: () => widget.onOpenConversation(conversation.id),
                     ),
-                    subtitle: Text(
-                      _previewLabel(conversation.preview),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    trailing: const ThemedIcon(Icons.chevron_right),
-                    onTap: () => widget.onOpenConversation(conversation.id),
                   ),
               ],
             ],
@@ -603,6 +732,9 @@ class _MessageTimeline extends StatelessWidget {
         constraints: const BoxConstraints(maxWidth: 1080),
         child: ListView.builder(
           controller: controller,
+          // Keep image bubbles close to the viewport so their encrypted
+          // payloads are materialized lazily instead of for the whole chat.
+          cacheExtent: 320,
           padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
           itemCount: messages.length,
           itemBuilder: (context, index) {
@@ -654,7 +786,9 @@ class _Composer extends StatelessWidget {
     required this.enabled,
     required this.sending,
     required this.preparingImage,
+    required this.attachments,
     required this.onAttach,
+    required this.onRemoveAttachment,
     required this.onChanged,
     required this.onCancelReply,
     required this.onSend,
@@ -665,10 +799,12 @@ class _Composer extends StatelessWidget {
   final bool enabled;
   final bool sending;
   final bool preparingImage;
+  final List<ComposerAttachment> attachments;
   final VoidCallback onAttach;
+  final ValueChanged<int> onRemoveAttachment;
   final ValueChanged<String> onChanged;
   final VoidCallback onCancelReply;
-  final VoidCallback onSend;
+  final Future<void> Function() onSend;
 
   @override
   Widget build(BuildContext context) {
@@ -688,6 +824,47 @@ class _Composer extends StatelessWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                if (attachments.isNotEmpty)
+                  SizedBox(
+                    height: 68,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: attachments.length,
+                      separatorBuilder: (_, _) => const SizedBox(width: 7),
+                      itemBuilder: (context, index) {
+                        final attachment = attachments[index];
+                        return Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: Image.memory(
+                                attachment.previewBytes,
+                                width: 60,
+                                height: 60,
+                                fit: BoxFit.cover,
+                                filterQuality: FilterQuality.low,
+                              ),
+                            ),
+                            Positioned(
+                              top: -5,
+                              right: -5,
+                              child: IconButton.filledTonal(
+                                tooltip: 'Usuń załącznik',
+                                onPressed: () => onRemoveAttachment(index),
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints.tightFor(
+                                  width: 22,
+                                  height: 22,
+                                ),
+                                icon: const ThemedIcon(Icons.close, size: 13),
+                              ),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                  ),
                 if (replyTo != null)
                   Container(
                     width: double.infinity,
@@ -738,8 +915,11 @@ class _Composer extends StatelessWidget {
                       child: CallbackShortcuts(
                         bindings: {
                           const SingleActivator(LogicalKeyboardKey.enter): () {
-                            if (enabled && controller.text.trim().isNotEmpty) {
-                              onSend();
+                            if (enabled &&
+                                !sending &&
+                                (controller.text.trim().isNotEmpty ||
+                                    attachments.isNotEmpty)) {
+                              unawaited(onSend());
                             }
                           },
                         },
@@ -750,8 +930,11 @@ class _Composer extends StatelessWidget {
                           maxLines: 5,
                           onChanged: onChanged,
                           onSubmitted: (_) {
-                            if (enabled && controller.text.trim().isNotEmpty) {
-                              onSend();
+                            if (enabled &&
+                                !sending &&
+                                (controller.text.trim().isNotEmpty ||
+                                    attachments.isNotEmpty)) {
+                              unawaited(onSend());
                             }
                           },
                           decoration: InputDecoration(
@@ -760,8 +943,11 @@ class _Composer extends StatelessWidget {
                                 : 'Rozmowa nie jest jeszcze gotowa',
                             suffixIcon: FilledButton(
                               onPressed:
-                                  enabled && controller.text.trim().isNotEmpty
-                                  ? onSend
+                                  enabled &&
+                                      !sending &&
+                                      (controller.text.trim().isNotEmpty ||
+                                          attachments.isNotEmpty)
+                                  ? () => unawaited(onSend())
                                   : null,
                               child: sending
                                   ? const ThemedActivityIndicator(compact: true)
@@ -837,6 +1023,15 @@ String _routeLabel(ContactRecord contact) => switch (contact.transportPolicy) {
         : 'Tor P2P + relay fallback',
   ContactTransportPolicy.peerOnly => 'Tor P2P',
 };
+
+String _lastSeenLabel(int epochMillis) {
+  final seen = DateTime.fromMillisecondsSinceEpoch(epochMillis);
+  final difference = DateTime.now().difference(seen);
+  if (difference.inSeconds < 60) return 'przed chwilą';
+  if (difference.inMinutes < 60) return '${difference.inMinutes} min temu';
+  if (difference.inHours < 24) return '${difference.inHours} godz. temu';
+  return '${difference.inDays} dni temu';
+}
 
 String _contactName(String id, List<ContactRecord> contacts) {
   for (final contact in contacts) {
