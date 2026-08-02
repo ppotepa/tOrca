@@ -63,12 +63,14 @@ class _MessageDeliverySurfaceState extends State<MessageDeliverySurface>
   }
 
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: _pulse,
-    builder: (context, child) => Opacity(
-      opacity: !_animated ? 1 : .46 + (_pulse.value * .14),
-      child: child,
+  Widget build(BuildContext context) => RepaintBoundary(
+    child: AnimatedBuilder(
+      animation: _pulse,
+      builder: (context, child) => Opacity(
+        opacity: !_animated ? 1 : .46 + (_pulse.value * .14),
+        child: child,
+      ),
+      child: widget.child,
     ),
-    child: widget.child,
   );
 }

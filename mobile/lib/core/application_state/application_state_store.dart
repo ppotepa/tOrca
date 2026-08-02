@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 
 import 'application_snapshot.dart';
 import 'application_snapshot_patch.dart';
@@ -136,6 +137,11 @@ class ApplicationStateStore {
     _messages[conversationId] = immutable;
     final revision = (_messageRevisions[conversationId] ?? 0) + 1;
     _messageRevisions[conversationId] = revision;
+    developer.log(
+      'message projection published count=${immutable.length} '
+      'revision=$revision',
+      name: 'torchat.projection',
+    );
     _messageChanges.add(
       ConversationMessagesSnapshot(
         conversationId: conversationId,

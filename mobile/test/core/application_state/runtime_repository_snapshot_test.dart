@@ -80,7 +80,7 @@ void main() {
   });
 
   test(
-    'a complete live projection replaces stale history atomically',
+    'a transient live projection never truncates retained chat history',
     () async {
       final runtime = _SnapshotRuntime(
         messageBatches: [
@@ -117,12 +117,16 @@ void main() {
       repository.invalidateMessages('conversation');
       final refreshed = await repository.messages('conversation', force: true);
 
-      expect(refreshed.map((message) => message.id), ['new-3']);
+      expect(refreshed.map((message) => message.id), [
+        'old-1',
+        'old-2',
+        'new-3',
+      ]);
       expect(
         repository.applicationState
             .messages('conversation')
             .map((message) => message.id),
-        ['new-3'],
+        ['old-1', 'old-2', 'new-3'],
       );
     },
   );

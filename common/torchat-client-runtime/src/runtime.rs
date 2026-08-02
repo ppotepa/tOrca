@@ -906,14 +906,30 @@ where
             .ok_or_else(|| RuntimeError::NotFound("contact does not exist".to_owned()))?;
         contact.verification = crate::VerificationState::Verified;
         self.storage.put_contact(contact)?;
-        for mut conversation in self.storage.conversations()? {
-            if conversation.contact_installation_id == installation_id
-                || conversation.id == installation_id
-            {
-                conversation.status = crate::ConversationState::Active;
-                self.storage.put_conversation(conversation)?;
-            }
-        }
+        // Verification completes the relationship, so both projections must
+        // become usable atomically.  Pairing can arrive through the control
+        // plane without having created a conversation row yet; waiting for
+        // the first message made the contact invisible from the chat list on
+        // Android and desktop.  Preserve an existing summary, but create the
+        // empty conversation eagerly when it is missing.
+        let existing_conversation =
+            self.storage
+                .conversations()?
+                .into_iter()
+                .find(|conversation| {
+                    conversation.contact_installation_id == installation_id
+                        || conversation.id == installation_id
+                });
+        let mut conversation = existing_conversation.unwrap_or_else(|| ConversationSummary {
+            id: installation_id.to_owned(),
+            contact_installation_id: installation_id.to_owned(),
+            status: crate::ConversationState::Active,
+            last_message_preview: "Nowa rozmowa".to_owned(),
+            last_message_at: self.clock.now_ms(),
+            unread_count: 0,
+        });
+        conversation.status = crate::ConversationState::Active;
+        self.storage.put_conversation(conversation)?;
         self.session.push_event(RuntimeEvent::Changed {
             kind: Some("contacts".to_owned()),
         });
@@ -2297,6 +2313,23 @@ mod tests {
             event,
             RuntimeEvent::Changed { kind } if kind.as_deref() == Some("conversations")
         )));
+    }
+
+    #[test]
+    fn verify_contact_creates_empty_conversation_when_missing() {
+        let mut runtime = runtime();
+        let mut contact = contact();
+        contact.verification = VerificationState::Unverified;
+        runtime.storage.put_contact(contact).unwrap();
+
+        runtime.verify_contact("peer-1").unwrap();
+
+        let conversations = runtime.conversations().unwrap();
+        assert_eq!(conversations.len(), 1);
+        assert_eq!(conversations[0].id, "peer-1");
+        assert_eq!(conversations[0].contact_installation_id, "peer-1");
+        assert_eq!(conversations[0].status, crate::ConversationState::Active);
+        assert_eq!(conversations[0].last_message_preview, "Nowa rozmowa");
     }
 
     #[test]

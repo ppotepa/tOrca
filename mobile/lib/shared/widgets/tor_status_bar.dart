@@ -121,56 +121,58 @@ class _TransportStatusDockState extends State<TransportStatusDock>
         .toList(growable: false);
 
     final theme = Theme.of(context);
-    return Semantics(
-      label:
-          'Stan komunikacji: ${segments.map((segment) => '${segment.label}: ${segment.detail}').join(', ')}',
-      button: true,
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(
-          widget.desktop ? 10 : 8,
-          0,
-          widget.desktop ? 10 : 8,
-          4,
-        ),
-        child: Material(
-          color: theme.colorScheme.surfaceContainerLowest,
-          elevation: 5,
-          shadowColor: theme.colorScheme.shadow.withValues(alpha: .28),
-          shape: RoundedRectangleBorder(
-            borderRadius: const BorderRadius.vertical(
-              bottom: Radius.circular(14),
-            ),
-            side: BorderSide(color: theme.dividerColor.withValues(alpha: .7)),
+    return RepaintBoundary(
+      child: Semantics(
+        label:
+            'Stan komunikacji: ${segments.map((segment) => '${segment.label}: ${segment.detail}').join(', ')}',
+        button: true,
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(
+            widget.desktop ? 10 : 8,
+            0,
+            widget.desktop ? 10 : 8,
+            4,
           ),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap:
-                widget.onOpenConnectionCenter ??
-                () => setState(() => _expanded = !_expanded),
-            child: AnimatedSize(
-              duration: const Duration(milliseconds: 220),
-              curve: Curves.easeOutCubic,
-              child: Row(
-                children: [
-                  for (var index = 0; index < segments.length; index++) ...[
-                    Expanded(
-                      child: _ConnectionSegment(
-                        segment: segments[index],
-                        desktop: widget.desktop,
-                        phase: phase,
-                        showDetails: _showDetails,
+          child: Material(
+            color: theme.colorScheme.surfaceContainerLowest,
+            elevation: 5,
+            shadowColor: theme.colorScheme.shadow.withValues(alpha: .28),
+            shape: RoundedRectangleBorder(
+              borderRadius: const BorderRadius.vertical(
+                bottom: Radius.circular(14),
+              ),
+              side: BorderSide(color: theme.dividerColor.withValues(alpha: .7)),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap:
+                  widget.onOpenConnectionCenter ??
+                  () => setState(() => _expanded = !_expanded),
+              child: AnimatedSize(
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOutCubic,
+                child: Row(
+                  children: [
+                    for (var index = 0; index < segments.length; index++) ...[
+                      Expanded(
+                        child: _ConnectionSegment(
+                          segment: segments[index],
+                          desktop: widget.desktop,
+                          phase: phase,
+                          showDetails: _showDetails,
+                        ),
                       ),
-                    ),
-                    if (index < segments.length - 1)
-                      VerticalDivider(
-                        width: 1,
-                        thickness: 1,
-                        indent: 9,
-                        endIndent: 9,
-                        color: theme.dividerColor.withValues(alpha: .62),
-                      ),
+                      if (index < segments.length - 1)
+                        VerticalDivider(
+                          width: 1,
+                          thickness: 1,
+                          indent: 9,
+                          endIndent: 9,
+                          color: theme.dividerColor.withValues(alpha: .62),
+                        ),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
           ),

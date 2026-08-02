@@ -22,8 +22,11 @@ import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -50,6 +53,7 @@ class TorChatForegroundService : Service() {
     @Volatile private var starting = false
     @Volatile private var torStarting = false
     @Volatile private var networkOnline = false
+    private var torRetryJob: Job? = null
     private var runtimeGeneration = 0L
     private val pendingTorStatuses = ArrayDeque<JSONObject>()
 
@@ -328,8 +332,13 @@ class TorChatForegroundService : Service() {
             }
             relaySupervisor.start(host)
             if (networkOnline) relaySupervisor.signalNetworkAvailable()
+            torRetryJob = null
         }.onFailure { error ->
             Log.e("TorChat-Tor", "Tor startup failed; local UI remains usable", error)
+            // TorRuntime stops and releases a failed native service. Clear the
+            // reference so the retry worker can create a fresh control
+            // connection instead of being blocked by `runtime != null`.
+            runtime = null
             startupLogger.write(
                 level = "error",
                 component = "tor",
@@ -340,7 +349,9 @@ class TorChatForegroundService : Service() {
                 durationMs = System.currentTimeMillis() - startedAt,
                 errorCode = error.javaClass.simpleName,
             )
-            completeExceptionally(torReady, error)
+            // Keep TOR_READY pending across transient bootstrap failures so
+            // the retry worker can eventually complete it. It is completed
+            // exceptionally only when the service is actually destroyed.
             publish(
                 mapOf(
                     EngineContract.TYPE to EngineContract.TOR_STATUS,
@@ -352,8 +363,51 @@ class TorChatForegroundService : Service() {
                 ),
             )
             updateNotification("Tor niedostępny · aplikacja lokalna działa")
+            scheduleTorRetry(host)
         }
         torStarting = false
+    }
+
+    /**
+     * A transient Tor bootstrap failure must not permanently strand Android
+     * in warming-up. Keep the engine and local data alive, then retry Tor with
+     * bounded backoff. Relay/onion readiness is only published after a
+     * successful bootstrap, so this cannot create a false READY state.
+     */
+    private fun scheduleTorRetry(host: AndroidEngineHost) {
+        if (torRetryJob?.isActive == true) return
+        torRetryJob = scope.launch {
+            var attempt = 0
+            while (kotlinx.coroutines.currentCoroutineContext().isActive &&
+                engineHost === host && !torReady.isCompleted
+            ) {
+                attempt += 1
+                val waitMs = minOf(60_000L, 5_000L * attempt)
+                delay(waitMs)
+                if (!networkOnline) {
+                    startupLogger.write(
+                        level = "info",
+                        component = "tor",
+                        eventCode = "tor_retry_deferred",
+                        stage = "TOR_READY",
+                        message = "Retry deferred because Android network is offline",
+                        state = "waiting",
+                        errorCode = "NETWORK_OFFLINE",
+                    )
+                    continue
+                }
+                Log.i("TorChat-Tor", "Retrying Tor startup attempt=$attempt")
+                startupLogger.write(
+                    level = "info",
+                    component = "tor",
+                    eventCode = "tor_retry",
+                    stage = "TOR_READY",
+                    message = "Retrying Tor bootstrap attempt=$attempt",
+                    state = "starting",
+                )
+                startTor(host)
+            }
+        }
     }
 
     private fun resetLocalState(resetDev: Boolean, clean: Boolean) {
@@ -388,6 +442,8 @@ class TorChatForegroundService : Service() {
         }
         runCatching { unregisterReceiver(powerModeReceiver) }
         relaySupervisor.stop()
+        torRetryJob?.cancel()
+        torRetryJob = null
         publishEngineFact(engineAppVisibilityChangedFactJson(foreground = false))
         publishEngineFact(engineOnionServiceLostFactJson("TorChat service stopped"))
         publishEngineFact(engineTorEndpointLostFactJson("TorChat service stopped"))

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:collection';
+import 'dart:developer' as developer;
 
 import '../../client_runtime.dart';
 import '../application_state/application_snapshot.dart';
@@ -648,16 +649,38 @@ class RuntimeRepository {
       final projection = List<ChatMessage>.unmodifiable(messages);
       final currentEpoch = _messageInvalidationEpoch[id] ?? 0;
       final appliedSequence = _messageAppliedSequence[id] ?? 0;
+      developer.log(
+        'message projection fetched count=${projection.length} '
+        'epoch=$invalidationEpoch currentEpoch=$currentEpoch '
+        'sequence=$requestSequence appliedSequence=$appliedSequence',
+        name: 'torchat.projection',
+      );
       if (invalidationEpoch == currentEpoch &&
           requestSequence > appliedSequence) {
-        // The full-history projection must replace the previous projection.
-        // Merging here could resurrect rows deleted by a
-        // relationship reset and could make an old cache look newer than the
-        // database. Overlapping responses are ordered by request sequence;
-        // only the newest response for the current invalidation epoch wins.
-        applicationState.replaceMessages(id, projection);
+        // Transport delivery emits several closely spaced events. Even the
+        // full-history query can observe an intermediate committed view while
+        // the remaining inbound/outbound effects are still being applied.
+        // Replacing the retained timeline with that transient view made an
+        // open chat collapse to its newest message until it was reopened.
+        //
+        // Live refreshes are therefore monotonic upserts by message id. This
+        // also updates state transitions (SENDING -> SENT -> DELIVERED)
+        // without duplicating the row. Explicit deletion removes the row from
+        // the store before this refresh, while identity/relationship resets
+        // clear the store, so merging cannot resurrect data across a reset.
+        final merged = applicationState.mergeMessages(id, projection);
         _messageAppliedSequence[id] = requestSequence;
-        _messageCache[id] = projection;
+        _messageCache[id] = merged;
+        developer.log(
+          'message projection applied count=${merged.length} '
+          'sequence=$requestSequence',
+          name: 'torchat.projection',
+        );
+      } else {
+        developer.log(
+          'message projection discarded count=${projection.length}',
+          name: 'torchat.projection',
+        );
       }
       while (_messageCache.length > _messageCacheLimit) {
         _messageCache.remove(_messageCache.keys.first);
@@ -779,8 +802,13 @@ class RuntimeRepository {
     String? replyToMessageId,
   }) async {
     await _runtime.sendMessage(id, text, replyToMessageId: replyToMessageId);
+    // Apply the durable queued message immediately. Transport events may
+    // arrive before or after the command response, so the repository owns
+    // this one read-your-writes refresh and the controller does not start a
+    // second competing request.
     invalidateMessages(id);
-    invalidateLocalCache();
+    await messages(id, force: true);
+    await refreshDataForConversation(id);
   }
 
   Future<void> retryMessage(String messageId) async {

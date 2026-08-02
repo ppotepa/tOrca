@@ -37,6 +37,7 @@ class TorRuntime(private val context: Context) {
     private var activeServiceId: String? = null
     private var activeLocalPort: Int? = null
     private var activeVirtualPort: Int? = null
+    private var lastBootstrapProbeError: String? = null
 
     fun prepare(): TorRuntimeConfig {
         val torrc = TorService.getTorrc(context)
@@ -131,7 +132,23 @@ class TorRuntime(private val context: Context) {
         for (attempt in 0 until 240) {
             val bootstrap = runCatching {
                 service?.torControlConnection?.getInfo("status/bootstrap-phase")
+            }.onFailure { error ->
+                val message = error.message ?: error.javaClass.simpleName
+                lastBootstrapProbeError = message
+                // Do not silently turn a control-socket failure into a fake
+                // 0% bootstrap state. This is the distinction needed to tell
+                // a real Tor/network stall from a control connection problem.
+                if (attempt == 0 || attempt % 10 == 0) {
+                    Log.w(
+                        "TorChat-Tor",
+                        "Tor bootstrap control probe failed attempt=$attempt: $message",
+                        error,
+                    )
+                }
             }.getOrNull().orEmpty()
+            if (bootstrap.isBlank() && lastBootstrapProbeError == null) {
+                lastBootstrapProbeError = "empty bootstrap response"
+            }
             val progress = BOOTSTRAP_PROGRESS.find(bootstrap)
                 ?.groupValues
                 ?.getOrNull(1)
@@ -143,7 +160,12 @@ class TorRuntime(private val context: Context) {
                 ?.getOrNull(1)
                 ?.trim()
                 ?.takeIf { it.isNotEmpty() }
-                ?: if (progress >= 100) "Tor gotowy" else "Tor bootstrap: $progress%"
+                ?: if (progress >= 100) "Tor gotowy"
+                else if (bootstrap.isBlank()) {
+                    "Tor control status unavailable"
+                } else {
+                    "Tor bootstrap: $progress%"
+                }
             if (progress != lastProgress || detail != lastDetail || attempt == 0) {
                 Log.i("TorChat-Tor", "Tor bootstrap probe attempt=$attempt progress=$progress detail=$detail")
                 onBootstrapProgress(progress, detail)
@@ -153,7 +175,8 @@ class TorRuntime(private val context: Context) {
             if (progress >= 100) return
             Thread.sleep(500)
         }
-        error("Tor bootstrap did not reach 100% within 120 seconds")
+        val probeDetail = lastBootstrapProbeError?.let { "; control=$it" }.orEmpty()
+        error("Tor bootstrap did not reach 100% within 120 seconds$probeDetail")
     }
 
     @Synchronized

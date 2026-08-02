@@ -331,12 +331,6 @@ abstract class AppController extends Notifier<AppState> {
         text.trim(),
         replyToMessageId: replyToMessageId,
       );
-      // The runtime invalidates its snapshot asynchronously after accepting
-      // an outbound message.  Refresh the selected conversation immediately
-      // so the canonical queued message is visible without waiting for a
-      // later transport event.
-      await _repository.messages(id, force: true);
-      await _repository.refreshDataForConversation(id);
       state = state.copyWith(action: '', notice: '');
     } catch (error) {
       state = state.copyWith(action: '', error: _message(error));

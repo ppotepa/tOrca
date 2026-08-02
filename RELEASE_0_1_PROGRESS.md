@@ -177,3 +177,44 @@ they are not used to block the clean-code completion percentage.
 - [ ] Tor/relay restart never blocks local profile, contact or chat reads.
 - [ ] Android and Windows present the same readiness meaning.
 - [ ] Exported logs contain neither plaintext nor keys nor stable contact ids.
+
+## Android Tor startup hardening
+
+- [x] Log control-socket probe failures instead of silently reporting fake `0%` bootstrap.
+- [x] Preserve `TOR_READY` as pending across transient bootstrap timeouts.
+- [x] Retry native Tor startup with bounded backoff while keeping the Rust engine and local data alive.
+- [x] Prevent retry attempts from publishing relay/onion readiness before Tor reaches bootstrap completion.
+- [ ] Verify on-device recovery after Wi-Fi/LTE loss and a cold Tor start.
+
+## Repository cleanup
+
+- [x] Removed 19 physically empty legacy/source placeholder directories after
+  verifying that none contained tracked files or build inputs.
+- [x] Removed the stale Android `arm64-v8a.corrupt-20260729` directory.
+- [x] Removed the remaining empty source/temp leftovers (`.agents`, `docs`,
+  `tests`, `mobile/src`, `mobile/mobile/assets/audio`, stale Flutter ephemeral
+  links and `.tmp-javap` fragments) after verifying they contained no files.
+- [ ] Audit non-empty but unreachable legacy files separately; this cleanup did
+  not remove any file based only on a name or directory location.
+
+## Pairing-to-conversation projection
+
+- [x] `verify_contact` now creates an empty active conversation when pairing did
+  not create one earlier, so Android and Windows publish the chat entry before
+  the first message.
+- [x] Preserve an existing conversation summary while promoting it to `Active`.
+- [x] Add runtime regression coverage for verification without a conversation row.
+- [ ] Verify the contact and empty chat entry on both platforms after a fresh pairing deploy.
+
+## Live conversation projection
+
+- [x] Remove frozen visible message limit from the active chat
+- [x] Remove active-chat local pagination from the live timeline
+- [x] Add stable message keys
+- [x] Serialize read-your-writes refresh through `RuntimeRepository.sendMessage`
+- [x] Add projection count/sequence diagnostics
+- [x] Keep one keyed in-flight/trailing refresh per conversation
+- [ ] Reduce broad application refreshes after message events
+- [x] Isolate live message/status animations with repaint boundaries
+- [x] Add open-chat live-history regression test
+- [ ] Verify Android ↔ desktop live conversation after fresh deploy

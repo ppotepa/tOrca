@@ -272,4 +272,3 @@ const generatedPeerConnectionStatuses = <String>[
   'CONNECTED',
   'BACKOFF',
 ];
-

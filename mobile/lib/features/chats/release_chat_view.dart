@@ -5,7 +5,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../app/app_controller.dart';
 import '../../app/app_theme.dart';
 import '../../app/ui_operation_registry.dart';
 import '../../core/attachments/image_attachment_picker.dart';
@@ -63,10 +62,7 @@ class ReleaseChatView extends ConsumerStatefulWidget {
 
 class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
   static const _nearBottomThreshold = 160.0;
-  static const _loadOlderThreshold = 120.0;
-  static const _messagePageSize = 50;
   static const _scrollPositionPrefix = 'torchat.timeline.scroll.';
-  static const _scrollLimitPrefix = 'torchat.timeline.limit.';
 
   final _scroll = ScrollController();
   final _search = TextEditingController();
@@ -79,10 +75,9 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
   bool _nearBottom = true;
   bool _initialScrollApplied = false;
   bool _preparingImage = false;
-  bool _loadingOlder = false;
-  bool _hasMoreMessages = true;
-  int _visibleMessageLimit = _messagePageSize;
   int _unseenMessageCount = 0;
+  int _restoreGeneration = 0;
+  bool _restoreInFlight = false;
 
   @override
   void initState() {
@@ -106,23 +101,26 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
         unawaited(_persistScrollPosition(previousConversationId));
       }
       _activeConversationId = conversationId;
+      _restoreGeneration += 1;
+      // Invalidate a pending restore from the previous conversation before
+      // starting the new one. The old post-frame callback is generation
+      // guarded and cannot mutate the new conversation.
+      _restoreInFlight = false;
       _initialScrollApplied = false;
       _nearBottom = true;
       _unseenMessageCount = 0;
-      _visibleMessageLimit = _messagePageSize;
-      _loadingOlder = false;
-      _hasMoreMessages = true;
       _replyingTo = null;
       _attachmentError = '';
       if (widget.messages.isNotEmpty) {
-        unawaited(_restoreInitialPosition(conversationId));
+        unawaited(_restoreInitialPosition(conversationId, _restoreGeneration));
       }
       return;
     }
 
-    if (_loadingOlder) return;
     if (!_initialScrollApplied && widget.messages.isNotEmpty) {
-      unawaited(_restoreInitialPosition(conversationId));
+      if (!_restoreInFlight) {
+        unawaited(_restoreInitialPosition(conversationId, _restoreGeneration));
+      }
       return;
     }
 
@@ -133,18 +131,21 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
         .toList(growable: false);
     if (added.isEmpty) return;
 
-    if (added.any((message) => message.outgoing) || _nearBottom) {
-      _scheduleAnimatedBottomScroll();
-    } else {
+    // The repository provides the complete active-conversation projection.
+    // Never keep a window size derived from the number of rows that happened
+    // to exist when the chat was first opened: that made a chat opened with
+    // one message display only the newest row forever.
+    if (mounted) {
+      final followLatest =
+          added.any((message) => message.outgoing) || _nearBottom;
       setState(() {
-        final minimum = widget.messages.length < _messagePageSize
-            ? widget.messages.length
-            : _messagePageSize;
-        _visibleMessageLimit = (_visibleMessageLimit + added.length)
-            .clamp(minimum, widget.messages.length)
-            .toInt();
-        _unseenMessageCount += added.length;
+        if (followLatest) {
+          _unseenMessageCount = 0;
+        } else {
+          _unseenMessageCount += added.length;
+        }
       });
+      if (followLatest) _scheduleAnimatedBottomScroll();
     }
   }
 
@@ -182,10 +183,7 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
           })
           .toList(growable: false);
     }
-    if (widget.messages.length <= _visibleMessageLimit) return widget.messages;
-    return widget.messages.sublist(
-      widget.messages.length - _visibleMessageLimit,
-    );
+    return widget.messages;
   }
 
   void _composerChanged() {
@@ -196,12 +194,6 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
     if (!_scroll.hasClients) return;
     _scheduleScrollPersist();
     if (!_initialScrollApplied) return;
-    if (!_searching &&
-        !_loadingOlder &&
-        _scroll.offset <= _loadOlderThreshold &&
-        (_visibleMessageLimit < widget.messages.length || _hasMoreMessages)) {
-      unawaited(_loadOlderMessages());
-    }
 
     final remaining = _scroll.position.maxScrollExtent - _scroll.offset;
     final nextNearBottom = remaining <= _nearBottomThreshold;
@@ -215,111 +207,53 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
     });
   }
 
-  Future<void> _loadOlderMessages() async {
-    if (_loadingOlder || !_scroll.hasClients) return;
-    final conversationId = _activeConversationId;
-    if (conversationId == null || conversationId.isEmpty) return;
-
-    _loadingOlder = true;
-    final oldOffset = _scroll.offset;
-    final oldExtent = _scroll.position.maxScrollExtent;
-    var added = 0;
-
-    final localRemaining = widget.messages.length - _visibleMessageLimit;
-    if (localRemaining > 0) {
-      added = localRemaining < _messagePageSize
-          ? localRemaining
-          : _messagePageSize;
-    } else if (_hasMoreMessages) {
-      try {
-        added = await ref
-            .read(appControllerProvider.notifier)
-            .loadOlderMessages(conversationId);
-      } catch (_) {
-        added = 0;
-      }
-      if (added < _messagePageSize) _hasMoreMessages = false;
-    }
-
-    if (!mounted) return;
-    if (added <= 0) {
-      _loadingOlder = false;
+  Future<void> _restoreInitialPosition(
+    String conversationId,
+    int generation,
+  ) async {
+    if (_restoreInFlight ||
+        conversationId.isEmpty ||
+        widget.messages.isEmpty ||
+        generation != _restoreGeneration) {
       return;
     }
-    setState(() => _visibleMessageLimit += added);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_scroll.hasClients) {
-        _loadingOlder = false;
-        return;
-      }
-      final newExtent = _scroll.position.maxScrollExtent;
-      final target = (oldOffset + newExtent - oldExtent)
-          .clamp(0.0, newExtent)
-          .toDouble();
-      _scroll.jumpTo(target);
-      _loadingOlder = false;
-      _scheduleScrollPersist();
-    });
-  }
-
-  Future<void> _restoreInitialPosition(String conversationId) async {
-    if (conversationId.isEmpty || widget.messages.isEmpty || _loadingOlder) {
-      return;
-    }
-    final preferences = await SharedPreferences.getInstance();
-    final savedOffset = preferences.getDouble(
-      '$_scrollPositionPrefix$conversationId',
-    );
-    final savedLimit = preferences.getInt('$_scrollLimitPrefix$conversationId');
-    if (!mounted || _activeConversationId != conversationId) return;
-
-    final total = widget.messages.length;
-    final minimum = total < _messagePageSize ? total : _messagePageSize;
-    final requested = savedLimit ?? minimum;
-    setState(() {
-      _visibleMessageLimit = requested.clamp(minimum, total).toInt();
-    });
-
-    if (savedLimit != null && savedLimit > total) {
-      _loadingOlder = true;
-      while (mounted &&
-          _activeConversationId == conversationId &&
-          _visibleMessageLimit < savedLimit &&
-          _hasMoreMessages) {
-        final added = await ref
-            .read(appControllerProvider.notifier)
-            .loadOlderMessages(conversationId);
-        if (added <= 0) {
-          _hasMoreMessages = false;
-          break;
-        }
-        if (added < _messagePageSize) _hasMoreMessages = false;
-        if (mounted) {
-          setState(() => _visibleMessageLimit += added);
-        }
-        await WidgetsBinding.instance.endOfFrame;
-      }
-      _loadingOlder = false;
-    }
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    _restoreInFlight = true;
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      final savedOffset = preferences.getDouble(
+        '$_scrollPositionPrefix$conversationId',
+      );
       if (!mounted ||
           _activeConversationId != conversationId ||
-          !_scroll.hasClients) {
+          generation != _restoreGeneration) {
+        if (generation == _restoreGeneration) _restoreInFlight = false;
         return;
       }
-      final maxExtent = _scroll.position.maxScrollExtent;
-      final target = savedOffset == null
-          ? maxExtent
-          : savedOffset.clamp(0.0, maxExtent).toDouble();
-      _scroll.jumpTo(target);
-      final remaining = maxExtent - target;
-      setState(() {
-        _initialScrollApplied = true;
-        _nearBottom = remaining <= _nearBottomThreshold;
-        if (_nearBottom) _unseenMessageCount = 0;
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted ||
+            _activeConversationId != conversationId ||
+            generation != _restoreGeneration ||
+            !_scroll.hasClients) {
+          if (generation == _restoreGeneration) _restoreInFlight = false;
+          return;
+        }
+        final maxExtent = _scroll.position.maxScrollExtent;
+        final target = savedOffset == null
+            ? maxExtent
+            : savedOffset.clamp(0.0, maxExtent).toDouble();
+        _scroll.jumpTo(target);
+        final remaining = maxExtent - target;
+        setState(() {
+          _initialScrollApplied = true;
+          _nearBottom = remaining <= _nearBottomThreshold;
+          if (_nearBottom) _unseenMessageCount = 0;
+        });
+        if (generation == _restoreGeneration) _restoreInFlight = false;
       });
-    });
+    } catch (_) {
+      if (generation == _restoreGeneration) _restoreInFlight = false;
+    }
   }
 
   void _scheduleScrollPersist() {
@@ -335,12 +269,11 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
   Future<void> _persistScrollPosition(String conversationId) async {
     if (conversationId.isEmpty || !_scroll.hasClients) return;
     final offset = _scroll.offset;
-    final limit = _visibleMessageLimit;
     final preferences = await SharedPreferences.getInstance();
-    await Future.wait([
-      preferences.setDouble('$_scrollPositionPrefix$conversationId', offset),
-      preferences.setInt('$_scrollLimitPrefix$conversationId', limit),
-    ]);
+    await preferences.setDouble(
+      '$_scrollPositionPrefix$conversationId',
+      offset,
+    );
   }
 
   void _scheduleAnimatedBottomScroll() {
@@ -691,6 +624,7 @@ class _MessageTimeline extends StatelessWidget {
                 !isSameMessageDay(message.createdAt, next.createdAt);
 
             return Column(
+              key: ValueKey(message.id),
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 if (showDay) _DayDivider(date: message.createdAt),

@@ -89,11 +89,13 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
   bool _onboardingUnlocked = false;
   bool _runningUnlocked = false;
   bool _incomingPairingDialogOpen = false;
+  bool _pairingCodeDialogOpen = false;
   // A prompt can be requested while the page is changing route (notably just
   // after a pairing code was submitted).  Keep only a *scheduled* marker;
   // marking it permanently as presented before showDialog has mounted loses
   // the only accept/reject affordance when that frame cannot present a route.
   final Set<String> _scheduledIncomingPairingIds = <String>{};
+  final Set<String> _resolvedIncomingPairingIds = <String>{};
   String _reattachedNickname = '';
   Timer? _backgroundDebounce;
   StreamSubscription<DesktopNavigationIntent>? _desktopNavigationSubscription;
@@ -166,18 +168,24 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
   }
 
   void _queueIncomingPairingPrompt(List<PairingItem> inbox) {
-    if (!mounted || !_runningUnlocked || _incomingPairingDialogOpen) return;
+    if (!mounted ||
+        !_runningUnlocked ||
+        _pairingCodeDialogOpen ||
+        _incomingPairingDialogOpen) {
+      return;
+    }
     final request = inbox.firstOrNullWhere(
       (item) =>
           item.received &&
           item.can(PairingAvailableAction.accept) &&
+          !_resolvedIncomingPairingIds.contains(item.id) &&
           !_scheduledIncomingPairingIds.contains(item.id),
     );
     if (request == null) return;
 
     _scheduledIncomingPairingIds.add(request.id);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || _incomingPairingDialogOpen) {
+      if (!mounted || _pairingCodeDialogOpen || _incomingPairingDialogOpen) {
         _scheduledIncomingPairingIds.remove(request.id);
         return;
       }
@@ -186,7 +194,7 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
   }
 
   Future<void> _showIncomingPairingPrompt(PairingItem request) async {
-    if (!mounted || _incomingPairingDialogOpen) {
+    if (!mounted || _pairingCodeDialogOpen || _incomingPairingDialogOpen) {
       _scheduledIncomingPairingIds.remove(request.id);
       return;
     }
@@ -200,6 +208,7 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
           request: request,
           onAccept: () async {
             await controller.acceptPairing(request.id);
+            _resolvedIncomingPairingIds.add(request.id);
             await controller.refreshData(
               forcePairing: true,
               allowAutoTorka: false,
@@ -207,6 +216,7 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
           },
           onReject: () async {
             await controller.rejectPairing(request.id);
+            _resolvedIncomingPairingIds.add(request.id);
             await controller.refreshData(
               forcePairing: true,
               allowAutoTorka: false,
@@ -223,6 +233,37 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
       if (mounted) {
         _queueIncomingPairingPrompt(ref.read(appControllerProvider).inbox);
       }
+    }
+  }
+
+  void _showPairingOutcomeToast(
+    List<PairingItem>? previous,
+    List<PairingItem> current,
+  ) {
+    if (!mounted || previous == null) return;
+    final previousById = {for (final item in previous) item.id: item};
+    for (final item in current) {
+      if (item.received) continue;
+      final old = previousById[item.id];
+      if (old == null || old.status != InviteState.pending) continue;
+
+      final message = switch (item.status) {
+        InviteState.accepted || InviteState.completed =>
+          '${item.peer?.displayName ?? 'Użytkownik'} przyjął Twoje zaproszenie.',
+        InviteState.rejected =>
+          '${item.peer?.displayName ?? 'Użytkownik'} odrzucił Twoje zaproszenie.',
+        InviteState.expired => 'Zaproszenie wygasło bez odpowiedzi.',
+        InviteState.cancelled => 'Zaproszenie zostało anulowane.',
+        _ => null,
+      };
+      if (message == null) continue;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final messenger = ScaffoldMessenger.maybeOf(context);
+        messenger
+          ?..hideCurrentSnackBar()
+          ..showSnackBar(SnackBar(content: Text(message)));
+      });
     }
   }
 
@@ -263,26 +304,38 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
   }
 
   Future<void> _showInvite() async {
+    if (_pairingCodeDialogOpen || _incomingPairingDialogOpen) return;
+    _pairingCodeDialogOpen = true;
     final controller = ref.read(appControllerProvider.notifier);
     final code = await controller.refreshInviteCode();
-    if (!mounted) return;
+    if (!mounted) {
+      _pairingCodeDialogOpen = false;
+      return;
+    }
     if (code == null) {
       final error = ref.read(appControllerProvider).error;
-      await showDialog<void>(
-        context: context,
-        builder: (_) => AlertDialog(
-          title: const Text('Nie można wygenerować kodu'),
-          content: Text(
-            error.isEmpty ? 'Połączenie z relayem nie jest gotowe.' : error,
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Zamknij'),
+      try {
+        await showDialog<void>(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('Nie można wygenerować kodu'),
+            content: Text(
+              error.isEmpty ? 'Połączenie z relayem nie jest gotowe.' : error,
             ),
-          ],
-        ),
-      );
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Zamknij'),
+              ),
+            ],
+          ),
+        );
+      } finally {
+        _pairingCodeDialogOpen = false;
+        if (mounted) {
+          _queueIncomingPairingPrompt(ref.read(appControllerProvider).inbox);
+        }
+      }
       return;
     }
     final knownInboxIds = ref
@@ -290,39 +343,51 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
         .inbox
         .map((item) => item.id)
         .toSet();
-    await showDialog<bool>(
-      context: context,
-      builder: (_) => PairingCodeDialog(
-        initialCode: code.code,
-        initialExpiresAt: code.expiresAt,
-        refresh: controller.refreshInviteCode,
-        onChanged: (_) {},
-        checkRequest: () async {
-          await controller.refreshData();
-          final inbox = ref.read(appControllerProvider).inbox;
-          return inbox.firstOrNullWhere(
-            (item) =>
-                !knownInboxIds.contains(item.id) &&
-                item.can(PairingAvailableAction.accept),
-          );
-        },
-        onAccept: (request) async {
-          await controller.acceptPairing(request.id);
-          final peerId = request.peer?.id;
-          if (peerId == null || peerId.isEmpty) return false;
-          for (var attempt = 0; attempt < 15; attempt += 1) {
-            await controller.refreshData();
-            final contacts =
-                ref.read(applicationSnapshotProvider).valueOrNull?.contacts ??
-                ref.read(appControllerProvider).contacts;
-            if (contacts.any((contact) => contact.id == peerId)) return true;
-            await Future<void>.delayed(const Duration(seconds: 1));
-          }
-          return false;
-        },
-        onReject: (request) => controller.rejectPairing(request.id),
-      ),
-    );
+    try {
+      await showDialog<bool>(
+        context: context,
+        builder: (_) => PairingCodeDialog(
+          initialCode: code.code,
+          initialExpiresAt: code.expiresAt,
+          refresh: controller.refreshInviteCode,
+          onChanged: (_) {},
+          checkRequest: () async {
+            await controller.refreshData(forcePairing: true);
+            final inbox = ref.read(appControllerProvider).inbox;
+            return inbox.firstOrNullWhere(
+              (item) =>
+                  !knownInboxIds.contains(item.id) &&
+                  !_resolvedIncomingPairingIds.contains(item.id) &&
+                  item.can(PairingAvailableAction.accept),
+            );
+          },
+          onAccept: (request) async {
+            await controller.acceptPairing(request.id);
+            _resolvedIncomingPairingIds.add(request.id);
+            final peerId = request.peer?.id;
+            if (peerId == null || peerId.isEmpty) return false;
+            for (var attempt = 0; attempt < 15; attempt += 1) {
+              await controller.refreshData(forcePairing: true);
+              final contacts =
+                  ref.read(applicationSnapshotProvider).valueOrNull?.contacts ??
+                  ref.read(appControllerProvider).contacts;
+              if (contacts.any((contact) => contact.id == peerId)) return true;
+              await Future<void>.delayed(const Duration(seconds: 1));
+            }
+            return false;
+          },
+          onReject: (request) async {
+            await controller.rejectPairing(request.id);
+            _resolvedIncomingPairingIds.add(request.id);
+          },
+        ),
+      );
+    } finally {
+      _pairingCodeDialogOpen = false;
+      if (mounted) {
+        _queueIncomingPairingPrompt(ref.read(appControllerProvider).inbox);
+      }
+    }
   }
 
   Future<void> _showTransportStatus() => showModalBottomSheet<void>(
@@ -476,6 +541,10 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
     ref.listen<List<PairingItem>>(
       appControllerProvider.select((value) => value.inbox),
       (_, inbox) => _queueIncomingPairingPrompt(inbox),
+    );
+    ref.listen<List<PairingItem>>(
+      appControllerProvider.select((value) => value.outbox),
+      _showPairingOutcomeToast,
     );
     final snapshot = ref.watch(applicationSnapshotProvider).valueOrNull;
     final messageSnapshot = ref
