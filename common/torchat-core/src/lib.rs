@@ -56,6 +56,19 @@ pub struct ContactInvite {
     pub signature: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct InviteValidationPolicy {
+    pub max_future_lifetime_secs: u64,
+}
+
+impl Default for InviteValidationPolicy {
+    fn default() -> Self {
+        Self {
+            max_future_lifetime_secs: 15 * 60 + 120,
+        }
+    }
+}
+
 impl ContactInvite {
     pub fn from_identity(
         identity: &Identity,
@@ -98,6 +111,14 @@ impl ContactInvite {
     /// Production callers use `parse`; deterministic runtimes and skew tests
     /// use this boundary instead of reading the process clock internally.
     pub fn parse_at(value: &str, now: u64) -> Result<Self, String> {
+        Self::parse_at_with_policy(value, now, InviteValidationPolicy::default())
+    }
+
+    pub fn parse_at_with_policy(
+        value: &str,
+        now: u64,
+        policy: InviteValidationPolicy,
+    ) -> Result<Self, String> {
         let invite: Self =
             serde_json::from_str(value).map_err(|e| format!("invalid invite JSON: {e}"))?;
         if invite.version != PROTOCOL_VERSION {
@@ -133,6 +154,9 @@ impl ContactInvite {
         }
         if invite.expires_at < now {
             return Err("invite has expired".into());
+        }
+        if invite.expires_at.saturating_sub(now) > policy.max_future_lifetime_secs {
+            return Err("invite lifetime exceeds clock-skew policy".into());
         }
         let signature = invite
             .signature

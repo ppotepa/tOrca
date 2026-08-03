@@ -24,6 +24,13 @@ $badPatterns = @(
     '(?m)tracing::(?:trace|debug|info|warn|error)!\([^\r\n]*\bmessage_id\s*=',
     '(?m)tracing::(?:trace|debug|info|warn|error)!\([^\r\n]*\bpairing_id\s*='
 )
+$badPatterns += @(
+    '(?m)tracing::(?:trace|debug|info|warn|error)!\([^\r\n]*\bmessage_id_hash\s*=',
+    '(?m)tracing::(?:trace|debug|info|warn|error)!\([^\r\n]*(?:sender_hash|sender_alias)[^\r\n]*(?:recipient_hash|recipient_alias)',
+    '(?m)tracing::(?:trace|debug|info|warn|error)!\([^\r\n]*(?:recipient_hash|recipient_alias)[^\r\n]*(?:sender_hash|sender_alias)',
+    '(?m)\bpseudonymous_id_with_secret\s*\([^\r\n]*pairing',
+    '(?m)\blog_secret\s*=\s*.*pairing_secret'
+)
 foreach ($pattern in $badPatterns) {
     $match = $text | Select-String -Pattern $pattern
     if ($match) {

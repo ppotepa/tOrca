@@ -1,23 +1,27 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'client_runtime.dart';
 import 'core/runtime/runtime_arguments.dart';
 import 'core/runtime/runtime_bridge_base.dart';
 import 'core/runtime/runtime_contract.dart';
 import 'core/runtime/runtime_payload.dart';
+import 'core/runtime/operation_journal.dart';
 
 /// Flutter boundary for the Android Tor/MLS runtime.
 /// The platform side owns the Tor process, identity and encrypted state.
 class MobileBridge extends Object
     with RuntimeBridgeMethods
     implements RuntimeCallBridge, RuntimeAttachmentProvider {
-  const MobileBridge();
+  MobileBridge();
 
   static const _channel = MethodChannel('org.torchat/mobile');
   static const _eventsChannel = EventChannel('org.torchat/mobile/events');
   static const _reattachBudget = Duration(milliseconds: 750);
+  Future<OperationJournal>? _operationJournal;
 
   @override
   Stream<RuntimeEvent> get events => _eventsChannel
@@ -64,5 +68,40 @@ class MobileBridge extends Object
   Future<Object?> callRuntime(
     String method, [
     RuntimeArguments params = RuntimeArguments.empty,
-  ]) => _channel.invokeMethod(method, params.toMap());
+  ]) async {
+    final arguments = params.toMap();
+    final journal = _operationJournal ??= SharedPreferences.getInstance().then(
+      OperationJournal.new,
+    );
+    final payloadHash = jsonEncode(_canonicalize(arguments));
+    final journalValue = await journal;
+    final commandId = await journalValue.commandId(
+      operation: method,
+      stableId: payloadHash,
+      payloadHash: payloadHash,
+    );
+    arguments['commandId'] = commandId;
+    final operationKey = '$method:$payloadHash';
+    await journalValue.markSubmitted(operationKey);
+    try {
+      final response = await _channel.invokeMethod(method, arguments);
+      await journalValue.markCompleted(operationKey);
+      return response;
+    } catch (_) {
+      rethrow;
+    }
+  }
+
+  dynamic _canonicalize(dynamic value) {
+    if (value is Map) {
+      final entries = value.entries.toList()
+        ..sort((a, b) => a.key.toString().compareTo(b.key.toString()));
+      return <String, dynamic>{
+        for (final entry in entries)
+          entry.key.toString(): _canonicalize(entry.value),
+      };
+    }
+    if (value is List) return value.map(_canonicalize).toList(growable: false);
+    return value;
+  }
 }

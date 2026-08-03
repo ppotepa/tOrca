@@ -32,6 +32,9 @@ impl ClientEngineActor {
             RetryKind::ReadReceipt => self
                 .flush_pending_read_receipts()
                 .map(|_| "read receipt flush"),
+            RetryKind::RelationshipRemoval | RetryKind::RelationshipRemovalAck => self
+                .flush_pending_send_effects()
+                .map(|_| "relationship removal flush"),
         };
         if let Err(error) = result {
             let _ = events
@@ -84,12 +87,15 @@ impl ClientEngineActor {
     }
 
     fn retry_is_runnable(&self, kind: RetryKind) -> bool {
+        let _policy = super::RetryPolicy::for_kind(kind);
         let control_plane_required = matches!(
             kind,
             RetryKind::PairingResponse
                 | RetryKind::PendingWelcome
                 | RetryKind::PeerEndpointBootstrap
                 | RetryKind::ContactConfirmation
+                | RetryKind::RelationshipRemoval
+                | RetryKind::RelationshipRemovalAck
         );
         if control_plane_required {
             return self.network_online
@@ -100,7 +106,10 @@ impl ClientEngineActor {
     }
 
     fn retry_expired_ack_deadlines(&mut self) -> EngineResult<()> {
-        for message_id in self.database.expired_ack_deadline_message_ids(unix_ms())? {
+        for message_id in self
+            .database
+            .expired_ack_deadline_message_ids(self.clock.now_ms())?
+        {
             let _ = self.apply_message_transport_outcome(
                 &message_id,
                 MessageTransportOutcome::RetryableFailure,

@@ -571,13 +571,21 @@ class WindowsRuntime extends Object
     final completer = Completer<Object?>();
     _pending[id] = completer;
     final command = _engineCommand(method, params);
-    final stableArgumentId = params.toMap()[EngineContract.argId]?.toString();
+    // The complete canonical command payload is part of the journal key.
+    // Target-only keys incorrectly reused a completed command for a later
+    // mutation against the same conversation/contact.
+    final stablePayloadKey = jsonEncode(_canonicalizeCommand(params.toMap()));
     final journal = _operationJournal ??= SharedPreferences.getInstance().then(
       OperationJournal.new,
     );
-    final commandId = await journal.then(
-      (value) => value.commandId(operation: method, stableId: stableArgumentId),
+    final journalValue = await journal;
+    final commandId = await journalValue.commandId(
+      operation: method,
+      stableId: stablePayloadKey,
+      payloadHash: stablePayloadKey,
     );
+    final operationKey = '$method:$stablePayloadKey';
+    await journalValue.markSubmitted(operationKey);
     final request = {
       EngineContract.requestId: id,
       EngineContract.commandId: commandId,
@@ -598,13 +606,33 @@ class WindowsRuntime extends Object
       _pending.remove(id);
       completer.completeError(error, stackTrace);
     }
-    return completer.future.timeout(
-      const Duration(seconds: 45),
-      onTimeout: () {
-        _pending.remove(id);
-        throw TimeoutException('Client engine command timed out: $method');
-      },
-    );
+    return completer.future
+        .timeout(
+          const Duration(seconds: 45),
+          onTimeout: () {
+            _pending.remove(id);
+            throw TimeoutException('Client engine command timed out: $method');
+          },
+        )
+        .then((value) async {
+          await journalValue.markCompleted(operationKey);
+          return value;
+        });
+  }
+
+  dynamic _canonicalizeCommand(dynamic value) {
+    if (value is Map) {
+      final entries = value.entries.toList()
+        ..sort((a, b) => a.key.toString().compareTo(b.key.toString()));
+      return <String, dynamic>{
+        for (final entry in entries)
+          entry.key.toString(): _canonicalizeCommand(entry.value),
+      };
+    }
+    if (value is List) {
+      return value.map(_canonicalizeCommand).toList(growable: false);
+    }
+    return value;
   }
 
   Future<Object?> _call(
@@ -635,4 +663,4 @@ class WindowsRuntime extends Object
 ClientRuntime createPlatformRuntime() =>
     Platform.isWindows || Platform.isLinux || Platform.isMacOS
     ? WindowsRuntime()
-    : const MobileBridge();
+    : MobileBridge();

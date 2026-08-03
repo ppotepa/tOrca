@@ -7,7 +7,7 @@ impl ClientEngineActor {
     ) -> EngineResult<Option<(String, String)>> {
         let Some(stored) = self
             .database
-            .pairing_response_retry_record(&effect.pairing_id, unix_secs())?
+            .pairing_response_retry_record(&effect.pairing_id, self.clock.now_ms() / 1_000)?
         else {
             return Ok(None);
         };
@@ -69,7 +69,7 @@ impl ClientEngineActor {
         let profile = self.runtime_profile()?;
         let nickname = protocol_nickname(&self.identity.installation_id(), &profile.nickname);
         let invite_id = uuid::Uuid::new_v4().to_string();
-        let expires_at = unix_secs() + 15 * 60;
+        let expires_at = self.clock.now_ms() / 1_000 + 15 * 60;
         let member = self.fresh_mls_member()?;
         let key_package = member
             .key_package()
@@ -98,7 +98,7 @@ impl ClientEngineActor {
             .map_err(|error| EngineError::Serialization(error.to_string()))?;
         let encoded = serde_json::to_string(&invite).map_err(EngineError::from)?;
         self.database
-            .delete_expired_pending_local_invite_mls(unix_secs())?;
+            .delete_expired_pending_local_invite_mls(self.clock.now_ms() / 1_000)?;
         self.database
             .put_pending_local_invite_mls(&PendingLocalInviteMlsRecord {
                 invite_id,
@@ -110,8 +110,8 @@ impl ClientEngineActor {
     }
 
     pub(super) fn retry_pending_welcomes(&mut self) -> EngineResult<()> {
-        let now_ms = unix_ms();
-        let now_secs = unix_secs();
+        let now_ms = self.clock.now_ms();
+        let now_secs = now_ms / 1_000;
         self.database.delete_expired_pending_welcomes(now_secs)?;
         self.pending_welcomes
             .retain(|_, pending| pending.expires_at >= now_secs);
@@ -160,7 +160,10 @@ impl ClientEngineActor {
         if self.connection_state != ConnectionState::Connected {
             return Ok(());
         }
-        for record in self.database.due_pending_contact_confirmations(unix_ms())? {
+        for record in self
+            .database
+            .due_pending_contact_confirmations(self.clock.now_ms())?
+        {
             let next_attempt_at = self.clock.now_ms() + retry_backoff_ms(record.attempt_count);
             if !self.database.claim_pending_contact_confirmation_attempt(
                 &record.pairing_id,
@@ -197,7 +200,7 @@ impl ClientEngineActor {
         }
         for (pairing_id, attempt_count) in self
             .database
-            .due_pending_pairing_acknowledgements(unix_ms())?
+            .due_pending_pairing_acknowledgements(self.clock.now_ms())?
         {
             let next_attempt_at = self.clock.now_ms() + retry_backoff_ms(attempt_count);
             if !self
@@ -383,6 +386,7 @@ impl ClientEngineActor {
         let conversation_snapshot = conversation
             .snapshot()
             .map_err(|error| EngineError::Storage(error.to_string()))?;
+        let boundary_at = self.clock.now_ms();
         let (result, mut runtime_events): (WelcomeAcceptedResult, _) =
             self.with_runtime(|runtime| {
                 if let Some(invite_id) = consume_invite_id
@@ -400,7 +404,7 @@ impl ClientEngineActor {
                 runtime.storage_mut().apply_relationship_transition(
                     crate::storage::runtime_storage::RelationshipTransition::BeginVerified {
                         installation_id: card.installation_id.clone(),
-                        boundary_at: unix_ms(),
+                        boundary_at,
                     },
                 )?;
                 runtime.storage_mut().put_conversation_mls_snapshot(

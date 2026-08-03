@@ -196,7 +196,11 @@ impl SharedRelayActor {
                         .join("/v1/bootstrap/challenge")
                         .map_err(http_error)?,
                 )
-                .json(&serde_json::json!({}))
+                .json(&serde_json::json!({
+                    "public_key": public_key,
+                    "client_nonce": uuid::Uuid::new_v4().to_string(),
+                    "protocol_version": torchat_core::PROTOCOL_VERSION,
+                }))
                 .send()
                 .map_err(http_error)?
                 .relay_status()?

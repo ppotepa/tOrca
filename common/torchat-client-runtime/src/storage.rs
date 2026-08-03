@@ -16,6 +16,12 @@ pub enum RelationshipTransition {
         removal_id: String,
         relationship_epoch: i64,
     },
+    ApplyRemoteRemoval {
+        installation_id: String,
+        remote_removed_at: i64,
+        removal_id: String,
+        relationship_epoch: i64,
+    },
 }
 
 pub trait RuntimeStorage {
@@ -61,6 +67,17 @@ pub trait RuntimeStorage {
                 &removal_id,
                 relationship_epoch,
             ),
+            RelationshipTransition::ApplyRemoteRemoval {
+                installation_id,
+                remote_removed_at,
+                removal_id,
+                relationship_epoch,
+            } => self.apply_remote_relationship_removal(
+                &installation_id,
+                remote_removed_at,
+                &removal_id,
+                relationship_epoch,
+            ),
         }
     }
 
@@ -102,6 +119,29 @@ pub trait RuntimeStorage {
     ) -> RuntimeResult<()> {
         let _ = (removal_id, relationship_epoch);
         self.remove_relationship(installation_id, removed_at, preserve_history)
+    }
+    fn apply_remote_relationship_removal(
+        &mut self,
+        installation_id: &str,
+        _remote_removed_at: i64,
+        _removal_id: &str,
+        _relationship_epoch: i64,
+    ) -> RuntimeResult<()> {
+        let _ = installation_id;
+        Err(crate::RuntimeError::Unavailable(
+            "remote relationship removal is not supported by this storage".to_owned(),
+        ))
+    }
+    fn put_relationship_removal_ack(
+        &mut self,
+        _removal_id: &str,
+        _contact_installation_id: &str,
+        _relationship_epoch: i64,
+        _payload: &[u8],
+    ) -> RuntimeResult<()> {
+        Err(crate::RuntimeError::Unavailable(
+            "relationship removal ACK outbox is not supported by this storage".to_owned(),
+        ))
     }
     fn pending_messages(&self) -> RuntimeResult<Vec<ChatMessage>>;
     fn pending_receipts(&self) -> RuntimeResult<Vec<ReceiptSendEffect>> {

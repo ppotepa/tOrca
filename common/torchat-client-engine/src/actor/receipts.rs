@@ -17,14 +17,14 @@ impl ClientEngineActor {
             conversation_id,
             conversation_id,
             &message_ids_json,
-            unix_ms(),
-            unix_ms(),
+            self.clock.now_ms(),
+            self.clock.now_ms(),
         )?;
         self.flush_pending_read_receipts()
     }
 
     pub(super) fn flush_pending_read_receipts(&mut self) -> EngineResult<()> {
-        for record in self.database.due_read_receipts(unix_ms())? {
+        for record in self.database.due_read_receipts(self.clock.now_ms())? {
             let payload = if let Some(payload) = record.wire_ciphertext.clone() {
                 payload
             } else {
@@ -207,7 +207,7 @@ impl ClientEngineActor {
             .unwrap_or(0);
         let age_exhausted = receipt.as_ref().is_some_and(|record| {
             super::RetryPolicy::DELIVERY
-                .age_exhausted(record.created_at.saturating_mul(1_000), unix_ms())
+                .age_exhausted(record.created_at.saturating_mul(1_000), self.clock.now_ms())
         });
         let exhausted = super::RetryPolicy::DELIVERY.exhausted(attempt) || age_exhausted;
         let retry_at = if exhausted {
@@ -267,7 +267,7 @@ impl ClientEngineActor {
             .database
             .delivery_receipt(&effect.message_id)?
             .ok_or_else(|| EngineError::Storage("delivery receipt is missing".to_owned()))?;
-        let in_flight_until = unix_ms() + 60_000;
+        let in_flight_until = self.clock.now_ms() + 60_000;
         if let Some(existing) = stored.relay_payload {
             if !self
                 .database

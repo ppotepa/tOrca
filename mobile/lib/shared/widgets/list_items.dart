@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../app/app_theme.dart';
+import '../../core/models/domain.dart';
 import '../formatters/message_timestamps.dart';
 import 'counter_badge.dart';
 import 'identity_avatar.dart';

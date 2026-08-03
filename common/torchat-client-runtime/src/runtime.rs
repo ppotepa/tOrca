@@ -610,6 +610,30 @@ where
         Ok(())
     }
 
+    pub fn apply_remote_relationship_removal(
+        &mut self,
+        installation_id: &str,
+        remote_removed_at: i64,
+        removal_id: &str,
+        relationship_epoch: i64,
+    ) -> RuntimeResult<()> {
+        relationship_process::validate_removal_identifiers(installation_id, Some(removal_id))?;
+        self.storage
+            .apply_relationship_transition(RelationshipTransition::ApplyRemoteRemoval {
+                installation_id: installation_id.to_owned(),
+                remote_removed_at,
+                removal_id: removal_id.to_owned(),
+                relationship_epoch,
+            })?;
+        self.session.push_event(RuntimeEvent::Changed {
+            kind: Some("contacts".to_owned()),
+        });
+        self.session.push_event(RuntimeEvent::Changed {
+            kind: Some("conversations".to_owned()),
+        });
+        Ok(())
+    }
+
     pub fn contact_accepts_messages(&self, installation_id: &str) -> RuntimeResult<bool> {
         Ok(!self
             .storage

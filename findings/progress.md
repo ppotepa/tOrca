@@ -702,7 +702,132 @@ Poniższe punkty są celowo zapisane osobno od statusu implementacji, żeby nie 
 | 2026-08-03 | TC-002.2/.4 | IN PROGRESS | — | Implementacja bez uruchamiania testów na życzenie użytkownika | Dodano `InboundApplyResult` dla ścieżki peer (`committed`, `receipt_due`, `runtime_events`); ACK `Delivered` jest emitowany dopiero dla jawnie zatwierdzonego inboundu, a receipt pozostaje osobnym durable efektem. |
 | 2026-08-03 | TC-001.3 / CONTRACT | IN PROGRESS | — | Implementacja bez uruchamiania testów na życzenie użytkownika | Checker runtime contract został przepięty z usuniętego `remove_relationship` na jedyną aktualną komendę `request_relationship_removal`; nie pozostawiono fałszywego wymagania kompatybilnościowego. |
 | 2026-08-03 | IMPLEMENTATION AUDIT | IN PROGRESS | — | Bez uruchamiania testów/buildów na życzenie użytkownika | Wszystkie punkty oznaczone jako implementacyjne zostały porównane z aktualnym checkoutem i uzupełnione tam, gdzie kod już istnieje. Pozostałe checkboxy są wyłącznie testami, smoke/CodeGraph audit albo funkcją multi-instance niewymaganą przez deployment `replicas=1`; nie oznaczono ich jako DONE bez dowodu. |
+| 2026-08-03 | TC-003 / TORKA IMAGE | IN PROGRESS | — | Naprawa po realnym deployu | Produkcyjny desktop nadal używa feature `os-vault`; developmentowy obraz Torka kompiluje jawny `torka-file-secrets`, przechowujący klucz SQLCipher i monotoniczne kotwice MLS jako pliki `0600` w prywatnym trwałym volume. Usunięto zależność obrazu od DBus/Secret Service i poprawiono utworzenie anchoru przed przeniesieniem `database_path` do configu. |
+| 2026-08-03 | SERVER MIGRATIONS | IN PROGRESS | — | Naprawa po realnym deployu | Checksum migracji serwera jest liczony z kanonicznych końców LF, więc checkout Windows CRLF i Docker Linux nie powodują fałszywego `database migration checksum changed`; zawartość SQL nadal jest chroniona checksumem. |
+| 2026-08-03 | WINDOWS FLUTTER BUILD | IN PROGRESS | — | Naprawa po realnym deployu | Przywrócono jawny import modelu `ContactRecord` w `list_items.dart`; usunięcie wskaźnika P2P nie może usuwać zależności wymaganej przez `ContactListTile`. |
 
 ## Następny krok
 
+| 2026-08-03 | FINISH01 TC-005 MOBILE COMMAND CONTEXT | IN PROGRESS | — | `dart format mobile/lib/mobile_bridge.dart` PASS | Mobile bridge now creates/stores command IDs through the shared Dart `OperationJournal` and sends them as channel metadata. Android `MainActivity` still needs to copy metadata into the engine envelope for complete end-to-end wiring. |
+
+| 2026-08-03 | FINISH01 TC-003 FAIL-CLOSED DB KEY | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-desktop` PASS | Production vault startup now refuses to generate a replacement DB key when legacy `.db.key` exists; this prevents opening an old database with a new key and routes the client to explicit rekey migration. |
+
+| 2026-08-03 | FINISH01 TC-003 EXPLICIT IDENTITY IMPORT | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-desktop` PASS | Added `--import-legacy-identity`: explicit vault import verifies read-back and removes the imported plaintext file; ordinary vault startup remains fail-closed. DB rekey/pending-key recovery remains. |
+
+| 2026-08-03 | FINISH01 TC-003 FAIL-CLOSED LEGACY IDENTITY | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-desktop` PASS | Vault startup now refuses a detected legacy plaintext identity instead of silently generating a new identity. Explicit import/rekey execution remains. |
+
+| 2026-08-03 | FINISH01 TC-003 MIGRATION JOURNAL | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-desktop` PASS | Added secret migration journal model with explicit restart states, no secret fields, path hashing and atomic temp/rename persistence. Wiring recovery/rekey execution remains. |
+
+| 2026-08-03 | FINISH01 TC-003 SECRET NAMESPACES | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-desktop` PASS | OS-vault account derivation now includes explicit secret kind, separating identity, active DB key, pending DB key and MLS checkpoint namespaces. Rekey journal/recovery remains. |
+
+| 2026-08-03 | FINISH01 TC-003 DESKTOP IDENTITY VAULT | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-desktop` PASS | Production `os-vault` identity creation/loading no longer writes `installation.key`; it performs vault read-back verification. File identity remains only in non-vault/Torka mode. Rekey migration journal remains. |
+
+| 2026-08-03 | FINISH01 TC-007 CHECKPOINT ANCHOR API | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-client-engine --tests` PASS | `MlsEpochAnchor` now exposes optional default checkpoint read/write methods and `validate_snapshot_checkpoint`; existing epoch-only platform implementations remain source-compatible. Native secure-store implementations still need full checkpoint bytes. |
+
+| 2026-08-03 | FINISH01 TC-007 CHECKPOINT ROLLBACK RULE | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-client-engine --tests` PASS | Added pure checkpoint validation: lower `state_version` or changed hash at the same version requires re-pair, including same MLS epoch. Platform anchor wiring remains. |
+
+| 2026-08-03 | FINISH01 TC-014 CHECKPOINT API | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-client-engine` PASS | Added `MlsCheckpointRecord` storage API exposing conversation ID, snapshot, monotonic state version and hash for secure-anchor integration. Existing epoch anchor remains compatible. |
+
+| 2026-08-03 | FINISH01 TC-014 MLS CHECKPOINT VERSION | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-client-engine` PASS | Added migration 031 with `conversation_mls.state_version` and `snapshot_hash`; all identified snapshot write paths now increment the monotonic version and persist SHA-256. Anchor integration and V2 provider boundary remain. |
+
+| 2026-08-03 | FINISH01 TC-009 RELATIONSHIP RETRY KINDS | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-client-engine` PASS | Added `RelationshipRemoval` and `RelationshipRemovalAck` to `RetryKind`, next-deadline aggregation and scheduler wakeups. Complete unified policy/dead-letter UI remains. |
+
+| 2026-08-03 | FINISH01 TC-017 INVITE SKEW | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-core --tests` PASS | Added `InviteValidationPolicy` and `parse_at_with_policy`; invites exceeding the bounded future lifetime are rejected while deterministic injected time remains the validation input. Full skew matrix remains. |
+
+| 2026-08-03 | FINISH01 TC-013 MAP BOUNDS | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-server` PASS | Challenge-budget and pairing-attempt maps now prune expired windows and reject new keys at 10,000 entries. Load tests and metrics assertions remain. |
+
+| 2026-08-03 | FINISH01 TC-013 IDENTITY-BOUND CHALLENGE | IN PROGRESS | — | `cargo fmt --all`; targeted `cargo check -p torchat-server -p torchat-client-engine` PASS | Bootstrap challenge now requires a bounded public-key field and keys its admission bucket to that public key; engine sends the key. Signature verification still occurs at registration. Load/regression tests remain. |
+
+| 2026-08-03 | FINISH01 TC-013 ANONYMOUS BUDGET | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-server` PASS | Anonymous bootstrap requests now share one bounded budget key instead of minting a new random token per request. Identity-bound public-key challenge and load tests remain. |
+
+| 2026-08-03 | FINISH01 TC-012 SINGLE INSTANCE | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-server` PASS | Server acquires a PostgreSQL session advisory lock before readiness and health exposes `single-instance-v0.1` / `held`. Negative two-process integration test remains. |
+
+| 2026-08-03 | FINISH01 TC-011 LOG KEY ROTATION | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-server` PASS | Server pseudonymization now uses a process-generated `log_secret`, separate from pairing secret and rotated on restart. Full tracing capture/retention test remains. |
+
+| 2026-08-03 | FINISH01 TC-011 ROUTE PRIVACY | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-server` PASS | Relay routing logs now use per-envelope random `route_trace_id` and payload size only; sender/recipient/message hashes are removed from forwarding outcomes. Full capture test and process-key redesign remain. |
+
+| 2026-08-03 | FINISH01 TC-005 ANDROID HOST | IN PROGRESS | — | Static source check: `stableCommandId` removed | Android host no longer derives command IDs from command type/target and no longer keeps a target-keyed journal. Each caller path now transports an explicit host envelope ID; shared Flutter operation context remains to be wired for process-death retries. |
+
+| 2026-08-03 | FINISH01 TC-005 HOST COMMAND KEY | IN PROGRESS | — | `dart format mobile/lib/windows_runtime.dart` PASS | Windows operation journal key now includes the complete canonicalized command parameters, preventing reuse of a completed command for a different mutation on the same target. Shared cross-host operation context and Android heuristic removal remain. |
+
+| 2026-08-03 | FINISH01 TC-001 SIGNED ACK TEST | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-core --tests` PASS | Dodano regresyjny test round-trip podpisanego `RelationshipRemovalApplied` z odrzuceniem błędnego recipienta. Engine-level crash/retry tests nadal pozostają do wykonania przez użytkownika/CI. |
+
+| 2026-08-03 | FINISH01 TC-001 BOUNDED RETRY | IN PROGRESS | — | `cargo fmt --all`; targeted `cargo check -p torchat-client-engine` PASS | Relationship removal and ACK delivery are bounded to 8 attempts, transition to `DEAD_LETTER`, and expose explicit manual retry APIs. Signed ACK integration tests and broader retry scheduler integration remain. |
+
+| 2026-08-03 | FINISH01 TC-001 RETRY | IN PROGRESS | — | `cargo fmt --all`; targeted `cargo check -p torchat-client-engine` PASS | Relationship removal retries records in `WAITING_FOR_ACK` after a lost application ACK; ACK delivery has its own retry/recovery state and completes only after relay acceptance. Max-attempt/dead-letter policy and regression tests remain. |
+
+| 2026-08-03 | FINISH01 TC-001 ACK | IN PROGRESS | — | `cargo fmt --all`; targeted `cargo check` PASS | Dodano `RelayPayloadV1::RelationshipRemovalApplied` z podpisem i weryfikacją, durable `relationship_removal_ack_outbox`, odbiór signed ACK oraz osobny dispatcher ACK. Pozostaje pełny retry/dead-letter lifecycle i testy regresyjne; nie uruchamiano smoke/deploy. |
+
+| 2026-08-03 | FINISH01 BATCH 00/01 | IN PROGRESS | — | Implementacja bez smoke/deploy | Dodano closure ledger, FaultPoint/FaultInjector/NoopFaultInjector, migrację ACK outbox oraz rozdzielono domenowe przejście lokalnego i zdalnego relationship removal. Zdalny removal ignoruje preserveHistory i nie tworzy lokalnego removal outbox; podpisany ACK i retry lifecycle pozostają kolejnym krokiem TC-001. |
+
 Implementacja zakresu bieżącego jest domknięta bez uruchamiania testów. Pozostaje lokalna weryfikacja użytkownika: testy Rust/Flutter/Android, smoke oraz ewentualne poprawki wynikające z ich rezultatów. Nie dodawać legacy/V2 ścieżek; nowy deploy używa wyłącznie aktualnych interfejsów.
+
+| 2026-08-03 | FINISH01 TC-007 MLS CHECKPOINT ADAPTER | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-desktop --locked` PASS | Startup anti-rollback używa już SQL `state_version` i `snapshot_hash`; desktop secure-store/file adapter zapisuje wersjonowany checkpoint `TCANCHK2` z kompatybilnym odczytem starego epoch-only formatu. Runtime commit-time anchor i testy dynamiczne pozostają. |
+
+| 2026-08-03 | FINISH01 TC-009 RETRY POLICY MATRIX | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-client-engine --tests --locked` PASS | Dodano centralne polityki retry dla wszystkich istniejących `RetryKind` z osobnymi limitami prób, wieku i opóźnienia oraz regresję sprawdzającą bounded policy dla każdej kolejki. Pełne ujednolicenie claim/dead-letter storage i testy runtime pozostają. |
+
+| 2026-08-03 | FINISH01 TC-021 UTF-8 FIXTURE | IN PROGRESS | — | `pwsh -NoProfile -File scripts/internal/check-text-encoding.ps1` PASS | Checker buduje polski sentinel z code pointów, więc jego własny zapis nie zależy od kodowania shella; dodano wspólny `common/encoding-fixture.json` dla polskiego tekstu, emoji, combining, cyrylicy i greki. Weryfikacja rzeczywistego checkoutu/CODECAT pozostaje. |
+
+| 2026-08-03 | FINISH01 TC-011 PRIVACY CHECKER | IN PROGRESS | — | `pwsh -NoProfile -File scripts/internal/check-server-log-privacy.ps1` PASS | Checker blokuje logowanie `message_id_hash`, par sender/recipient alias/hash oraz użycie pairing secret przy pseudonimizacji logów. Capture tracing i retencja operacyjna pozostają. |
+
+| 2026-08-03 | FINISH01 TC-012 RELEASE POLICY | IN PROGRESS | — | Static checker added: `scripts/internal/check-single-instance-release.ps1` | Dodano checker wymagający PostgreSQL advisory locka, trybu `single-instance-v0.1` oraz `replicas: 1` w release compose. Negatywny test dwóch procesów pozostaje. |
+
+| 2026-08-03 | FINISH01 TC-005 OPERATION JOURNAL | IN PROGRESS | — | `dart format`; `dart analyze mobile/lib/core/runtime/operation_journal.dart` PASS | OperationJournal przechowuje teraz typed record z `operationId`, `commandId`, `payloadHash`, stanem i timestampem; reuse z innym payloadem kończy się konfliktem, a Flutter przekazuje canonical payload jako hash/journal key. Pełne recovery po process-death i host contract tests pozostają. |
+
+| 2026-08-03 | FINISH01 TC-005 OPERATION JOURNAL TESTS | IN PROGRESS | — | `dart format mobile/test/core/runtime/operation_journal_test.dart` PASS | Dodano regresje dla konfliktu zmienionego payloadu oraz trwałego przejścia `submitted` -> `completed`. Pełne uruchomienie testów Flutter pozostaje po stronie CI/użytkownika. |
+
+| 2026-08-03 | FINISH01 TC-005 JOURNAL LIFECYCLE | IN PROGRESS | — | `dart format`; `dart analyze mobile/lib/mobile_bridge.dart mobile/lib/windows_runtime.dart` PASS | Android i Windows oznaczają operację jako `submitted` przed wysłaniem i `completed` po poprawnej odpowiedzi; timeout/błąd pozostawia rekord do recovery. |
+
+| 2026-08-03 | FINISH01 TC-013 CHALLENGE CONTRACT | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-server -p torchat-client-engine --locked` PASS | Bootstrap challenge wymaga teraz `public_key`, bounded `client_nonce` i zgodnego `protocol_version`; klient generuje nonce per challenge, a serwer odrzuca nieobsługiwane wersje. Load/admission tests pozostają. |
+
+| 2026-08-03 | FINISH01 PRESENCE STORE TESTS | IN PROGRESS | — | `dart format mobile/test/core/presence/contact_presence_store_test.dart` PASS | Potwierdzono testami, że jeden store zwraca `unknown` dla nowego kontaktu, odrzuca starszą rewizję i publikuje nowszy snapshot. Nie tworzono drugiego systemu probingowego. |
+
+| 2026-08-03 | FINISH01 TC-009 CSPRNG JITTER | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-client-engine --locked` PASS | Retry jitter nie wyprowadza już losowości z zegara systemowego; korzysta z `getrandom` CSPRNG i zachowuje bounded full-jitter. Wstrzykiwalny RNG dla harnessu pozostaje. |
+
+| 2026-08-03 | FINISH01 MLS STARTUP CLEANUP | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-client-engine --locked` PASS | Usunięto nieużywany wrapper ładowania MLS bez anchor, pozostawiając jedną ścieżkę startupu z opcjonalną walidacją checkpointu. |
+
+| 2026-08-03 | FINISH01 TC-009 INJECTABLE RNG | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-client-engine --tests --locked` PASS | Wydzielono `RetryRandom` i `retry_backoff_with`, a test używa deterministycznego generatora; produkcja nadal korzysta z CSPRNG. |
+
+| 2026-08-03 | FINISH01 TC-014 MLS SNAPSHOT V2 | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-core --tests --locked` PASS | Dodano envelope `TCMLS2` z `state_version`, checksum, metadata parser i restore; zachowano odczyt istniejącego `TCMLS1`. Test sprawdza round-trip V2 i state version. |
+
+| 2026-08-03 | FINISH01 TC-014 V1 TO V2 MIGRATION | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-core --tests --locked` PASS | Dodano kontrolowany `migrate_v1_to_v2`; migracja najpierw waliduje/odtwarza V1, następnie zapisuje V2 z jawną rewizją. Uszkodzone lub nieobsługiwane dane są odrzucane. |
+
+| 2026-08-03 | FINISH01 TC-017 ACTOR CLOCK CLEANUP | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-client-engine --locked` PASS | Retry, receipts, messaging i capability deadline/age decisions korzystają teraz z `SharedRuntimeClock`, zamiast bezpośredniego `SystemTime` helpera. Pozostałe timestampy wire/startup wymagają dalszej migracji. |
+
+| 2026-08-03 | FINISH01 TC-017 PEER CONTROL CLOCK | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-client-engine --locked` PASS | Walidacja endpointu, claim delivery i `created_at` peer control/probe/presence korzystają z `SharedRuntimeClock`; w tym module nie ma już bezpośrednich helperów `unix_ms/unix_secs`. |
+
+| 2026-08-03 | FINISH01 TC-017 PEER EVENTS CLOCK | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-client-engine --locked` PASS | Inbound envelope timestamps, successor endpoint validation i peer-connected timestamp korzystają z `SharedRuntimeClock`. |
+
+| 2026-08-03 | FINISH01 TC-017 ENVELOPE CLOCK | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-client-engine --locked` PASS | Application envelope, capability i relay envelope korzystają z `SharedRuntimeClock` dla receiptów, expiry, endpoint validation i issued/received timestamps. |
+
+| 2026-08-03 | FINISH01 TC-017 PAIRING CLOCK | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-client-engine --locked` PASS | Pairing expiry, retry queries, invite cleanup i relationship boundary używają `SharedRuntimeClock`; poprawiono też borrow boundary przy commit contact. |
+
+| 2026-08-03 | FINISH01 TC-017 PROJECTION PLATFORM CLOCK | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-client-engine --locked` PASS | Projection timestamps, platform endpoint validation/requeue i capability revoke timestamp korzystają z `SharedRuntimeClock`. |
+
+| 2026-08-03 | FINISH01 TC-017 RECEIPT REMOVAL CLOCK | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-client-engine --locked` PASS | Read receipt enqueue, outbound delivery creation oraz relationship removal/ACK retry deadlines korzystają z `SharedRuntimeClock`; globalne helpery pozostały wyłącznie w startupie i wspólnym status-event helperze. |
+
+| 2026-08-03 | FINISH01 TC-003 JOURNAL DURABILITY | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-desktop --locked` PASS | Secret migration journal zapisuje plik tymczasowy z `sync_all`, wykonuje atomic rename i synchronizuje katalog na Unix; nie zawiera sekretów. |
+
+| 2026-08-03 | FINISH01 PRESENCE DIAGNOSTICS | IN PROGRESS | — | `dart format`; `dart analyze mobile/lib/core/presence/contact_probe_coordinator.dart` PASS | Eventowe logi presence zawierają teraz pseudonimizowany contact hash oraz availability, peerLink, observedAt, expiresAt, latencyMs i revision; plaintext ID nie jest logowany. |
+
+| 2026-08-03 | FINISH01 TC-003 JOURNAL FORMAT | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-desktop --locked` PASS | Secret migration journal używa stabilnych nazw `SCREAMING_SNAKE_CASE` dla state i camelCase dla pól JSON, zgodnie z kontraktem planu. |
+
+| 2026-08-03 | FINISH01 TC-003 JOURNAL TEST | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-desktop --tests --locked` PASS | Dodano regresję round-trip journalu i sprawdzenie stabilnych nazw JSON; test nie dotyka sekretów ani OS vault. |
+
+| 2026-08-03 | FINISH01 BATCH 00 FAULT HOOK | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-client-engine --tests --locked` PASS | Actor posiada domyślny `NoopFaultInjector`, testowy setter i punkt `AfterLocalCommitBeforeDispatch` po SQL commit; produkcyjny przebieg pozostaje bez zmian. |
+
+| 2026-08-03 | FINISH01 BATCH 00 FAULT TESTS | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-client-engine --tests --locked` PASS | Dodano testy Noop oraz precyzyjnego abortu pojedynczego `FaultPoint`; pełna macierz crash/restart pozostaje do uruchomienia. |
+
+| 2026-08-03 | FINISH01 BATCH 00 PEER ACK HOOKS | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-client-engine --tests --locked` PASS | Peer event path ma failpointy `AfterPeerPersistedAck` i `AfterPeerDeliveredAck`; produkcyjnie obsługuje je `NoopFaultInjector`. |
+
+| 2026-08-03 | FINISH01 BATCH 00 DELIVERED BOUNDARY | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-client-engine --tests --locked` PASS | Normalna ścieżka inbound message ma failpoint po durable commit i przed wysłaniem `Delivered`, obejmując również przypadek nie będący duplicate. |
+
+| 2026-08-03 | FINISH01 BATCH 00 PRE-COMMIT | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-client-engine --tests --locked` PASS | Runtime transaction wywołuje `BeforeLocalCommit` przed SQL commit oraz `AfterLocalCommitBeforeDispatch` po commit; oba punkty są no-op w produkcji. |
+
+| 2026-08-03 | FINISH01 TC-003 RECOVERY DECISION | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-desktop --tests --locked` PASS | Dodano czystą funkcję wyboru recovery journalu, która zawsze preferuje istniejący pending DB key; dodano regresję zakazującą jego pominięcia. Pełna orkiestracja rekey pozostaje celowo niewykonana bez legacy-KDF. |
+
+| 2026-08-03 | FINISH01 TC-007 OWNED MLS ANCHOR | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-client-engine -p torchat-desktop --locked` PASS | Dodano owned-anchor API dla engine/actora; desktop przekazuje anchor do runtime, a po commitach runtime zapisuje state_version/epoch/hash dla zmienionych rozmów. FFI i pełna fail-closed macierz anchor pozostają. |
+
+| 2026-08-03 | FINISH01 TC-007 FFI ANCHOR LIFETIME | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-client-engine-ffi --locked` PASS | Istniejący FFI constructor przekazuje teraz epoch anchor jako owned object, więc callbacki żyją przez cały actor runtime zamiast wyłącznie przez startup. ABI symbolu nie zmieniono. |
+
+| 2026-08-03 | FINISH01 TC-017 STATUS EVENT CLOCK | IN PROGRESS | — | `cargo fmt --all`; `cargo check -p torchat-client-engine --locked` PASS | `transport_status_event` przyjmuje teraz jawny `updated_at_ms`; wszystkie actor callers przekazują `SharedRuntimeClock`. Globalne helpery czasu pozostały wyłącznie w konstrukcji/startupie przed utworzeniem aktora. |

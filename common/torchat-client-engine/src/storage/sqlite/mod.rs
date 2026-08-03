@@ -16,6 +16,8 @@ use super::{MigrationRunner, transaction::SqliteTransaction};
 
 pub type ContactEndpointCapability = (String, Vec<u8>, u64, CapabilityStatus);
 
+const RELATIONSHIP_REMOVAL_MAX_ATTEMPTS: i64 = 8;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RelationshipRemovalOutboxRecord {
     pub removal_id: String,
@@ -24,6 +26,22 @@ pub struct RelationshipRemovalOutboxRecord {
     pub relationship_epoch: i64,
     pub preserve_history: bool,
     pub attempt_count: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RelationshipRemovalAckOutboxRecord {
+    pub removal_id: String,
+    pub contact_installation_id: String,
+    pub payload: Vec<u8>,
+    pub attempt_count: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MlsCheckpointRecord {
+    pub conversation_id: String,
+    pub snapshot: Vec<u8>,
+    pub state_version: u64,
+    pub snapshot_hash: Option<Vec<u8>>,
 }
 
 pub struct ClientDatabase {
@@ -212,7 +230,8 @@ impl ClientDatabase {
              JOIN relationship_tombstones t
                ON t.contact_installation_id = o.contact_installation_id
               AND t.removal_id = o.removal_id
-             WHERE o.state = 'PENDING' AND o.next_attempt_at <= ?1
+             WHERE o.state IN ('PENDING', 'DISPATCHED', 'WAITING_FOR_ACK')
+               AND o.next_attempt_at <= ?1
              ORDER BY o.next_attempt_at ASC, o.removal_id ASC;",
             )
             .map_err(sqlite_error)?;
@@ -241,10 +260,11 @@ impl ClientDatabase {
         self.connection
             .execute(
                 "UPDATE relationship_removal_outbox
-             SET state = 'DISPATCHED', attempt_count = attempt_count + 1,
+             SET state = CASE WHEN attempt_count + 1 >= ?3 THEN 'DEAD_LETTER' ELSE 'WAITING_FOR_ACK' END,
+                 attempt_count = attempt_count + 1,
                  next_attempt_at = ?2, updated_at = unixepoch()
-             WHERE removal_id = ?1 AND state = 'PENDING';",
-                rusqlite::params![removal_id, next_attempt_at],
+             WHERE removal_id = ?1 AND state IN ('PENDING', 'DISPATCHED', 'WAITING_FOR_ACK');",
+                rusqlite::params![removal_id, next_attempt_at, RELATIONSHIP_REMOVAL_MAX_ATTEMPTS],
             )
             .map_err(sqlite_error)?;
         Ok(())
@@ -256,6 +276,91 @@ impl ClientDatabase {
                 "UPDATE relationship_removal_outbox
                  SET state = 'ACKED', updated_at = unixepoch()
                  WHERE removal_id = ?1;",
+                [removal_id],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
+    pub fn retry_relationship_removal_dead_letter(&self, removal_id: &str) -> EngineResult<()> {
+        self.connection
+            .execute(
+                "UPDATE relationship_removal_outbox
+                 SET state = 'PENDING', next_attempt_at = 0, updated_at = unixepoch()
+                 WHERE removal_id = ?1 AND state = 'DEAD_LETTER';",
+                [removal_id],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
+    pub fn due_relationship_removal_acks(
+        &self,
+        now_ms: i64,
+    ) -> EngineResult<Vec<RelationshipRemovalAckOutboxRecord>> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT removal_id, contact_installation_id, payload, attempt_count
+             FROM relationship_removal_ack_outbox
+             WHERE state IN ('PENDING', 'DISPATCHED') AND next_attempt_at <= ?1
+             ORDER BY next_attempt_at, removal_id;",
+            )
+            .map_err(sqlite_error)?;
+        statement
+            .query_map([now_ms], |row| {
+                Ok(RelationshipRemovalAckOutboxRecord {
+                    removal_id: row.get(0)?,
+                    contact_installation_id: row.get(1)?,
+                    payload: row.get(2)?,
+                    attempt_count: row.get::<_, i64>(3)?.max(0) as u32,
+                })
+            })
+            .map_err(sqlite_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(sqlite_error)
+    }
+
+    pub fn mark_relationship_removal_ack_dispatched(
+        &self,
+        removal_id: &str,
+        next_attempt_at: i64,
+    ) -> EngineResult<()> {
+        self.connection
+            .execute(
+                "UPDATE relationship_removal_ack_outbox
+             SET state = CASE WHEN attempt_count + 1 >= ?3 THEN 'DEAD_LETTER' ELSE 'DISPATCHED' END,
+                 attempt_count = attempt_count + 1,
+                 next_attempt_at = ?2, updated_at = unixepoch()
+             WHERE removal_id = ?1 AND state IN ('PENDING', 'DISPATCHED');",
+                params![
+                    removal_id,
+                    next_attempt_at,
+                    RELATIONSHIP_REMOVAL_MAX_ATTEMPTS
+                ],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
+    pub fn complete_relationship_removal_ack_delivery(&self, removal_id: &str) -> EngineResult<()> {
+        self.connection
+            .execute(
+                "UPDATE relationship_removal_ack_outbox
+                 SET state = 'ACKED', updated_at = unixepoch()
+                 WHERE removal_id = ?1 AND state <> 'ACKED';",
+                [removal_id],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
+    pub fn retry_relationship_removal_ack_dead_letter(&self, removal_id: &str) -> EngineResult<()> {
+        self.connection
+            .execute(
+                "UPDATE relationship_removal_ack_outbox
+                 SET state = 'PENDING', next_attempt_at = 0, updated_at = unixepoch()
+                 WHERE removal_id = ?1 AND state = 'DEAD_LETTER';",
                 [removal_id],
             )
             .map_err(sqlite_error)?;
@@ -295,19 +400,44 @@ impl ClientDatabase {
             .map_err(sqlite_error)
     }
 
+    pub fn conversation_mls_checkpoint(
+        &self,
+        conversation_id: &str,
+    ) -> EngineResult<Option<MlsCheckpointRecord>> {
+        self.connection
+            .query_row(
+                "SELECT conversation_id, snapshot, state_version, snapshot_hash
+                 FROM conversation_mls WHERE conversation_id = ?1;",
+                [conversation_id],
+                |row| {
+                    Ok(MlsCheckpointRecord {
+                        conversation_id: row.get(0)?,
+                        snapshot: row.get(1)?,
+                        state_version: row.get::<_, i64>(2)?.max(0) as u64,
+                        snapshot_hash: row.get(3)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(sqlite_error)
+    }
+
     pub fn put_conversation_mls_snapshot(
         &self,
         conversation_id: &str,
         snapshot: &[u8],
     ) -> EngineResult<()> {
+        let snapshot_hash = sha2::Sha256::digest(snapshot).to_vec();
         self.connection
             .execute(
-                "INSERT INTO conversation_mls (conversation_id, snapshot, updated_at)
-                 VALUES (?1, ?2, unixepoch())
+                "INSERT INTO conversation_mls (conversation_id, snapshot, state_version, snapshot_hash, updated_at)
+                 VALUES (?1, ?2, 1, ?3, unixepoch())
                  ON CONFLICT(conversation_id) DO UPDATE SET
                     snapshot = excluded.snapshot,
+                    state_version = conversation_mls.state_version + 1,
+                    snapshot_hash = excluded.snapshot_hash,
                     updated_at = unixepoch();",
-                params![conversation_id, snapshot],
+                params![conversation_id, snapshot, snapshot_hash],
             )
             .map_err(sqlite_error)?;
         Ok(())
@@ -693,8 +823,8 @@ impl ClientDatabase {
             .map_err(sqlite_error)?;
         transaction
             .execute(
-                "INSERT INTO conversation_mls (conversation_id, snapshot, updated_at)\n                 VALUES (?1, ?2, unixepoch())\n                 ON CONFLICT(conversation_id) DO UPDATE SET\n                    snapshot = excluded.snapshot,\n                    updated_at = unixepoch();",
-                params![conversation_id, snapshot],
+                "INSERT INTO conversation_mls (conversation_id, snapshot, state_version, snapshot_hash, updated_at)\n                 VALUES (?1, ?2, 1, ?3, unixepoch())\n                 ON CONFLICT(conversation_id) DO UPDATE SET\n                    snapshot = excluded.snapshot,\n                    state_version = conversation_mls.state_version + 1,\n                    snapshot_hash = excluded.snapshot_hash,\n                    updated_at = unixepoch();",
+                params![conversation_id, snapshot, sha2::Sha256::digest(snapshot).to_vec()],
             )
             .map_err(sqlite_error)?;
         transaction.commit().map_err(sqlite_error)?;
@@ -910,6 +1040,18 @@ impl ClientDatabase {
                 at_ms: deadline,
             });
         }
+        if let Some(deadline) = self.next_relationship_removal_retry_deadline_ms()? {
+            deadlines.push(RetryDeadline {
+                kind: RetryKind::RelationshipRemoval,
+                at_ms: deadline,
+            });
+        }
+        if let Some(deadline) = self.next_relationship_removal_ack_retry_deadline_ms()? {
+            deadlines.push(RetryDeadline {
+                kind: RetryKind::RelationshipRemovalAck,
+                at_ms: deadline,
+            });
+        }
         Ok(deadlines
             .into_iter()
             .map(|deadline| RetryDeadline {
@@ -928,6 +1070,28 @@ impl ClientDatabase {
                    AND UPPER(state) IN ('SENDING', 'QUEUED');",
                 [],
                 |row| row.get("next_attempt_at"),
+            )
+            .map_err(sqlite_error)
+    }
+
+    fn next_relationship_removal_retry_deadline_ms(&self) -> EngineResult<Option<i64>> {
+        self.connection
+            .query_row(
+                "SELECT MIN(next_attempt_at) FROM relationship_removal_outbox
+                 WHERE state IN ('PENDING', 'DISPATCHED', 'WAITING_FOR_ACK');",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(sqlite_error)
+    }
+
+    fn next_relationship_removal_ack_retry_deadline_ms(&self) -> EngineResult<Option<i64>> {
+        self.connection
+            .query_row(
+                "SELECT MIN(next_attempt_at) FROM relationship_removal_ack_outbox
+                 WHERE state IN ('PENDING', 'DISPATCHED');",
+                [],
+                |row| row.get(0),
             )
             .map_err(sqlite_error)
     }

@@ -29,6 +29,51 @@ impl ClientEngine {
         Self::new_with_optional_anchor(config, Some(anchor))
     }
 
+    pub fn new_with_owned_anchor(
+        config: EngineConfig,
+        anchor: Box<dyn MlsEpochAnchor<Error = EngineError> + Send>,
+    ) -> EngineResult<Self> {
+        Self::new_with_owned_anchor_internal(config, anchor)
+    }
+
+    fn new_with_owned_anchor_internal(
+        config: EngineConfig,
+        anchor: Box<dyn MlsEpochAnchor<Error = EngineError> + Send>,
+    ) -> EngineResult<Self> {
+        let (command_tx, command_rx) = mpsc::channel(COMMAND_CHANNEL_CAPACITY);
+        let (actor_event_tx, mut actor_event_rx) = mpsc::channel(WORKER_OUTCOME_CHANNEL_CAPACITY);
+        let (event_tx, event_rx) = mpsc::channel(WORKER_OUTCOME_CHANNEL_CAPACITY);
+        let shutdown = CancellationToken::new();
+        let actor = ClientEngineActor::new_with_owned_anchor(config, anchor)?;
+        let public_events = event_tx.clone();
+        tokio::spawn(async move {
+            while let Some(event) = actor_event_rx.recv().await {
+                if public_events.send(event).await.is_err() {
+                    break;
+                }
+            }
+        });
+        let fatal_events = actor_event_tx.clone();
+        let actor_shutdown = shutdown.clone();
+        tokio::spawn(async move {
+            if let Err(error) = actor.run(command_rx, actor_event_tx, actor_shutdown).await {
+                let _ = fatal_events
+                    .send(EngineEvent::Fatal {
+                        error: EngineFatalError {
+                            code: "engine_actor_failed".to_owned(),
+                            message: error.to_string(),
+                        },
+                    })
+                    .await;
+            }
+        });
+        Ok(Self {
+            commands: command_tx,
+            events: EngineEventReceiver::new(event_rx),
+            shutdown,
+        })
+    }
+
     fn new_with_optional_anchor(
         config: EngineConfig,
         mut anchor: Option<&mut dyn MlsEpochAnchor<Error = EngineError>>,

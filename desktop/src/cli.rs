@@ -33,6 +33,10 @@ pub struct Cli {
     #[arg(long, env = "TORCHAT_IDENTITY_FILE")]
     pub identity_file: Option<PathBuf>,
 
+    /// Explicit one-time import of a legacy plaintext identity into OS vault.
+    #[arg(long, env = "TORCHAT_IMPORT_LEGACY_IDENTITY")]
+    pub import_legacy_identity: Option<PathBuf>,
+
     /// Publish this nickname for paired contacts after bootstrap.
     #[arg(long, env = "TORCHAT_NICKNAME")]
     pub nickname: Option<String>,

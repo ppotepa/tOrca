@@ -59,6 +59,8 @@ const PAIRING_REQUEST_TTL_SECONDS: u64 = 600;
 const PAIRING_ATTEMPT_WINDOW_SECONDS: u64 = 60;
 const PAIRING_ATTEMPT_LIMIT: u32 = 5;
 const CHALLENGE_BUDGET_LIMIT: u32 = 10;
+const MAX_ADMISSION_BUCKETS: usize = 10_000;
+const SINGLE_INSTANCE_ADVISORY_LOCK: i64 = 0x544f524348415430;
 
 #[derive(Clone)]
 struct AppState {
@@ -69,6 +71,7 @@ struct AppState {
     connection_leases: Arc<RwLock<HashMap<String, ConnectionLease>>>,
     instance_id: Uuid,
     pairing_secret: Arc<String>,
+    log_secret: Arc<String>,
     crypto_bootstrap_budget: Arc<Semaphore>,
     db_operation_budget: Arc<Semaphore>,
     pairing_attempts: Arc<RwLock<HashMap<String, PairingAttemptWindow>>>,
@@ -88,6 +91,8 @@ struct Installation {
 struct Health {
     status: &'static str,
     protocol_version: u16,
+    deployment_mode: &'static str,
+    instance_guard: &'static str,
     admission_rejections: AdmissionRejectionSnapshot,
 }
 
@@ -226,6 +231,17 @@ async fn main() {
     bootstrap::apply_database_migrations(&mut db)
         .await
         .expect("database migration failed");
+    let instance_lock = db
+        .query_one(
+            "SELECT pg_try_advisory_lock($1)",
+            &[&SINGLE_INSTANCE_ADVISORY_LOCK],
+        )
+        .await
+        .expect("single-instance advisory lock query failed")
+        .get::<_, bool>(0);
+    if !instance_lock {
+        panic!("TorChat relay already has an active instance for this database");
+    }
     bootstrap::prune_server_metadata(&db)
         .await
         .expect("server metadata cleanup failed");
@@ -237,6 +253,7 @@ async fn main() {
         connection_leases: Arc::new(RwLock::new(HashMap::new())),
         instance_id: Uuid::new_v4(),
         pairing_secret: Arc::new(pairing_secret),
+        log_secret: Arc::new(Uuid::new_v4().to_string()),
         crypto_bootstrap_budget: Arc::new(Semaphore::new(CRYPTO_BOOTSTRAP_PERMITS)),
         db_operation_budget: Arc::new(Semaphore::new(DB_OPERATION_PERMITS)),
         pairing_attempts: Arc::new(RwLock::new(HashMap::new())),
@@ -306,6 +323,8 @@ async fn health(State(state): State<AppState>) -> Json<Health> {
     Json(Health {
         status: "ok",
         protocol_version: torchat_core::protocol_version(),
+        deployment_mode: "single-instance-v0.1",
+        instance_guard: "held",
         admission_rejections: state.admission_metrics.snapshot(),
     })
 }
@@ -355,9 +374,27 @@ async fn status_page() -> Html<String> {
 
 async fn create_challenge(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Json(request): Json<ChallengeRequest>,
 ) -> Result<Json<ChallengeResponse>, (StatusCode, Json<serde_json::Value>)> {
     let current = now();
+    if request.public_key.len() > 256 || request.public_key.trim().is_empty() {
+        return Err(error(
+            StatusCode::BAD_REQUEST,
+            "bootstrap public key is required",
+        ));
+    }
+    if request.client_nonce.len() > 128 || request.client_nonce.trim().is_empty() {
+        return Err(error(
+            StatusCode::BAD_REQUEST,
+            "bootstrap client nonce is required",
+        ));
+    }
+    if request.protocol_version != torchat_core::PROTOCOL_VERSION {
+        return Err(error(
+            StatusCode::BAD_REQUEST,
+            "unsupported bootstrap protocol version",
+        ));
+    }
     let mut challenges = state.challenges.write().await;
     challenges.retain(|_, challenge| challenge.expires_at >= current);
     if challenges.len() >= MAX_PENDING_CHALLENGES {
@@ -370,18 +407,25 @@ async fn create_challenge(
             "bootstrap challenge capacity reached",
         ));
     }
-    let supplied_token = headers
-        .get("x-torchat-budget-token")
-        .and_then(|value| value.to_str().ok())
-        .filter(|value| !value.is_empty())
-        .unwrap_or("anonymous");
-    let budget_token = if supplied_token == "anonymous" {
-        URL_SAFE_NO_PAD.encode(rand::random::<[u8; 16]>())
-    } else {
-        supplied_token.to_owned()
-    };
+    // Bind the budget before any challenge material is generated. The public
+    // key is only an admission identity here; proof verification happens at
+    // installation registration.
+    let budget_token = format!("public-key:{}", request.public_key);
     let budget_key = pseudonymous_id(&state, &budget_token);
     let mut budgets = state.challenge_budgets.write().await;
+    budgets.retain(|_, value| {
+        current.saturating_sub(value.started_at) < PAIRING_ATTEMPT_WINDOW_SECONDS
+    });
+    if !budgets.contains_key(&budget_key) && budgets.len() >= MAX_ADMISSION_BUCKETS {
+        state
+            .admission_metrics
+            .challenge_budget
+            .fetch_add(1, Ordering::Relaxed);
+        return Err(error(
+            StatusCode::TOO_MANY_REQUESTS,
+            "challenge budget capacity reached",
+        ));
+    }
     let entry = budgets.entry(budget_key).or_insert(PairingAttemptWindow {
         started_at: current,
         count: 0,
@@ -883,6 +927,16 @@ async fn take_pairing_attempt(
     attempts.retain(|_, value| {
         current.saturating_sub(value.started_at) < PAIRING_ATTEMPT_WINDOW_SECONDS
     });
+    if !attempts.contains_key(installation_id) && attempts.len() >= MAX_ADMISSION_BUCKETS {
+        state
+            .admission_metrics
+            .pairing_attempt
+            .fetch_add(1, Ordering::Relaxed);
+        return Err(error(
+            StatusCode::TOO_MANY_REQUESTS,
+            "pairing attempt capacity reached",
+        ));
+    }
     let entry = attempts
         .entry(installation_id.to_owned())
         .or_insert(PairingAttemptWindow {
@@ -1026,7 +1080,14 @@ fn parse_pairing_capability(state: &AppState, value: &str) -> Option<(Uuid, Stri
 }
 
 fn pseudonymous_id(state: &AppState, value: &str) -> String {
-    pseudonymous_id_with_secret(&state.pairing_secret, value)
+    pseudonymous_id_with_secret(&state.log_secret, value)
+}
+
+#[derive(Deserialize)]
+struct ChallengeRequest {
+    public_key: String,
+    client_nonce: String,
+    protocol_version: u16,
 }
 
 async fn contact_card(
@@ -1388,7 +1449,6 @@ async fn process_frame(
                 &state.connections,
                 sender_id,
                 envelope,
-                &state.pairing_secret,
                 Some(&state.db),
                 Some(state.instance_id),
             )
@@ -1419,10 +1479,12 @@ async fn route_envelope(
     connections: &Arc<RwLock<HashMap<String, Connection>>>,
     sender_id: &str,
     mut envelope: torchat_core::relay::RelayEnvelope,
-    secret: &str,
     db: Option<&tokio_postgres::Client>,
     instance_id: Option<Uuid>,
 ) -> Result<(), String> {
+    // A per-envelope trace is intentionally unrelated to installation,
+    // recipient, pairing or message identifiers.
+    let route_trace_id = Uuid::new_v4();
     if envelope.version != torchat_core::PROTOCOL_VERSION
         || envelope.sender != sender_id
         || envelope.recipient.is_empty()
@@ -1430,8 +1492,8 @@ async fn route_envelope(
         || !relay_ciphertext_allowed(&envelope.ciphertext)
     {
         tracing::warn!(
-            sender_hash = %pseudonymous_id_with_secret(secret, sender_id),
-            message_id_hash = %pseudonymous_id_with_secret(secret, &envelope.message_id.to_string()),
+            route_trace_id = %route_trace_id,
+            payload_size = envelope.ciphertext.len(),
             "relay envelope rejected by validation"
         );
         return Ok(());
@@ -1440,7 +1502,6 @@ async fn route_envelope(
     let message_id = envelope.message_id;
     if let Some(recipient) = recipient {
         envelope.sender = sender_id.to_owned();
-        let recipient_id = envelope.recipient.clone();
         let (completion_tx, completion_rx) = oneshot::channel();
         let queued = recipient.sender.try_send(OutboundCommand::Frame {
             frame: torchat_core::relay::RelayServerFrame::Envelope(envelope),
@@ -1448,9 +1509,7 @@ async fn route_envelope(
         });
         if queued.is_err() {
             tracing::warn!(
-                sender_hash = %pseudonymous_id_with_secret(secret, sender_id),
-                recipient_hash = %pseudonymous_id_with_secret(secret, &recipient_id),
-                message_id_hash = %pseudonymous_id_with_secret(secret, &message_id.to_string()),
+                route_trace_id = %route_trace_id,
                 "relay recipient queue full"
             );
             let _ = recipient.sender.try_send(OutboundCommand::Close);
@@ -1469,17 +1528,13 @@ async fn route_envelope(
         );
         let outcome = if written {
             tracing::info!(
-                sender_hash = %pseudonymous_id_with_secret(secret, sender_id),
-                recipient_hash = %pseudonymous_id_with_secret(secret, &recipient_id),
-                message_id_hash = %pseudonymous_id_with_secret(secret, &message_id.to_string()),
+                route_trace_id = %route_trace_id,
                 "relay envelope forwarded"
             );
             torchat_core::relay::RelayServerFrame::Forwarded { message_id }
         } else {
             tracing::warn!(
-                sender_hash = %pseudonymous_id_with_secret(secret, sender_id),
-                recipient_hash = %pseudonymous_id_with_secret(secret, &recipient_id),
-                message_id_hash = %pseudonymous_id_with_secret(secret, &message_id.to_string()),
+                route_trace_id = %route_trace_id,
                 "relay envelope write failed"
             );
             torchat_core::relay::RelayServerFrame::RecipientOffline { message_id }
@@ -1487,9 +1542,7 @@ async fn route_envelope(
         send_server_frame_to_connections(connections, sender_id, outcome).await?;
     } else {
         tracing::info!(
-        sender_hash = %pseudonymous_id_with_secret(secret, sender_id),
-        recipient_hash = %pseudonymous_id_with_secret(secret, &envelope.recipient),
-        message_id_hash = %pseudonymous_id_with_secret(secret, &message_id.to_string()),
+        route_trace_id = %route_trace_id,
             "relay recipient offline"
         );
         let recipient_id = envelope.recipient.clone();
@@ -1539,7 +1592,8 @@ fn relay_ciphertext_allowed(ciphertext: &str) -> bool {
             | torchat_core::relay::RelayPayloadV1::PairingRejected { .. }
             | torchat_core::relay::RelayPayloadV1::Welcome { .. }
             | torchat_core::relay::RelayPayloadV1::WelcomeApplied { .. }
-            | torchat_core::relay::RelayPayloadV1::PeerEndpointBootstrap { .. },
+            | torchat_core::relay::RelayPayloadV1::PeerEndpointBootstrap { .. }
+            | torchat_core::relay::RelayPayloadV1::RelationshipRemovalApplied { .. },
         ) => true,
         Err(_) => torchat_core::peer_protocol::PeerCiphertextPayload::decode(ciphertext).is_ok(),
     }

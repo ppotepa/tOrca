@@ -20,6 +20,7 @@ use sha2::{Digest, Sha256};
 
 const SUITE: Ciphersuite = Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519;
 const MLS_SNAPSHOT_HEADER: &[u8] = b"TCMLS1";
+const MLS_SNAPSHOT_V2_HEADER: &[u8] = b"TCMLS2";
 const MLS_SNAPSHOT_APP_SCHEMA: u16 = 1;
 const MLS_SNAPSHOT_OPENMLS_VERSION: &[u8] = b"0.8.1";
 
@@ -37,6 +38,17 @@ pub struct DirectConversation {
     provider: PersistentProvider,
     signer: SignatureKeyPair,
     group: MlsGroup,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MlsSnapshotMetadata {
+    pub app_schema: u16,
+    pub openmls_version: Vec<u8>,
+    pub ciphersuite: Vec<u8>,
+    pub group_id: Vec<u8>,
+    pub epoch: u64,
+    pub state_version: Option<u64>,
+    pub snapshot_hash: Vec<u8>,
 }
 
 #[derive(Default)]
@@ -226,10 +238,30 @@ impl DirectConversation {
         Ok(output)
     }
 
+    /// Serializes the V2 envelope with a monotonic local persistence version.
+    pub fn snapshot_v2(&self, state_version: u64) -> Result<Vec<u8>, String> {
+        let payload = self.snapshot_payload()?;
+        let checksum = Sha256::digest(&payload);
+        let suite = format!("{:?}", SUITE);
+        let mut output = Vec::with_capacity(72 + suite.len() + payload.len());
+        output.extend_from_slice(MLS_SNAPSHOT_V2_HEADER);
+        output.extend_from_slice(&MLS_SNAPSHOT_APP_SCHEMA.to_be_bytes());
+        write_blob(&mut output, MLS_SNAPSHOT_OPENMLS_VERSION);
+        write_blob(&mut output, suite.as_bytes());
+        write_blob(&mut output, self.group.group_id().as_slice());
+        output.extend_from_slice(&self.group.epoch().as_u64().to_be_bytes());
+        output.extend_from_slice(&state_version.to_be_bytes());
+        output.extend_from_slice(&checksum);
+        write_blob(&mut output, &payload);
+        Ok(output)
+    }
+
     /// Restores the current snapshot envelope.
     pub fn restore_current(snapshot: &[u8]) -> Result<Self, String> {
         let mut input = snapshot;
-        if take(&mut input, 6)? != MLS_SNAPSHOT_HEADER {
+        let header = take(&mut input, 6)?;
+        let is_v2 = header == MLS_SNAPSHOT_V2_HEADER;
+        if header != MLS_SNAPSHOT_HEADER && !is_v2 {
             return Err("invalid MLS snapshot header".into());
         }
         let schema = u16::from_be_bytes(
@@ -254,6 +286,13 @@ impl DirectConversation {
                 .try_into()
                 .map_err(|_| "invalid MLS snapshot epoch")?,
         );
+        if is_v2 {
+            let _state_version = u64::from_be_bytes(
+                take(&mut input, 8)?
+                    .try_into()
+                    .map_err(|_| "invalid MLS snapshot state version")?,
+            );
+        }
         let checksum = take(&mut input, 32)?;
         let payload = take_blob(&mut input)?.to_vec();
         if !input.is_empty() || Sha256::digest(&payload).as_slice() != checksum {
@@ -266,6 +305,69 @@ impl DirectConversation {
             return Err("MLS snapshot envelope metadata mismatch".into());
         }
         Ok(conversation)
+    }
+
+    pub fn restore_v2(snapshot: &[u8]) -> Result<Self, String> {
+        if !snapshot.starts_with(MLS_SNAPSHOT_V2_HEADER) {
+            return Err("expected MLS snapshot V2".into());
+        }
+        Self::restore_current(snapshot)
+    }
+
+    pub fn migrate_v1_to_v2(snapshot: &[u8], next_state_version: u64) -> Result<Vec<u8>, String> {
+        if !snapshot.starts_with(MLS_SNAPSHOT_HEADER) {
+            return Err("expected MLS snapshot V1".into());
+        }
+        let conversation = Self::restore_current(snapshot)?;
+        conversation.snapshot_v2(next_state_version)
+    }
+
+    pub fn parse_snapshot_metadata(snapshot: &[u8]) -> Result<MlsSnapshotMetadata, String> {
+        let mut input = snapshot;
+        let header = take(&mut input, 6)?;
+        let state_version = if header == MLS_SNAPSHOT_V2_HEADER {
+            None
+        } else if header == MLS_SNAPSHOT_HEADER {
+            Some(0)
+        } else {
+            return Err("invalid MLS snapshot header".into());
+        };
+        let app_schema = u16::from_be_bytes(
+            take(&mut input, 2)?
+                .try_into()
+                .map_err(|_| "invalid MLS app schema")?,
+        );
+        let openmls_version = take_blob(&mut input)?;
+        let ciphersuite = take_blob(&mut input)?;
+        let group_id = take_blob(&mut input)?;
+        let epoch = u64::from_be_bytes(
+            take(&mut input, 8)?
+                .try_into()
+                .map_err(|_| "invalid MLS snapshot epoch")?,
+        );
+        let state_version = if state_version.is_none() {
+            Some(u64::from_be_bytes(
+                take(&mut input, 8)?
+                    .try_into()
+                    .map_err(|_| "invalid MLS state version")?,
+            ))
+        } else {
+            None
+        };
+        let snapshot_hash = take(&mut input, 32)?.to_vec();
+        let payload = take_blob(&mut input)?;
+        if !input.is_empty() || Sha256::digest(&payload).as_slice() != snapshot_hash {
+            return Err("MLS snapshot metadata checksum mismatch".into());
+        }
+        Ok(MlsSnapshotMetadata {
+            app_schema,
+            openmls_version,
+            ciphersuite,
+            group_id,
+            epoch,
+            state_version,
+            snapshot_hash,
+        })
     }
 
     pub fn snapshot(&self) -> Result<Vec<u8>, String> {
@@ -542,6 +644,8 @@ mod tests {
         let (welcome, tree) = alice_chat.invite(&bob.key_package().unwrap()).unwrap();
         let bob_chat = bob.accept_conversation(&welcome, &tree).unwrap();
         let snapshot = bob_chat.snapshot_current().unwrap();
+        let v1_metadata = DirectConversation::parse_snapshot_metadata(&snapshot).unwrap();
+        assert_eq!(v1_metadata.state_version, None);
         let mut restored = DirectConversation::restore_current(&snapshot).unwrap();
         let outbound = alice_chat.encrypt(b"v2 restart").unwrap();
         assert_eq!(restored.decrypt(&outbound).unwrap(), b"v2 restart");
@@ -554,6 +658,22 @@ mod tests {
         downgraded[6] = 0;
         downgraded[7] = 0;
         assert!(DirectConversation::restore_current(&downgraded).is_err());
+
+        let snapshot_v2 = bob_chat.snapshot_v2(17).unwrap();
+        let metadata = DirectConversation::parse_snapshot_metadata(&snapshot_v2).unwrap();
+        assert_eq!(metadata.state_version, Some(17));
+        assert_eq!(metadata.epoch, bob_chat.epoch());
+        let restored_v2 = DirectConversation::restore_v2(&snapshot_v2).unwrap();
+        assert_eq!(restored_v2.epoch(), bob_chat.epoch());
+        let migrated =
+            DirectConversation::migrate_v1_to_v2(&bob_chat.snapshot_current().unwrap(), 18)
+                .unwrap();
+        assert_eq!(
+            DirectConversation::parse_snapshot_metadata(&migrated)
+                .unwrap()
+                .state_version,
+            Some(18)
+        );
     }
 
     #[test]

@@ -542,6 +542,7 @@ impl ClientEngineActor {
                             retry_in_ms,
                             self.connection_generation,
                             None,
+                            self.clock.now_ms(),
                         ),
                     })
                     .await;

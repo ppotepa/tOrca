@@ -13,10 +13,10 @@ pub use migrations::{Migration, MigrationRunner};
 pub use runtime_storage::SqliteRuntimeStorage;
 pub use sqlite::{
     CapabilityDeliveryRecord, ClientDatabase, DeliveryReceiptRecord, InboundEnvelopeStoreResult,
-    InboundPeerEnvelopeRecord, OutboundDeliveryRecord, PairingResponseRecord,
+    InboundPeerEnvelopeRecord, MlsCheckpointRecord, OutboundDeliveryRecord, PairingResponseRecord,
     PeerEndpointBootstrapRecord, PendingApplicationEnvelopeRecord,
     PendingContactConfirmationRecord, PendingLocalInviteMlsRecord, PendingPeerEndpointInboxRecord,
-    PendingWelcomeRecord, ReceivedEnvelopeRecord, RelationshipRemovalOutboxRecord, RetryDeadline,
-    RetryKind, StoredMessageRecord,
+    PendingWelcomeRecord, ReceivedEnvelopeRecord, RelationshipRemovalAckOutboxRecord,
+    RelationshipRemovalOutboxRecord, RetryDeadline, RetryKind, StoredMessageRecord,
 };
 pub use transaction::SqliteTransaction;

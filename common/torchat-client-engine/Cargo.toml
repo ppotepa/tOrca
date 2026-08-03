@@ -8,6 +8,7 @@ description = "Shared TorChat client engine boundary"
 [dependencies]
 base64 = "0.22"
 futures-util = "=0.3.32"
+getrandom = "0.3"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls", "socks"] }
 rusqlite.workspace = true
 secrecy = "0.10"

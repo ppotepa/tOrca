@@ -70,6 +70,7 @@ impl ClientEngineActor {
                     None,
                     self.connection_generation,
                     None,
+                    self.clock.now_ms(),
                 ));
                 Ok(runtime_events)
             }
@@ -111,6 +112,7 @@ impl ClientEngineActor {
                     None,
                     self.connection_generation,
                     self.socks5_url.clone(),
+                    self.clock.now_ms(),
                 ));
                 Ok(runtime_events)
             }
@@ -139,6 +141,7 @@ impl ClientEngineActor {
                     None,
                     self.connection_generation,
                     None,
+                    self.clock.now_ms(),
                 ));
                 Ok(runtime_events)
             }
@@ -173,11 +176,11 @@ impl ClientEngineActor {
                     &self.identity,
                     onion_address,
                     sequence,
-                    unix_secs(),
+                    self.clock.now_ms() / 1_000,
                     None,
                 );
                 endpoint
-                    .validate(unix_secs())
+                    .validate(self.clock.now_ms() / 1_000)
                     .map_err(EngineError::InvalidCommand)?;
                 self.database
                     .put_local_peer_endpoint(&endpoint, generation)?;
@@ -214,13 +217,14 @@ impl ClientEngineActor {
                     self.local_peer_endpoint
                         .as_ref()
                         .map(|endpoint| endpoint.onion_address.clone()),
+                    self.clock.now_ms(),
                 ));
                 Ok(events)
             }
             PlatformFact::OnionServiceLost { reason } => {
                 self.local_peer_endpoint = None;
                 self.database.delete_local_peer_endpoint()?;
-                self.database.requeue_peer_deliveries(unix_ms())?;
+                self.database.requeue_peer_deliveries(self.clock.now_ms())?;
                 Ok(vec![
                     torchat_client_runtime::RuntimeEvent::PeerEndpointChanged {
                         contact_id: self.identity.installation_id(),
@@ -239,6 +243,7 @@ impl ClientEngineActor {
                         None,
                         self.expected_onion_generation,
                         None,
+                        self.clock.now_ms(),
                     ),
                 ])
             }

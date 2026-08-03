@@ -28,7 +28,10 @@ use torchat_core::{
     relay::{RelayEnvelope, RelayPayloadV1},
 };
 
-use crate::anti_rollback::{MlsEpochAnchor, MlsRecoveryState, validate_snapshot_epoch};
+use crate::anti_rollback::{
+    AnchoredMlsCheckpoint, MlsEpochAnchor, MlsRecoveryState, validate_snapshot_checkpoint,
+};
+use crate::fault_injection::{FaultInjector, NoopFaultInjector};
 use crate::{
     ClientDatabase, EngineCommand, EngineCommandEnvelope, EngineConfig, EngineError, EngineEvent,
     EngineLogEvent, EngineResult, PlatformAction, PlatformFact, PlatformKind,
@@ -107,6 +110,9 @@ enum PendingRelayDelivery {
     Ephemeral {
         installation_id: String,
         delivery_id: Option<String>,
+    },
+    RelationshipRemovalAck {
+        removal_id: String,
     },
     PeerEndpointBootstrap {
         installation_id: String,
@@ -188,6 +194,8 @@ struct IdempotencyCommitContext {
 }
 
 pub struct ClientEngineActor {
+    pub(super) fault_injector: Arc<dyn FaultInjector>,
+    pub(super) mls_anchor: Option<Box<dyn MlsEpochAnchor<Error = EngineError> + Send>>,
     /// Retain only platform metadata after construction. Database and identity
     /// secrets are consumed while opening the actor and must not have a second
     /// long-lived copy in actor memory.
@@ -266,6 +274,10 @@ const RETRY_BLOCKED_RECHECK: Duration = Duration::from_secs(5);
 const RETRY_OFFLINE_RECHECK: Duration = Duration::from_secs(30);
 
 impl ClientEngineActor {
+    pub fn set_fault_injector(&mut self, injector: Arc<dyn FaultInjector>) {
+        self.fault_injector = injector;
+    }
+
     pub fn set_clock(&mut self, clock: impl RuntimeClock + Send + Sync + 'static) {
         self.clock = SharedRuntimeClock::new(clock);
     }
@@ -283,6 +295,15 @@ impl ClientEngineActor {
         anchor: &mut dyn MlsEpochAnchor<Error = EngineError>,
     ) -> EngineResult<Self> {
         Self::new_with_optional_anchor(config, Some(anchor))
+    }
+
+    pub fn new_with_owned_anchor(
+        config: EngineConfig,
+        mut anchor: Box<dyn MlsEpochAnchor<Error = EngineError> + Send>,
+    ) -> EngineResult<Self> {
+        let mut actor = Self::new_with_optional_anchor(config, Some(anchor.as_mut()))?;
+        actor.mls_anchor = Some(anchor);
+        Ok(actor)
     }
 
     fn new_with_optional_anchor(
@@ -313,6 +334,8 @@ impl ClientEngineActor {
         };
         let platform = config.platform.clone();
         Ok(Self {
+            fault_injector: Arc::new(NoopFaultInjector),
+            mls_anchor: None,
             platform,
             database,
             identity,
@@ -778,7 +801,7 @@ impl ClientEngineActor {
     }
 
     fn requeue_after_disconnect(&mut self) -> EngineResult<()> {
-        let now_ms = unix_ms();
+        let now_ms = self.clock.now_ms();
         self.database.requeue_after_disconnect(now_ms)?;
         self.database.requeue_peer_deliveries(now_ms)?;
         self.pending_relay_deliveries.clear();
@@ -933,9 +956,9 @@ impl ClientEngineActor {
                         contact_installation_id: installation_id.to_owned(),
                         payload: payload.as_bytes().to_vec(),
                         attempt_count: 0,
-                        next_attempt_at: unix_ms(),
+                        next_attempt_at: self.clock.now_ms(),
                         last_error: None,
-                        created_at: unix_ms(),
+                        created_at: self.clock.now_ms(),
                     })?;
             }
             return self.queue_relay_envelope(
@@ -1051,14 +1074,47 @@ impl ClientEngineActor {
         for effect in effects {
             self.deliver_send_effect(effect)?;
         }
+        self.flush_pending_relationship_removal_acks()?;
         self.flush_pending_relationship_removals()?;
+        Ok(())
+    }
+
+    fn flush_pending_relationship_removal_acks(&mut self) -> EngineResult<()> {
+        for ack in self
+            .database
+            .due_relationship_removal_acks(self.clock.now_ms())?
+        {
+            let payload = String::from_utf8(ack.payload).map_err(|_| {
+                EngineError::Storage("relationship removal ACK payload is not UTF-8".to_owned())
+            })?;
+            let envelope_id = uuid::Uuid::new_v4();
+            if self
+                .queue_relay_envelope(
+                    envelope_id,
+                    &ack.contact_installation_id,
+                    &payload,
+                    PendingRelayDelivery::RelationshipRemovalAck {
+                        removal_id: ack.removal_id.clone(),
+                    },
+                )
+                .is_ok()
+            {
+                self.database.mark_relationship_removal_ack_dispatched(
+                    &ack.removal_id,
+                    self.clock.now_ms() + retry_backoff_ms(ack.attempt_count + 1),
+                )?;
+            }
+        }
         Ok(())
     }
 
     fn flush_pending_relationship_removals(&mut self) -> EngineResult<()> {
         use torchat_core::application::ApplicationPayloadV1;
 
-        for removal in self.database.due_relationship_removals(unix_ms())? {
+        for removal in self
+            .database
+            .due_relationship_removals(self.clock.now_ms())?
+        {
             let message_id = match uuid::Uuid::parse_str(&removal.removal_id) {
                 Ok(value) => value,
                 Err(error) => {
@@ -1092,14 +1148,14 @@ impl ClientEngineActor {
             }
             self.database.mark_relationship_removal_dispatched(
                 &removal.removal_id,
-                unix_ms() + retry_backoff_ms(removal.attempt_count + 1),
+                self.clock.now_ms() + retry_backoff_ms(removal.attempt_count + 1),
             )?;
         }
         Ok(())
     }
 
     fn peer_retry_in_ms(&self, installation_id: &str) -> EngineResult<Option<u64>> {
-        let now = unix_ms();
+        let now = self.clock.now_ms();
         let outbound = self
             .database
             .next_contact_peer_retry_deadline_ms(installation_id)?;
@@ -1222,15 +1278,6 @@ fn protocol_nickname(installation_id: &str, nickname: &str) -> String {
     format!("peer-{suffix}")
 }
 
-fn load_engine_technical_state(
-    database: &ClientDatabase,
-) -> EngineResult<(
-    HashMap<String, DirectConversation>,
-    HashMap<String, PendingWelcomeRecord>,
-)> {
-    load_engine_technical_state_with_anchor(database, None)
-}
-
 /// Loads MLS state with an optional platform secure-store anti-rollback gate.
 /// Hosts that have a secure anchor must pass it here before exposing the
 /// conversations to the actor.
@@ -1256,7 +1303,19 @@ pub(crate) fn load_engine_technical_state_with_anchor(
             ))
         })?;
         if let Some(anchor) = anchor.as_deref_mut() {
-            match validate_snapshot_epoch(anchor, &conversation_id, conversation.epoch())? {
+            let checkpoint = database
+                .conversation_mls_checkpoint(&conversation_id)?
+                .map(|record| AnchoredMlsCheckpoint {
+                    state_version: record.state_version,
+                    epoch: conversation.epoch(),
+                    snapshot_hash: record.snapshot_hash.unwrap_or_default(),
+                })
+                .unwrap_or_else(|| AnchoredMlsCheckpoint {
+                    state_version: conversation.epoch(),
+                    epoch: conversation.epoch(),
+                    snapshot_hash: Vec::new(),
+                });
+            match validate_snapshot_checkpoint(anchor, &conversation_id, &checkpoint)? {
                 MlsRecoveryState::Ready => {}
                 MlsRecoveryState::RePairRequired => {
                     return Err(EngineError::Storage(format!(
@@ -1307,6 +1366,41 @@ impl RetryPolicy {
         max_age_ms: 24 * 60 * 60 * 1_000,
     };
 
+    pub const CONTROL_PLANE: Self = Self {
+        max_attempts: 8,
+        base_delay_ms: 5_000,
+        max_delay_ms: 160_000,
+        max_age_ms: 24 * 60 * 60 * 1_000,
+    };
+
+    pub const PAIRING: Self = Self {
+        max_attempts: 6,
+        base_delay_ms: 2_000,
+        max_delay_ms: 120_000,
+        max_age_ms: 30 * 60 * 1_000,
+    };
+
+    pub const RECEIPT: Self = Self {
+        max_attempts: 8,
+        base_delay_ms: 3_000,
+        max_delay_ms: 120_000,
+        max_age_ms: 12 * 60 * 60 * 1_000,
+    };
+
+    pub fn for_kind(kind: RetryKind) -> Self {
+        match kind {
+            RetryKind::MessageSend | RetryKind::MessageAckDeadline => Self::DELIVERY,
+            RetryKind::Receipt | RetryKind::ReadReceipt => Self::RECEIPT,
+            RetryKind::PendingWelcome
+            | RetryKind::PairingResponse
+            | RetryKind::ContactConfirmation
+            | RetryKind::PairingAcknowledgement => Self::PAIRING,
+            RetryKind::PeerEndpointBootstrap
+            | RetryKind::RelationshipRemoval
+            | RetryKind::RelationshipRemovalAck => Self::CONTROL_PLANE,
+        }
+    }
+
     pub fn delay_ms(self, attempt_count: u32) -> i64 {
         let shift = attempt_count.min(5);
         (self.base_delay_ms * (1_i64 << shift)).min(self.max_delay_ms)
@@ -1328,6 +1422,13 @@ impl RetryPolicy {
 pub(super) trait RetryJitter {
     fn sample(&mut self, upper_inclusive_ms: i64) -> i64;
 }
+
+/// Injectable retry randomness boundary used by deterministic resilience
+/// tests. Production uses `SystemRetryJitter`; harnesses can provide a fixed
+/// sequence without touching scheduling logic.
+pub(super) trait RetryRandom: RetryJitter {}
+
+impl<T: RetryJitter> RetryRandom for T {}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum RetryDisposition {
@@ -1377,26 +1478,29 @@ impl RetryJitter for SystemRetryJitter {
         if upper_inclusive_ms <= 0 {
             return 0;
         }
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|value| value.as_nanos())
-            .unwrap_or_default();
-        let digest = Sha256::digest(now.to_le_bytes());
         let mut bytes = [0_u8; 8];
-        bytes.copy_from_slice(&digest[..8]);
-        i64::from_le_bytes(bytes).unsigned_abs() as i64 % (upper_inclusive_ms + 1)
+        if getrandom::fill(&mut bytes).is_err() {
+            return 0;
+        }
+        (u64::from_le_bytes(bytes) % (upper_inclusive_ms as u64 + 1)) as i64
     }
 }
 
 fn retry_backoff_ms(attempt_count: u32) -> i64 {
-    RetryPolicy::DELIVERY.full_jitter_ms(attempt_count, &mut SystemRetryJitter)
+    retry_backoff_with(attempt_count, &mut SystemRetryJitter)
+}
+
+fn retry_backoff_with<R: RetryRandom>(attempt_count: u32, random: &mut R) -> i64 {
+    RetryPolicy::DELIVERY.full_jitter_ms(attempt_count, random)
 }
 
 #[cfg(test)]
 mod retry_policy_tests {
     use super::{
-        RetryDisposition, RetryJitter, RetryPolicy, classify_retry_error, retry_error_code,
+        RetryDisposition, RetryJitter, RetryPolicy, classify_retry_error, retry_backoff_with,
+        retry_error_code,
     };
+    use crate::storage::RetryKind;
 
     struct FixedJitter(i64);
 
@@ -1439,6 +1543,35 @@ mod retry_policy_tests {
             retry_error_code("permanent: contact not found"),
             "permanent"
         );
+    }
+
+    #[test]
+    fn retry_backoff_accepts_deterministic_randomness() {
+        let mut random = FixedJitter(42);
+        assert_eq!(retry_backoff_with(0, &mut random), 42);
+    }
+
+    #[test]
+    fn every_durable_retry_kind_has_a_bounded_policy() {
+        let kinds = [
+            RetryKind::MessageSend,
+            RetryKind::MessageAckDeadline,
+            RetryKind::Receipt,
+            RetryKind::PendingWelcome,
+            RetryKind::PairingResponse,
+            RetryKind::PeerEndpointBootstrap,
+            RetryKind::ContactConfirmation,
+            RetryKind::PairingAcknowledgement,
+            RetryKind::ReadReceipt,
+            RetryKind::RelationshipRemoval,
+            RetryKind::RelationshipRemovalAck,
+        ];
+        for kind in kinds {
+            let policy = RetryPolicy::for_kind(kind);
+            assert!(policy.max_attempts > 0);
+            assert!(policy.max_age_ms > 0);
+            assert!(policy.max_delay_ms >= policy.base_delay_ms);
+        }
     }
 }
 
@@ -1592,6 +1725,7 @@ fn transport_status_event(
     retry_in_ms: Option<u64>,
     generation: u64,
     endpoint: Option<String>,
+    updated_at_ms: i64,
 ) -> torchat_client_runtime::RuntimeEvent {
     torchat_client_runtime::RuntimeEvent::TransportStatusChanged {
         component,
@@ -1603,7 +1737,7 @@ fn transport_status_event(
         retry_in_ms,
         generation,
         endpoint,
-        updated_at: unix_ms(),
+        updated_at: updated_at_ms,
     }
 }
 

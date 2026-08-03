@@ -25,7 +25,7 @@ impl ClientEngineActor {
         let snapshot_before = conversation
             .snapshot()
             .map_err(|error| EngineError::Storage(error.to_string()))?;
-        let now_ms = unix_ms();
+        let now_ms = self.clock.now_ms();
         let next_attempt_at = now_ms + retry_backoff_ms(0);
         let ack_deadline = Some(now_ms + 60_000);
 
@@ -133,7 +133,7 @@ impl ClientEngineActor {
             &message.message_id,
             &message.recipient_installation_id,
             sequence,
-            unix_secs(),
+            self.clock.now_ms() / 1_000,
         )?;
         let policy = self.contact_transport_policy(&message.recipient_installation_id)?;
         self.pending_engine_events.push(EngineEvent::Log {
@@ -224,7 +224,7 @@ impl ClientEngineActor {
             .unwrap_or(0);
         let age_exhausted = delivery.as_ref().is_some_and(|record| {
             super::RetryPolicy::DELIVERY
-                .age_exhausted(record.created_at.saturating_mul(1_000), unix_ms())
+                .age_exhausted(record.created_at.saturating_mul(1_000), self.clock.now_ms())
         });
         if matches!(
             super::classify_retry_error(error),
@@ -282,7 +282,7 @@ impl ClientEngineActor {
             EngineError::Storage("runtime message is missing from engine store".to_owned())
         })?;
         let next_attempt_at = self.clock.now_ms() + retry_backoff_ms(stored.attempt_count);
-        let ack_deadline = Some(unix_ms() + 60_000);
+        let ack_deadline = Some(self.clock.now_ms() + 60_000);
         if let Some(existing) = stored.wire_ciphertext {
             if !self.database.claim_outgoing_attempt(
                 &effect.message_id,

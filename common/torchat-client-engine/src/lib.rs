@@ -5,6 +5,7 @@ pub mod config;
 pub mod engine;
 pub mod error;
 pub mod event;
+pub mod fault_injection;
 mod logging;
 pub mod peer;
 pub mod probing;
@@ -23,6 +24,7 @@ pub use event::{
 pub use relay::{EngineRelay, NoopEngineRelay};
 pub use storage::{
     ClientDatabase, InboundEnvelopeStoreResult, InboundPeerEnvelopeRecord, Migration,
-    MigrationRunner, OutboundDeliveryRecord, RelationshipRemovalOutboxRecord, SqliteRuntimeStorage,
+    MigrationRunner, MlsCheckpointRecord, OutboundDeliveryRecord,
+    RelationshipRemovalAckOutboxRecord, RelationshipRemovalOutboxRecord, SqliteRuntimeStorage,
     SqliteTransaction,
 };

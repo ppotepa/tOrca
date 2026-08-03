@@ -202,12 +202,12 @@ pub unsafe extern "C" fn torchat_client_engine_new_with_mls_epoch_anchor(
         })?;
         let runtime = tokio::runtime::Runtime::new()
             .map_err(|error| EngineError::InvalidConfig(error.to_string()))?;
-        let mut anchor = FfiMlsEpochAnchor {
+        let anchor = FfiMlsEpochAnchor {
             get: get_epoch,
             set: set_epoch,
         };
-        let engine =
-            runtime.block_on(async { ClientEngine::new_with_anchor(config, &mut anchor) })?;
+        let engine = runtime
+            .block_on(async { ClientEngine::new_with_owned_anchor(config, Box::new(anchor)) })?;
         let (commands, events, shutdown_token) = engine.into_parts();
         Ok(into_opaque(Box::new(EngineHandle {
             runtime,

@@ -28,7 +28,7 @@ impl ClientEngineActor {
                 };
                 let store_result = match self
                     .database
-                    .store_inbound_peer_envelope(&envelope, unix_secs())
+                    .store_inbound_peer_envelope(&envelope, self.clock.now_ms() / 1_000)
                 {
                     Ok(result) => result,
                     Err(error) => {
@@ -38,11 +38,20 @@ impl ClientEngineActor {
                     }
                 };
                 let _ = persisted.send(Ok(ack(PeerAckKind::Persisted)));
+                if let Err(error) = self
+                    .fault_injector
+                    .hit(crate::fault_injection::FaultPoint::AfterPeerPersistedAck)
+                {
+                    let _ = delivered.send(Err(error.to_string()));
+                    return Err(error);
+                }
                 if matches!(
                     store_result,
                     InboundEnvelopeStoreResult::Duplicate { delivered: true }
                 ) {
                     let _ = delivered.send(Ok(ack(PeerAckKind::Delivered)));
+                    self.fault_injector
+                        .hit(crate::fault_injection::FaultPoint::AfterPeerDeliveredAck)?;
                     return Ok(Vec::new());
                 }
                 let ciphertext = String::from_utf8(envelope.ciphertext.clone()).map_err(|error| {
@@ -66,10 +75,21 @@ impl ClientEngineActor {
                 });
                 match result {
                     Ok(result) if result.committed => {
+                        if result.receipt_due {
+                            self.pending_engine_events.push(EngineEvent::Log {
+                                log: EngineLogEvent {
+                                    level: "debug".to_owned(),
+                                    message: "inbound committed with durable receipt pending"
+                                        .to_owned(),
+                                },
+                            });
+                        }
                         self.database.complete_inbound_peer_envelope(
                             &envelope.sender_installation_id,
                             &envelope.message_id.to_string(),
                         )?;
+                        self.fault_injector
+                            .hit(crate::fault_injection::FaultPoint::AfterPeerDeliveredAck)?;
                         let _ = delivered.send(Ok(ack(PeerAckKind::Delivered)));
                         Ok(result.runtime_events)
                     }
@@ -232,7 +252,7 @@ impl ClientEngineActor {
                         )
                     })?;
                 endpoint
-                    .validate_successor(&previous, unix_secs())
+                    .validate_successor(&previous, self.clock.now_ms() / 1_000)
                     .map_err(EngineError::InvalidCommand)?;
                 self.database.put_contact_peer_endpoint(&endpoint)?;
                 self.database
@@ -430,7 +450,7 @@ impl ClientEngineActor {
                 }
                 if status == PeerConnectionStatus::Connected {
                     self.database
-                        .mark_peer_connected(&installation_id, unix_secs())?;
+                        .mark_peer_connected(&installation_id, self.clock.now_ms() / 1_000)?;
                 }
                 let mut runtime_events = match (&status, error.as_deref(), delivery) {
                     (

@@ -73,7 +73,7 @@ impl ClientEngineActor {
                 let peer_endpoint = payload.welcome_peer_endpoint().cloned();
                 if let Some(endpoint) = &peer_endpoint {
                     endpoint
-                        .validate(unix_secs())
+                        .validate(self.clock.now_ms() / 1_000)
                         .map_err(EngineError::InvalidCommand)?;
                     if endpoint.installation_id != sender.installation_id
                         || endpoint.identity_public_key != sender.public_key
@@ -115,7 +115,7 @@ impl ClientEngineActor {
                 }
                 let pending_invite = self
                     .database
-                    .pending_local_invite_mls(&invite_id, unix_secs())?
+                    .pending_local_invite_mls(&invite_id, self.clock.now_ms() / 1_000)?
                     .ok_or_else(|| {
                         EngineError::InvalidCommand(
                             "local MLS state for contact invite is missing or expired".to_owned(),
@@ -205,6 +205,17 @@ impl ClientEngineActor {
                 self.pending_welcomes.remove(&invite_id);
                 Ok(Vec::new())
             }
+            RelayPayloadV1::RelationshipRemovalApplied { .. } => {
+                let removal_id = payload
+                    .verify_relationship_removal_applied(
+                        &envelope.sender,
+                        &self.identity.installation_id(),
+                    )
+                    .map_err(EngineError::InvalidCommand)?;
+                self.database
+                    .complete_relationship_removal_ack(&removal_id)?;
+                Ok(Vec::new())
+            }
             RelayPayloadV1::PeerEndpointBootstrap { .. } => {
                 let endpoint = payload
                     .verify_peer_endpoint_bootstrap(
@@ -225,7 +236,7 @@ impl ClientEngineActor {
                                 .map_err(EngineError::InvalidCommand)?
                                 .into_bytes(),
                             endpoint_sequence: endpoint.sequence,
-                            received_at: unix_ms(),
+                            received_at: self.clock.now_ms(),
                         },
                     )?;
                     self.pending_engine_events.push(EngineEvent::Log {

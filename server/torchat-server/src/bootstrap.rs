@@ -41,7 +41,7 @@ pub(crate) async fn apply_database_migrations(
 ) -> Result<(), tokio_postgres::Error> {
     db.batch_execute(SQL_SCHEMA_MIGRATIONS).await?;
     for (name, sql) in DATABASE_MIGRATIONS {
-        let checksum = format!("{:x}", Sha256::digest(sql.as_bytes()));
+        let checksum = migration_checksum(sql);
         let existing = db.query_opt(SQL_SCHEMA_MIGRATION_LOOKUP, &[name]).await?;
         if let Some(row) = existing {
             let applied: String = row.get(0);
@@ -59,6 +59,14 @@ pub(crate) async fn apply_database_migrations(
         info!(migration = *name, "database migration applied");
     }
     Ok(())
+}
+
+fn migration_checksum(sql: &str) -> String {
+    // Git may materialize newly added SQL files as CRLF on Windows while the
+    // same image build receives LF from the Docker context. Line endings are
+    // not a schema change, so checksum the canonical LF representation.
+    let canonical = sql.replace("\r\n", "\n");
+    format!("{:x}", Sha256::digest(canonical.as_bytes()))
 }
 
 pub(crate) async fn prune_server_metadata(

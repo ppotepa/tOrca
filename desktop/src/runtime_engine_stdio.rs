@@ -4,17 +4,23 @@ use sha2::{Digest, Sha256};
 use std::io::{BufRead, Write};
 use torchat_client_engine::{
     ClientEngine, EngineCommand, EngineCommandEnvelope, EngineConfig, EngineError, EngineEvent,
-    EngineFatalError, PlatformAction, PlatformFact, PlatformKind, anti_rollback::MlsEpochAnchor,
+    EngineFatalError, PlatformAction, PlatformFact, PlatformKind,
+    anti_rollback::{AnchoredMlsCheckpoint, MlsEpochAnchor},
     config::SecretBytes,
 };
 use url::Url;
 
 use crate::{cli::Cli, identity_store, tor_runtime::TorRuntime};
 
+#[cfg(not(any(feature = "os-vault", feature = "torka-file-secrets")))]
+compile_error!("torchat-desktop requires either os-vault or torka-file-secrets");
+
+#[cfg(feature = "os-vault")]
 struct DesktopMlsEpochAnchor {
     namespace: String,
 }
 
+#[cfg(feature = "os-vault")]
 impl DesktopMlsEpochAnchor {
     fn new(database_path: &std::path::Path) -> Self {
         let digest = Sha256::digest(database_path.to_string_lossy().as_bytes());
@@ -38,6 +44,7 @@ impl DesktopMlsEpochAnchor {
     }
 }
 
+#[cfg(feature = "os-vault")]
 impl MlsEpochAnchor for DesktopMlsEpochAnchor {
     type Error = EngineError;
 
@@ -61,6 +68,177 @@ impl MlsEpochAnchor for DesktopMlsEpochAnchor {
             .set_secret(&epoch.to_be_bytes())
             .map_err(|error| EngineError::Storage(format!("write MLS epoch vault value: {error}")))
     }
+
+    fn highest_checkpoint(
+        &self,
+        conversation_id: &str,
+    ) -> Result<Option<AnchoredMlsCheckpoint>, Self::Error> {
+        match self.entry(conversation_id)?.get_secret() {
+            Ok(value) => decode_checkpoint(&value).map(Some),
+            Err(error) if matches!(&error, keyring::Error::NoEntry) => Ok(None),
+            Err(error) => Err(EngineError::Storage(format!(
+                "read MLS checkpoint vault value: {error}"
+            ))),
+        }
+    }
+
+    fn record_checkpoint(
+        &mut self,
+        conversation_id: &str,
+        checkpoint: &AnchoredMlsCheckpoint,
+    ) -> Result<(), Self::Error> {
+        self.entry(conversation_id)?
+            .set_secret(&encode_checkpoint(checkpoint))
+            .map_err(|error| {
+                EngineError::Storage(format!("write MLS checkpoint vault value: {error}"))
+            })
+    }
+}
+
+#[cfg(all(not(feature = "os-vault"), feature = "torka-file-secrets"))]
+struct DesktopMlsEpochAnchor {
+    root: std::path::PathBuf,
+}
+
+#[cfg(all(not(feature = "os-vault"), feature = "torka-file-secrets"))]
+impl DesktopMlsEpochAnchor {
+    fn new(database_path: &std::path::Path) -> Self {
+        let file_name = database_path
+            .file_name()
+            .unwrap_or_else(|| std::ffi::OsStr::new("torchat-client.db"));
+        Self {
+            root: database_path
+                .with_file_name(format!("{}.mls-anchors", file_name.to_string_lossy())),
+        }
+    }
+
+    fn path(&self, conversation_id: &str) -> std::path::PathBuf {
+        let digest = Sha256::digest(conversation_id.as_bytes());
+        let name = digest
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        self.root.join(name)
+    }
+}
+
+#[cfg(all(not(feature = "os-vault"), feature = "torka-file-secrets"))]
+impl MlsEpochAnchor for DesktopMlsEpochAnchor {
+    type Error = EngineError;
+
+    fn highest_epoch(&self, conversation_id: &str) -> Result<Option<u64>, Self::Error> {
+        let path = self.path(conversation_id);
+        if !path.exists() {
+            return Ok(None);
+        }
+        let value = std::fs::read(&path)
+            .map_err(|error| EngineError::Storage(format!("read Torka MLS anchor: {error}")))?;
+        let bytes: [u8; 8] = value
+            .try_into()
+            .map_err(|_| EngineError::Storage("Torka MLS anchor has invalid length".to_owned()))?;
+        Ok(Some(u64::from_be_bytes(bytes)))
+    }
+
+    fn record_epoch(&mut self, conversation_id: &str, epoch: u64) -> Result<(), Self::Error> {
+        if self
+            .highest_epoch(conversation_id)?
+            .is_some_and(|current| epoch < current)
+        {
+            return Err(EngineError::Storage(
+                "Torka MLS anchor cannot move backwards".to_owned(),
+            ));
+        }
+        std::fs::create_dir_all(&self.root)
+            .map_err(|error| EngineError::Storage(format!("create Torka MLS anchors: {error}")))?;
+        let path = self.path(conversation_id);
+        let temporary = path.with_extension("tmp");
+        std::fs::write(&temporary, epoch.to_be_bytes())
+            .map_err(|error| EngineError::Storage(format!("write Torka MLS anchor: {error}")))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(0o600)).map_err(
+                |error| EngineError::Storage(format!("protect Torka MLS anchor: {error}")),
+            )?;
+        }
+        std::fs::rename(&temporary, &path)
+            .map_err(|error| EngineError::Storage(format!("commit Torka MLS anchor: {error}")))
+    }
+
+    fn highest_checkpoint(
+        &self,
+        conversation_id: &str,
+    ) -> Result<Option<AnchoredMlsCheckpoint>, Self::Error> {
+        let path = self.path(conversation_id);
+        if !path.exists() {
+            return Ok(None);
+        }
+        let value = std::fs::read(&path)
+            .map_err(|error| EngineError::Storage(format!("read Torka MLS checkpoint: {error}")))?;
+        decode_checkpoint(&value).map(Some)
+    }
+
+    fn record_checkpoint(
+        &mut self,
+        conversation_id: &str,
+        checkpoint: &AnchoredMlsCheckpoint,
+    ) -> Result<(), Self::Error> {
+        let path = self.path(conversation_id);
+        std::fs::create_dir_all(&self.root)
+            .map_err(|error| EngineError::Storage(format!("create Torka MLS anchors: {error}")))?;
+        let temporary = path.with_extension("tmp");
+        std::fs::write(&temporary, encode_checkpoint(checkpoint)).map_err(|error| {
+            EngineError::Storage(format!("write Torka MLS checkpoint: {error}"))
+        })?;
+        std::fs::rename(&temporary, &path)
+            .map_err(|error| EngineError::Storage(format!("commit Torka MLS checkpoint: {error}")))
+    }
+}
+
+const CHECKPOINT_MAGIC: &[u8; 8] = b"TCANCHK2";
+
+fn encode_checkpoint(checkpoint: &AnchoredMlsCheckpoint) -> Vec<u8> {
+    let hash_len = checkpoint.snapshot_hash.len() as u32;
+    let mut bytes = Vec::with_capacity(28 + checkpoint.snapshot_hash.len());
+    bytes.extend_from_slice(CHECKPOINT_MAGIC);
+    bytes.extend_from_slice(&checkpoint.state_version.to_be_bytes());
+    bytes.extend_from_slice(&checkpoint.epoch.to_be_bytes());
+    bytes.extend_from_slice(&hash_len.to_be_bytes());
+    bytes.extend_from_slice(&checkpoint.snapshot_hash);
+    bytes
+}
+
+fn decode_checkpoint(bytes: &[u8]) -> Result<AnchoredMlsCheckpoint, EngineError> {
+    if bytes.len() == 8 {
+        let epoch = u64::from_be_bytes(
+            bytes
+                .try_into()
+                .map_err(|_| EngineError::Storage("invalid legacy MLS anchor".to_owned()))?,
+        );
+        return Ok(AnchoredMlsCheckpoint {
+            state_version: epoch,
+            epoch,
+            snapshot_hash: Vec::new(),
+        });
+    }
+    if bytes.len() < 28 || &bytes[..8] != CHECKPOINT_MAGIC {
+        return Err(EngineError::Storage(
+            "invalid MLS checkpoint header".to_owned(),
+        ));
+    }
+    let state_version = u64::from_be_bytes(bytes[8..16].try_into().unwrap());
+    let epoch = u64::from_be_bytes(bytes[16..24].try_into().unwrap());
+    let hash_len = u32::from_be_bytes(bytes[24..28].try_into().unwrap()) as usize;
+    if hash_len != bytes.len() - 28 {
+        return Err(EngineError::Storage(
+            "invalid MLS checkpoint length".to_owned(),
+        ));
+    }
+    Ok(AnchoredMlsCheckpoint {
+        state_version,
+        epoch,
+        snapshot_hash: bytes[28..].to_vec(),
+    })
 }
 
 fn write_json_line(value: impl Serialize) -> Result<()> {
@@ -119,10 +297,15 @@ pub(crate) fn start_tor(
 pub fn run_stdio_engine(cli: Cli) -> Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async move {
+        #[cfg(feature = "os-vault")]
+        if let Some(legacy_path) = cli.import_legacy_identity.as_deref() {
+            identity_store::import_legacy_identity(legacy_path)?;
+        }
         let identity = identity_store::load_or_create(cli.identity_file.as_deref())?;
         let database_path = identity_store::state_path(cli.identity_file.as_deref())?;
         let database_key_path = identity_store::database_key_path(cli.identity_file.as_deref())?;
         let database_key = identity_store::load_or_create_database_key(&database_key_path)?;
+        let mls_anchor = DesktopMlsEpochAnchor::new(&database_path);
         let log_directory = database_path
             .parent()
             .map(|parent| parent.join("engine-logs"));
@@ -135,8 +318,7 @@ pub fn run_stdio_engine(cli: Cli) -> Result<()> {
             log_directory,
             platform: platform_kind(),
         };
-        let mut mls_anchor = DesktopMlsEpochAnchor::new(&database_path);
-        let mut engine = ClientEngine::new_with_anchor(config, &mut mls_anchor)?;
+        let mut engine = ClientEngine::new_with_owned_anchor(config, Box::new(mls_anchor))?;
         engine.start().await?;
         let (tor_runtime, status_rx) = start_tor(&cli)?;
 

@@ -26,6 +26,7 @@ import org.json.JSONObject
 import org.torchat.generated.EngineContract
 
 class MainActivity : FlutterActivity() {
+    private var activeCommandId: String? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val mainHandler = Handler(Looper.getMainLooper())
     private var eventSink: EventChannel.EventSink? = null
@@ -189,6 +190,7 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun handle(call: MethodCall, result: MethodChannel.Result) {
+        activeCommandId = call.argument<String>(EngineContract.COMMAND_ID)
         when (call.method) {
             EngineContract.CONNECT -> connect(result)
             EngineContract.GET_IDENTITY -> submitQueryResult(result, EngineContract.COMMAND_GET_IDENTITY)
@@ -207,6 +209,7 @@ class MainActivity : FlutterActivity() {
                 readyEngineHost().submitCommandAndAwait(
                     engineCommand(EngineContract.COMMAND_SET_NICKNAME)
                         .put(EngineContract.NICKNAME, nickname),
+                    commandId = call.argument<String>(EngineContract.COMMAND_ID),
                 )
             }
             EngineContract.SUBMIT_PAIRING_CODE -> submitCommandResult(
@@ -466,9 +469,10 @@ class MainActivity : FlutterActivity() {
         result: MethodChannel.Result,
         command: JSONObject,
         discardPayload: Boolean = false,
+        commandId: String? = activeCommandId,
     ) {
         runAsync(result) {
-            val payload = readyEngineHost().submitCommandAndAwait(command)
+            val payload = readyEngineHost().submitCommandAndAwait(command, commandId = commandId)
             if (discardPayload) null else payload
         }
     }

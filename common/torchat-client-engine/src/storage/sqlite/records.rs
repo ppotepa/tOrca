@@ -186,6 +186,8 @@ pub enum RetryKind {
     ContactConfirmation,
     PairingAcknowledgement,
     ReadReceipt,
+    RelationshipRemoval,
+    RelationshipRemovalAck,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

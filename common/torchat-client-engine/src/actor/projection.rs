@@ -1,9 +1,9 @@
 use torchat_client_runtime::{
-    ApplicationSnapshot, PairingSummary, ProjectionStamp, RuntimeIdentity, RuntimeProfile,
-    RuntimeStorage, UiCheckpoint,
+    ApplicationSnapshot, PairingSummary, ProjectionStamp, RuntimeClock, RuntimeIdentity,
+    RuntimeProfile, RuntimeStorage, UiCheckpoint,
 };
 
-use super::{ClientEngineActor, runtime_error, unix_ms};
+use super::{ClientEngineActor, runtime_error};
 use crate::{EngineError, EngineResult, storage::SqliteRuntimeStorage};
 
 impl ClientEngineActor {
@@ -47,7 +47,7 @@ impl ClientEngineActor {
         Ok(ApplicationSnapshot {
             schema_version: torchat_client_runtime::APPLICATION_SNAPSHOT_SCHEMA_VERSION,
             generation: revision,
-            created_at_ms: unix_ms(),
+            created_at_ms: self.clock.now_ms(),
             identity,
             profile,
             contacts,

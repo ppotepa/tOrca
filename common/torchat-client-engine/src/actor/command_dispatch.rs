@@ -27,6 +27,7 @@ impl ClientEngineActor {
                     None,
                     self.connection_generation,
                     None,
+                    self.clock.now_ms(),
                 ));
                 Ok((json_response(bootstrapped)?, runtime_events, None))
             }
@@ -169,7 +170,7 @@ impl ClientEngineActor {
                             version: torchat_core::PROTOCOL_VERSION,
                             capability_id,
                             sequence,
-                            revoked_at: unix_secs(),
+                            revoked_at: self.clock.now_ms() / 1_000,
                         },
                     );
                 }

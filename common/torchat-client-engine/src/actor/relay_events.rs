@@ -56,6 +56,7 @@ impl ClientEngineActor {
                     None,
                     self.connection_generation,
                     self.socks5_url.clone(),
+                    self.clock.now_ms(),
                 ));
                 self.flush_pending_send_effects()?;
                 self.flush_pending_receipt_effects()?;
@@ -92,6 +93,7 @@ impl ClientEngineActor {
                     Some(retry_in_ms),
                     self.connection_generation,
                     None,
+                    self.clock.now_ms(),
                 )];
                 Ok((
                     runtime_events,
@@ -118,6 +120,7 @@ impl ClientEngineActor {
                         None,
                         self.connection_generation,
                         None,
+                        self.clock.now_ms(),
                     )],
                     Some(self.connection_snapshot("relay disconnected")),
                     Some(EngineLogEvent {
@@ -301,8 +304,6 @@ impl ClientEngineActor {
                             | MessageTransportOutcome::PeerDelivered
                     ) {
                         self.database.complete_capability_delivery(&delivery_id)?;
-                        self.database
-                            .complete_relationship_removal_ack(&delivery_id)?;
                     } else {
                         self.database.record_capability_delivery_error(
                             &delivery_id,
@@ -326,6 +327,23 @@ impl ClientEngineActor {
                         ),
                     },
                 });
+                Ok(Vec::new())
+            }
+            Some(PendingRelayDelivery::RelationshipRemovalAck { removal_id }) => {
+                // The sender's signed application ACK is durable until the
+                // relay accepts it. Relay FORWARDED is sufficient for this
+                // one-way notification; it must never complete the removal
+                // outbox owned by the original sender.
+                if matches!(
+                    outcome,
+                    MessageTransportOutcome::Forwarded
+                        | MessageTransportOutcome::Delivered
+                        | MessageTransportOutcome::PeerPersisted
+                        | MessageTransportOutcome::PeerDelivered
+                ) {
+                    self.database
+                        .complete_relationship_removal_ack_delivery(&removal_id)?;
+                }
                 Ok(Vec::new())
             }
             Some(PendingRelayDelivery::PeerEndpointBootstrap {

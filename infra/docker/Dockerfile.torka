@@ -4,7 +4,7 @@ COPY infra/docker/Cargo.torka.toml ./Cargo.toml
 COPY Cargo.lock ./
 COPY common ./common
 COPY desktop ./desktop
-RUN cargo build --release -p torchat-desktop
+RUN cargo build --release -p torchat-desktop --no-default-features --features torka-file-secrets
 
 FROM debian:bookworm-slim
 RUN apt-get update \

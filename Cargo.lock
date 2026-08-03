@@ -2988,8 +2988,9 @@ dependencies = [
 name = "torchat-client-engine"
 version = "0.1.0"
 dependencies = [
- "base64",
- "futures-util",
+	"base64",
+	"futures-util",
+	"getrandom 0.3.4",
  "reqwest",
  "rusqlite",
  "secrecy",

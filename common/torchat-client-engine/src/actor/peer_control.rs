@@ -55,9 +55,11 @@ impl ClientEngineActor {
                 "peer MLS session is inconsistent; pair the contact again".to_owned(),
             ));
         }
-        endpoint.validate(unix_secs()).map_err(|error| {
-            EngineError::Transport(format!("peer endpoint validation failed: {error}"))
-        })?;
+        endpoint
+            .validate(self.clock.now_ms() / 1_000)
+            .map_err(|error| {
+                EngineError::Transport(format!("peer endpoint validation failed: {error}"))
+            })?;
         if endpoint.installation_id != recipient {
             return Err(EngineError::Transport(
                 "peer endpoint does not belong to the requested contact".to_owned(),
@@ -68,7 +70,7 @@ impl ClientEngineActor {
             message_id: delivery_message_id,
         } = &delivery
         {
-            let now = unix_ms();
+            let now = self.clock.now_ms();
             let ack_deadline = now + 60_000;
             if !self.database.claim_outbound_delivery(
                 delivery_message_id,
@@ -103,7 +105,7 @@ impl ClientEngineActor {
             message_id,
             conversation_id: conversation_id.to_owned(),
             sequence,
-            created_at: unix_secs(),
+            created_at: self.clock.now_ms() / 1_000,
             ciphertext,
             delivery,
             socks5_url,
@@ -185,7 +187,7 @@ impl ClientEngineActor {
                 message_id: probe_id,
                 conversation_id: contact.installation_id,
                 sequence: stable_message_sequence(probe_id),
-                created_at: unix_secs(),
+                created_at: self.clock.now_ms() / 1_000,
                 ciphertext: Vec::new(),
                 // Endpoint updates are sent by the same command, but the
                 // delivery itself must remain a probe so a successful Ping
@@ -258,7 +260,7 @@ impl ClientEngineActor {
             message_id: probe_id,
             conversation_id: recipient.to_owned(),
             sequence: stable_message_sequence(probe_id),
-            created_at: unix_secs(),
+            created_at: self.clock.now_ms() / 1_000,
             ciphertext: Vec::new(),
             delivery: PeerDeliveryTag::Probe,
             socks5_url,
@@ -322,7 +324,7 @@ impl ClientEngineActor {
             message_id: control_id,
             conversation_id: recipient.to_owned(),
             sequence: stable_message_sequence(control_id),
-            created_at: unix_secs(),
+            created_at: self.clock.now_ms() / 1_000,
             ciphertext: Vec::new(),
             delivery,
             socks5_url,

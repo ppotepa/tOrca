@@ -55,7 +55,12 @@ if ($failures.Count -gt 0) {
 # Keep one cross-language UTF-8 sentinel in the checker. This catches an
 # exporter or shell that silently converts Polish text while preserving valid
 # UTF-8 byte sequences for ordinary ASCII-only fixtures.
-$golden = 'Zażółć gęślą jaźń'
+$golden = -join @(
+    [char]0x005A, [char]0x0061, [char]0x017C, [char]0x00F3,
+    [char]0x0142, [char]0x0107, [char]0x0020, [char]0x0067,
+    [char]0x0119, [char]0x015B, [char]0x006C, [char]0x0105,
+    [char]0x0020, [char]0x006A, [char]0x0061, [char]0x017A, [char]0x0144
+)
 $goldenFixtures = @(
     ('{"text":"' + $golden + '"}', 'JSON'),
     ('const text = "' + $golden + '";', 'Dart'),
@@ -66,6 +71,17 @@ foreach ($fixture in $goldenFixtures) {
     $roundTrip = $utf8.GetString($bytes)
     if ($roundTrip -ne $fixture[0]) {
         throw "UTF-8 golden round-trip failed for $($fixture[1])."
+    }
+}
+$fixturePath = Join-Path $RepositoryRoot 'common/encoding-fixture.json'
+if (Test-Path -LiteralPath $fixturePath) {
+    $fixtureText = [IO.File]::ReadAllText($fixturePath, $utf8)
+    $fixtureObject = $fixtureText | ConvertFrom-Json
+    foreach ($property in 'polish', 'emoji', 'combining', 'cyrillic', 'greek') {
+        $value = [string]$fixtureObject.$property
+        if ([string]::IsNullOrEmpty($value) -or $value -ne ([string]$fixtureObject.$property)) {
+            throw "UTF-8 fixture round-trip failed for '$property'."
+        }
     }
 }
 

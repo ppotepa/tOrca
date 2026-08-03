@@ -88,6 +88,15 @@ pub enum RelayPayloadV1 {
         recipient: String,
         endpoint: PeerEndpointBundle,
     },
+    RelationshipRemovalApplied {
+        version: u16,
+        sender: ContactCard,
+        recipient_installation_id: String,
+        removal_id: String,
+        relationship_epoch: i64,
+        applied_at: i64,
+        signature: String,
+    },
 }
 
 impl RelayPayloadV1 {
@@ -194,6 +203,7 @@ impl RelayPayloadV1 {
             | Self::Welcome { version, .. }
             | Self::WelcomeApplied { version, .. }
             | Self::PeerEndpointBootstrap { version, .. } => *version,
+            Self::RelationshipRemovalApplied { version, .. } => *version,
         };
         if version != PROTOCOL_VERSION {
             return Err("unsupported relay payload version".into());
@@ -317,6 +327,72 @@ impl RelayPayloadV1 {
         }
     }
 
+    pub fn relationship_removal_applied(
+        identity: &Identity,
+        recipient_installation_id: String,
+        removal_id: String,
+        relationship_epoch: i64,
+        applied_at: i64,
+    ) -> Self {
+        let sender = ContactCard::from_identity(identity, "TorChat");
+        let signature = identity.sign(&relationship_removal_applied_signing_bytes(
+            &sender,
+            &recipient_installation_id,
+            &removal_id,
+            relationship_epoch,
+            applied_at,
+        ));
+        Self::RelationshipRemovalApplied {
+            version: PROTOCOL_VERSION,
+            sender,
+            recipient_installation_id,
+            removal_id,
+            relationship_epoch,
+            applied_at,
+            signature,
+        }
+    }
+
+    pub fn verify_relationship_removal_applied(
+        &self,
+        expected_sender: &str,
+        expected_recipient: &str,
+    ) -> Result<String, String> {
+        let Self::RelationshipRemovalApplied {
+            sender,
+            recipient_installation_id,
+            removal_id,
+            relationship_epoch,
+            applied_at,
+            signature,
+            ..
+        } = self
+        else {
+            return Err("relay payload is not a relationship removal acknowledgement".into());
+        };
+        sender.validate()?;
+        if sender.installation_id != expected_sender {
+            return Err("relationship removal ACK sender mismatch".into());
+        }
+        if recipient_installation_id != expected_recipient {
+            return Err("relationship removal ACK recipient mismatch".into());
+        }
+        if !verify_signature(
+            &sender.public_key,
+            &relationship_removal_applied_signing_bytes(
+                sender,
+                recipient_installation_id,
+                removal_id,
+                *relationship_epoch,
+                *applied_at,
+            ),
+            signature,
+        ) {
+            return Err("invalid relationship removal ACK signature".into());
+        }
+        Ok(removal_id.clone())
+    }
+
     pub fn verify_peer_endpoint_bootstrap(
         &self,
         expected_sender: &str,
@@ -395,6 +471,25 @@ fn welcome_applied_signing_bytes(
         output.extend_from_slice(value);
     }
     output
+}
+
+fn relationship_removal_applied_signing_bytes(
+    sender: &ContactCard,
+    recipient_installation_id: &str,
+    removal_id: &str,
+    relationship_epoch: i64,
+    applied_at: i64,
+) -> Vec<u8> {
+    format!(
+        "torchat.relationship-removal-applied.v1|{}|{}|{}|{}|{}|{}",
+        PROTOCOL_VERSION,
+        sender.installation_id,
+        recipient_installation_id,
+        removal_id,
+        relationship_epoch,
+        applied_at,
+    )
+    .into_bytes()
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -500,6 +595,37 @@ mod tests {
         assert!(
             decoded
                 .verify_welcome_applied(&bob.installation_id(), &bob.installation_id())
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn signed_relationship_removal_applied_round_trip_rejects_wrong_recipient() {
+        let alice = Identity::generate();
+        let bob = Identity::generate();
+        let payload = RelayPayloadV1::relationship_removal_applied(
+            &alice,
+            bob.installation_id(),
+            "removal-1".into(),
+            7,
+            1234,
+        );
+        let decoded = RelayPayloadV1::decode(&payload.encode().unwrap()).unwrap();
+        assert_eq!(
+            decoded
+                .verify_relationship_removal_applied(
+                    &alice.installation_id(),
+                    &bob.installation_id(),
+                )
+                .unwrap(),
+            "removal-1"
+        );
+        assert!(
+            decoded
+                .verify_relationship_removal_applied(
+                    &alice.installation_id(),
+                    &Identity::generate().installation_id(),
+                )
                 .is_err()
         );
     }

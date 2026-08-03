@@ -5,13 +5,20 @@ edition.workspace = true
 license.workspace = true
 description = "TorChat lightweight desktop client for Windows and Linux"
 
+[features]
+default = ["os-vault"]
+os-vault = ["dep:keyring"]
+# Development-only backend for the isolated Torka container. Its private
+# Docker volume is the security boundary and survives container recreation.
+torka-file-secrets = []
+
 [dependencies]
 anyhow = "1"
 base64 = "0.22"
 clap = { version = "4", features = ["derive", "env"] }
 directories = "6"
 getrandom = "0.3"
-keyring = { version = "3.6.3", default-features = false, features = ["apple-native", "windows-native", "sync-secret-service"] }
+keyring = { version = "3.6.3", default-features = false, features = ["apple-native", "windows-native", "sync-secret-service"], optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"

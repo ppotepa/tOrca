@@ -104,7 +104,7 @@ impl ClientEngineActor {
         let previous = self
             .database
             .contact_peer_endpoint(&endpoint.installation_id)?;
-        if !peer_endpoint_requires_update(previous.as_ref(), &endpoint, unix_secs())
+        if !peer_endpoint_requires_update(previous.as_ref(), &endpoint, self.clock.now_ms() / 1_000)
             .map_err(EngineError::InvalidCommand)?
         {
             return Ok(Vec::new());
@@ -169,7 +169,10 @@ impl ClientEngineActor {
         if self.connection_state != ConnectionState::Connected {
             return Ok(());
         }
-        for record in self.database.due_peer_endpoint_bootstraps(unix_ms())? {
+        for record in self
+            .database
+            .due_peer_endpoint_bootstraps(self.clock.now_ms())?
+        {
             let next_attempt_at = self.clock.now_ms() + retry_backoff_ms(record.attempt_count);
             if !self.database.claim_peer_endpoint_bootstrap_attempt(
                 &record.contact_installation_id,
@@ -233,7 +236,7 @@ impl ClientEngineActor {
                 capability_id,
                 secret: URL_SAFE_NO_PAD.encode(secret),
                 sequence,
-                issued_at: unix_secs(),
+                issued_at: self.clock.now_ms() / 1_000,
                 expires_at: None,
             },
         )
@@ -281,7 +284,10 @@ impl ClientEngineActor {
         if self.connection_state != ConnectionState::Connected {
             return Ok(());
         }
-        for record in self.database.due_capability_deliveries(unix_ms())? {
+        for record in self
+            .database
+            .due_capability_deliveries(self.clock.now_ms())?
+        {
             let next_attempt = self.clock.now_ms() + retry_backoff_ms(record.attempt_count);
             if !self
                 .database

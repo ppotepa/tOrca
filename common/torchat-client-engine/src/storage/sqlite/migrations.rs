@@ -70,6 +70,10 @@ pub const BASELINE_SCHEMA: &str = concat!(
     "\n",
     include_str!("../../../sql/migrations/029_remove_relationship_guard_triggers.sql"),
     "\n",
+    include_str!("../../../sql/migrations/030_relationship_removal_ack_outbox.sql"),
+    "\n",
+    include_str!("../../../sql/migrations/031_mls_checkpoint_versions.sql"),
+    "\n",
     "INSERT OR IGNORE INTO schema_migrations (version, name) VALUES ",
     "(0, '000_schema_migrations.sql'),",
     "(1, '001_canonical_client.sql'),",
@@ -100,7 +104,9 @@ pub const BASELINE_SCHEMA: &str = concat!(
     "(26, '026_remove_legacy_relationship_triggers.sql'),",
     "(27, '027_retry_dead_letters.sql'),",
     "(28, '028_relationship_epoch_boundary.sql'),",
-    "(29, '029_remove_relationship_guard_triggers.sql');"
+    "(29, '029_remove_relationship_guard_triggers.sql'),",
+    "(30, '030_relationship_removal_ack_outbox.sql'),",
+    "(31, '031_mls_checkpoint_versions.sql');"
 );
 
 pub const MIGRATIONS: &[Migration] = &[
@@ -253,5 +259,15 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 29,
         name: "029_remove_relationship_guard_triggers.sql",
         sql: include_str!("../../../sql/migrations/029_remove_relationship_guard_triggers.sql"),
+    },
+    Migration {
+        version: 30,
+        name: "030_relationship_removal_ack_outbox.sql",
+        sql: include_str!("../../../sql/migrations/030_relationship_removal_ack_outbox.sql"),
+    },
+    Migration {
+        version: 31,
+        name: "031_mls_checkpoint_versions.sql",
+        sql: include_str!("../../../sql/migrations/031_mls_checkpoint_versions.sql"),
     },
 ];

@@ -10,7 +10,7 @@ impl ClientEngineActor {
     pub(super) fn handle_application_envelope_result(
         &mut self,
         envelope: RelayEnvelope,
-        ciphertext: PeerCiphertextPayload,
+        ciphertext: Vec<u8>,
     ) -> EngineResult<InboundApplyResult> {
         let message_id = envelope.message_id.to_string();
         let runtime_events = self.handle_application_envelope(envelope, ciphertext)?;
@@ -60,7 +60,7 @@ impl ClientEngineActor {
                     envelope_json,
                     ciphertext,
                     ciphertext_hash,
-                    received_at: unix_ms(),
+                    received_at: self.clock.now_ms(),
                 })?;
             self.pending_engine_events.push(EngineEvent::Log {
                 log: EngineLogEvent {
@@ -85,7 +85,7 @@ impl ClientEngineActor {
             let snapshot_after = conversation
                 .snapshot()
                 .map_err(|error| EngineError::Storage(error.to_string()))?;
-            let received_at = unix_secs();
+            let received_at = self.clock.now_ms() / 1_000;
             let envelope_record = ReceivedEnvelopeRecord {
                 sender_installation_id: peer.clone(),
                 message_id: message_id.to_string(),
@@ -222,7 +222,7 @@ impl ClientEngineActor {
                 ApplicationPayloadV1::RelationshipRemoved {
                     message_id: removal_message_id,
                     removed_at,
-                    preserve_history,
+                    preserve_history: _,
                     relationship_epoch,
                     removal_id,
                     ..
@@ -232,23 +232,35 @@ impl ClientEngineActor {
                             "relationship removal messageId mismatch".to_owned(),
                         ));
                     }
+                    let removal_id = removal_id
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| removal_message_id.to_string());
+                    let relationship_epoch = relationship_epoch.unwrap_or(0);
+                    let ack = RelayPayloadV1::relationship_removal_applied(
+                        &self.identity,
+                        peer.clone(),
+                        removal_id.clone(),
+                        relationship_epoch,
+                        self.clock.now_ms(),
+                    )
+                    .encode()
+                    .map_err(EngineError::InvalidCommand)?;
                     let (_, events) = self.with_runtime(|runtime| {
                         // The shared runtime owns the relationship transition;
                         // the transport only delivers the typed application
                         // payload and persists the resulting MLS snapshot.
-                        let removal_id = removal_id
-                            .map(|value| value.to_string())
-                            .unwrap_or_else(|| removal_message_id.to_string());
-                        runtime.remove_relationship_with_id(
+                        runtime.apply_remote_relationship_removal(
                             &peer,
                             removed_at,
-                            preserve_history,
                             &removal_id,
-                            relationship_epoch.unwrap_or(removed_at),
+                            relationship_epoch,
                         )?;
-                        runtime
-                            .storage_mut()
-                            .put_conversation_mls_snapshot(&peer, &snapshot_after)?;
+                        runtime.storage_mut().put_relationship_removal_ack(
+                            &removal_id,
+                            &peer,
+                            relationship_epoch,
+                            ack.as_bytes(),
+                        )?;
                         runtime
                             .storage_mut()
                             .put_received_envelope(&envelope_record)?;

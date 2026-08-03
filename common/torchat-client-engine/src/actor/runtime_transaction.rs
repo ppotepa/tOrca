@@ -1,12 +1,14 @@
 use std::mem;
 
 use torchat_client_runtime::ClientRuntime;
+use torchat_core::mls::DirectConversation;
 
 use super::{
     ClientEngineActor, EngineRuntimeTransport, IdempotencyCommitContext, SharedRuntimeClock,
     runtime_error,
 };
-use crate::{EngineResult, event::ResponsePayload, storage::SqliteRuntimeStorage};
+use crate::fault_injection::FaultPoint;
+use crate::{EngineError, EngineResult, event::ResponsePayload, storage::SqliteRuntimeStorage};
 
 impl ClientEngineActor {
     pub(super) fn with_runtime<R>(
@@ -95,9 +97,12 @@ impl ClientEngineActor {
                             .map_err(runtime_error)?;
                     }
                 }
+                self.fault_injector.hit(FaultPoint::BeforeLocalCommit)?;
                 match runtime.storage_mut().commit() {
                     Ok(()) => {
                         runtime.session_mut().commit_transaction();
+                        self.fault_injector
+                            .hit(FaultPoint::AfterLocalCommitBeforeDispatch)?;
                         Ok((value, projection_changed, conversation_ids))
                     }
                     Err(error) => {
@@ -124,6 +129,23 @@ impl ClientEngineActor {
         self.session = session;
         self.tor_status = transport.status;
         let (value, projection_changed, conversation_ids) = result.map_err(runtime_error)?;
+        if let Some(anchor) = self.mls_anchor.as_deref_mut() {
+            for conversation_id in &conversation_ids {
+                if let Some(record) = self.database.conversation_mls_checkpoint(conversation_id)? {
+                    let epoch = DirectConversation::restore(&record.snapshot)
+                        .map_err(EngineError::Storage)?
+                        .epoch();
+                    anchor.record_checkpoint(
+                        conversation_id,
+                        &crate::anti_rollback::AnchoredMlsCheckpoint {
+                            state_version: record.state_version,
+                            epoch,
+                            snapshot_hash: record.snapshot_hash.unwrap_or_default(),
+                        },
+                    )?;
+                }
+            }
+        }
         if projection_changed && let Ok((store_id, revision)) = self.database.projection_head() {
             let mut events = events;
             events.push(torchat_client_runtime::RuntimeEvent::ProjectionChanged {

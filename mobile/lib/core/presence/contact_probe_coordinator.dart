@@ -260,13 +260,21 @@ class ContactProbeCoordinator {
     String? contactId, {
     required String source,
   }) async {
+    final snapshot = contactId == null ? null : store.snapshot(contactId);
     developer.log(
       event,
       name: 'torchat.presence',
       error: {
         'contactIdHash': contactId == null ? null : await _digest(contactId),
         'source': source,
-        'revision': contactId == null ? null : (_sequence[contactId] ?? 0),
+        'availability': snapshot?.availability.name,
+        'peerLink': snapshot?.peerLink.name,
+        'observedAt': snapshot?.observedAt,
+        'expiresAt': snapshot?.expiresAt,
+        'latencyMs': snapshot?.latencyMs,
+        'revision':
+            snapshot?.revision ??
+            (contactId == null ? null : (_sequence[contactId] ?? 0)),
       },
     );
   }

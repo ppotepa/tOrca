@@ -61,6 +61,17 @@ impl<'db> SqliteRuntimeStorage<'db> {
                 &removal_id,
                 relationship_epoch,
             ),
+            RelationshipTransition::ApplyRemoteRemoval {
+                installation_id,
+                remote_removed_at,
+                removal_id,
+                relationship_epoch,
+            } => self.apply_remote_relationship_removal(
+                &installation_id,
+                remote_removed_at,
+                &removal_id,
+                relationship_epoch,
+            ),
         }
     }
 
@@ -287,14 +298,17 @@ impl<'db> SqliteRuntimeStorage<'db> {
         if tombstoned {
             return Ok(());
         }
+        let snapshot_hash = Sha256::digest(snapshot).to_vec();
         self.tx()
             .execute(
-                "INSERT INTO conversation_mls (conversation_id, snapshot, updated_at)
-                 VALUES (?1, ?2, unixepoch())
+                "INSERT INTO conversation_mls (conversation_id, snapshot, state_version, snapshot_hash, updated_at)
+                 VALUES (?1, ?2, 1, ?3, unixepoch())
                  ON CONFLICT(conversation_id) DO UPDATE SET
                     snapshot = excluded.snapshot,
+                    state_version = conversation_mls.state_version + 1,
+                    snapshot_hash = excluded.snapshot_hash,
                     updated_at = unixepoch();",
-                params![conversation_id, snapshot],
+                params![conversation_id, snapshot, snapshot_hash],
             )
             .map_err(storage_error)?;
         Ok(())
@@ -679,6 +693,89 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
         ] {
             tx.execute(sql, [installation_id]).map_err(storage_error)?;
         }
+        Ok(())
+    }
+
+    fn apply_remote_relationship_removal(
+        &mut self,
+        installation_id: &str,
+        remote_removed_at: i64,
+        removal_id: &str,
+        relationship_epoch: i64,
+    ) -> RuntimeResult<()> {
+        if installation_id.trim().is_empty() || removal_id.trim().is_empty() {
+            return Err(RuntimeError::InvalidParams(
+                "remote relationship removal identifiers must not be empty".to_owned(),
+            ));
+        }
+        let tx = self.tx();
+        let current_epoch = tx
+            .query_row(
+                "SELECT relationship_epoch FROM relationship_tombstones WHERE contact_installation_id = ?1;",
+                [installation_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .map_err(storage_error)?;
+        if current_epoch.is_some_and(|current| relationship_epoch < current) {
+            return Ok(());
+        }
+        tx.execute(
+            "INSERT INTO relationship_tombstones (contact_installation_id, removed_at, preserve_history, relationship_epoch, removal_id)
+             VALUES (?1, ?2, 1, ?3, ?4)
+             ON CONFLICT(contact_installation_id) DO UPDATE SET
+               removed_at = MAX(relationship_tombstones.removed_at, excluded.removed_at),
+               preserve_history = 1,
+               relationship_epoch = MAX(relationship_tombstones.relationship_epoch, excluded.relationship_epoch),
+               removal_id = CASE WHEN excluded.relationship_epoch >= relationship_tombstones.relationship_epoch THEN excluded.removal_id ELSE relationship_tombstones.removal_id END;",
+            rusqlite::params![installation_id, remote_removed_at, relationship_epoch, removal_id],
+        ).map_err(storage_error)?;
+        tx.execute(
+            "UPDATE contacts SET blocked = 1, updated_at = unixepoch() WHERE installation_id = ?1;",
+            [installation_id],
+        )
+        .map_err(storage_error)?;
+        tx.execute(
+            "UPDATE conversations SET state = 'OFFLINE', updated_at = unixepoch() WHERE contact_installation_id = ?1;",
+            [installation_id],
+        ).map_err(storage_error)?;
+        tx.execute(
+            "UPDATE messages SET state = 'FAILED', next_attempt_at = 0, ack_deadline = NULL, last_transport_error = 'relationship removed'
+             WHERE conversation_id IN (SELECT id FROM conversations WHERE contact_installation_id = ?1)
+             AND outgoing = 1 AND UPPER(state) IN ('QUEUED', 'SENDING');",
+            [installation_id],
+        ).map_err(storage_error)?;
+        tx.execute(
+            "DELETE FROM outbound_deliveries WHERE contact_installation_id = ?1;",
+            [installation_id],
+        )
+        .map_err(storage_error)?;
+        tx.execute("DELETE FROM delivery_receipts WHERE conversation_id IN (SELECT id FROM conversations WHERE contact_installation_id = ?1);", [installation_id])
+            .map_err(storage_error)?;
+        Ok(())
+    }
+
+    fn put_relationship_removal_ack(
+        &mut self,
+        removal_id: &str,
+        contact_installation_id: &str,
+        relationship_epoch: i64,
+        payload: &[u8],
+    ) -> RuntimeResult<()> {
+        self.tx()
+            .execute(
+                "INSERT INTO relationship_removal_ack_outbox
+                 (removal_id, contact_installation_id, relationship_epoch, payload, state, next_attempt_at)
+                 VALUES (?1, ?2, ?3, ?4, 'PENDING', 0)
+                 ON CONFLICT(removal_id) DO UPDATE SET updated_at = unixepoch();",
+                rusqlite::params![
+                    removal_id,
+                    contact_installation_id,
+                    relationship_epoch,
+                    payload
+                ],
+            )
+            .map_err(storage_error)?;
         Ok(())
     }
 

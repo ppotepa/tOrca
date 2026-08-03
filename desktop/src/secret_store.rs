@@ -1,9 +1,12 @@
 use anyhow::{Context, Result, bail};
+#[cfg(feature = "os-vault")]
 use sha2::{Digest, Sha256};
-use std::{
-    fs,
-    path::{Path, PathBuf},
-};
+#[cfg(any(test, feature = "torka-file-secrets"))]
+use std::fs;
+#[cfg(feature = "os-vault")]
+use std::path::Path;
+#[cfg(any(test, feature = "torka-file-secrets"))]
+use std::path::PathBuf;
 use zeroize::Zeroizing;
 
 /// Storage boundary for desktop secrets. Platform vault implementations can
@@ -15,6 +18,27 @@ pub(crate) trait DesktopSecretStore {
     fn remove(&self) -> Result<()>;
 }
 
+#[allow(dead_code)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum DesktopSecretKind {
+    IdentityPrivateKey,
+    DatabaseKeyActive,
+    DatabaseKeyPending,
+    MlsCheckpoint,
+}
+
+impl DesktopSecretKind {
+    fn label(&self) -> &'static str {
+        match self {
+            Self::IdentityPrivateKey => "identity-private-key",
+            Self::DatabaseKeyActive => "database-key-active",
+            Self::DatabaseKeyPending => "database-key-pending",
+            Self::MlsCheckpoint => "mls-checkpoint",
+        }
+    }
+}
+
+#[cfg(feature = "os-vault")]
 /// Native OS credential-store backend used for secrets that must not sit next
 /// to the SQLCipher database. `keyring` selects Credential Manager, Keychain,
 /// or Secret Service through compile-time platform features.
@@ -23,9 +47,13 @@ pub(crate) struct OsVaultSecretStore {
     account: String,
 }
 
+#[cfg(feature = "os-vault")]
 impl OsVaultSecretStore {
-    pub(crate) fn for_path(path: &Path) -> Self {
-        let digest = Sha256::digest(path.to_string_lossy().as_bytes());
+    pub(crate) fn for_installation(path: &Path, kind: DesktopSecretKind) -> Self {
+        let mut namespace = path.to_string_lossy().as_bytes().to_vec();
+        namespace.extend_from_slice(b"\0");
+        namespace.extend_from_slice(kind.label().as_bytes());
+        let digest = Sha256::digest(namespace);
         let account = digest.iter().map(|byte| format!("{byte:02x}")).collect();
         Self { account }
     }
@@ -36,6 +64,7 @@ impl OsVaultSecretStore {
     }
 }
 
+#[cfg(feature = "os-vault")]
 impl DesktopSecretStore for OsVaultSecretStore {
     fn read(&self) -> Result<Option<Zeroizing<Vec<u8>>>> {
         match self.entry()?.get_secret() {
@@ -66,18 +95,21 @@ impl DesktopSecretStore for OsVaultSecretStore {
     }
 }
 
+#[cfg(any(test, feature = "torka-file-secrets"))]
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub(crate) struct FileSecretStore {
     path: PathBuf,
 }
 
+#[cfg(any(test, feature = "torka-file-secrets"))]
 impl FileSecretStore {
     pub(crate) fn new(path: impl Into<PathBuf>) -> Self {
         Self { path: path.into() }
     }
 }
 
+#[cfg(any(test, feature = "torka-file-secrets"))]
 impl DesktopSecretStore for FileSecretStore {
     fn read(&self) -> Result<Option<Zeroizing<Vec<u8>>>> {
         if !self.path.exists() {
