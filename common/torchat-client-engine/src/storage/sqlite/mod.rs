@@ -9,6 +9,7 @@ use sha2::Digest;
 use torchat_client_runtime::CapabilityStatus;
 use torchat_core::peer_protocol::{PeerEndpointBundle, PeerEndpointUpdate, PeerMessageEnvelope};
 use uuid::Uuid;
+use zeroize::Zeroizing;
 
 use crate::{EngineError, EngineResult, config::SecretBytes};
 
@@ -49,6 +50,7 @@ pub struct ClientDatabase {
     migration_runner: MigrationRunner,
 }
 
+pub(crate) mod affected_rows;
 mod messages;
 mod migrations;
 mod pairing;
@@ -57,7 +59,7 @@ mod projection;
 mod read_receipts;
 mod receipts;
 mod records;
-use migrations::{BASELINE_SCHEMA, CONNECTION_PRAGMAS};
+pub(crate) mod sql_catalog;
 pub use migrations::{MIGRATION_LOOKUP, MIGRATIONS, TABLE_COLUMNS};
 pub use records::*;
 
@@ -72,14 +74,7 @@ impl ClientDatabase {
     ) -> EngineResult<()> {
         self.connection
             .execute(
-                "INSERT INTO delivery_dead_letters
-                 (kind, item_id, contact_installation_id, attempt_count, last_error, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, unixepoch(), unixepoch())
-                 ON CONFLICT(kind, item_id) DO UPDATE SET
-                    contact_installation_id = excluded.contact_installation_id,
-                    attempt_count = excluded.attempt_count,
-                    last_error = excluded.last_error,
-                    updated_at = unixepoch();",
+                sql_catalog::delivery::RECORD_DEAD_LETTER,
                 rusqlite::params![kind, item_id, contact_installation_id, attempt_count, error],
             )
             .map_err(sqlite_error)?;
@@ -89,7 +84,7 @@ impl ClientDatabase {
     pub fn record_contact_seen(&self, contact_id: &str, observed_at: i64) -> EngineResult<()> {
         self.connection
             .execute(
-                "UPDATE contacts SET last_seen_at = ?1, updated_at = unixepoch() WHERE installation_id = ?2",
+                sql_catalog::contacts::RECORD_SEEN,
                 rusqlite::params![observed_at, contact_id],
             )
             .map_err(sqlite_error)?;
@@ -107,11 +102,15 @@ impl ClientDatabase {
                 .map_err(|error| EngineError::Storage(format!("{error:#}")))?;
         }
         let connection = Connection::open(path).map_err(sqlite_error)?;
+        let key = sqlcipher_key_value(database_key.expose());
         connection
-            .execute_batch(&sqlcipher_key_pragma(database_key.expose()))
+            .pragma_update(None, "key", &*key)
             .map_err(sqlite_error)?;
         connection
-            .execute_batch(CONNECTION_PRAGMAS)
+            .pragma_update(None, "foreign_keys", true)
+            .map_err(sqlite_error)?;
+        connection
+            .pragma_update(None, "journal_mode", "WAL")
             .map_err(sqlite_error)?;
         connection
             .busy_timeout(Duration::from_secs(5))
@@ -127,25 +126,15 @@ impl ClientDatabase {
             )));
         }
         let has_schema_migrations = connection
-            .query_row(
-                "SELECT EXISTS(
-                    SELECT 1 FROM sqlite_master
-                    WHERE type = 'table' AND name = 'schema_migrations'
-                );",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
+            .query_row(sql_catalog::projection::HAS_SCHEMA_MIGRATIONS, [], |row| {
+                row.get::<_, i64>(0)
+            })
             .map_err(sqlite_error)?
             != 0;
         let has_client_tables = connection
-            .query_row(
-                "SELECT EXISTS(
-                    SELECT 1 FROM sqlite_master
-                    WHERE type = 'table' AND name IN ('contacts', 'messages')
-                );",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
+            .query_row(sql_catalog::projection::HAS_CLIENT_TABLES, [], |row| {
+                row.get::<_, i64>(0)
+            })
             .map_err(sqlite_error)?
             != 0;
         if !has_schema_migrations && has_client_tables {
@@ -155,13 +144,7 @@ impl ClientDatabase {
             ));
         }
         let migration_runner = MigrationRunner::new(MIGRATIONS);
-        if !has_schema_migrations {
-            connection
-                .execute_batch(BASELINE_SCHEMA)
-                .map_err(sqlite_error)?;
-        } else {
-            migration_runner.run(&connection)?;
-        }
+        migration_runner.run(&connection)?;
         let database = Self {
             connection,
             migration_runner,
@@ -177,12 +160,10 @@ impl ClientDatabase {
         Ok(database)
     }
 
+    /// Temporary compatibility surface for migration tests; production callers
+    /// must use typed repository methods. It will be removed with REF2-08.
     pub fn connection(&self) -> &Connection {
         &self.connection
-    }
-
-    pub fn connection_mut(&mut self) -> &mut Connection {
-        &mut self.connection
     }
 
     /// Rotate the SQLCipher key while the database is open under its current
@@ -193,8 +174,9 @@ impl ClientDatabase {
                 "databaseKey must contain exactly 32 bytes".to_owned(),
             ));
         }
+        let key = sqlcipher_key_value(new_key.expose());
         self.connection
-            .execute_batch(&sqlcipher_rekey_pragma(new_key.expose()))
+            .pragma_update(None, "rekey", &*key)
             .map_err(sqlite_error)?;
         let integrity: String = self
             .connection
@@ -223,17 +205,7 @@ impl ClientDatabase {
     ) -> EngineResult<Vec<RelationshipRemovalOutboxRecord>> {
         let mut statement = self
             .connection
-            .prepare(
-                "SELECT o.removal_id, o.contact_installation_id, t.removed_at,
-                    o.relationship_epoch, o.preserve_history, o.attempt_count
-             FROM relationship_removal_outbox o
-             JOIN relationship_tombstones t
-               ON t.contact_installation_id = o.contact_installation_id
-              AND t.removal_id = o.removal_id
-             WHERE o.state IN ('PENDING', 'DISPATCHED', 'WAITING_FOR_ACK')
-               AND o.next_attempt_at <= ?1
-             ORDER BY o.next_attempt_at ASC, o.removal_id ASC;",
-            )
+            .prepare(sql_catalog::relationships::DUE_REMOVALS)
             .map_err(sqlite_error)?;
         let rows = statement
             .query_map([now_ms], |row| {
@@ -259,12 +231,12 @@ impl ClientDatabase {
     ) -> EngineResult<()> {
         self.connection
             .execute(
-                "UPDATE relationship_removal_outbox
-             SET state = CASE WHEN attempt_count + 1 >= ?3 THEN 'DEAD_LETTER' ELSE 'WAITING_FOR_ACK' END,
-                 attempt_count = attempt_count + 1,
-                 next_attempt_at = ?2, updated_at = unixepoch()
-             WHERE removal_id = ?1 AND state IN ('PENDING', 'DISPATCHED', 'WAITING_FOR_ACK');",
-                rusqlite::params![removal_id, next_attempt_at, RELATIONSHIP_REMOVAL_MAX_ATTEMPTS],
+                sql_catalog::relationships::MARK_REMOVAL_DISPATCHED,
+                rusqlite::params![
+                    removal_id,
+                    next_attempt_at,
+                    RELATIONSHIP_REMOVAL_MAX_ATTEMPTS
+                ],
             )
             .map_err(sqlite_error)?;
         Ok(())
@@ -273,9 +245,7 @@ impl ClientDatabase {
     pub fn complete_relationship_removal_ack(&self, removal_id: &str) -> EngineResult<()> {
         self.connection
             .execute(
-                "UPDATE relationship_removal_outbox
-                 SET state = 'ACKED', updated_at = unixepoch()
-                 WHERE removal_id = ?1;",
+                sql_catalog::relationships::COMPLETE_REMOVAL_ACK,
                 [removal_id],
             )
             .map_err(sqlite_error)?;
@@ -285,9 +255,7 @@ impl ClientDatabase {
     pub fn retry_relationship_removal_dead_letter(&self, removal_id: &str) -> EngineResult<()> {
         self.connection
             .execute(
-                "UPDATE relationship_removal_outbox
-                 SET state = 'PENDING', next_attempt_at = 0, updated_at = unixepoch()
-                 WHERE removal_id = ?1 AND state = 'DEAD_LETTER';",
+                sql_catalog::relationships::DEAD_LETTER_REMOVAL,
                 [removal_id],
             )
             .map_err(sqlite_error)?;
@@ -300,12 +268,7 @@ impl ClientDatabase {
     ) -> EngineResult<Vec<RelationshipRemovalAckOutboxRecord>> {
         let mut statement = self
             .connection
-            .prepare(
-                "SELECT removal_id, contact_installation_id, payload, attempt_count
-             FROM relationship_removal_ack_outbox
-             WHERE state IN ('PENDING', 'DISPATCHED') AND next_attempt_at <= ?1
-             ORDER BY next_attempt_at, removal_id;",
-            )
+            .prepare(sql_catalog::relationships::DUE_REMOVAL_ACKS)
             .map_err(sqlite_error)?;
         statement
             .query_map([now_ms], |row| {
@@ -328,11 +291,7 @@ impl ClientDatabase {
     ) -> EngineResult<()> {
         self.connection
             .execute(
-                "UPDATE relationship_removal_ack_outbox
-             SET state = CASE WHEN attempt_count + 1 >= ?3 THEN 'DEAD_LETTER' ELSE 'DISPATCHED' END,
-                 attempt_count = attempt_count + 1,
-                 next_attempt_at = ?2, updated_at = unixepoch()
-             WHERE removal_id = ?1 AND state IN ('PENDING', 'DISPATCHED');",
+                sql_catalog::relationships::MARK_REMOVAL_ACK_DISPATCHED,
                 params![
                     removal_id,
                     next_attempt_at,
@@ -346,9 +305,7 @@ impl ClientDatabase {
     pub fn complete_relationship_removal_ack_delivery(&self, removal_id: &str) -> EngineResult<()> {
         self.connection
             .execute(
-                "UPDATE relationship_removal_ack_outbox
-                 SET state = 'ACKED', updated_at = unixepoch()
-                 WHERE removal_id = ?1 AND state <> 'ACKED';",
+                sql_catalog::relationships::COMPLETE_REMOVAL_ACK_DELIVERY,
                 [removal_id],
             )
             .map_err(sqlite_error)?;
@@ -358,9 +315,7 @@ impl ClientDatabase {
     pub fn retry_relationship_removal_ack_dead_letter(&self, removal_id: &str) -> EngineResult<()> {
         self.connection
             .execute(
-                "UPDATE relationship_removal_ack_outbox
-                 SET state = 'PENDING', next_attempt_at = 0, updated_at = unixepoch()
-                 WHERE removal_id = ?1 AND state = 'DEAD_LETTER';",
+                sql_catalog::relationships::DEAD_LETTER_REMOVAL_ACK,
                 [removal_id],
             )
             .map_err(sqlite_error)?;
@@ -370,11 +325,7 @@ impl ClientDatabase {
     pub fn conversation_mls_snapshots(&self) -> EngineResult<Vec<(String, Vec<u8>)>> {
         let mut statement = self
             .connection
-            .prepare(
-                "SELECT conversation_id, snapshot
-                 FROM conversation_mls
-                 ORDER BY conversation_id ASC;",
-            )
+            .prepare(sql_catalog::mls::LIST_SNAPSHOTS)
             .map_err(sqlite_error)?;
         let rows = statement
             .query_map([], |row| {
@@ -389,13 +340,9 @@ impl ClientDatabase {
         conversation_id: &str,
     ) -> EngineResult<Option<Vec<u8>>> {
         self.connection
-            .query_row(
-                "SELECT snapshot
-                 FROM conversation_mls
-                 WHERE conversation_id = ?1;",
-                [conversation_id],
-                |row| row.get("snapshot"),
-            )
+            .query_row(sql_catalog::mls::GET_SNAPSHOT, [conversation_id], |row| {
+                row.get("snapshot")
+            })
             .optional()
             .map_err(sqlite_error)
     }
@@ -405,19 +352,14 @@ impl ClientDatabase {
         conversation_id: &str,
     ) -> EngineResult<Option<MlsCheckpointRecord>> {
         self.connection
-            .query_row(
-                "SELECT conversation_id, snapshot, state_version, snapshot_hash
-                 FROM conversation_mls WHERE conversation_id = ?1;",
-                [conversation_id],
-                |row| {
-                    Ok(MlsCheckpointRecord {
-                        conversation_id: row.get(0)?,
-                        snapshot: row.get(1)?,
-                        state_version: row.get::<_, i64>(2)?.max(0) as u64,
-                        snapshot_hash: row.get(3)?,
-                    })
-                },
-            )
+            .query_row(sql_catalog::mls::GET_CHECKPOINT, [conversation_id], |row| {
+                Ok(MlsCheckpointRecord {
+                    conversation_id: row.get(0)?,
+                    snapshot: row.get(1)?,
+                    state_version: row.get::<_, i64>(2)?.max(0) as u64,
+                    snapshot_hash: row.get(3)?,
+                })
+            })
             .optional()
             .map_err(sqlite_error)
     }
@@ -430,13 +372,7 @@ impl ClientDatabase {
         let snapshot_hash = sha2::Sha256::digest(snapshot).to_vec();
         self.connection
             .execute(
-                "INSERT INTO conversation_mls (conversation_id, snapshot, state_version, snapshot_hash, updated_at)
-                 VALUES (?1, ?2, 1, ?3, unixepoch())
-                 ON CONFLICT(conversation_id) DO UPDATE SET
-                    snapshot = excluded.snapshot,
-                    state_version = conversation_mls.state_version + 1,
-                    snapshot_hash = excluded.snapshot_hash,
-                    updated_at = unixepoch();",
+                sql_catalog::mls::UPSERT_SNAPSHOT_FROM_DATABASE,
                 params![conversation_id, snapshot, snapshot_hash],
             )
             .map_err(sqlite_error)?;
@@ -445,11 +381,7 @@ impl ClientDatabase {
 
     pub fn delete_conversation_mls_snapshot(&self, conversation_id: &str) -> EngineResult<()> {
         self.connection
-            .execute(
-                "DELETE FROM conversation_mls
-                 WHERE conversation_id = ?1;",
-                [conversation_id],
-            )
+            .execute(sql_catalog::mls::DELETE_SNAPSHOT, [conversation_id])
             .map_err(sqlite_error)?;
         Ok(())
     }
@@ -460,15 +392,9 @@ impl ClientDatabase {
     ) -> EngineResult<()> {
         self.connection
             .execute(
-                "INSERT INTO pending_application_envelopes (
-                    sender_installation_id, message_id, envelope_json,
-                    ciphertext, ciphertext_hash, received_at
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-                 ON CONFLICT(sender_installation_id, message_id) DO UPDATE SET
-                    envelope_json = excluded.envelope_json,
-                    ciphertext = excluded.ciphertext,
-                    ciphertext_hash = excluded.ciphertext_hash,
-                    received_at = excluded.received_at;",
+                include_str!(
+                    "../../../sql/commands/projection/put_pending_application_envelope_1.sql"
+                ),
                 params![
                     record.sender_installation_id,
                     record.message_id,
@@ -488,13 +414,9 @@ impl ClientDatabase {
     ) -> EngineResult<Vec<PendingApplicationEnvelopeRecord>> {
         let mut statement = self
             .connection
-            .prepare(
-                "SELECT sender_installation_id, message_id, envelope_json,
-                        ciphertext, ciphertext_hash, received_at
-                 FROM pending_application_envelopes
-                 WHERE sender_installation_id = ?1
-                 ORDER BY received_at ASC, message_id ASC;",
-            )
+            .prepare(include_str!(
+                "../../../sql/queries/projection/pending_application_envelopes_1.sql"
+            ))
             .map_err(sqlite_error)?;
         let rows = statement
             .query_map([sender_installation_id], |row| {
@@ -518,8 +440,9 @@ impl ClientDatabase {
     ) -> EngineResult<()> {
         self.connection
             .execute(
-                "DELETE FROM pending_application_envelopes
-                 WHERE sender_installation_id = ?1 AND message_id = ?2;",
+                include_str!(
+                    "../../../sql/commands/projection/remove_pending_application_envelope_1.sql"
+                ),
                 params![sender_installation_id, message_id],
             )
             .map_err(sqlite_error)?;
@@ -529,15 +452,7 @@ impl ClientDatabase {
     pub fn put_capability_delivery(&self, record: &CapabilityDeliveryRecord) -> EngineResult<()> {
         self.connection
             .execute(
-                "INSERT INTO capability_delivery_outbox (
-                    delivery_id, contact_installation_id, payload,
-                    attempt_count, next_attempt_at, last_error, created_at
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-                 ON CONFLICT(delivery_id) DO UPDATE SET
-                    payload = excluded.payload,
-                    attempt_count = excluded.attempt_count,
-                    next_attempt_at = excluded.next_attempt_at,
-                    last_error = excluded.last_error;",
+                sql_catalog::capabilities::PUT_DELIVERY,
                 params![
                     record.delivery_id,
                     record.contact_installation_id,
@@ -558,13 +473,7 @@ impl ClientDatabase {
     ) -> EngineResult<Vec<CapabilityDeliveryRecord>> {
         let mut statement = self
             .connection
-            .prepare(
-                "SELECT delivery_id, contact_installation_id, payload,
-                        attempt_count, next_attempt_at, last_error, created_at
-                 FROM capability_delivery_outbox
-                 WHERE next_attempt_at <= ?1 AND dead_lettered_at IS NULL
-                 ORDER BY next_attempt_at ASC, created_at ASC;",
-            )
+            .prepare(sql_catalog::capabilities::DUE_DELIVERIES)
             .map_err(sqlite_error)?;
         let rows = statement
             .query_map([now_ms], |row| {
@@ -588,10 +497,7 @@ impl ClientDatabase {
     ) -> EngineResult<bool> {
         self.connection
             .query_row(
-                "SELECT EXISTS(
-                    SELECT 1 FROM capability_delivery_outbox
-                    WHERE contact_installation_id = ?1
-                 );",
+                sql_catalog::capabilities::HAS_DELIVERY_FOR_CONTACT,
                 [contact_installation_id],
                 |row| row.get::<_, i64>(0),
             )
@@ -608,11 +514,7 @@ impl ClientDatabase {
         let changed = self
             .connection
             .execute(
-                "UPDATE capability_delivery_outbox
-                 SET attempt_count = attempt_count + 1,
-                     next_attempt_at = ?1,
-                     last_error = ?2
-                 WHERE delivery_id = ?3 AND next_attempt_at <= ?4;",
+                sql_catalog::capabilities::CLAIM_DELIVERY,
                 params![next_attempt_at, last_error, delivery_id, unix_ms()],
             )
             .map_err(sqlite_error)?;
@@ -621,10 +523,7 @@ impl ClientDatabase {
 
     pub fn complete_capability_delivery(&self, delivery_id: &str) -> EngineResult<()> {
         self.connection
-            .execute(
-                "DELETE FROM capability_delivery_outbox WHERE delivery_id = ?1;",
-                [delivery_id],
-            )
+            .execute(sql_catalog::capabilities::COMPLETE_DELIVERY, [delivery_id])
             .map_err(sqlite_error)?;
         Ok(())
     }
@@ -635,8 +534,7 @@ impl ClientDatabase {
     ) -> EngineResult<()> {
         self.connection
             .execute(
-                "DELETE FROM capability_delivery_outbox
-                 WHERE contact_installation_id = ?1;",
+                sql_catalog::capabilities::COMPLETE_CONTACT_DELIVERIES,
                 [contact_installation_id],
             )
             .map_err(sqlite_error)?;
@@ -649,27 +547,19 @@ impl ClientDatabase {
     pub fn retry_dead_letter(&self, kind: &str, id: &str) -> EngineResult<bool> {
         let changed = match kind {
             "capability" => self.connection.execute(
-                "UPDATE capability_delivery_outbox
-                 SET dead_lettered_at = NULL, next_attempt_at = 0
-                 WHERE delivery_id = ?1 AND dead_lettered_at IS NOT NULL;",
+                include_str!("../../../sql/commands/delivery/retry_dead_letter_1.sql"),
                 [id],
             ),
             "endpoint_bootstrap" => self.connection.execute(
-                "UPDATE peer_endpoint_bootstrap_outbox
-                 SET dead_lettered_at = NULL, next_attempt_at = 0
-                 WHERE contact_installation_id = ?1 AND dead_lettered_at IS NOT NULL;",
+                include_str!("../../../sql/commands/delivery/retry_dead_letter_2.sql"),
                 [id],
             ),
             "contact_confirmation" => self.connection.execute(
-                "UPDATE pending_contact_confirmations
-                 SET dead_lettered_at = NULL, next_attempt_at = 0
-                 WHERE pairing_id = ?1 AND dead_lettered_at IS NOT NULL;",
+                include_str!("../../../sql/commands/delivery/retry_dead_letter_3.sql"),
                 [id],
             ),
             "welcome" => self.connection.execute(
-                "UPDATE pending_welcomes
-                 SET dead_lettered_at = NULL, next_attempt_at = 0
-                 WHERE invite_id = ?1 AND dead_lettered_at IS NOT NULL;",
+                include_str!("../../../sql/commands/delivery/retry_dead_letter_4.sql"),
                 [id],
             ),
             _ => {
@@ -683,22 +573,12 @@ impl ClientDatabase {
     }
 
     pub fn dead_letters(&self) -> EngineResult<Vec<DeadLetterRecord>> {
-        let mut statement = self.connection.prepare(
-            "SELECT kind, id, attempt_count, dead_lettered_at, last_error
-             FROM (
-                SELECT 'capability' AS kind, delivery_id AS id, attempt_count, dead_lettered_at, last_error
-                FROM capability_delivery_outbox WHERE dead_lettered_at IS NOT NULL
-                UNION ALL
-                SELECT 'endpoint_bootstrap', contact_installation_id, attempt_count, dead_lettered_at, last_error
-                FROM peer_endpoint_bootstrap_outbox WHERE dead_lettered_at IS NOT NULL
-                UNION ALL
-                SELECT 'contact_confirmation', pairing_id, attempt_count, dead_lettered_at, last_error
-                FROM pending_contact_confirmations WHERE dead_lettered_at IS NOT NULL
-                UNION ALL
-                SELECT 'welcome', invite_id, attempt_count, dead_lettered_at, last_error
-                FROM pending_welcomes WHERE dead_lettered_at IS NOT NULL
-             ) ORDER BY dead_lettered_at DESC, kind ASC, id ASC;",
-        ).map_err(sqlite_error)?;
+        let mut statement = self
+            .connection
+            .prepare(include_str!(
+                "../../../sql/queries/delivery/dead_letters_1.sql"
+            ))
+            .map_err(sqlite_error)?;
         let rows = statement
             .query_map([], |row| {
                 Ok(DeadLetterRecord {
@@ -721,10 +601,7 @@ impl ClientDatabase {
     ) -> EngineResult<()> {
         self.connection
             .execute(
-                "UPDATE capability_delivery_outbox
-                 SET next_attempt_at = ?1, last_error = ?2,
-                     dead_lettered_at = CASE WHEN ?2 LIKE 'permanent:%' OR ?2 LIKE 'protocol:%' THEN unixepoch() ELSE dead_lettered_at END
-                 WHERE delivery_id = ?3;",
+                sql_catalog::capabilities::RECORD_DELIVERY_ERROR,
                 params![next_attempt_at, error, delivery_id],
             )
             .map_err(sqlite_error)?;
@@ -733,11 +610,9 @@ impl ClientDatabase {
 
     pub fn invite_used(&self, invite_id: &str) -> EngineResult<bool> {
         self.connection
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM used_invites WHERE invite_id = ?1) AS used;",
-                [invite_id],
-                |row| row.get::<_, i64>("used"),
-            )
+            .query_row(sql_catalog::pairing::INVITE_USED, [invite_id], |row| {
+                row.get::<_, i64>("used")
+            })
             .map(|used| used != 0)
             .map_err(sqlite_error)
     }
@@ -745,43 +620,30 @@ impl ClientDatabase {
     pub fn consume_invite(&self, invite_id: &str) -> EngineResult<bool> {
         let inserted = self
             .connection
-            .execute(
-                "INSERT OR IGNORE INTO used_invites (invite_id, used_at)
-                 VALUES (?1, unixepoch());",
-                [invite_id],
-            )
+            .execute(sql_catalog::pairing::CONSUME_INVITE, [invite_id])
             .map_err(sqlite_error)?;
         Ok(inserted > 0)
     }
 
     pub fn message(&self, message_id: &str) -> EngineResult<Option<StoredMessageRecord>> {
         self.connection
-            .query_row(
-                "SELECT id, conversation_id, outgoing, body, state, created_at,
-                        COALESCE(wire_ciphertext, relay_payload) AS wire_ciphertext,
-                        ciphertext_hash, attempt_count, last_attempt_at,
-                        next_attempt_at, ack_deadline, last_transport_error
-                 FROM messages
-                 WHERE id = ?1;",
-                [message_id],
-                |row| {
-                    Ok(StoredMessageRecord {
-                        id: row.get("id")?,
-                        conversation_id: row.get("conversation_id")?,
-                        outgoing: row.get::<_, i64>("outgoing")? != 0,
-                        body: row.get("body")?,
-                        state: row.get("state")?,
-                        created_at: row.get("created_at")?,
-                        wire_ciphertext: row.get("wire_ciphertext")?,
-                        ciphertext_hash: row.get("ciphertext_hash")?,
-                        attempt_count: row.get::<_, i64>("attempt_count")? as u32,
-                        last_attempt_at: row.get("last_attempt_at")?,
-                        next_attempt_at: row.get("next_attempt_at")?,
-                        ack_deadline: row.get("ack_deadline")?,
-                        last_transport_error: row.get("last_transport_error")?,
-                    })
-                },
-            )
+            .query_row(sql_catalog::messages::GET_BY_ID, [message_id], |row| {
+                Ok(StoredMessageRecord {
+                    id: row.get("id")?,
+                    conversation_id: row.get("conversation_id")?,
+                    outgoing: row.get::<_, i64>("outgoing")? != 0,
+                    body: row.get("body")?,
+                    state: row.get("state")?,
+                    created_at: row.get("created_at")?,
+                    wire_ciphertext: row.get("wire_ciphertext")?,
+                    ciphertext_hash: row.get("ciphertext_hash")?,
+                    attempt_count: row.get::<_, i64>("attempt_count")? as u32,
+                    last_attempt_at: row.get("last_attempt_at")?,
+                    next_attempt_at: row.get("next_attempt_at")?,
+                    ack_deadline: row.get("ack_deadline")?,
+                    last_transport_error: row.get("last_transport_error")?,
+                })
+            })
             .optional()
             .map_err(sqlite_error)
     }
@@ -800,7 +662,7 @@ impl ClientDatabase {
         let transaction = self.connection.transaction().map_err(sqlite_error)?;
         let changed = transaction
             .execute(
-                "UPDATE messages\n                 SET wire_ciphertext = ?2,\n                     ciphertext_hash = ?3,\n                     attempt_count = attempt_count + 1,\n                     last_attempt_at = ?4,\n                     next_attempt_at = ?5,\n                     ack_deadline = ?6,\n                     last_transport_error = NULL\n                 WHERE id = ?1\n                   AND outgoing = 1\n                   AND UPPER(state) IN ('SENDING', 'QUEUED')\n                   AND next_attempt_at <= ?4;",
+                sql_catalog::projection::PERSIST_ENCRYPTION,
                 params![
                     message_id,
                     wire_ciphertext,
@@ -817,14 +679,18 @@ impl ClientDatabase {
         }
         transaction
             .execute(
-                "UPDATE messages SET claimed_until = ?1, last_error_code = NULL WHERE id = ?2;",
+                sql_catalog::projection::SET_ACK_DEADLINE,
                 params![ack_deadline, message_id],
             )
             .map_err(sqlite_error)?;
         transaction
             .execute(
-                "INSERT INTO conversation_mls (conversation_id, snapshot, state_version, snapshot_hash, updated_at)\n                 VALUES (?1, ?2, 1, ?3, unixepoch())\n                 ON CONFLICT(conversation_id) DO UPDATE SET\n                    snapshot = excluded.snapshot,\n                    state_version = conversation_mls.state_version + 1,\n                    snapshot_hash = excluded.snapshot_hash,\n                    updated_at = unixepoch();",
-                params![conversation_id, snapshot, sha2::Sha256::digest(snapshot).to_vec()],
+                sql_catalog::projection::CLAIM_ENCRYPTED_MESSAGE,
+                params![
+                    conversation_id,
+                    snapshot,
+                    sha2::Sha256::digest(snapshot).to_vec()
+                ],
             )
             .map_err(sqlite_error)?;
         transaction.commit().map_err(sqlite_error)?;
@@ -842,16 +708,7 @@ impl ClientDatabase {
         let changed = self
             .connection
             .execute(
-                "UPDATE messages
-                 SET attempt_count = attempt_count + 1,
-                     last_attempt_at = ?1,
-                     next_attempt_at = ?2,
-                     ack_deadline = ?3,
-                     last_transport_error = ?4
-                 WHERE id = ?5
-                   AND outgoing = 1
-                   AND UPPER(state) IN ('SENDING', 'QUEUED')
-                   AND next_attempt_at <= ?1;",
+                sql_catalog::projection::CLAIM_OUTGOING_ATTEMPT,
                 params![
                     now_ms,
                     next_attempt_at,
@@ -864,7 +721,7 @@ impl ClientDatabase {
         if changed > 0 {
             self.connection
                 .execute(
-                    "UPDATE messages SET claimed_until = ?1, last_error_code = NULL WHERE id = ?2;",
+                    sql_catalog::projection::SET_OUTGOING_ACK_DEADLINE,
                     params![ack_deadline, message_id],
                 )
                 .map_err(sqlite_error)?;
@@ -876,20 +733,13 @@ impl ClientDatabase {
         let transaction = self.connection.transaction().map_err(sqlite_error)?;
         transaction
             .execute(
-                "UPDATE delivery_receipts
-                 SET state = 'PENDING', next_attempt_at = ?1
-                 WHERE UPPER(state) = 'SENT';",
+                sql_catalog::projection::REQUEUE_DISCONNECTED_DELIVERIES,
                 [now_ms],
             )
             .map_err(sqlite_error)?;
         transaction
             .execute(
-                "UPDATE messages
-                 SET state = 'QUEUED',
-                     next_attempt_at = ?1,
-                     ack_deadline = NULL
-                 WHERE outgoing = 1
-                   AND UPPER(state) = 'SENDING';",
+                sql_catalog::projection::REQUEUE_DISCONNECTED_ACKS,
                 params![now_ms],
             )
             .map_err(sqlite_error)?;
@@ -900,7 +750,7 @@ impl ClientDatabase {
     pub fn delete_expired_pending_welcomes(&self, now_secs: i64) -> EngineResult<usize> {
         self.connection
             .execute(
-                "DELETE FROM pending_welcomes WHERE expires_at < ?1;",
+                include_str!("../../../sql/commands/pairing/delete_expired_pending_welcomes_1.sql"),
                 [now_secs],
             )
             .map_err(sqlite_error)
@@ -913,15 +763,9 @@ impl ClientDatabase {
     ) -> EngineResult<Vec<PendingWelcomeRecord>> {
         let mut statement = self
             .connection
-            .prepare(
-                "SELECT invite_id, recipient_installation_id, payload, expires_at,
-                        attempt_count, next_attempt_at, last_error
-                 FROM pending_welcomes
-                 WHERE next_attempt_at <= ?1
-                   AND expires_at >= ?2
-                   AND dead_lettered_at IS NULL
-                 ORDER BY next_attempt_at ASC, invite_id ASC;",
-            )
+            .prepare(include_str!(
+                "../../../sql/queries/pairing/due_pending_welcomes_1.sql"
+            ))
             .map_err(sqlite_error)?;
         let rows = statement
             .query_map(params![now_ms, now_secs], |row| {
@@ -946,10 +790,7 @@ impl ClientDatabase {
     ) -> EngineResult<()> {
         self.connection
             .execute(
-                "UPDATE pending_welcomes
-                 SET last_error = ?1,
-                     dead_lettered_at = CASE WHEN ?1 LIKE 'permanent:%' OR ?1 LIKE 'protocol:%' THEN unixepoch() ELSE dead_lettered_at END
-                 WHERE invite_id = ?2;",
+                include_str!("../../../sql/commands/pairing/record_pending_welcome_error_1.sql"),
                 params![last_error, invite_id],
             )
             .map_err(sqlite_error)?;
@@ -967,13 +808,7 @@ impl ClientDatabase {
         let changed = self
             .connection
             .execute(
-                "UPDATE pending_welcomes
-                 SET attempt_count = attempt_count + 1,
-                     next_attempt_at = ?1,
-                     last_error = ?2
-                 WHERE invite_id = ?3
-                   AND next_attempt_at <= ?4
-                   AND expires_at >= ?5;",
+                include_str!("../../../sql/commands/pairing/claim_pending_welcome_attempt_1.sql"),
                 params![next_attempt_at, last_error, invite_id, now_ms, now_secs],
             )
             .map_err(sqlite_error)?;
@@ -1064,10 +899,7 @@ impl ClientDatabase {
     pub fn next_message_retry_deadline_ms(&self) -> EngineResult<Option<i64>> {
         self.connection
             .query_row(
-                "SELECT MIN(next_attempt_at) AS next_attempt_at
-                 FROM messages
-                 WHERE outgoing = 1
-                   AND UPPER(state) IN ('SENDING', 'QUEUED');",
+                include_str!("../../../sql/queries/messages/next_message_retry_deadline_ms_1.sql"),
                 [],
                 |row| row.get("next_attempt_at"),
             )
@@ -1077,8 +909,7 @@ impl ClientDatabase {
     fn next_relationship_removal_retry_deadline_ms(&self) -> EngineResult<Option<i64>> {
         self.connection
             .query_row(
-                "SELECT MIN(next_attempt_at) FROM relationship_removal_outbox
-                 WHERE state IN ('PENDING', 'DISPATCHED', 'WAITING_FOR_ACK');",
+                include_str!("../../../sql/queries/relationships/next_relationship_removal_retry_deadline_ms_1.sql"),
                 [],
                 |row| row.get(0),
             )
@@ -1088,8 +919,7 @@ impl ClientDatabase {
     fn next_relationship_removal_ack_retry_deadline_ms(&self) -> EngineResult<Option<i64>> {
         self.connection
             .query_row(
-                "SELECT MIN(next_attempt_at) FROM relationship_removal_ack_outbox
-                 WHERE state IN ('PENDING', 'DISPATCHED');",
+                include_str!("../../../sql/queries/relationships/next_relationship_removal_ack_retry_deadline_ms_1.sql"),
                 [],
                 |row| row.get(0),
             )
@@ -1099,9 +929,7 @@ impl ClientDatabase {
     pub fn next_receipt_retry_deadline_ms(&self) -> EngineResult<Option<i64>> {
         self.connection
             .query_row(
-                "SELECT MIN(next_attempt_at) AS next_attempt_at
-                 FROM delivery_receipts
-                 WHERE UPPER(state) IN ('PENDING', 'SENT');",
+                include_str!("../../../sql/queries/receipts/next_receipt_retry_deadline_ms_1.sql"),
                 [],
                 |row| row.get("next_attempt_at"),
             )
@@ -1111,11 +939,7 @@ impl ClientDatabase {
     pub fn next_message_ack_deadline_ms(&self) -> EngineResult<Option<i64>> {
         self.connection
             .query_row(
-                "SELECT MIN(ack_deadline) AS ack_deadline
-                 FROM messages
-                 WHERE outgoing = 1
-                   AND UPPER(state) = 'SENT'
-                   AND ack_deadline IS NOT NULL;",
+                include_str!("../../../sql/queries/messages/next_message_ack_deadline_ms_1.sql"),
                 [],
                 |row| row.get("ack_deadline"),
             )
@@ -1128,9 +952,9 @@ impl ClientDatabase {
     ) -> EngineResult<Option<i64>> {
         self.connection
             .query_row(
-                "SELECT MIN(next_attempt_at) AS next_attempt_at
-                 FROM pending_welcomes
-                 WHERE expires_at >= ?1;",
+                include_str!(
+                    "../../../sql/queries/pairing/next_pending_welcome_retry_deadline_ms_1.sql"
+                ),
                 [now_secs],
                 |row| row.get("next_attempt_at"),
             )
@@ -1143,11 +967,9 @@ impl ClientDatabase {
     ) -> EngineResult<Option<i64>> {
         self.connection
             .query_row(
-                "SELECT MIN(next_attempt_at) AS next_attempt_at
-                 FROM pairing_inbox
-                 WHERE expires_at >= ?1
-                   AND response_delivered = 0
-                   AND UPPER(state) IN ('ACCEPTED', 'REJECTED');",
+                include_str!(
+                    "../../../sql/queries/pairing/next_pairing_response_retry_deadline_ms_1.sql"
+                ),
                 [now_secs],
                 |row| row.get("next_attempt_at"),
             )
@@ -1161,13 +983,7 @@ impl ClientDatabase {
     ) -> EngineResult<Option<PairingResponseRecord>> {
         self.connection
             .query_row(
-                "SELECT pairing_id, sender_installation_id, state, offer_payload,
-                        attempt_count, next_attempt_at, last_error, expires_at
-                 FROM pairing_inbox
-                 WHERE pairing_id = ?1
-                   AND expires_at >= ?2
-                   AND response_delivered = 0
-                   AND UPPER(state) IN ('ACCEPTED', 'REJECTED');",
+                include_str!("../../../sql/queries/pairing/pairing_response_retry_record_1.sql"),
                 params![pairing_id, now_secs],
                 |row| {
                     Ok(PairingResponseRecord {
@@ -1197,16 +1013,7 @@ impl ClientDatabase {
         let changed = self
             .connection
             .execute(
-                "UPDATE pairing_inbox
-                 SET attempt_count = attempt_count + 1,
-                     next_attempt_at = ?1,
-                     last_error = ?2,
-                     updated_at = unixepoch()
-                 WHERE pairing_id = ?3
-                   AND expires_at >= ?4
-                   AND response_delivered = 0
-                   AND UPPER(state) IN ('ACCEPTED', 'REJECTED')
-                   AND next_attempt_at <= ?5;",
+                include_str!("../../../sql/commands/pairing/claim_pairing_response_attempt_1.sql"),
                 params![next_attempt_at, last_error, pairing_id, now_secs, now_ms],
             )
             .map_err(sqlite_error)?;
@@ -1216,12 +1023,7 @@ impl ClientDatabase {
     pub fn complete_pairing_response(&self, pairing_id: &str) -> EngineResult<()> {
         self.connection
             .execute(
-                "UPDATE pairing_inbox
-                 SET response_delivered = 1,
-                     next_attempt_at = 0,
-                     last_error = NULL,
-                     updated_at = unixepoch()
-                 WHERE pairing_id = ?1;",
+                include_str!("../../../sql/commands/pairing/complete_pairing_response_1.sql"),
                 [pairing_id],
             )
             .map_err(sqlite_error)?;
@@ -1235,10 +1037,7 @@ impl ClientDatabase {
     ) -> EngineResult<()> {
         self.connection
             .execute(
-                "UPDATE pairing_inbox
-                 SET last_error = ?1,
-                     updated_at = unixepoch()
-                 WHERE pairing_id = ?2;",
+                include_str!("../../../sql/commands/pairing/record_pairing_response_error_1.sql"),
                 params![last_error, pairing_id],
             )
             .map_err(sqlite_error)?;
@@ -1248,15 +1047,9 @@ impl ClientDatabase {
     pub fn expired_ack_deadline_message_ids(&self, now_ms: i64) -> EngineResult<Vec<String>> {
         let mut statement = self
             .connection
-            .prepare(
-                "SELECT id
-                 FROM messages
-                 WHERE outgoing = 1
-                   AND UPPER(state) = 'SENT'
-                   AND ack_deadline IS NOT NULL
-                   AND ack_deadline <= ?1
-                 ORDER BY ack_deadline ASC, created_at ASC, id ASC;",
-            )
+            .prepare(include_str!(
+                "../../../sql/queries/messages/expired_ack_deadline_message_ids_1.sql"
+            ))
             .map_err(sqlite_error)?;
         let rows = statement
             .query_map([now_ms], |row| row.get("id"))
@@ -1269,22 +1062,13 @@ fn sqlite_error(error: rusqlite::Error) -> EngineError {
     EngineError::Storage(format!("{error:#}"))
 }
 
-fn sqlcipher_key_pragma(database_key: &[u8]) -> String {
-    let mut hex = String::with_capacity(database_key.len() * 2);
+fn sqlcipher_key_value(database_key: &[u8]) -> Zeroizing<String> {
+    let mut hex = Zeroizing::new(String::with_capacity(database_key.len() * 2));
     for byte in database_key {
         use std::fmt::Write as _;
         let _ = write!(&mut hex, "{byte:02x}");
     }
-    format!("PRAGMA key = \"x'{hex}'\";")
-}
-
-fn sqlcipher_rekey_pragma(database_key: &[u8]) -> String {
-    let mut hex = String::with_capacity(database_key.len() * 2);
-    for byte in database_key {
-        use std::fmt::Write as _;
-        let _ = write!(&mut hex, "{byte:02x}");
-    }
-    format!("PRAGMA rekey = \"x'{hex}'\";")
+    Zeroizing::new(format!("x'{}'", hex.as_str()))
 }
 
 fn unix_ms() -> i64 {
@@ -1340,7 +1124,7 @@ mod tests {
         database
             .connection()
             .execute(
-                "INSERT INTO settings (key, value) VALUES ('rekey-test', 'true');",
+                include_str!("../../../tests/sql/storage/rekey_rotates_sqlcipher_key_and_old_key_no_longer_opens_1.sql"),
                 [],
             )
             .expect("fixture should be written");
@@ -1352,7 +1136,7 @@ mod tests {
         let value: String = reopened
             .connection()
             .query_row(
-                "SELECT value FROM settings WHERE key = 'rekey-test';",
+                include_str!("../../../tests/sql/storage/rekey_rotates_sqlcipher_key_and_old_key_no_longer_opens_2.sql"),
                 [],
                 |row| row.get(0),
             )
@@ -1369,12 +1153,12 @@ mod tests {
 
         let latest_version: i64 = database
             .connection()
-            .query_row("SELECT MAX(version) FROM schema_migrations;", [], |row| {
+            .query_row(include_str!("../../../tests/sql/storage/open_runs_all_migrations_with_correct_sqlcipher_key_1.sql"), [], |row| {
                 row.get("MAX(version)")
             })
             .expect("schema_migrations version is readable");
 
-        assert_eq!(latest_version, 29);
+        assert_eq!(latest_version, MIGRATIONS.last().unwrap().version);
         assert_eq!(database.migration_runner().checksum().len(), 64);
 
         drop(database);
@@ -1388,19 +1172,7 @@ mod tests {
         let remaining: i64 = database
             .connection()
             .query_row(
-                "SELECT COUNT(*)
-                 FROM sqlite_master
-                 WHERE type = 'trigger'
-                   AND name IN (
-                     'record_inserted_relationship_boundary',
-                     'record_reactivated_relationship_boundary',
-                     'ignore_stale_relationship_removal',
-                     'apply_incoming_relationship_removal',
-                     'suppress_removed_relationship_mls_insert',
-                     'suppress_removed_relationship_mls_update',
-                     'suppress_removed_contact_endpoint_insert',
-                     'suppress_removed_contact_endpoint_update'
-                   );",
+                include_str!("../../../tests/sql/storage/relationship_lifecycle_triggers_are_absent_after_current_migration_1.sql"),
                 [],
                 |row| row.get(0),
             )
@@ -1418,9 +1190,7 @@ mod tests {
             database
                 .connection()
                 .execute(
-                    "INSERT INTO processed_commands
-                     (command_id, command_type, result_json, committed_revision, created_at)
-                     VALUES (?1, 'test', '{}', ?2, ?3);",
+                    include_str!("../../../tests/sql/storage/processed_command_prune_keeps_fresh_rows_and_enforces_limit_1.sql"),
                     params![
                         format!("command-{index}"),
                         index as i64,
@@ -1444,7 +1214,7 @@ mod tests {
         assert_eq!(removed, 2);
         let count: i64 = database
             .connection()
-            .query_row("SELECT COUNT(*) FROM processed_commands;", [], |row| {
+            .query_row(include_str!("../../../tests/sql/storage/processed_command_prune_keeps_fresh_rows_and_enforces_limit_2.sql"), [], |row| {
                 row.get(0)
             })
             .expect("count is readable");
@@ -1452,7 +1222,7 @@ mod tests {
         let newest: String = database
             .connection()
             .query_row(
-                "SELECT command_id FROM processed_commands ORDER BY created_at ASC LIMIT 1;",
+                include_str!("../../../tests/sql/storage/processed_command_prune_keeps_fresh_rows_and_enforces_limit_3.sql"),
                 [],
                 |row| row.get(0),
             )
@@ -1476,11 +1246,7 @@ mod tests {
         database
             .connection()
             .execute_batch(
-                "INSERT INTO contacts
-                 (installation_id, nickname, public_key, fingerprint, verification, source)
-                 VALUES ('peer-read', 'Peer', 'pk', 'fp', 'UNVERIFIED', 'test');
-                 INSERT INTO conversations (id, contact_installation_id, state)
-                 VALUES ('peer-read', 'peer-read', 'ESTABLISHED');",
+                include_str!("../../../tests/sql/storage/read_receipt_outbox_is_idempotent_and_survives_reopen_1.sql"),
             )
             .expect("contact and conversation exist");
 
@@ -1598,24 +1364,22 @@ mod tests {
         let path = temp_database_path("migration-7-to-8");
         let database_key = key(17);
         let connection = Connection::open(&path).expect("database file opens");
+        let key = sqlcipher_key_value(database_key.expose());
         connection
-            .execute_batch(&sqlcipher_key_pragma(database_key.expose()))
+            .pragma_update(None, "key", &*key)
             .expect("database key applies");
         connection
-            .execute_batch(CONNECTION_PRAGMAS)
-            .expect("connection pragmas apply");
+            .pragma_update(None, "foreign_keys", true)
+            .expect("foreign keys apply");
+        connection
+            .pragma_update(None, "journal_mode", "WAL")
+            .expect("journal mode applies");
         MigrationRunner::new(&MIGRATIONS[..8])
             .run(&connection)
             .expect("version 7 migrations apply");
         connection
             .execute(
-                "INSERT INTO contacts (
-                    installation_id, nickname, public_key, fingerprint,
-                    verification, source, created_at, updated_at
-                 ) VALUES (
-                    'contact-1', 'Alice', 'pk', 'fp',
-                    'VERIFIED', 'PAIRING', 1, 1
-                 );",
+                include_str!("../../../tests/sql/storage/opening_version_7_database_applies_contact_transport_policy_migration_1.sql"),
                 [],
             )
             .expect("contact inserts");
@@ -1626,20 +1390,20 @@ mod tests {
         let policy: String = database
             .connection()
             .query_row(
-                "SELECT transport_policy FROM contacts WHERE installation_id = 'contact-1';",
+                include_str!("../../../tests/sql/storage/opening_version_7_database_applies_contact_transport_policy_migration_2.sql"),
                 [],
                 |row| row.get(0),
             )
             .expect("transport policy is readable");
         let latest_version: i64 = database
             .connection()
-            .query_row("SELECT MAX(version) FROM schema_migrations;", [], |row| {
+            .query_row(include_str!("../../../tests/sql/storage/opening_version_7_database_applies_contact_transport_policy_migration_3.sql"), [], |row| {
                 row.get(0)
             })
             .expect("latest migration is readable");
 
         assert_eq!(policy, "PEER_ONLY");
-        assert_eq!(latest_version, 29);
+        assert_eq!(latest_version, MIGRATIONS.last().unwrap().version);
         drop(database);
         let _ = std::fs::remove_file(path);
     }
@@ -1663,13 +1427,7 @@ mod tests {
         database
             .connection()
             .execute(
-                "INSERT INTO contacts (
-                    installation_id, nickname, public_key, fingerprint,
-                    verification, source, created_at, updated_at, transport_policy
-                 ) VALUES (
-                    'contact-1', 'Alice', 'pk', 'fp',
-                    'VERIFIED', 'PAIRING', 1, 1, 'PEER_ONLY'
-                 );",
+                include_str!("../../../tests/sql/storage/refreshing_peer_endpoint_bootstrap_resets_retry_metadata_1.sql"),
                 [],
             )
             .expect("contact inserts");
@@ -1750,13 +1508,7 @@ mod tests {
         database
             .connection()
             .execute(
-                "INSERT INTO contacts (
-                    installation_id, nickname, public_key, fingerprint,
-                    verification, source, created_at, updated_at, transport_policy
-                 ) VALUES (
-                    'contact-1', 'Alice', 'pk', 'fp',
-                    'VERIFIED', 'PAIRING', 1, 1, 'PEER_ONLY'
-                 );",
+                include_str!("../../../tests/sql/storage/recording_peer_endpoint_bootstrap_error_updates_last_error_1.sql"),
                 [],
             )
             .expect("contact inserts");
@@ -1805,31 +1557,7 @@ mod tests {
         database
             .connection()
             .execute_batch(
-                "INSERT INTO contacts (
-                    installation_id, nickname, public_key, fingerprint,
-                    verification, source, created_at, updated_at, transport_policy
-                 ) VALUES
-                    ('contact-1', 'Alice', 'pk-1', 'fp-1', 'VERIFIED', 'PAIRING', 1, 1, 'PEER_ONLY'),
-                    ('contact-2', 'Bob', 'pk-2', 'fp-2', 'VERIFIED', 'PAIRING', 1, 1, 'PEER_ONLY');
-                 INSERT INTO conversations (
-                    id, contact_installation_id, state, unread_count, last_message_preview,
-                    last_message_at, created_at, updated_at
-                 ) VALUES
-                    ('conversation-1', 'contact-1', 'ACTIVE', 0, NULL, NULL, 1, 1),
-                    ('conversation-2', 'contact-2', 'ACTIVE', 0, NULL, NULL, 1, 1);
-                 INSERT INTO messages (
-                    id, conversation_id, outgoing, body, state, created_at,
-                    relay_payload, ciphertext_hash, attempt_count, last_attempt_at,
-                    next_attempt_at, ack_deadline, last_transport_error
-                 ) VALUES
-                    ('message-1', 'conversation-1', 1, 'hello', 'QUEUED', 100, NULL, NULL, 0, NULL, 0, NULL, NULL),
-                    ('message-2', 'conversation-2', 1, 'hello', 'QUEUED', 200, NULL, NULL, 0, NULL, 0, NULL, NULL);
-                 INSERT INTO outbound_deliveries (
-                    message_id, contact_installation_id, sequence, state,
-                    attempt_count, next_attempt_at, created_at, updated_at
-                 ) VALUES
-                    ('message-1', 'contact-1', 1, 'QUEUED', 0, 3456, 100, unixepoch()),
-                    ('message-2', 'contact-2', 1, 'QUEUED', 0, 7890, 200, unixepoch());",
+                include_str!("../../../tests/sql/storage/next_contact_peer_retry_deadline_uses_contact_installation_id_1.sql"),
             )
             .expect("contact, message and delivery fixtures insert");
 

@@ -26,10 +26,7 @@ fn insert_contact_and_conversation(database: &ClientDatabase) {
     let connection = database.connection();
     connection
         .execute(
-            "INSERT INTO contacts (
-                installation_id, nickname, public_key, fingerprint,
-                verification, source
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6);",
+            include_str!("sql/fixture/fixture_1.sql"),
             params![
                 "peer-installation",
                 "Peer nickname",
@@ -42,10 +39,7 @@ fn insert_contact_and_conversation(database: &ClientDatabase) {
         .expect("contact fixture should be stored");
     connection
         .execute(
-            "INSERT INTO conversations (
-                id, contact_installation_id, state, unread_count,
-                last_message_preview, last_message_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6);",
+            include_str!("sql/fixture/fixture_2.sql"),
             params![
                 "conversation-1",
                 "peer-installation",
@@ -71,13 +65,13 @@ fn fresh_database_applies_every_registered_migration() {
         ClientDatabase::open(&path, &database_key()).expect("fresh encrypted database should open");
     let applied_version: i64 = database
         .connection()
-        .query_row("SELECT MAX(version) FROM schema_migrations;", [], |row| {
+        .query_row(include_str!("sql/fresh_database_applies_every_registered_migration/fresh_database_applies_every_registered_migration_1.sql"), [], |row| {
             row.get(0)
         })
         .expect("migration version should be readable");
     let applied_count: i64 = database
         .connection()
-        .query_row("SELECT COUNT(*) FROM schema_migrations;", [], |row| {
+        .query_row(include_str!("sql/fresh_database_applies_every_registered_migration/fresh_database_applies_every_registered_migration_2.sql"), [], |row| {
             row.get(0)
         })
         .expect("migration count should be readable");
@@ -101,10 +95,7 @@ fn reopening_database_preserves_client_state_across_migrations() {
         let connection = database.connection();
         connection
             .execute(
-                "INSERT INTO messages (
-                    id, conversation_id, outgoing, body, state, created_at,
-                    attempt_count, next_attempt_at
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8);",
+                include_str!("sql/reopening_database_preserves_client_state_across_migrations/reopening_database_preserves_client_state_across_migrations_1.sql"),
                 params![
                     "message-1",
                     "conversation-1",
@@ -119,7 +110,7 @@ fn reopening_database_preserves_client_state_across_migrations() {
             .expect("message fixture should be stored");
         connection
             .execute(
-                "INSERT INTO settings (key, value) VALUES (?1, ?2);",
+                include_str!("sql/reopening_database_preserves_client_state_across_migrations/reopening_database_preserves_client_state_across_migrations_2.sql"),
                 params!["test.setting", &b"preserved-value"[..]],
             )
             .expect("setting fixture should be stored");
@@ -132,7 +123,7 @@ fn reopening_database_preserves_client_state_across_migrations() {
 
         let contact: (String, String) = connection
             .query_row(
-                "SELECT nickname, verification FROM contacts WHERE installation_id = ?1;",
+                include_str!("sql/reopening_database_preserves_client_state_across_migrations/reopening_database_preserves_client_state_across_migrations_3.sql"),
                 ["peer-installation"],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -141,7 +132,7 @@ fn reopening_database_preserves_client_state_across_migrations() {
 
         let conversation: (i64, String) = connection
             .query_row(
-                "SELECT unread_count, last_message_preview FROM conversations WHERE id = ?1;",
+                include_str!("sql/reopening_database_preserves_client_state_across_migrations/reopening_database_preserves_client_state_across_migrations_4.sql"),
                 ["conversation-1"],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -150,7 +141,7 @@ fn reopening_database_preserves_client_state_across_migrations() {
 
         let message: (String, String, i64) = connection
             .query_row(
-                "SELECT body, state, attempt_count FROM messages WHERE id = ?1;",
+                include_str!("sql/reopening_database_preserves_client_state_across_migrations/reopening_database_preserves_client_state_across_migrations_5.sql"),
                 ["message-1"],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
@@ -166,7 +157,7 @@ fn reopening_database_preserves_client_state_across_migrations() {
 
         let setting: Vec<u8> = connection
             .query_row(
-                "SELECT value FROM settings WHERE key = ?1;",
+                include_str!("sql/reopening_database_preserves_client_state_across_migrations/reopening_database_preserves_client_state_across_migrations_6.sql"),
                 ["test.setting"],
                 |row| row.get(0),
             )
@@ -174,7 +165,7 @@ fn reopening_database_preserves_client_state_across_migrations() {
         assert_eq!(setting, b"preserved-value");
 
         let applied_version: i64 = connection
-            .query_row("SELECT MAX(version) FROM schema_migrations;", [], |row| {
+            .query_row(include_str!("sql/reopening_database_preserves_client_state_across_migrations/reopening_database_preserves_client_state_across_migrations_7.sql"), [], |row| {
                 row.get(0)
             })
             .expect("latest migration version should remain recorded");
@@ -203,10 +194,7 @@ fn message_state_timestamps_are_durable_monotonic_and_cascaded() {
         let connection = database.connection();
         connection
             .execute(
-                "INSERT INTO messages (
-                    id, conversation_id, outgoing, body, state, created_at,
-                    attempt_count, next_attempt_at
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8);",
+                include_str!("sql/message_state_timestamps_are_durable_monotonic_and_cascaded/message_state_timestamps_are_durable_monotonic_and_cascaded_1.sql"),
                 params![
                     "message-timestamps",
                     "conversation-1",
@@ -222,9 +210,7 @@ fn message_state_timestamps_are_durable_monotonic_and_cascaded() {
 
         let empty: Option<(Option<i64>, Option<i64>, Option<i64>)> = connection
             .query_row(
-                "SELECT sent_at, delivered_at, read_at
-                 FROM message_state_timestamps
-                 WHERE message_id = ?1;",
+                include_str!("sql/message_state_timestamps_are_durable_monotonic_and_cascaded/message_state_timestamps_are_durable_monotonic_and_cascaded_2.sql"),
                 ["message-timestamps"],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
@@ -237,15 +223,13 @@ fn message_state_timestamps_are_durable_monotonic_and_cascaded() {
 
         connection
             .execute(
-                "UPDATE messages SET state = 'SENT' WHERE id = ?1;",
+                include_str!("sql/message_state_timestamps_are_durable_monotonic_and_cascaded/message_state_timestamps_are_durable_monotonic_and_cascaded_3.sql"),
                 ["message-timestamps"],
             )
             .expect("sent transition should be stored");
         let sent: (Option<i64>, Option<i64>, Option<i64>) = connection
             .query_row(
-                "SELECT sent_at, delivered_at, read_at
-                 FROM message_state_timestamps
-                 WHERE message_id = ?1;",
+                include_str!("sql/message_state_timestamps_are_durable_monotonic_and_cascaded/message_state_timestamps_are_durable_monotonic_and_cascaded_4.sql"),
                 ["message-timestamps"],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
@@ -256,15 +240,13 @@ fn message_state_timestamps_are_durable_monotonic_and_cascaded() {
 
         connection
             .execute(
-                "UPDATE messages SET state = 'DELIVERED' WHERE id = ?1;",
+                include_str!("sql/message_state_timestamps_are_durable_monotonic_and_cascaded/message_state_timestamps_are_durable_monotonic_and_cascaded_5.sql"),
                 ["message-timestamps"],
             )
             .expect("delivered transition should be stored");
         let delivered: (Option<i64>, Option<i64>, Option<i64>) = connection
             .query_row(
-                "SELECT sent_at, delivered_at, read_at
-                 FROM message_state_timestamps
-                 WHERE message_id = ?1;",
+                include_str!("sql/message_state_timestamps_are_durable_monotonic_and_cascaded/message_state_timestamps_are_durable_monotonic_and_cascaded_6.sql"),
                 ["message-timestamps"],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
@@ -276,15 +258,13 @@ fn message_state_timestamps_are_durable_monotonic_and_cascaded() {
 
         connection
             .execute(
-                "UPDATE messages SET state = 'READ' WHERE id = ?1;",
+                include_str!("sql/message_state_timestamps_are_durable_monotonic_and_cascaded/message_state_timestamps_are_durable_monotonic_and_cascaded_7.sql"),
                 ["message-timestamps"],
             )
             .expect("read transition should be stored");
         let read: (Option<i64>, Option<i64>, Option<i64>) = connection
             .query_row(
-                "SELECT sent_at, delivered_at, read_at
-                 FROM message_state_timestamps
-                 WHERE message_id = ?1;",
+                include_str!("sql/message_state_timestamps_are_durable_monotonic_and_cascaded/message_state_timestamps_are_durable_monotonic_and_cascaded_8.sql"),
                 ["message-timestamps"],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
@@ -302,9 +282,7 @@ fn message_state_timestamps_are_durable_monotonic_and_cascaded() {
         let connection = database.connection();
         let persisted: (i64, i64, i64) = connection
             .query_row(
-                "SELECT sent_at, delivered_at, read_at
-                 FROM message_state_timestamps
-                 WHERE message_id = ?1;",
+                include_str!("sql/message_state_timestamps_are_durable_monotonic_and_cascaded/message_state_timestamps_are_durable_monotonic_and_cascaded_9.sql"),
                 ["message-timestamps"],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
@@ -313,9 +291,7 @@ fn message_state_timestamps_are_durable_monotonic_and_cascaded() {
 
         let projected: (String, i64, i64, i64) = connection
             .query_row(
-                "SELECT state, sent_at, delivered_at, read_at
-                 FROM messages_with_state_timestamps
-                 WHERE id = ?1;",
+                include_str!("sql/message_state_timestamps_are_durable_monotonic_and_cascaded/message_state_timestamps_are_durable_monotonic_and_cascaded_10.sql"),
                 ["message-timestamps"],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
@@ -327,13 +303,13 @@ fn message_state_timestamps_are_durable_monotonic_and_cascaded() {
 
         connection
             .execute(
-                "DELETE FROM messages WHERE id = ?1;",
+                include_str!("sql/message_state_timestamps_are_durable_monotonic_and_cascaded/message_state_timestamps_are_durable_monotonic_and_cascaded_11.sql"),
                 ["message-timestamps"],
             )
             .expect("message deletion should succeed");
         let remaining: i64 = connection
             .query_row(
-                "SELECT COUNT(*) FROM message_state_timestamps WHERE message_id = ?1;",
+                include_str!("sql/message_state_timestamps_are_durable_monotonic_and_cascaded/message_state_timestamps_are_durable_monotonic_and_cascaded_12.sql"),
                 ["message-timestamps"],
                 |row| row.get(0),
             )

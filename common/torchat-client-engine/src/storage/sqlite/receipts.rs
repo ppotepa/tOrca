@@ -1,6 +1,21 @@
 use super::*;
 
 impl ClientDatabase {
+    pub fn mark_delivery_receipt_dead_lettered(
+        &self,
+        error_code: &str,
+        message_id: &str,
+    ) -> EngineResult<()> {
+        let changed = self
+            .connection
+            .execute(
+                super::sql_catalog::receipts::MARK_DEAD_LETTERED,
+                rusqlite::params![error_code, message_id],
+            )
+            .map_err(sqlite_error)?;
+        super::affected_rows::exactly_one(changed, "mark delivery receipt dead-lettered")
+    }
+
     pub fn received_envelope(
         &self,
         sender_installation_id: &str,
@@ -8,9 +23,7 @@ impl ClientDatabase {
     ) -> EngineResult<Option<ReceivedEnvelopeRecord>> {
         self.connection
             .query_row(
-                "SELECT sender_installation_id, message_id, ciphertext_hash, received_at, receipt_state
-                 FROM received_envelopes
-                 WHERE sender_installation_id = ?1 AND message_id = ?2;",
+                super::sql_catalog::receipts::RECEIVED_ENVELOPE,
                 params![sender_installation_id, message_id],
                 |row| {
                     Ok(ReceivedEnvelopeRecord {
@@ -29,9 +42,7 @@ impl ClientDatabase {
     pub fn put_received_envelope(&self, value: &ReceivedEnvelopeRecord) -> EngineResult<()> {
         self.connection
             .execute(
-                "INSERT OR REPLACE INTO received_envelopes (
-                    sender_installation_id, message_id, ciphertext_hash, received_at, receipt_state
-                 ) VALUES (?1, ?2, ?3, ?4, ?5);",
+                super::sql_catalog::receipts::PUT_RECEIVED_ENVELOPE,
                 params![
                     value.sender_installation_id,
                     value.message_id,
@@ -50,10 +61,7 @@ impl ClientDatabase {
     ) -> EngineResult<Option<DeliveryReceiptRecord>> {
         self.connection
             .query_row(
-                "SELECT envelope_id, message_id, conversation_id, original_sender, received_at,
-                        relay_payload, state, attempt_count, next_attempt_at, last_error, created_at
-                 FROM delivery_receipts
-                 WHERE message_id = ?1;",
+                super::sql_catalog::receipts::DELIVERY_RECEIPT,
                 [message_id],
                 |row| {
                     Ok(DeliveryReceiptRecord {
@@ -78,10 +86,7 @@ impl ClientDatabase {
     pub fn put_delivery_receipt(&self, value: &DeliveryReceiptRecord) -> EngineResult<()> {
         self.connection
             .execute(
-                "INSERT OR REPLACE INTO delivery_receipts (
-                    envelope_id, message_id, conversation_id, original_sender, received_at,
-                    relay_payload, state, attempt_count, next_attempt_at, last_error, created_at
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11);",
+                super::sql_catalog::receipts::PUT_DELIVERY_RECEIPT,
                 params![
                     value.envelope_id,
                     value.message_id,
@@ -113,15 +118,7 @@ impl ClientDatabase {
         let transaction = self.connection.transaction().map_err(sqlite_error)?;
         let changed = transaction
             .execute(
-                "UPDATE delivery_receipts
-                 SET relay_payload = COALESCE(relay_payload, ?1),
-                     state = 'SENT',
-                     attempt_count = attempt_count + 1,
-                     next_attempt_at = ?2,
-                     last_error = ?3
-                 WHERE message_id = ?4
-                   AND UPPER(state) IN ('PENDING', 'SENT')
-                   AND next_attempt_at <= ?5;",
+                super::sql_catalog::receipts::PERSIST_RECEIPT_ENCRYPTION,
                 params![
                     relay_payload,
                     next_attempt_at,
@@ -137,27 +134,23 @@ impl ClientDatabase {
         }
         transaction
             .execute(
-                "UPDATE delivery_receipts SET claimed_until = ?1, last_error_code = NULL WHERE message_id = ?2;",
+                super::sql_catalog::receipts::PERSIST_RECEIPT_ENCRYPTION_RETRY,
                 params![next_attempt_at, message_id],
             )
             .map_err(sqlite_error)?;
         transaction
             .execute(
-                "INSERT INTO conversation_mls (conversation_id, snapshot, state_version, snapshot_hash, updated_at)
-                 VALUES (?1, ?2, 1, ?3, unixepoch())
-                 ON CONFLICT(conversation_id) DO UPDATE SET
-                    snapshot = excluded.snapshot,
-                    state_version = conversation_mls.state_version + 1,
-                    snapshot_hash = excluded.snapshot_hash,
-                    updated_at = unixepoch();",
-                params![conversation_id, snapshot, sha2::Sha256::digest(snapshot).to_vec()],
+                super::sql_catalog::receipts::PERSIST_RECEIPT_ENCRYPTION_CLAIM,
+                params![
+                    conversation_id,
+                    snapshot,
+                    sha2::Sha256::digest(snapshot).to_vec()
+                ],
             )
             .map_err(sqlite_error)?;
         transaction
             .execute(
-                "UPDATE received_envelopes
-                 SET receipt_state = 'SENT'
-                 WHERE message_id = ?1;",
+                super::sql_catalog::receipts::PERSIST_RECEIPT_ENCRYPTION_COMPLETE,
                 [message_id],
             )
             .map_err(sqlite_error)?;
@@ -175,29 +168,20 @@ impl ClientDatabase {
         let transaction = self.connection.transaction().map_err(sqlite_error)?;
         let changed = transaction
             .execute(
-                "UPDATE delivery_receipts
-                 SET state = 'SENT',
-                     attempt_count = attempt_count + 1,
-                     next_attempt_at = ?1,
-                     last_error = ?2
-                 WHERE message_id = ?3
-                   AND UPPER(state) IN ('PENDING', 'SENT')
-                   AND next_attempt_at <= ?4;",
+                super::sql_catalog::receipts::CLAIM_RECEIPT_ATTEMPT,
                 params![next_attempt_at, last_error, message_id, now_ms],
             )
             .map_err(sqlite_error)?;
         if changed > 0 {
             transaction
                 .execute(
-                    "UPDATE delivery_receipts SET claimed_until = ?1, last_error_code = NULL WHERE message_id = ?2;",
+                    super::sql_catalog::receipts::CLAIM_RECEIPT_ATTEMPT_RETRY,
                     params![next_attempt_at, message_id],
                 )
                 .map_err(sqlite_error)?;
             transaction
                 .execute(
-                    "UPDATE received_envelopes
-                     SET receipt_state = 'SENT'
-                     WHERE message_id = ?1;",
+                    super::sql_catalog::receipts::CLAIM_RECEIPT_ATTEMPT_COMPLETE,
                     [message_id],
                 )
                 .map_err(sqlite_error)?;
@@ -210,17 +194,13 @@ impl ClientDatabase {
         let transaction = self.connection.transaction().map_err(sqlite_error)?;
         transaction
             .execute(
-                "UPDATE delivery_receipts
-                 SET state = 'DELIVERED', next_attempt_at = 0, last_error = NULL
-                 WHERE message_id = ?1;",
+                super::sql_catalog::receipts::COMPLETE_DELIVERY_RECEIPT,
                 [message_id],
             )
             .map_err(sqlite_error)?;
         transaction
             .execute(
-                "UPDATE received_envelopes
-                 SET receipt_state = 'DELIVERED'
-                 WHERE message_id = ?1;",
+                super::sql_catalog::receipts::COMPLETE_DELIVERY_RECEIPT_FINAL,
                 [message_id],
             )
             .map_err(sqlite_error)?;
@@ -237,17 +217,13 @@ impl ClientDatabase {
         let transaction = self.connection.transaction().map_err(sqlite_error)?;
         transaction
             .execute(
-                "UPDATE delivery_receipts
-                 SET state = 'PENDING', next_attempt_at = ?1, last_error = ?2
-                 WHERE message_id = ?3;",
+                super::sql_catalog::receipts::REQUEUE_DELIVERY_RECEIPT,
                 params![next_attempt_at, last_error, message_id],
             )
             .map_err(sqlite_error)?;
         transaction
             .execute(
-                "UPDATE received_envelopes
-                 SET receipt_state = 'PENDING'
-                 WHERE message_id = ?1;",
+                super::sql_catalog::receipts::REQUEUE_DELIVERY_RECEIPT_FINAL,
                 [message_id],
             )
             .map_err(sqlite_error)?;

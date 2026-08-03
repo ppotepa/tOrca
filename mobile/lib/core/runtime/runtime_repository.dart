@@ -217,11 +217,25 @@ class RuntimeRepository {
   Future<ApplicationSnapshot> _buildApplicationSnapshot({
     bool includePairing = false,
   }) async {
-    final snapshot = _runtime is RuntimeProjectionProvider
+    var snapshot = _runtime is RuntimeProjectionProvider
         ? await (_runtime as RuntimeProjectionProvider).applicationSnapshot()
         : null;
     if (snapshot == null) {
-      throw StateError('Runtime returned no application projection');
+      final values = await Future.wait<Object?>([
+        _runtime.identity(),
+        _runtime.profile(),
+        _loadLocalBatch(force: true),
+      ]);
+      final local = values[2] as RuntimeLocalSnapshot;
+      snapshot = ApplicationSnapshot(
+        generation: local.generation,
+        createdAtMs: DateTime.now().millisecondsSinceEpoch,
+        identity: values[0] as RuntimeIdentity? ?? const RuntimeIdentity(),
+        profile: values[1] as RuntimeProfile? ?? const RuntimeProfile(),
+        contacts: local.contacts,
+        conversations: local.conversations,
+        peerEndpointAvailable: local.peerEndpointAvailable,
+      );
     }
     if (!includePairing) {
       applicationState.hydrate(snapshot);
@@ -357,24 +371,33 @@ class RuntimeRepository {
     final current = _pairingBatchInFlight;
     if (current != null) return current;
     final generation = _nextGeneration();
-    final request =
-        Future.wait<Object>([
-          _runtime.pairingInbox(),
-          _runtime.pairingOutbox(),
-        ]).then((values) {
-          final snapshot = RuntimePairingSnapshot(
-            inbox: List.unmodifiable(values[0] as List<PairingItem>),
-            outbox: List.unmodifiable(values[1] as List<PairingItem>),
-            generation: generation,
-          );
-          _latestPairingSnapshot = snapshot;
-          ApplicationStateStore.shared.setPairing(
-            snapshot.inbox,
-            snapshot.outbox,
-          );
-          _pairingCacheTime = DateTime.now();
-          return snapshot;
-        });
+    final request = _runtime.listPairings().then((items) {
+      final inbox = <PairingItem>[];
+      final outbox = <PairingItem>[];
+      for (final item in items) {
+        switch (item.origin) {
+          case PairingOrigin.inbox:
+            inbox.add(item);
+          case PairingOrigin.outbox:
+            outbox.add(item);
+          case PairingOrigin.unknown:
+            if (item.received) {
+              inbox.add(item);
+            } else {
+              outbox.add(item);
+            }
+        }
+      }
+      final snapshot = RuntimePairingSnapshot(
+        inbox: List.unmodifiable(inbox),
+        outbox: List.unmodifiable(outbox),
+        generation: generation,
+      );
+      _latestPairingSnapshot = snapshot;
+      ApplicationStateStore.shared.setPairing(snapshot.inbox, snapshot.outbox);
+      _pairingCacheTime = DateTime.now();
+      return snapshot;
+    });
     _pairingBatchInFlight = request;
     return request.whenComplete(() {
       if (identical(_pairingBatchInFlight, request)) {

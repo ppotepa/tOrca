@@ -3,6 +3,11 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$checker = Join-Path $PSScriptRoot 'check-sql-files.py'
+if (Test-Path -LiteralPath $checker) {
+    & python $checker --root $repoRoot --strict
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
 $sqlRoots = @(
     (Join-Path $repoRoot 'desktop\sql'),
     (Join-Path $repoRoot 'mobile\android\app\src\main\assets\sql'),

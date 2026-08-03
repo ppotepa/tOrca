@@ -9,6 +9,7 @@ final class UnreadSummary {
     required this.contactsWithUnread,
     required this.totalUnreadMessages,
     required this.messagesByConversation,
+    required this.messagesByContact,
   });
 
   factory UnreadSummary.fromConversations(
@@ -16,26 +17,33 @@ final class UnreadSummary {
   ) {
     final contacts = <String>{};
     final messages = <String, int>{};
+    final contactMessages = <String, int>{};
     var total = 0;
     for (final conversation in conversations) {
       if (conversation.unread <= 0) continue;
       contacts.add(conversation.contactId);
       messages[conversation.id] = conversation.unread;
+      contactMessages[conversation.contactId] =
+          (contactMessages[conversation.contactId] ?? 0) + conversation.unread;
       total += conversation.unread;
     }
     return UnreadSummary._(
       contactsWithUnread: contacts.length,
       totalUnreadMessages: total,
       messagesByConversation: Map.unmodifiable(messages),
+      messagesByContact: Map.unmodifiable(contactMessages),
     );
   }
 
   final int contactsWithUnread;
   final int totalUnreadMessages;
   final Map<String, int> messagesByConversation;
+  final Map<String, int> messagesByContact;
 
   int messagesFor(String conversationId) =>
       messagesByConversation[conversationId] ?? 0;
+
+  int messagesForContact(String contactId) => messagesByContact[contactId] ?? 0;
 }
 
 extension ConversationUnreadProjection on Iterable<ConversationSummary> {

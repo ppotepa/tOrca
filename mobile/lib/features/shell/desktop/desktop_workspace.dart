@@ -115,6 +115,7 @@ class _DesktopWorkspaceState extends State<DesktopWorkspace> {
                       )
                     : _ContactSidebar(
                         contacts: widget.contacts,
+                        conversations: widget.conversations,
                         presenceStore: _presenceStore,
                         onSelect: widget.onStartConversation,
                       ),
@@ -456,11 +457,13 @@ enum _ContactFilter { all, online, p2p }
 class _ContactSidebar extends StatefulWidget {
   const _ContactSidebar({
     required this.contacts,
+    required this.conversations,
     required this.presenceStore,
     required this.onSelect,
   });
 
   final List<ContactRecord> contacts;
+  final List<ConversationSummary> conversations;
   final ContactPresenceStore presenceStore;
   final ValueChanged<ContactRecord> onSelect;
 
@@ -502,6 +505,7 @@ class _ContactSidebarState extends State<_ContactSidebar> {
   @override
   Widget build(BuildContext context) {
     final shell = context.shellTheme;
+    final unread = widget.conversations.unreadSummary;
     return Container(
       color: shell.surface,
       padding: const EdgeInsets.fromLTRB(12, 14, 12, 10),
@@ -569,6 +573,8 @@ class _ContactSidebarState extends State<_ContactSidebar> {
               },
               contactTrailingBuilder: (contact) =>
                   const ThemedIcon(Icons.chevron_right, size: 18),
+              contactUnreadBuilder: (contact) =>
+                  unread.messagesForContact(contact.id),
               contactActivityBuilder: (contact) => switch (widget.presenceStore
                   .snapshot(contact.id)
                   .availability) {

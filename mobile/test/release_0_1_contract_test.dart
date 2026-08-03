@@ -65,11 +65,10 @@ void main() {
     expect(releaseChat, isNot(contains("label: const Text('Zweryfikuj')")));
   });
 
-  test('release scope stays frozen', () {
-    final release = File('../RELEASE_0_1.md').readAsStringSync();
-    expect(release, contains('The scope is frozen'));
-    expect(release, contains('audio and video calls'));
-    expect(release, contains('protocol-level groups'));
-    expect(release, contains('Release blockers'));
+  test('README documents the current release scope', () {
+    final release = File('../README.md').readAsStringSync();
+    expect(release, contains('Calls, groups, multi-device synchronization'));
+    expect(release, contains('not part of the current scope'));
+    expect(release, contains('Windows and Android'));
   });
 }

@@ -35,6 +35,7 @@ class RuntimeContractManifestTest {
                 EngineContract.GET_PROFILE,
                 EngineContract.GET_STARTUP_READINESS,
                 EngineContract.GET_APPLICATION_SNAPSHOT,
+                EngineContract.LIST_PAIRINGS,
                 EngineContract.PAIRING_INBOX,
                 EngineContract.PAIRING_OUTBOX,
                 EngineContract.LIST_CONTACTS,

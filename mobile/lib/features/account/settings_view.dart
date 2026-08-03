@@ -3,7 +3,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
 import '../../app/app_theme.dart';
 import '../../app/desktop_autostart.dart';
 import '../../app/notifications/ui_notification_center.dart';

@@ -107,7 +107,7 @@ impl ClientEngineActor {
                             &envelope.message_id.to_string(),
                         )?;
                         let _ = delivered.send(Ok(ack(PeerAckKind::Rejected)));
-                        if is_cryptographic_inbound_error(&error) {
+                        if super::peer_event_policy::is_cryptographic_inbound_error(&error) {
                             self.crypto_blocked_peers
                                 .insert(envelope.sender_installation_id.clone());
                         }
@@ -491,39 +491,6 @@ impl ClientEngineActor {
                 );
                 Ok(runtime_events)
             }
-        }
-    }
-}
-
-fn is_cryptographic_inbound_error(error: &EngineError) -> bool {
-    matches!(error, EngineError::InvalidCommand(message)
-        if ["decrypt", "MLS", "ciphertext", "authentication", "hash"]
-            .iter()
-            .any(|marker| message.contains(marker)))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::is_cryptographic_inbound_error;
-    use crate::EngineError;
-
-    #[test]
-    fn only_cryptographic_inbound_errors_are_blocking() {
-        for message in [
-            "MLS decrypt failed",
-            "ciphertext authentication failed",
-            "application hash mismatch",
-        ] {
-            assert!(is_cryptographic_inbound_error(
-                &EngineError::InvalidCommand(message.to_owned(),)
-            ));
-        }
-        for error in [
-            EngineError::Storage("receipt retry unavailable".to_owned()),
-            EngineError::Transport("relay timeout".to_owned()),
-            EngineError::InvalidCommand("receipt effect failed".to_owned()),
-        ] {
-            assert!(!is_cryptographic_inbound_error(&error));
         }
     }
 }

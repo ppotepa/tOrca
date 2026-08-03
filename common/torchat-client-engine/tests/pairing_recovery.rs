@@ -33,17 +33,7 @@ fn accepted_pairing_response_and_acknowledgement_survive_restart_idempotently() 
         database
             .connection()
             .execute(
-                "INSERT INTO pairing_inbox (
-                    pairing_id, sender_installation_id, sender_nickname,
-                    sender_public_key, sender_fingerprint, capability,
-                    expires_at, state, offer_invite_id, offer_payload,
-                    attempt_count, next_attempt_at, last_error,
-                    response_delivered
-                 ) VALUES (
-                    ?1, ?2, ?3, ?4, ?5, ?6,
-                    ?7, 'ACCEPTED', ?8, ?9,
-                    0, 0, NULL, 0
-                 );",
+                include_str!("sql/accepted_pairing_response_and_acknowledgement_survive_restart_idempotently/accepted_pairing_response_and_acknowledgement_survive_restart_idempotently_1.sql"),
                 params![
                     pairing_id,
                     "peer-pairing",
@@ -109,8 +99,7 @@ fn accepted_pairing_response_and_acknowledgement_survive_restart_idempotently() 
         let ack_count: i64 = database
             .connection()
             .query_row(
-                "SELECT COUNT(*) FROM pending_pairing_acknowledgements
-                 WHERE pairing_id = ?1;",
+                include_str!("sql/accepted_pairing_response_and_acknowledgement_survive_restart_idempotently/accepted_pairing_response_and_acknowledgement_survive_restart_idempotently_2.sql"),
                 [pairing_id],
                 |row| row.get(0),
             )
@@ -120,9 +109,7 @@ fn accepted_pairing_response_and_acknowledgement_survive_restart_idempotently() 
         let ack: (i64, i64, Option<String>) = database
             .connection()
             .query_row(
-                "SELECT attempt_count, next_attempt_at, last_error
-                 FROM pending_pairing_acknowledgements
-                 WHERE pairing_id = ?1;",
+                include_str!("sql/accepted_pairing_response_and_acknowledgement_survive_restart_idempotently/accepted_pairing_response_and_acknowledgement_survive_restart_idempotently_3.sql"),
                 [pairing_id],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
@@ -147,8 +134,7 @@ fn accepted_pairing_response_and_acknowledgement_survive_restart_idempotently() 
         let remaining: i64 = database
             .connection()
             .query_row(
-                "SELECT COUNT(*) FROM pending_pairing_acknowledgements
-                 WHERE pairing_id = ?1;",
+                include_str!("sql/accepted_pairing_response_and_acknowledgement_survive_restart_idempotently/accepted_pairing_response_and_acknowledgement_survive_restart_idempotently_4.sql"),
                 [pairing_id],
                 |row| row.get(0),
             )

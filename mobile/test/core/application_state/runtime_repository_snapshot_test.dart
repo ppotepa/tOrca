@@ -33,8 +33,9 @@ void main() {
 
     expect(snapshot.pendingInbox, 1);
     expect(snapshot.pendingOutbox, 1);
-    expect(runtime.pairingInboxCalls, 1);
-    expect(runtime.pairingOutboxCalls, 1);
+    expect(runtime.listPairingsCalls, 1);
+    expect(runtime.pairingInboxCalls, 0);
+    expect(runtime.pairingOutboxCalls, 0);
   });
 
   test(
@@ -284,6 +285,7 @@ class _SnapshotRuntime implements ClientRuntime {
   final String installationId;
   int pairingInboxCalls = 0;
   int pairingOutboxCalls = 0;
+  int listPairingsCalls = 0;
   int messageCalls = 0;
   final List<List<ChatMessage>> _messageBatches;
   final StreamController<RuntimeEvent> _events =
@@ -372,6 +374,25 @@ class _SnapshotRuntime implements ClientRuntime {
   Future<List<PairingItem>> pairingOutbox() async {
     pairingOutboxCalls += 1;
     return const [PairingItem(id: 'outbox', status: InviteState.pending)];
+  }
+
+  @override
+  Future<List<PairingItem>> listPairings() async {
+    listPairingsCalls += 1;
+    return const [
+      PairingItem(
+        id: 'inbox',
+        status: InviteState.pending,
+        availableActions: [PairingAvailableAction.accept],
+        origin: PairingOrigin.inbox,
+      ),
+      PairingItem(
+        id: 'outbox',
+        status: InviteState.pending,
+        received: false,
+        origin: PairingOrigin.outbox,
+      ),
+    ];
   }
 
   @override

@@ -11,7 +11,7 @@ impl ClientEngineActor {
         else {
             return Ok(None);
         };
-        let next_attempt_at = self.clock.now_ms() + retry_backoff_ms(stored.attempt_count);
+        let next_attempt_at = self.clock.now_ms() + pairing_retry_backoff_ms(stored.attempt_count);
         if !self.database.claim_pairing_response_attempt(
             &effect.pairing_id,
             next_attempt_at,
@@ -116,7 +116,7 @@ impl ClientEngineActor {
         self.pending_welcomes
             .retain(|_, pending| pending.expires_at >= now_secs);
         for pending in self.database.due_pending_welcomes(now_ms, now_secs)? {
-            let next_attempt_at = now_ms + retry_backoff_ms(pending.attempt_count);
+            let next_attempt_at = now_ms + pairing_retry_backoff_ms(pending.attempt_count);
             if !self.database.claim_pending_welcome_attempt(
                 &pending.invite_id,
                 next_attempt_at,
@@ -164,7 +164,8 @@ impl ClientEngineActor {
             .database
             .due_pending_contact_confirmations(self.clock.now_ms())?
         {
-            let next_attempt_at = self.clock.now_ms() + retry_backoff_ms(record.attempt_count);
+            let next_attempt_at =
+                self.clock.now_ms() + pairing_retry_backoff_ms(record.attempt_count);
             if !self.database.claim_pending_contact_confirmation_attempt(
                 &record.pairing_id,
                 next_attempt_at,
@@ -202,7 +203,7 @@ impl ClientEngineActor {
             .database
             .due_pending_pairing_acknowledgements(self.clock.now_ms())?
         {
-            let next_attempt_at = self.clock.now_ms() + retry_backoff_ms(attempt_count);
+            let next_attempt_at = self.clock.now_ms() + pairing_retry_backoff_ms(attempt_count);
             if !self
                 .database
                 .claim_pending_pairing_acknowledgement_attempt(&pairing_id, next_attempt_at, None)?

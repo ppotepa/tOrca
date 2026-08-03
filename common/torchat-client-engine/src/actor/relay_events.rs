@@ -137,7 +137,7 @@ impl ClientEngineActor {
                     Some(EngineLogEvent {
                         level: "info".to_owned(),
                         message: format!(
-                            "pairing inbox synchronized after relay notification pairing_id={pairing_id}"
+                            "pairing inbox synchronization scheduled after relay notification pairing_id={pairing_id}"
                         ),
                     }),
                 ))

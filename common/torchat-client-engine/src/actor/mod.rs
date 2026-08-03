@@ -57,6 +57,7 @@ mod connection;
 mod messaging;
 mod pairing;
 mod peer_control;
+mod peer_event_policy;
 mod peer_events;
 mod platform_facts;
 mod projection;
@@ -239,6 +240,8 @@ pub struct ClientEngineActor {
     relay_control_sender: Option<mpsc::Sender<RelayControlOutcome>>,
     relay_control_rejected: u64,
     relay_control_coalesced: u64,
+    pairing_inbox_retry_at: Option<Instant>,
+    pairing_inbox_retry_attempt: u32,
     connect_requested: bool,
     engine_session_id: String,
 }
@@ -383,6 +386,8 @@ impl ClientEngineActor {
             relay_control_sender: None,
             relay_control_rejected: 0,
             relay_control_coalesced: 0,
+            pairing_inbox_retry_at: None,
+            pairing_inbox_retry_attempt: 0,
             connect_requested: false,
             engine_session_id: uuid::Uuid::new_v4().to_string(),
         })
@@ -496,6 +501,9 @@ impl ClientEngineActor {
             let relay_retry_wakeup_at = self
                 .relay_retry_at
                 .unwrap_or(relay_poll_at + Duration::from_secs(3600));
+            let pairing_inbox_retry_wakeup_at = self
+                .pairing_inbox_retry_at
+                .unwrap_or(relay_poll_at + Duration::from_secs(3600));
             tokio::select! {
                 _ = shutdown.cancelled() => {
                     self.advance_connection_generation();
@@ -532,6 +540,10 @@ impl ClientEngineActor {
                 }
                 _ = tokio::time::sleep_until(relay_retry_wakeup_at), if self.relay_retry_at.is_some() && !self.relay_bootstrap_in_flight => {
                     self.start_relay_bootstrap(relay_bootstrap_outcomes.clone());
+                }
+                _ = tokio::time::sleep_until(pairing_inbox_retry_wakeup_at), if self.pairing_inbox_retry_at.is_some() => {
+                    self.pairing_inbox_retry_at = None;
+                    self.enqueue_pairing_inbox_refresh();
                 }
                 outcome = relay_bootstrap_outcome_rx.recv(), if self.relay_bootstrap_in_flight => {
                     if let Some(outcome) = outcome {
@@ -1490,6 +1502,10 @@ fn retry_backoff_ms(attempt_count: u32) -> i64 {
     retry_backoff_with(attempt_count, &mut SystemRetryJitter)
 }
 
+fn pairing_retry_backoff_ms(attempt_count: u32) -> i64 {
+    RetryPolicy::PAIRING.full_jitter_ms(attempt_count, &mut SystemRetryJitter)
+}
+
 fn retry_backoff_with<R: RetryRandom>(attempt_count: u32, random: &mut R) -> i64 {
     RetryPolicy::DELIVERY.full_jitter_ms(attempt_count, random)
 }
@@ -1572,6 +1588,14 @@ mod retry_policy_tests {
             assert!(policy.max_age_ms > 0);
             assert!(policy.max_delay_ms >= policy.base_delay_ms);
         }
+    }
+
+    #[test]
+    fn pairing_retry_uses_the_faster_pairing_policy() {
+        assert_eq!(RetryPolicy::PAIRING.delay_ms(0), 2_000);
+        assert_eq!(RetryPolicy::PAIRING.delay_ms(5), 64_000);
+        assert_eq!(RetryPolicy::PAIRING.delay_ms(20), 64_000);
+        assert!(RetryPolicy::PAIRING.delay_ms(0) < RetryPolicy::DELIVERY.delay_ms(0));
     }
 }
 

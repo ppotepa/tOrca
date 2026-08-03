@@ -16,10 +16,12 @@ pub use actor::ClientEngineActor;
 pub use command::{EngineCommand, EngineCommandEnvelope, PlatformFact, PlatformKind, TorPhase};
 pub use config::EngineConfig;
 pub use engine::ClientEngine;
+pub mod client_api;
+pub use client_api::PairingList;
 pub use error::{EngineError, EngineResult};
 pub use event::{
     ConnectionSnapshot, ConnectionState, EngineEvent, EngineFatalError, EngineLogEvent,
-    NotificationRequest, PlatformAction,
+    NotificationRequest, PlatformAction, ResponsePayload, ResponseResult,
 };
 pub use relay::{EngineRelay, NoopEngineRelay};
 pub use storage::{

@@ -96,20 +96,7 @@ impl<'db> SqliteRuntimeStorage<'db> {
         let secret_hash = Sha256::digest(secret).to_vec();
         self.tx()
             .execute(
-                "INSERT INTO peer_endpoint_capabilities (
-                    contact_installation_id, capability_id, secret_hash,
-                    secret_ciphertext, sequence, issued_at, expires_at, updated_at
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, unixepoch())
-                 ON CONFLICT(contact_installation_id) DO UPDATE SET
-                    capability_id = excluded.capability_id,
-                    secret_hash = excluded.secret_hash,
-                    secret_ciphertext = excluded.secret_ciphertext,
-                    sequence = excluded.sequence,
-                    issued_at = excluded.issued_at,
-                    expires_at = excluded.expires_at,
-                    revoked_at = NULL,
-                    updated_at = unixepoch()
-                 WHERE excluded.sequence >= peer_endpoint_capabilities.sequence;",
+                super::sqlite::sql_catalog::runtime_storage::PUT_PEER_ENDPOINT_CAPABILITY,
                 rusqlite::params![
                     contact_installation_id,
                     capability_id,
@@ -130,9 +117,7 @@ impl<'db> SqliteRuntimeStorage<'db> {
     ) -> RuntimeResult<()> {
         self.tx()
             .execute(
-                "UPDATE peer_endpoint_capabilities
-                 SET revoked_at = unixepoch(), updated_at = unixepoch()
-                 WHERE contact_installation_id = ?1;",
+                super::sqlite::sql_catalog::runtime_storage::REVOKE_PEER_ENDPOINT_CAPABILITY,
                 [contact_installation_id],
             )
             .map_err(storage_error)?;
@@ -146,7 +131,7 @@ impl<'db> SqliteRuntimeStorage<'db> {
     pub fn projection_head(&self) -> RuntimeResult<(String, u64)> {
         self.tx()
             .query_row(
-                "SELECT store_id, global_revision FROM projection_meta WHERE singleton = 1;",
+                super::sqlite::sql_catalog::runtime_storage::PROJECTION_HEAD,
                 [],
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64)),
             )
@@ -165,10 +150,7 @@ impl<'db> SqliteRuntimeStorage<'db> {
     ) -> RuntimeResult<()> {
         self.tx()
             .execute(
-                "INSERT INTO processed_commands
-                 (command_id, command_type, result_json, committed_revision)
-                 VALUES (?1, ?2, ?3, ?4)
-                 ON CONFLICT(command_id) DO NOTHING;",
+                super::sqlite::sql_catalog::runtime_storage::SAVE_PROCESSED_COMMAND,
                 params![
                     command_id,
                     command_descriptor,
@@ -186,7 +168,7 @@ impl<'db> SqliteRuntimeStorage<'db> {
     ) -> RuntimeResult<(String, u64)> {
         self.tx()
             .execute(
-                "UPDATE projection_meta SET global_revision = global_revision + 1 WHERE singleton = 1;",
+                super::sqlite::sql_catalog::runtime_storage::BUMP_PROJECTION_REVISION,
                 [],
             )
             .map_err(storage_error)?;
@@ -194,9 +176,7 @@ impl<'db> SqliteRuntimeStorage<'db> {
         for conversation_id in conversation_ids {
             self.tx()
                 .execute(
-                    "INSERT INTO conversation_projection_revisions (conversation_id, revision)
-                     VALUES (?1, ?2)
-                     ON CONFLICT(conversation_id) DO UPDATE SET revision = excluded.revision;",
+                    super::sqlite::sql_catalog::runtime_storage::BUMP_CONVERSATION_REVISION,
                     rusqlite::params![conversation_id, revision as i64],
                 )
                 .map_err(storage_error)?;
@@ -242,9 +222,11 @@ impl<'db> SqliteRuntimeStorage<'db> {
     ) -> RuntimeResult<Option<T>> {
         let blob: Option<Vec<u8>> = self
             .tx()
-            .query_row("SELECT value FROM settings WHERE key = ?1;", [key], |row| {
-                row.get("value")
-            })
+            .query_row(
+                super::sqlite::sql_catalog::runtime_storage::GET_SETTING_JSON,
+                [key],
+                |row| row.get("value"),
+            )
             .optional()
             .map_err(storage_error)?;
         blob.map(|value| settings::decode(&value)).transpose()
@@ -258,8 +240,7 @@ impl<'db> SqliteRuntimeStorage<'db> {
         let payload = settings::encode(value)?;
         self.tx()
             .execute(
-                "INSERT INTO settings (key, value) VALUES (?1, ?2)
-                 ON CONFLICT(key) DO UPDATE SET value = excluded.value;",
+                super::sqlite::sql_catalog::runtime_storage::PUT_SETTING_JSON,
                 params![key, payload],
             )
             .map_err(storage_error)?;
@@ -269,7 +250,7 @@ impl<'db> SqliteRuntimeStorage<'db> {
     pub fn remove_pending_local_invite_mls(&mut self, invite_id: &str) -> RuntimeResult<()> {
         self.tx()
             .execute(
-                "DELETE FROM pending_local_invite_mls WHERE invite_id = ?1;",
+                super::sqlite::sql_catalog::runtime_storage::REMOVE_PENDING_LOCAL_INVITE_MLS,
                 [invite_id],
             )
             .map_err(storage_error)?;
@@ -284,13 +265,7 @@ impl<'db> SqliteRuntimeStorage<'db> {
         let tombstoned: bool = self
             .tx()
             .query_row(
-                "SELECT EXISTS(
-                    SELECT 1
-                    FROM conversations c
-                    JOIN relationship_tombstones t
-                      ON t.contact_installation_id = c.contact_installation_id
-                    WHERE c.id = ?1
-                );",
+                super::sqlite::sql_catalog::runtime_storage::GET_MLS_SNAPSHOT,
                 [conversation_id],
                 |row| row.get(0),
             )
@@ -301,13 +276,7 @@ impl<'db> SqliteRuntimeStorage<'db> {
         let snapshot_hash = Sha256::digest(snapshot).to_vec();
         self.tx()
             .execute(
-                "INSERT INTO conversation_mls (conversation_id, snapshot, state_version, snapshot_hash, updated_at)
-                 VALUES (?1, ?2, 1, ?3, unixepoch())
-                 ON CONFLICT(conversation_id) DO UPDATE SET
-                    snapshot = excluded.snapshot,
-                    state_version = conversation_mls.state_version + 1,
-                    snapshot_hash = excluded.snapshot_hash,
-                    updated_at = unixepoch();",
+                super::sqlite::sql_catalog::runtime_storage::PUT_MLS_SNAPSHOT,
                 params![conversation_id, snapshot, snapshot_hash],
             )
             .map_err(storage_error)?;
@@ -328,14 +297,7 @@ impl<'db> SqliteRuntimeStorage<'db> {
         let next_epoch = self
             .tx()
             .query_row(
-                "SELECT MAX(
-                    COALESCE((SELECT relationship_epoch
-                              FROM relationship_boundaries
-                              WHERE contact_installation_id = ?1), 0),
-                    COALESCE((SELECT relationship_epoch
-                              FROM relationship_tombstones
-                              WHERE contact_installation_id = ?1), 0)
-                );",
+                super::sqlite::sql_catalog::runtime_storage::BEGIN_VERIFIED_RELATIONSHIP,
                 [installation_id],
                 |row| row.get::<_, Option<i64>>(0),
             )
@@ -346,19 +308,13 @@ impl<'db> SqliteRuntimeStorage<'db> {
             .saturating_add(1);
         self.tx()
             .execute(
-                "DELETE FROM relationship_tombstones WHERE contact_installation_id = ?1;",
+                super::sqlite::sql_catalog::runtime_storage::BEGIN_VERIFIED_RELATIONSHIP_COMMAND,
                 [installation_id],
             )
             .map_err(storage_error)?;
         self.tx()
             .execute(
-                "INSERT INTO relationship_boundaries
-                    (contact_installation_id, boundary_at, relationship_epoch)
-                 VALUES (?1, ?2, ?3)
-                 ON CONFLICT(contact_installation_id) DO UPDATE SET
-                    boundary_at = excluded.boundary_at,
-                    relationship_epoch = MAX(relationship_boundaries.relationship_epoch,
-                                             excluded.relationship_epoch);",
+                super::sqlite::sql_catalog::runtime_storage::BEGIN_VERIFIED_RELATIONSHIP_FINALIZE,
                 rusqlite::params![installation_id, boundary_at, next_epoch],
             )
             .map_err(storage_error)?;
@@ -368,8 +324,7 @@ impl<'db> SqliteRuntimeStorage<'db> {
     pub fn current_relationship_epoch(&mut self, installation_id: &str) -> RuntimeResult<i64> {
         self.tx()
             .query_row(
-                "SELECT relationship_epoch FROM relationship_boundaries
-                 WHERE contact_installation_id = ?1;",
+                super::sqlite::sql_catalog::runtime_storage::CURRENT_RELATIONSHIP_EPOCH,
                 [installation_id],
                 |row| row.get(0),
             )
@@ -381,17 +336,7 @@ impl<'db> SqliteRuntimeStorage<'db> {
     pub fn put_pending_welcome(&mut self, record: &PendingWelcomeRecord) -> RuntimeResult<()> {
         self.tx()
             .execute(
-                "INSERT INTO pending_welcomes (
-                    invite_id, recipient_installation_id, payload, expires_at,
-                    attempt_count, next_attempt_at, last_error
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-                 ON CONFLICT(invite_id) DO UPDATE SET
-                    recipient_installation_id = excluded.recipient_installation_id,
-                    payload = excluded.payload,
-                    expires_at = excluded.expires_at,
-                    attempt_count = excluded.attempt_count,
-                    next_attempt_at = excluded.next_attempt_at,
-                    last_error = excluded.last_error;",
+                super::sqlite::sql_catalog::runtime_storage::PUT_PENDING_WELCOME,
                 params![
                     record.invite_id,
                     record.recipient_installation_id,
@@ -409,7 +354,7 @@ impl<'db> SqliteRuntimeStorage<'db> {
     pub fn remove_pending_welcome(&mut self, invite_id: &str) -> RuntimeResult<()> {
         self.tx()
             .execute(
-                "DELETE FROM pending_welcomes WHERE invite_id = ?1;",
+                super::sqlite::sql_catalog::runtime_storage::REMOVE_PENDING_WELCOME,
                 [invite_id],
             )
             .map_err(storage_error)?;
@@ -420,8 +365,7 @@ impl<'db> SqliteRuntimeStorage<'db> {
         let inserted = self
             .tx()
             .execute(
-                "INSERT OR IGNORE INTO used_invites (invite_id, used_at)
-                 VALUES (?1, unixepoch());",
+                super::sqlite::sql_catalog::runtime_storage::CONSUME_INVITE,
                 [invite_id],
             )
             .map_err(storage_error)?;
@@ -431,9 +375,7 @@ impl<'db> SqliteRuntimeStorage<'db> {
     pub fn put_received_envelope(&mut self, value: &ReceivedEnvelopeRecord) -> RuntimeResult<()> {
         self.tx()
             .execute(
-                "INSERT INTO received_envelopes (
-                    sender_installation_id, message_id, ciphertext_hash, received_at, receipt_state
-                 ) VALUES (?1, ?2, ?3, ?4, ?5);",
+                super::sqlite::sql_catalog::runtime_storage::PUT_RECEIVED_ENVELOPE,
                 params![
                     value.sender_installation_id,
                     value.message_id,
@@ -449,10 +391,7 @@ impl<'db> SqliteRuntimeStorage<'db> {
     pub fn put_delivery_receipt(&mut self, value: &DeliveryReceiptRecord) -> RuntimeResult<()> {
         self.tx()
             .execute(
-                "INSERT INTO delivery_receipts (
-                    envelope_id, message_id, conversation_id, original_sender, received_at,
-                    relay_payload, state, attempt_count, next_attempt_at, last_error, created_at
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11);",
+                super::sqlite::sql_catalog::runtime_storage::PUT_DELIVERY_RECEIPT,
                 params![
                     value.envelope_id,
                     value.message_id,
@@ -483,9 +422,7 @@ impl<'db> SqliteRuntimeStorage<'db> {
         let changed = self
             .tx()
             .execute(
-                "UPDATE messages
-                 SET relay_payload = ?2, ciphertext_hash = ?3
-                 WHERE id = ?1;",
+                super::sqlite::sql_catalog::runtime_storage::PERSIST_OUTBOUND_ENCRYPTION,
                 params![message_id, relay_payload, ciphertext_hash],
             )
             .map_err(storage_error)?;
@@ -508,16 +445,7 @@ impl<'db> SqliteRuntimeStorage<'db> {
         let changed = self
             .tx()
             .execute(
-                "UPDATE messages
-                 SET attempt_count = attempt_count + 1,
-                     last_attempt_at = ?1,
-                     next_attempt_at = ?2,
-                     ack_deadline = ?3,
-                     last_transport_error = ?4
-                 WHERE id = ?5
-                   AND outgoing = 1
-                   AND UPPER(state) IN ('SENDING', 'QUEUED')
-                   AND next_attempt_at <= ?1;",
+                super::sqlite::sql_catalog::runtime_storage::CLAIM_OUTGOING_ATTEMPT,
                 params![
                     now_ms,
                     next_attempt_at,
@@ -622,8 +550,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
         let tx = self.tx();
         let current_epoch = tx
             .query_row(
-                "SELECT relationship_epoch FROM relationship_tombstones
-                 WHERE contact_installation_id = ?1;",
+                super::sqlite::sql_catalog::runtime_storage::GET_RELATIONSHIP_TOMBSTONE_EPOCH,
                 [installation_id],
                 |row| row.get::<_, i64>(0),
             )
@@ -633,63 +560,67 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
             return Ok(());
         }
         tx.execute(
-            "INSERT INTO relationship_tombstones (contact_installation_id, removed_at, preserve_history, relationship_epoch, removal_id)
-             VALUES (?1, ?2, ?3, ?4, ?5)
-             ON CONFLICT(contact_installation_id) DO UPDATE SET
-                removed_at = MAX(relationship_tombstones.removed_at, excluded.removed_at),
-                preserve_history = excluded.preserve_history,
-                relationship_epoch = MAX(relationship_tombstones.relationship_epoch, excluded.relationship_epoch),
-                removal_id = CASE WHEN excluded.relationship_epoch >= relationship_tombstones.relationship_epoch THEN excluded.removal_id ELSE relationship_tombstones.removal_id END;",
-            rusqlite::params![installation_id, removed_at, if preserve_history { 1_i64 } else { 0_i64 }, relationship_epoch, removal_id],
-        ).map_err(storage_error)?;
-        tx.execute(
-            "INSERT INTO relationship_removal_outbox
-                (removal_id, contact_installation_id, relationship_epoch, preserve_history, state, next_attempt_at)
-             VALUES (?1, ?2, ?3, ?4, 'PENDING', 0)
-             ON CONFLICT(removal_id) DO UPDATE SET updated_at = unixepoch();",
-            rusqlite::params![removal_id, installation_id, relationship_epoch, if preserve_history { 1_i64 } else { 0_i64 }],
-        ).map_err(storage_error)?;
-        tx.execute(
-            "UPDATE contacts SET blocked = 1, updated_at = unixepoch() WHERE installation_id = ?1;",
-            [installation_id],
+            super::sqlite::sql_catalog::runtime_storage::UPSERT_RELATIONSHIP_TOMBSTONE,
+            rusqlite::params![
+                installation_id,
+                removed_at,
+                if preserve_history { 1_i64 } else { 0_i64 },
+                relationship_epoch,
+                removal_id
+            ],
         )
         .map_err(storage_error)?;
-        tx.execute("UPDATE conversations SET state = 'OFFLINE', updated_at = unixepoch() WHERE contact_installation_id = ?1;", [installation_id]).map_err(storage_error)?;
         tx.execute(
-            "UPDATE messages SET state = 'FAILED', next_attempt_at = 0, ack_deadline = NULL,
-             last_transport_error = 'relationship removed'
-             WHERE conversation_id IN (SELECT id FROM conversations WHERE contact_installation_id = ?1)
-             AND outgoing = 1 AND UPPER(state) IN ('QUEUED', 'SENDING');",
-            [installation_id],
-        ).map_err(storage_error)?;
+            super::sqlite::sql_catalog::runtime_storage::ENQUEUE_RELATIONSHIP_REMOVAL,
+            rusqlite::params![
+                removal_id,
+                installation_id,
+                relationship_epoch,
+                if preserve_history { 1_i64 } else { 0_i64 }
+            ],
+        )
+        .map_err(storage_error)?;
         tx.execute(
-            "DELETE FROM outbound_deliveries WHERE contact_installation_id = ?1;",
+            super::sqlite::sql_catalog::runtime_storage::BLOCK_CONTACT,
             [installation_id],
         )
         .map_err(storage_error)?;
         tx.execute(
-            "DELETE FROM delivery_receipts WHERE conversation_id IN
-             (SELECT id FROM conversations WHERE contact_installation_id = ?1);",
+            super::sqlite::sql_catalog::runtime_storage::SET_CONVERSATION_OFFLINE,
+            [installation_id],
+        )
+        .map_err(storage_error)?;
+        tx.execute(
+            super::sqlite::sql_catalog::runtime_storage::FAIL_PENDING_MESSAGES,
+            [installation_id],
+        )
+        .map_err(storage_error)?;
+        tx.execute(
+            super::sqlite::sql_catalog::runtime_storage::DELETE_OUTBOUND_DELIVERIES,
+            [installation_id],
+        )
+        .map_err(storage_error)?;
+        tx.execute(
+            super::sqlite::sql_catalog::runtime_storage::DELETE_DELIVERY_RECEIPTS,
             [installation_id],
         )
         .map_err(storage_error)?;
         if !preserve_history {
             tx.execute(
-                "DELETE FROM messages WHERE conversation_id IN
-                 (SELECT id FROM conversations WHERE contact_installation_id = ?1);",
+                super::sqlite::sql_catalog::runtime_storage::DELETE_HISTORY,
                 [installation_id],
             )
             .map_err(storage_error)?;
         }
         for sql in [
-            "DELETE FROM conversation_mls WHERE conversation_id IN (SELECT id FROM conversations WHERE contact_installation_id = ?1);",
-            "DELETE FROM contact_peer_endpoints WHERE contact_installation_id = ?1;",
-            "DELETE FROM endpoint_update_outbox WHERE contact_installation_id = ?1;",
-            "DELETE FROM peer_endpoint_bootstrap_outbox WHERE contact_installation_id = ?1;",
-            "DELETE FROM pending_contact_confirmations WHERE peer_installation_id = ?1;",
-            "DELETE FROM pending_peer_endpoint_inbox WHERE contact_installation_id = ?1;",
-            "DELETE FROM inbound_peer_envelopes WHERE sender_installation_id = ?1;",
-            "DELETE FROM received_envelopes WHERE sender_installation_id = ?1;",
+            super::sqlite::sql_catalog::runtime_storage::DELETE_MLS,
+            super::sqlite::sql_catalog::runtime_storage::DELETE_CONTACT_ENDPOINT,
+            super::sqlite::sql_catalog::runtime_storage::DELETE_ENDPOINT_UPDATES,
+            super::sqlite::sql_catalog::runtime_storage::DELETE_PEER_BOOTSTRAP,
+            super::sqlite::sql_catalog::runtime_storage::DELETE_PENDING_CONFIRMATIONS,
+            super::sqlite::sql_catalog::runtime_storage::DELETE_PENDING_ENDPOINT_INBOX,
+            super::sqlite::sql_catalog::runtime_storage::DELETE_INBOUND_PEER_ENVELOPES,
+            super::sqlite::sql_catalog::runtime_storage::DELETE_RECEIVED_ENVELOPES,
         ] {
             tx.execute(sql, [installation_id]).map_err(storage_error)?;
         }
@@ -711,7 +642,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
         let tx = self.tx();
         let current_epoch = tx
             .query_row(
-                "SELECT relationship_epoch FROM relationship_tombstones WHERE contact_installation_id = ?1;",
+                super::sqlite::sql_catalog::runtime_storage::GET_REMOTE_TOMBSTONE_EPOCH,
                 [installation_id],
                 |row| row.get::<_, i64>(0),
             )
@@ -721,37 +652,40 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
             return Ok(());
         }
         tx.execute(
-            "INSERT INTO relationship_tombstones (contact_installation_id, removed_at, preserve_history, relationship_epoch, removal_id)
-             VALUES (?1, ?2, 1, ?3, ?4)
-             ON CONFLICT(contact_installation_id) DO UPDATE SET
-               removed_at = MAX(relationship_tombstones.removed_at, excluded.removed_at),
-               preserve_history = 1,
-               relationship_epoch = MAX(relationship_tombstones.relationship_epoch, excluded.relationship_epoch),
-               removal_id = CASE WHEN excluded.relationship_epoch >= relationship_tombstones.relationship_epoch THEN excluded.removal_id ELSE relationship_tombstones.removal_id END;",
-            rusqlite::params![installation_id, remote_removed_at, relationship_epoch, removal_id],
-        ).map_err(storage_error)?;
+            super::sqlite::sql_catalog::runtime_storage::UPSERT_REMOTE_TOMBSTONE,
+            rusqlite::params![
+                installation_id,
+                remote_removed_at,
+                relationship_epoch,
+                removal_id
+            ],
+        )
+        .map_err(storage_error)?;
         tx.execute(
-            "UPDATE contacts SET blocked = 1, updated_at = unixepoch() WHERE installation_id = ?1;",
+            super::sqlite::sql_catalog::runtime_storage::BLOCK_REMOTE_CONTACT,
             [installation_id],
         )
         .map_err(storage_error)?;
         tx.execute(
-            "UPDATE conversations SET state = 'OFFLINE', updated_at = unixepoch() WHERE contact_installation_id = ?1;",
-            [installation_id],
-        ).map_err(storage_error)?;
-        tx.execute(
-            "UPDATE messages SET state = 'FAILED', next_attempt_at = 0, ack_deadline = NULL, last_transport_error = 'relationship removed'
-             WHERE conversation_id IN (SELECT id FROM conversations WHERE contact_installation_id = ?1)
-             AND outgoing = 1 AND UPPER(state) IN ('QUEUED', 'SENDING');",
-            [installation_id],
-        ).map_err(storage_error)?;
-        tx.execute(
-            "DELETE FROM outbound_deliveries WHERE contact_installation_id = ?1;",
+            super::sqlite::sql_catalog::runtime_storage::SET_REMOTE_CONVERSATION_OFFLINE,
             [installation_id],
         )
         .map_err(storage_error)?;
-        tx.execute("DELETE FROM delivery_receipts WHERE conversation_id IN (SELECT id FROM conversations WHERE contact_installation_id = ?1);", [installation_id])
-            .map_err(storage_error)?;
+        tx.execute(
+            super::sqlite::sql_catalog::runtime_storage::FAIL_REMOTE_PENDING_MESSAGES,
+            [installation_id],
+        )
+        .map_err(storage_error)?;
+        tx.execute(
+            super::sqlite::sql_catalog::runtime_storage::DELETE_REMOTE_MLS,
+            [installation_id],
+        )
+        .map_err(storage_error)?;
+        tx.execute(
+            super::sqlite::sql_catalog::runtime_storage::ENQUEUE_RELATIONSHIP_REMOVAL_ACK,
+            [installation_id],
+        )
+        .map_err(storage_error)?;
         Ok(())
     }
 
@@ -764,10 +698,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
     ) -> RuntimeResult<()> {
         self.tx()
             .execute(
-                "INSERT INTO relationship_removal_ack_outbox
-                 (removal_id, contact_installation_id, relationship_epoch, payload, state, next_attempt_at)
-                 VALUES (?1, ?2, ?3, ?4, 'PENDING', 0)
-                 ON CONFLICT(removal_id) DO UPDATE SET updated_at = unixepoch();",
+                super::sqlite::sql_catalog::runtime_storage::PUT_RELATIONSHIP_REMOVAL_ACK,
                 rusqlite::params![
                     removal_id,
                     contact_installation_id,
@@ -790,13 +721,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
     fn pairing_inbox(&self) -> RuntimeResult<Vec<PairingItem>> {
         let mut statement = self
             .tx()
-            .prepare(
-                "SELECT pairing_id, sender_installation_id, sender_nickname,
-                        sender_public_key, sender_fingerprint, capability,
-                        expires_at, state, offer_invite_id, offer_payload
-                 FROM pairing_inbox
-                 ORDER BY updated_at DESC, pairing_id ASC;",
-            )
+            .prepare(super::sqlite::sql_catalog::runtime_storage::LIST_PAIRING_INBOX)
             .map_err(storage_error)?;
         let rows = statement
             .query_map([], |row| {
@@ -870,46 +795,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
         })?;
         self.tx()
             .execute(
-                "INSERT INTO pairing_inbox (
-                    pairing_id, sender_installation_id, sender_nickname,
-                    sender_public_key, sender_fingerprint, capability,
-                    expires_at, state, offer_invite_id, offer_payload,
-                    attempt_count, next_attempt_at, last_error, created_at, updated_at
-                 ) VALUES (
-                    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 0, 0, NULL, unixepoch(), unixepoch()
-                 )
-                 ON CONFLICT(pairing_id) DO UPDATE SET
-                    sender_installation_id = excluded.sender_installation_id,
-                    sender_nickname = excluded.sender_nickname,
-                    sender_public_key = excluded.sender_public_key,
-                    sender_fingerprint = excluded.sender_fingerprint,
-                    capability = excluded.capability,
-                    expires_at = excluded.expires_at,
-                    state = excluded.state,
-                    offer_invite_id = excluded.offer_invite_id,
-                    offer_payload = excluded.offer_payload,
-                    attempt_count = CASE
-                        WHEN pairing_inbox.state <> excluded.state
-                          OR COALESCE(pairing_inbox.offer_invite_id, '') <> COALESCE(excluded.offer_invite_id, '')
-                          OR COALESCE(pairing_inbox.offer_payload, X'') <> COALESCE(excluded.offer_payload, X'')
-                        THEN 0
-                        ELSE pairing_inbox.attempt_count
-                    END,
-                    next_attempt_at = CASE
-                        WHEN pairing_inbox.state <> excluded.state
-                          OR COALESCE(pairing_inbox.offer_invite_id, '') <> COALESCE(excluded.offer_invite_id, '')
-                          OR COALESCE(pairing_inbox.offer_payload, X'') <> COALESCE(excluded.offer_payload, X'')
-                        THEN 0
-                        ELSE pairing_inbox.next_attempt_at
-                    END,
-                    last_error = CASE
-                        WHEN pairing_inbox.state <> excluded.state
-                          OR COALESCE(pairing_inbox.offer_invite_id, '') <> COALESCE(excluded.offer_invite_id, '')
-                          OR COALESCE(pairing_inbox.offer_payload, X'') <> COALESCE(excluded.offer_payload, X'')
-                        THEN NULL
-                        ELSE pairing_inbox.last_error
-                    END,
-                    updated_at = unixepoch();",
+                super::sqlite::sql_catalog::runtime_storage::UPSERT_PAIRING_INBOX,
                 params![
                     item.pairing_id,
                     sender.installation_id,
@@ -930,12 +816,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
     fn pairing_outbox(&self) -> RuntimeResult<Vec<PairingItem>> {
         let mut statement = self
             .tx()
-            .prepare(
-                "SELECT pairing_id, recipient_installation_id, capability, payload,
-                        expires_at, state
-                 FROM pairing_outbox
-                 ORDER BY updated_at DESC, pairing_id ASC;",
-            )
+            .prepare(super::sqlite::sql_catalog::runtime_storage::LIST_PAIRING_OUTBOX)
             .map_err(storage_error)?;
         let rows = statement
             .query_map([], |row| {
@@ -985,20 +866,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
     fn put_pairing_outbox(&mut self, item: PairingItem) -> RuntimeResult<()> {
         self.tx()
             .execute(
-                "INSERT INTO pairing_outbox (
-                    pairing_id, recipient_installation_id, capability, payload,
-                    expires_at, state, attempt_count, next_attempt_at, last_error,
-                    created_at, updated_at
-                 ) VALUES (
-                    ?1, ?2, ?3, ?4, ?5, ?6, 0, 0, NULL, unixepoch(), unixepoch()
-                 )
-                 ON CONFLICT(pairing_id) DO UPDATE SET
-                    recipient_installation_id = excluded.recipient_installation_id,
-                    capability = excluded.capability,
-                    payload = excluded.payload,
-                    expires_at = excluded.expires_at,
-                    state = excluded.state,
-                    updated_at = unixepoch();",
+                super::sqlite::sql_catalog::runtime_storage::UPSERT_PAIRING_OUTBOX,
                 params![
                     item.pairing_id,
                     item.sender.map(|contact| contact.installation_id),
@@ -1015,37 +883,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
     fn contacts(&self) -> RuntimeResult<Vec<ContactRecord>> {
         let mut statement = self
             .tx()
-            .prepare(
-                "SELECT c.installation_id, c.nickname, c.public_key, c.fingerprint,
-                        c.verification, c.local_alias, c.muted, c.blocked,
-                        c.transport_policy,
-                        CASE WHEN p.contact_installation_id IS NULL THEN 0 ELSE 1 END
-                            AS has_peer_endpoint,
-                        CASE
-                            WHEN EXISTS (
-                                SELECT 1
-                                FROM peer_endpoint_bootstrap_outbox b
-                                WHERE b.contact_installation_id = c.installation_id
-                            ) THEN 1
-                            WHEN EXISTS (
-                                SELECT 1
-                                FROM pending_contact_confirmations cc
-                                WHERE cc.peer_installation_id = c.installation_id
-                            ) THEN 1
-                            ELSE 0
-                        END AS has_pending_peer_exchange,
-                        CASE
-                            WHEN p.last_connected_at IS NOT NULL
-                             AND p.last_connected_at >= (unixepoch() - 120) THEN 1
-                            ELSE 0
-                        END AS has_recent_peer_connection,
-                        p.last_connected_at,
-                        c.last_seen_at
-                 FROM contacts c
-                 LEFT JOIN contact_peer_endpoints p
-                   ON p.contact_installation_id = c.installation_id
-                 ORDER BY c.updated_at DESC, c.installation_id ASC;",
-            )
+            .prepare(super::sqlite::sql_catalog::runtime_storage::LIST_CONTACTS)
             .map_err(storage_error)?;
         let rows = statement
             .query_map([], |row| {
@@ -1120,23 +958,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
     fn put_contact(&mut self, contact: ContactRecord) -> RuntimeResult<()> {
         self.tx()
             .execute(
-                "INSERT INTO contacts (
-                    installation_id, nickname, public_key, fingerprint, key_package,
-                    verification, source, local_alias, muted, blocked, transport_policy, last_seen_at, created_at, updated_at
-                 ) VALUES (
-                    ?1, ?2, ?3, ?4, NULL, ?5, 'runtime', ?6, ?7, ?8, ?9, ?10, unixepoch(), unixepoch()
-                 )
-                 ON CONFLICT(installation_id) DO UPDATE SET
-                    nickname = excluded.nickname,
-                    public_key = excluded.public_key,
-                    fingerprint = excluded.fingerprint,
-                    verification = excluded.verification,
-                    local_alias = excluded.local_alias,
-                    muted = excluded.muted,
-                    blocked = excluded.blocked,
-                    transport_policy = excluded.transport_policy,
-                    last_seen_at = COALESCE(excluded.last_seen_at, contacts.last_seen_at),
-                    updated_at = unixepoch();",
+                super::sqlite::sql_catalog::runtime_storage::UPSERT_CONTACT,
                 params![
                     contact.installation_id,
                     contact.nickname,
@@ -1146,7 +968,9 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                     contact.local_alias,
                     if contact.muted { 1 } else { 0 },
                     if contact.blocked { 1 } else { 0 },
-                    serde_json::to_string(&contact.transport_policy).unwrap_or_else(|_| "\"PEER_ONLY\"".to_owned()).trim_matches('"'),
+                    serde_json::to_string(&contact.transport_policy)
+                        .unwrap_or_else(|_| "\"PEER_ONLY\"".to_owned())
+                        .trim_matches('"'),
                     contact.last_seen_at,
                 ],
             )
@@ -1157,14 +981,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
     fn conversations(&self) -> RuntimeResult<Vec<ConversationSummary>> {
         let mut statement = self
             .tx()
-            .prepare(
-                "SELECT id, contact_installation_id, state,
-                        COALESCE(last_message_preview, '') AS last_message_preview,
-                        COALESCE(last_message_at, 0) AS last_message_at,
-                        unread_count
-                 FROM conversations
-                 ORDER BY COALESCE(last_message_at, 0) DESC, id ASC;",
-            )
+            .prepare(super::sqlite::sql_catalog::runtime_storage::LIST_CONVERSATIONS)
             .map_err(storage_error)?;
         let rows = statement
             .query_map([], |row| {
@@ -1202,19 +1019,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
     fn put_conversation(&mut self, conversation: ConversationSummary) -> RuntimeResult<()> {
         self.tx()
             .execute(
-                "INSERT INTO conversations (
-                    id, contact_installation_id, state, unread_count,
-                    last_message_preview, last_message_at, created_at, updated_at
-                 ) VALUES (
-                    ?1, ?2, ?3, ?4, ?5, ?6, unixepoch(), unixepoch()
-                 )
-                 ON CONFLICT(id) DO UPDATE SET
-                    contact_installation_id = excluded.contact_installation_id,
-                    state = excluded.state,
-                    unread_count = excluded.unread_count,
-                    last_message_preview = excluded.last_message_preview,
-                    last_message_at = excluded.last_message_at,
-                    updated_at = unixepoch();",
+                super::sqlite::sql_catalog::runtime_storage::UPSERT_CONVERSATION,
                 params![
                     conversation.id,
                     conversation.contact_installation_id,
@@ -1231,9 +1036,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
     fn mark_conversation_read(&mut self, conversation_id: &str) -> RuntimeResult<()> {
         self.tx()
             .execute(
-                "UPDATE conversations
-                 SET unread_count = 0, updated_at = unixepoch()
-                 WHERE id = ?1;",
+                super::sqlite::sql_catalog::runtime_storage::MARK_CONVERSATION_READ,
                 [conversation_id],
             )
             .map_err(storage_error)?;
@@ -1245,14 +1048,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
             MessageQuery::All { conversation_id } => {
                 let mut statement = self
                     .tx()
-                    .prepare(
-                        "SELECT id, conversation_id, outgoing, body, reply_to_json, state, created_at,
-                                attempt_count, last_attempt_at, next_attempt_at,
-                                ack_deadline, last_transport_error
-                         FROM messages
-                         WHERE conversation_id = ?1
-                         ORDER BY created_at ASC, id ASC;",
-                    )
+                    .prepare(super::sqlite::sql_catalog::runtime_storage::LIST_MESSAGES)
                     .map_err(storage_error)?;
                 let rows = statement
                     .query_map([conversation_id], stored_message_row)
@@ -1268,16 +1064,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                 let mut messages = if let Some((before_created_at, before_id)) = before {
                     let mut statement = self
                         .tx()
-                        .prepare(
-                            "SELECT id, conversation_id, outgoing, body, reply_to_json, state, created_at,
-                                    attempt_count, last_attempt_at, next_attempt_at,
-                                    ack_deadline, last_transport_error
-                             FROM messages
-                             WHERE conversation_id = ?1
-                               AND (created_at < ?2 OR (created_at = ?2 AND id < ?3))
-                             ORDER BY created_at DESC, id DESC
-                             LIMIT ?4;",
-                        )
+                        .prepare(super::sqlite::sql_catalog::runtime_storage::LIST_MESSAGES_BEFORE)
                         .map_err(storage_error)?;
                     let rows = statement
                         .query_map(
@@ -1290,15 +1077,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                 } else {
                     let mut statement = self
                         .tx()
-                        .prepare(
-                            "SELECT id, conversation_id, outgoing, body, reply_to_json, state, created_at,
-                                    attempt_count, last_attempt_at, next_attempt_at,
-                                    ack_deadline, last_transport_error
-                             FROM messages
-                             WHERE conversation_id = ?1
-                             ORDER BY created_at DESC, id DESC
-                             LIMIT ?2;",
-                        )
+                        .prepare(super::sqlite::sql_catalog::runtime_storage::LIST_MESSAGES_LIMITED)
                         .map_err(storage_error)?;
                     let rows = statement
                         .query_map(params![conversation_id, limit as i64], stored_message_row)
@@ -1316,9 +1095,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
         let existing = self
             .tx()
             .query_row(
-                "SELECT relay_payload, ciphertext_hash
-                 FROM messages
-                 WHERE id = ?1;",
+                super::sqlite::sql_catalog::runtime_storage::GET_MESSAGE_METADATA,
                 [message.id.as_str()],
                 |row| {
                     Ok((
@@ -1332,25 +1109,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
         let (relay_payload, ciphertext_hash) = existing.unwrap_or((None, None));
         self.tx()
             .execute(
-                "INSERT INTO messages (
-                    id, conversation_id, outgoing, body, reply_to_json, state, created_at,
-                    relay_payload, ciphertext_hash, attempt_count, last_attempt_at,
-                    next_attempt_at, ack_deadline, last_transport_error
-                 ) VALUES (
-                    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14
-                 )
-                 ON CONFLICT(id) DO UPDATE SET
-                    conversation_id = excluded.conversation_id,
-                    outgoing = excluded.outgoing,
-                    body = excluded.body,
-                    reply_to_json = excluded.reply_to_json,
-                    state = excluded.state,
-                    created_at = excluded.created_at,
-                    attempt_count = excluded.attempt_count,
-                    last_attempt_at = excluded.last_attempt_at,
-                    next_attempt_at = excluded.next_attempt_at,
-                    ack_deadline = excluded.ack_deadline,
-                    last_transport_error = excluded.last_transport_error;",
+                super::sqlite::sql_catalog::runtime_storage::UPSERT_MESSAGE,
                 params![
                     message.id,
                     message.conversation_id,
@@ -1374,7 +1133,10 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
 
     fn delete_message(&mut self, message_id: &str) -> RuntimeResult<()> {
         self.tx()
-            .execute("DELETE FROM messages WHERE id = ?1;", [message_id])
+            .execute(
+                super::sqlite::sql_catalog::runtime_storage::DELETE_MESSAGE,
+                [message_id],
+            )
             .map_err(storage_error)?;
         Ok(())
     }
@@ -1382,15 +1144,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
     fn pending_messages(&self) -> RuntimeResult<Vec<ChatMessage>> {
         let mut statement = self
             .tx()
-            .prepare(
-                "SELECT id, conversation_id, outgoing, body, reply_to_json, state, created_at,
-                        attempt_count, last_attempt_at, next_attempt_at,
-                        ack_deadline, last_transport_error
-                 FROM messages
-                 WHERE state IN ('QUEUED', 'SENDING')
-                   AND next_attempt_at <= CAST(unixepoch('now') * 1000 AS INTEGER)
-                 ORDER BY next_attempt_at ASC, created_at ASC, id ASC;",
-            )
+            .prepare(super::sqlite::sql_catalog::runtime_storage::LIST_PENDING_MESSAGES)
             .map_err(storage_error)?;
         let rows = statement
             .query_map([], |row| {
@@ -1446,13 +1200,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
     fn pending_receipts(&self) -> RuntimeResult<Vec<ReceiptSendEffect>> {
         let mut statement = self
             .tx()
-            .prepare(
-                "SELECT envelope_id, message_id, conversation_id, original_sender, received_at
-                 FROM delivery_receipts
-                 WHERE state IN ('PENDING', 'SENT')
-                   AND next_attempt_at <= CAST(unixepoch('now') * 1000 AS INTEGER)
-                 ORDER BY next_attempt_at ASC, created_at ASC, envelope_id ASC;",
-            )
+            .prepare(super::sqlite::sql_catalog::runtime_storage::LIST_PENDING_RECEIPTS)
             .map_err(storage_error)?;
         let rows = statement
             .query_map([], |row| {
@@ -1471,53 +1219,43 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
     fn expedite_retry_after_ready(&mut self) -> RuntimeResult<()> {
         self.tx()
             .execute(
-                "UPDATE messages
-                 SET next_attempt_at = 0
-                 WHERE state IN ('QUEUED', 'SENDING');",
+                super::sqlite::sql_catalog::runtime_storage::EXPEDITE_MESSAGE_RETRIES,
                 [],
             )
             .map_err(storage_error)?;
         self.tx()
             .execute(
-                "UPDATE delivery_receipts
-                 SET next_attempt_at = 0
-                 WHERE state IN ('PENDING', 'SENT');",
+                super::sqlite::sql_catalog::runtime_storage::EXPEDITE_RECEIPT_RETRIES,
                 [],
             )
             .map_err(storage_error)?;
         self.tx()
             .execute(
-                "UPDATE pairing_outbox
-                 SET next_attempt_at = 0
-                 WHERE state IN ('PENDING', 'ACCEPTED');",
+                super::sqlite::sql_catalog::runtime_storage::EXPEDITE_READ_RECEIPT_RETRIES,
                 [],
             )
             .map_err(storage_error)?;
         self.tx()
             .execute(
-                "UPDATE pending_welcomes
-                 SET next_attempt_at = 0;",
+                super::sqlite::sql_catalog::runtime_storage::EXPEDITE_PAIRING_RETRIES,
                 [],
             )
             .map_err(storage_error)?;
         self.tx()
             .execute(
-                "UPDATE peer_endpoint_bootstrap_outbox
-                 SET next_attempt_at = 0;",
+                super::sqlite::sql_catalog::runtime_storage::EXPEDITE_CONFIRMATION_RETRIES,
                 [],
             )
             .map_err(storage_error)?;
         self.tx()
             .execute(
-                "UPDATE pending_contact_confirmations
-                 SET next_attempt_at = 0;",
+                super::sqlite::sql_catalog::runtime_storage::EXPEDITE_ENDPOINT_RETRIES,
                 [],
             )
             .map_err(storage_error)?;
         self.tx()
             .execute(
-                "UPDATE pending_pairing_acknowledgements
-                 SET next_attempt_at = 0;",
+                super::sqlite::sql_catalog::runtime_storage::EXPEDITE_CAPABILITY_RETRIES,
                 [],
             )
             .map_err(storage_error)?;
@@ -1528,11 +1266,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
         let message = self
             .tx()
             .query_row(
-                "SELECT id, conversation_id, outgoing, body, reply_to_json, state, created_at,
-                        attempt_count, last_attempt_at, next_attempt_at,
-                        ack_deadline, last_transport_error
-                 FROM messages
-                 WHERE id = ?1;",
+                super::sqlite::sql_catalog::runtime_storage::GET_MESSAGE,
                 [message_id],
                 |row| {
                     Ok((

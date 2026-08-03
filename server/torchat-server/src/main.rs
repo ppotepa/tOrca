@@ -232,10 +232,7 @@ async fn main() {
         .await
         .expect("database migration failed");
     let instance_lock = db
-        .query_one(
-            "SELECT pg_try_advisory_lock($1)",
-            &[&SINGLE_INSTANCE_ADVISORY_LOCK],
-        )
+        .query_one(SQL_TRY_ADVISORY_LOCK, &[&SINGLE_INSTANCE_ADVISORY_LOCK])
         .await
         .expect("single-instance advisory lock query failed")
         .get::<_, bool>(0);
@@ -688,7 +685,9 @@ async fn create_pairing_request(
     tracing::info!(sender_hash = %pseudonymous_id(&state, &sender), "create_pairing_request start");
     let code = torchat_core::Identity::pairing_code_digits(&request.code)
         .map_err(|message| error(StatusCode::BAD_REQUEST, &message))?;
-    let reserved_recipient = reserved_pairing_recipient(&state, &code).await;
+    let reserved_recipient = reserved_pairing_recipient(&state, &code)
+        .await
+        .map_err(|_| error(StatusCode::INTERNAL_SERVER_ERROR, "database error"))?;
     let use_reserved_recipient = reserved_recipient.is_some();
     let hash = pairing_code_hash(&state, &code);
     let stored_row = if reserved_recipient.is_none() {
@@ -982,12 +981,19 @@ async fn reserved_pairing_code_for_installation(
     None
 }
 
-async fn reserved_pairing_recipient(state: &AppState, code: &str) -> Option<String> {
-    let reserved_code = state.dev_reserved_pairing_code.as_ref().as_ref()?;
+async fn reserved_pairing_recipient(
+    state: &AppState,
+    code: &str,
+) -> Result<Option<String>, tokio_postgres::Error> {
+    let Some(reserved_code) = state.dev_reserved_pairing_code.as_ref().as_ref() else {
+        return Ok(None);
+    };
     if reserved_code != code {
-        return None;
+        return Ok(None);
     }
-    let nickname = state.dev_reserved_pairing_nickname.as_ref().as_ref()?;
+    let Some(nickname) = state.dev_reserved_pairing_nickname.as_ref().as_ref() else {
+        return Ok(None);
+    };
     if let Some(found) =
         state
             .installations
@@ -1002,7 +1008,7 @@ async fn reserved_pairing_recipient(state: &AppState, code: &str) -> Option<Stri
                     .map(|_| installation_id.clone())
             })
     {
-        return Some(found);
+        return Ok(Some(found));
     }
     installation_id_for_reserved_nickname(state, nickname).await
 }
@@ -1032,21 +1038,15 @@ async fn installation_matches_reserved_nickname(
         .is_some_and(|value| value.trim().eq_ignore_ascii_case(nickname))
 }
 
-async fn installation_id_for_reserved_nickname(state: &AppState, nickname: &str) -> Option<String> {
+async fn installation_id_for_reserved_nickname(
+    state: &AppState,
+    nickname: &str,
+) -> Result<Option<String>, tokio_postgres::Error> {
     state
         .db
-        .query_opt(
-            "SELECT installation_id
-             FROM installations
-             WHERE LOWER(TRIM(COALESCE(nickname, ''))) = LOWER(TRIM(?1))
-             ORDER BY updated_at DESC, installation_id ASC
-             LIMIT 1;",
-            &[&nickname],
-        )
+        .query_opt(SQL_FIND_BY_NORMALIZED_NICKNAME, &[&nickname])
         .await
-        .ok()
-        .flatten()
-        .and_then(|row| row.try_get::<_, String>(0).ok())
+        .map(|row| row.and_then(|row| row.try_get::<_, String>(0).ok()))
 }
 
 fn pairing_capability(
@@ -1305,8 +1305,7 @@ async fn websocket_session(state: AppState, installation_id: String, socket: Web
             let now = auth::now();
             let expires_at = now.saturating_add(30) as i64;
             let _ = state.db.execute(
-                "UPDATE connection_leases SET expires_at = $4, updated_at = NOW()
-                 WHERE installation_id = $1 AND instance_id = $2 AND connection_id = $3",
+                SQL_RENEW_LEASE,
                 &[&installation_id, &state.instance_id, &connection_id, &expires_at],
             ).await;
             if let Ok(Some((route_id, payload))) = claim_route(
@@ -1857,17 +1856,7 @@ mod tests {
         let message_id = Uuid::new_v4();
         let route_task = tokio::spawn({
             let connections = connections.clone();
-            async move {
-                route_envelope(
-                    &connections,
-                    "sender",
-                    envelope(message_id),
-                    "test-secret",
-                    None,
-                    None,
-                )
-                .await
-            }
+            async move { route_envelope(&connections, "sender", envelope(message_id), None, None).await }
         });
 
         let command = recipient_rx
@@ -1915,16 +1904,9 @@ mod tests {
         ])));
         let message_id = Uuid::new_v4();
 
-        route_envelope(
-            &connections,
-            "sender",
-            envelope(message_id),
-            "test-secret",
-            None,
-            None,
-        )
-        .await
-        .unwrap();
+        route_envelope(&connections, "sender", envelope(message_id), None, None)
+            .await
+            .unwrap();
 
         assert!(matches!(
             recipient_rx.try_recv(),

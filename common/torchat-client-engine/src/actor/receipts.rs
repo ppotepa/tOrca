@@ -219,12 +219,7 @@ impl ClientEngineActor {
         };
         if exhausted {
             self.database
-                .connection()
-                .execute(
-                    "UPDATE delivery_receipts SET dead_lettered_at = unixepoch(), last_error_code = 'retry_exhausted' WHERE message_id = ?1;",
-                    [message_id],
-                )
-                .map_err(|error| EngineError::Storage(error.to_string()))?;
+                .mark_delivery_receipt_dead_lettered("retry_exhausted", message_id)?;
             self.database.record_delivery_dead_letter(
                 "receipt",
                 message_id,

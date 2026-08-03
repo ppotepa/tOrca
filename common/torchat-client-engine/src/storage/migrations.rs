@@ -1,4 +1,4 @@
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension};
 use sha2::{Digest, Sha256};
 
 use crate::{EngineError, EngineResult};
@@ -24,23 +24,9 @@ impl MigrationRunner {
     }
 
     pub fn run(&self, connection: &Connection) -> EngineResult<()> {
-        connection
-            .execute_batch("BEGIN IMMEDIATE;")
-            .map_err(sqlite_error)?;
-
-        let result = self.run_locked(connection);
-        match result {
-            Ok(()) => connection.execute_batch("COMMIT;").map_err(sqlite_error),
-            Err(error) => {
-                let rollback = connection.execute_batch("ROLLBACK;");
-                if let Err(rollback_error) = rollback {
-                    return Err(EngineError::Storage(format!(
-                        "{error}; rollback failed: {rollback_error:#}",
-                    )));
-                }
-                Err(error)
-            }
-        }
+        let transaction = connection.unchecked_transaction().map_err(sqlite_error)?;
+        self.run_locked(&transaction)?;
+        transaction.commit().map_err(sqlite_error)
     }
 
     fn run_locked(&self, connection: &Connection) -> EngineResult<()> {
@@ -67,8 +53,8 @@ impl MigrationRunner {
                 .map_err(sqlite_error)?;
             connection
                 .execute(
-                    "INSERT OR IGNORE INTO schema_migrations (version, name) VALUES (?1, ?2);",
-                    params![migration.version, migration.name],
+                    super::sqlite::sql_catalog::metadata::MIGRATION_INSERT,
+                    rusqlite::params![migration.version, migration.name],
                 )
                 .map_err(sqlite_error)?;
 
@@ -110,10 +96,7 @@ fn sqlite_error(error: rusqlite::Error) -> EngineError {
 fn schema_migrations_table_exists(connection: &Connection) -> EngineResult<bool> {
     connection
         .query_row(
-            "SELECT 1
-             FROM sqlite_master
-             WHERE type = 'table'
-               AND name = 'schema_migrations';",
+            super::sqlite::sql_catalog::metadata::SCHEMA_MIGRATIONS_TABLE_EXISTS,
             [],
             |_| Ok(()),
         )

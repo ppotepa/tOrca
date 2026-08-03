@@ -384,6 +384,9 @@ class WindowsRuntime extends Object
       EngineContract.getApplicationSnapshot => {
         EngineContract.type: EngineContract.commandGetApplicationSnapshot,
       },
+      EngineContract.listPairings => {
+        EngineContract.type: EngineContract.commandListPairings,
+      },
       EngineContract.pairingInbox => {
         EngineContract.type: EngineContract.commandPairingInbox,
       },

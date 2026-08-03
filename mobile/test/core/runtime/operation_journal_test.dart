@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -30,7 +32,7 @@ void main() {
     final preferences = await SharedPreferences.getInstance();
     final raw = preferences.getString('torchat.operation-command-ids');
     expect(raw, isNotNull);
-    expect(raw!.split('mutation:').length - 1, OperationJournal.maxEntries);
+    expect((jsonDecode(raw!) as Map).length, OperationJournal.maxEntries);
   });
 
   test('rejects reusing an operation id for a different payload', () async {

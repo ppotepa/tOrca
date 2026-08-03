@@ -60,7 +60,6 @@ void main() {
             onOpenSettings: () => settings += 1,
             onRetryTor: () => reconnect += 1,
             typingContacts: const {},
-            onlineContacts: const {},
           ),
         ),
       ),

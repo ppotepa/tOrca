@@ -225,6 +225,10 @@ class MainActivity : FlutterActivity() {
                 result,
                 EngineContract.COMMAND_PAIRING_OUTBOX,
             )
+            EngineContract.LIST_PAIRINGS -> submitQueryResult(
+                result,
+                EngineContract.COMMAND_LIST_PAIRINGS,
+            )
             EngineContract.ACCEPT_PAIRING -> submitPairingCommand(
                 result,
                 EngineContract.COMMAND_ACCEPT_PAIRING,

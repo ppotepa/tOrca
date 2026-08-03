@@ -25,5 +25,8 @@ void main() {
     expect(summary.messagesFor('alice-secondary'), 2);
     expect(summary.messagesFor('bob-main'), 1);
     expect(summary.messagesFor('torka-main'), 0);
+    expect(summary.messagesForContact('alice'), 5);
+    expect(summary.messagesForContact('bob'), 1);
+    expect(summary.messagesForContact('torka'), 0);
   });
 }

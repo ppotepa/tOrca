@@ -1,6 +1,21 @@
-﻿use super::*;
+use super::*;
 
 impl ClientDatabase {
+    pub fn mark_message_dead_lettered(
+        &self,
+        error_code: &str,
+        message_id: &str,
+    ) -> EngineResult<()> {
+        let changed = self
+            .connection
+            .execute(
+                super::sql_catalog::messages::MARK_DEAD_LETTERED,
+                rusqlite::params![error_code, message_id],
+            )
+            .map_err(sqlite_error)?;
+        super::affected_rows::exactly_one(changed, "mark message dead-lettered")
+    }
+
     pub fn enqueue_outbound_delivery(
         &self,
         message_id: &str,
@@ -10,11 +25,7 @@ impl ClientDatabase {
     ) -> EngineResult<()> {
         self.connection
             .execute(
-                "INSERT INTO outbound_deliveries (
-                    message_id, contact_installation_id, sequence, state,
-                    attempt_count, next_attempt_at, created_at, updated_at
-                 ) VALUES (?1, ?2, ?3, 'QUEUED', 0, 0, ?4, unixepoch())
-                 ON CONFLICT(message_id) DO NOTHING;",
+                super::sql_catalog::messages::ENQUEUE_OUTBOUND_DELIVERY,
                 params![
                     message_id,
                     contact_installation_id,
@@ -33,15 +44,7 @@ impl ClientDatabase {
     ) -> EngineResult<Vec<OutboundDeliveryRecord>> {
         let mut statement = self
             .connection
-            .prepare(
-                "SELECT message_id, contact_installation_id, sequence, state,
-                        attempt_count, next_attempt_at, ack_deadline, last_error, created_at
-                 FROM outbound_deliveries
-                 WHERE UPPER(state) IN ('QUEUED', 'IN_FLIGHT')
-                   AND next_attempt_at <= ?1
-                 ORDER BY created_at ASC, message_id ASC
-                 LIMIT ?2;",
-            )
+            .prepare(super::sql_catalog::messages::DUE_OUTBOUND_DELIVERIES)
             .map_err(sqlite_error)?;
         let rows = statement
             .query_map(params![now_ms, limit as i64], |row| {
@@ -68,10 +71,7 @@ impl ClientDatabase {
     ) -> EngineResult<Option<OutboundDeliveryRecord>> {
         self.connection
             .query_row(
-                "SELECT message_id, contact_installation_id, sequence, state,
-                        attempt_count, next_attempt_at, ack_deadline, last_error, created_at
-                 FROM outbound_deliveries
-                 WHERE message_id = ?1;",
+                super::sql_catalog::messages::OUTBOUND_DELIVERY,
                 [message_id],
                 |row| {
                     Ok(OutboundDeliveryRecord {
@@ -97,10 +97,7 @@ impl ClientDatabase {
     ) -> EngineResult<Option<i64>> {
         self.connection
             .query_row(
-                "SELECT MIN(next_attempt_at)
-                 FROM outbound_deliveries
-                 WHERE contact_installation_id = ?1
-                   AND UPPER(state) = 'QUEUED';",
+                super::sql_catalog::messages::NEXT_CONTACT_PEER_RETRY_DEADLINE_MS,
                 [installation_id],
                 |row| row.get(0),
             )
@@ -115,10 +112,7 @@ impl ClientDatabase {
     ) -> EngineResult<Option<i64>> {
         self.connection
             .query_row(
-                "SELECT MIN(next_attempt_at)
-                 FROM delivery_receipts
-                 WHERE original_sender = ?1
-                   AND UPPER(state) = 'PENDING';",
+                super::sql_catalog::messages::NEXT_CONTACT_RECEIPT_RETRY_DEADLINE_MS,
                 [installation_id],
                 |row| row.get(0),
             )
@@ -135,21 +129,7 @@ impl ClientDatabase {
     ) -> EngineResult<bool> {
         self.connection
             .execute(
-                "UPDATE outbound_deliveries
-                 SET state = 'IN_FLIGHT',
-                     attempt_count = attempt_count + 1,
-                     next_attempt_at = ?2,
-                     ack_deadline = ?3,
-                     last_error = NULL,
-                     updated_at = unixepoch()
-                 WHERE message_id = ?1
-                   AND (
-                       UPPER(state) = 'QUEUED'
-                       OR (
-                           UPPER(state) = 'IN_FLIGHT'
-                           AND COALESCE(ack_deadline, 0) <= ?4
-                       )
-                   );",
+                super::sql_catalog::messages::CLAIM_OUTBOUND_DELIVERY,
                 params![message_id, next_attempt_at, ack_deadline, unix_ms()],
             )
             .map(|changed| changed > 0)
@@ -164,16 +144,13 @@ impl ClientDatabase {
     ) -> EngineResult<()> {
         self.connection
             .execute(
-                "UPDATE outbound_deliveries
-                 SET state = 'QUEUED', next_attempt_at = ?2, ack_deadline = NULL,
-                     last_error = ?3, updated_at = unixepoch()
-                 WHERE message_id = ?1;",
+                super::sql_catalog::messages::REQUEUE_OUTBOUND_DELIVERY,
                 params![message_id, next_attempt_at, error],
             )
             .map_err(sqlite_error)?;
         self.connection
             .execute(
-                "UPDATE outbound_deliveries SET claimed_until = NULL, last_error_code = NULL WHERE message_id = ?1;",
+                super::sql_catalog::messages::REQUEUE_OUTBOUND_DELIVERY_AFTER_DISCONNECT,
                 [message_id],
             )
             .map_err(sqlite_error)?;
@@ -183,7 +160,7 @@ impl ClientDatabase {
     pub fn complete_outbound_delivery(&self, message_id: &str) -> EngineResult<()> {
         self.connection
             .execute(
-                "DELETE FROM outbound_deliveries WHERE message_id = ?1;",
+                super::sql_catalog::messages::COMPLETE_OUTBOUND_DELIVERY,
                 [message_id],
             )
             .map_err(sqlite_error)?;
@@ -193,25 +170,13 @@ impl ClientDatabase {
     pub fn expedite_peer_deliveries(&self, installation_id: &str) -> EngineResult<()> {
         self.connection
             .execute(
-                "UPDATE outbound_deliveries
-                 SET state = 'QUEUED', next_attempt_at = 0, ack_deadline = NULL,
-                     updated_at = unixepoch()
-                 WHERE contact_installation_id = ?1;",
+                super::sql_catalog::messages::EXPEDITE_PEER_DELIVERIES,
                 [installation_id],
             )
             .map_err(sqlite_error)?;
         self.connection
             .execute(
-                "UPDATE messages
-                 SET state = CASE
-                         WHEN UPPER(state) = 'SENDING' THEN 'QUEUED'
-                         ELSE state
-                     END,
-                     next_attempt_at = 0,
-                     ack_deadline = NULL
-                 WHERE conversation_id = ?1
-                   AND outgoing = 1
-                   AND UPPER(state) IN ('QUEUED', 'SENDING');",
+                super::sql_catalog::messages::EXPEDITE_PEER_DELIVERIES_BY_CONTACT,
                 [installation_id],
             )
             .map_err(sqlite_error)?;
@@ -225,28 +190,13 @@ impl ClientDatabase {
             .map_err(sqlite_error)?;
         transaction
             .execute(
-                "UPDATE outbound_deliveries
-                 SET state = 'QUEUED', next_attempt_at = ?1, ack_deadline = NULL,
-                     claimed_until = NULL,
-                     updated_at = unixepoch()
-                 WHERE UPPER(state) = 'IN_FLIGHT';",
+                super::sql_catalog::messages::REQUEUE_PEER_DELIVERIES,
                 [now_ms],
             )
             .map_err(sqlite_error)?;
         transaction
             .execute(
-                "UPDATE messages
-                 SET state = 'QUEUED',
-                     next_attempt_at = ?1,
-                     ack_deadline = NULL,
-                     claimed_until = NULL
-                 WHERE outgoing = 1
-                   AND UPPER(state) = 'SENDING'
-                   AND id IN (
-                        SELECT message_id
-                        FROM outbound_deliveries
-                        WHERE UPPER(state) = 'QUEUED'
-                   );",
+                super::sql_catalog::messages::REQUEUE_PEER_DELIVERIES_AFTER_DISCONNECT,
                 [now_ms],
             )
             .map_err(sqlite_error)?;
@@ -263,9 +213,7 @@ impl ClientDatabase {
         if let Some((existing_hash, state)) = self
             .connection
             .query_row(
-                "SELECT ciphertext_hash, state
-                 FROM inbound_peer_envelopes
-                 WHERE sender_installation_id = ?1 AND message_id = ?2;",
+                super::sql_catalog::messages::STORE_INBOUND_PEER_ENVELOPE,
                 params![
                     envelope.sender_installation_id,
                     envelope.message_id.to_string(),
@@ -291,10 +239,7 @@ impl ClientDatabase {
         }
         self.connection
             .execute(
-                "INSERT INTO inbound_peer_envelopes (
-                    sender_installation_id, message_id, conversation_id, sequence,
-                    ciphertext, ciphertext_hash, state, received_at, updated_at
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'PERSISTED', ?7, unixepoch());",
+                super::sql_catalog::messages::STORE_INBOUND_PEER_ENVELOPE_STATE,
                 params![
                     envelope.sender_installation_id,
                     envelope.message_id.to_string(),
@@ -312,13 +257,7 @@ impl ClientDatabase {
     pub fn pending_inbound_peer_envelopes(&self) -> EngineResult<Vec<InboundPeerEnvelopeRecord>> {
         let mut statement = self
             .connection
-            .prepare(
-                "SELECT sender_installation_id, message_id, conversation_id, sequence,
-                        ciphertext, ciphertext_hash, state, received_at
-                 FROM inbound_peer_envelopes
-                 WHERE UPPER(state) = 'PERSISTED'
-                 ORDER BY received_at ASC, message_id ASC;",
-            )
+            .prepare(super::sql_catalog::messages::PENDING_INBOUND_PEER_ENVELOPES)
             .map_err(sqlite_error)?;
         let rows = statement
             .query_map([], |row| {
@@ -341,11 +280,7 @@ impl ClientDatabase {
     pub fn rejected_inbound_peer_senders(&self) -> EngineResult<HashSet<String>> {
         let mut statement = self
             .connection
-            .prepare(
-                "SELECT DISTINCT sender_installation_id
-                 FROM inbound_peer_envelopes
-                 WHERE UPPER(state) = 'REJECTED';",
-            )
+            .prepare(super::sql_catalog::messages::REJECTED_INBOUND_PEER_SENDERS)
             .map_err(sqlite_error)?;
         let rows = statement
             .query_map([], |row| row.get::<_, String>(0))
@@ -361,9 +296,7 @@ impl ClientDatabase {
     ) -> EngineResult<()> {
         self.connection
             .execute(
-                "UPDATE inbound_peer_envelopes
-                 SET state = 'DELIVERED', updated_at = unixepoch()
-                 WHERE sender_installation_id = ?1 AND message_id = ?2;",
+                super::sql_catalog::messages::COMPLETE_INBOUND_PEER_ENVELOPE,
                 params![sender_installation_id, message_id],
             )
             .map_err(sqlite_error)?;
@@ -377,9 +310,7 @@ impl ClientDatabase {
     ) -> EngineResult<()> {
         self.connection
             .execute(
-                "UPDATE inbound_peer_envelopes
-                 SET state = 'REJECTED', updated_at = unixepoch()
-                 WHERE sender_installation_id = ?1 AND message_id = ?2;",
+                super::sql_catalog::messages::REJECT_INBOUND_PEER_ENVELOPE,
                 params![sender_installation_id, message_id],
             )
             .map_err(sqlite_error)?;

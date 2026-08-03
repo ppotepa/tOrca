@@ -34,6 +34,7 @@ abstract class ClientRuntime {
   Future<PairingItem> submitPairingCode(String code);
   Future<List<PairingItem>> pairingInbox();
   Future<List<PairingItem>> pairingOutbox();
+  Future<List<PairingItem>> listPairings();
   Future<PeerEndpoint?> peerEndpoint();
   Future<bool> peerEndpointAvailable();
   Future<void> retryPeerConnection(String installationId);
@@ -132,6 +133,8 @@ final class _SessionAwareClientRuntime
   Future<List<PairingItem>> pairingInbox() => _delegate.pairingInbox();
   @override
   Future<List<PairingItem>> pairingOutbox() => _delegate.pairingOutbox();
+  @override
+  Future<List<PairingItem>> listPairings() => _delegate.listPairings();
   @override
   Future<PeerEndpoint?> peerEndpoint() => _delegate.peerEndpoint();
   @override
@@ -293,6 +296,8 @@ final class _SerializedClientRuntime
   Future<List<PairingItem>> pairingInbox() => _run(_delegate.pairingInbox);
   @override
   Future<List<PairingItem>> pairingOutbox() => _run(_delegate.pairingOutbox);
+  @override
+  Future<List<PairingItem>> listPairings() => _run(_delegate.listPairings);
   @override
   Future<PeerEndpoint?> peerEndpoint() => _run(_delegate.peerEndpoint);
   @override

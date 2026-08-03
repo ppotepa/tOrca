@@ -32,10 +32,7 @@ fn legacy_relationship_marker_is_an_ordinary_message() {
     let connection = database.connection();
     connection
         .execute(
-            "INSERT INTO contacts (
-                installation_id, nickname, public_key, fingerprint,
-                verification, source
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6);",
+            include_str!("sql/legacy_relationship_marker_is_an_ordinary_message/legacy_relationship_marker_is_an_ordinary_message_1.sql"),
             params![
                 "peer-remote",
                 "Remote peer",
@@ -48,26 +45,19 @@ fn legacy_relationship_marker_is_an_ordinary_message() {
         .expect("contact should be inserted");
     connection
         .execute(
-            "INSERT INTO conversations (
-                id, contact_installation_id, state, unread_count,
-                last_message_preview, last_message_at
-             ) VALUES (?1, ?2, 'ACTIVE', 0, NULL, NULL);",
+            include_str!("sql/legacy_relationship_marker_is_an_ordinary_message/legacy_relationship_marker_is_an_ordinary_message_2.sql"),
             params!["conversation-remote", "peer-remote"],
         )
         .expect("conversation should be inserted");
     connection
         .execute(
-            "INSERT INTO conversation_mls (conversation_id, snapshot)
-             VALUES (?1, ?2);",
+            include_str!("sql/legacy_relationship_marker_is_an_ordinary_message/legacy_relationship_marker_is_an_ordinary_message_3.sql"),
             params!["conversation-remote", &[1_u8, 2, 3][..]],
         )
         .expect("MLS snapshot should be inserted");
     connection
         .execute(
-            "INSERT INTO messages (
-                id, conversation_id, outgoing, body, state, created_at,
-                attempt_count, next_attempt_at
-             ) VALUES (?1, ?2, 0, ?3, 'DELIVERED', 1, 0, 0);",
+            include_str!("sql/legacy_relationship_marker_is_an_ordinary_message/legacy_relationship_marker_is_an_ordinary_message_4.sql"),
             params![
                 "ordinary-history",
                 "conversation-remote",
@@ -77,10 +67,7 @@ fn legacy_relationship_marker_is_an_ordinary_message() {
         .expect("ordinary history should be inserted");
     connection
         .execute(
-            "INSERT INTO messages (
-                id, conversation_id, outgoing, body, state, created_at,
-                attempt_count, next_attempt_at
-             ) VALUES (?1, ?2, 1, ?3, 'QUEUED', 2, 0, 0);",
+            include_str!("sql/legacy_relationship_marker_is_an_ordinary_message/legacy_relationship_marker_is_an_ordinary_message_5.sql"),
             params!["queued-outgoing", "conversation-remote", "queued message"],
         )
         .expect("outgoing queue fixture should be inserted");
@@ -90,10 +77,7 @@ fn legacy_relationship_marker_is_an_ordinary_message() {
     // with the removal fields expected by the trigger.
     connection
         .execute(
-            "INSERT INTO messages (
-                id, conversation_id, outgoing, body, state, created_at,
-                attempt_count, next_attempt_at
-             ) VALUES (?1, ?2, 0, ?3, 'DELIVERED', 2, 0, 0);",
+            include_str!("sql/legacy_relationship_marker_is_an_ordinary_message/legacy_relationship_marker_is_an_ordinary_message_6.sql"),
             params![
                 "legacy-marker-ordinary-message",
                 "conversation-remote",
@@ -103,7 +87,7 @@ fn legacy_relationship_marker_is_an_ordinary_message() {
         .expect("legacy marker in ordinary message should be accepted");
     let still_active: i64 = connection
         .query_row(
-            "SELECT blocked FROM contacts WHERE installation_id = ?1;",
+            include_str!("sql/legacy_relationship_marker_is_an_ordinary_message/legacy_relationship_marker_is_an_ordinary_message_7.sql"),
             ["peer-remote"],
             |row| row.get(0),
         )
@@ -122,8 +106,7 @@ fn local_removal_writes_tombstone_and_typed_outbox_atomically_and_replays_idempo
     database
         .connection()
         .execute(
-            "INSERT INTO contacts (installation_id, nickname, public_key, fingerprint, verification, source)
-             VALUES ('peer-local', 'Local peer', 'public', 'fingerprint', 'VERIFIED', 'PAIRING');",
+            include_str!("sql/local_removal_writes_tombstone_and_typed_outbox_atomically_and_replays_idempotently/local_removal_writes_tombstone_and_typed_outbox_atomically_and_replays_idempotently_1.sql"),
             [],
         )
         .expect("contact should be inserted");
@@ -139,8 +122,7 @@ fn local_removal_writes_tombstone_and_typed_outbox_atomically_and_replays_idempo
     let row: (String, i64) = database
         .connection()
         .query_row(
-            "SELECT removal_id, relationship_epoch
-             FROM relationship_tombstones WHERE contact_installation_id = 'peer-local';",
+            include_str!("sql/local_removal_writes_tombstone_and_typed_outbox_atomically_and_replays_idempotently/local_removal_writes_tombstone_and_typed_outbox_atomically_and_replays_idempotently_2.sql"),
             [],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
@@ -149,7 +131,7 @@ fn local_removal_writes_tombstone_and_typed_outbox_atomically_and_replays_idempo
     let blocked: i64 = database
         .connection()
         .query_row(
-            "SELECT blocked FROM contacts WHERE installation_id = 'peer-local';",
+            include_str!("sql/local_removal_writes_tombstone_and_typed_outbox_atomically_and_replays_idempotently/local_removal_writes_tombstone_and_typed_outbox_atomically_and_replays_idempotently_3.sql"),
             [],
             |row| row.get(0),
         )
@@ -159,8 +141,7 @@ fn local_removal_writes_tombstone_and_typed_outbox_atomically_and_replays_idempo
     let outbox: (String, String, i64) = database
         .connection()
         .query_row(
-            "SELECT removal_id, state, attempt_count
-             FROM relationship_removal_outbox WHERE removal_id = 'removal-1';",
+            include_str!("sql/local_removal_writes_tombstone_and_typed_outbox_atomically_and_replays_idempotently/local_removal_writes_tombstone_and_typed_outbox_atomically_and_replays_idempotently_4.sql"),
             [],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
@@ -173,12 +154,12 @@ fn local_removal_writes_tombstone_and_typed_outbox_atomically_and_replays_idempo
     let dispatched: String = database
         .connection()
         .query_row(
-            "SELECT state FROM relationship_removal_outbox WHERE removal_id = 'removal-1';",
+            include_str!("sql/local_removal_writes_tombstone_and_typed_outbox_atomically_and_replays_idempotently/local_removal_writes_tombstone_and_typed_outbox_atomically_and_replays_idempotently_5.sql"),
             [],
             |row| row.get(0),
         )
         .expect("dispatch state should be readable");
-    assert_eq!(dispatched, "DISPATCHED");
+    assert_eq!(dispatched, "WAITING_FOR_ACK");
     database
         .complete_relationship_removal_ack("removal-1")
         .expect("ACK should be durable");
@@ -196,7 +177,7 @@ fn local_removal_writes_tombstone_and_typed_outbox_atomically_and_replays_idempo
     let count: i64 = database
         .connection()
         .query_row(
-            "SELECT COUNT(*) FROM relationship_removal_outbox WHERE removal_id = 'removal-1';",
+            include_str!("sql/local_removal_writes_tombstone_and_typed_outbox_atomically_and_replays_idempotently/local_removal_writes_tombstone_and_typed_outbox_atomically_and_replays_idempotently_6.sql"),
             [],
             |row| row.get(0),
         )
@@ -205,7 +186,7 @@ fn local_removal_writes_tombstone_and_typed_outbox_atomically_and_replays_idempo
     let acknowledged: String = database
         .connection()
         .query_row(
-            "SELECT state FROM relationship_removal_outbox WHERE removal_id = 'removal-1';",
+            include_str!("sql/local_removal_writes_tombstone_and_typed_outbox_atomically_and_replays_idempotently/local_removal_writes_tombstone_and_typed_outbox_atomically_and_replays_idempotently_7.sql"),
             [],
             |row| row.get(0),
         )
@@ -217,8 +198,7 @@ fn local_removal_writes_tombstone_and_typed_outbox_atomically_and_replays_idempo
     let persisted: (i64, String) = reopened
         .connection()
         .query_row(
-            "SELECT COUNT(*), state FROM relationship_removal_outbox
-             WHERE removal_id = 'removal-1';",
+            include_str!("sql/local_removal_writes_tombstone_and_typed_outbox_atomically_and_replays_idempotently/local_removal_writes_tombstone_and_typed_outbox_atomically_and_replays_idempotently_8.sql"),
             [],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
@@ -235,8 +215,7 @@ fn fresh_pairing_advances_epoch_beyond_removal_tombstone() {
     database
         .connection()
         .execute(
-            "INSERT INTO contacts (installation_id, nickname, public_key, fingerprint, verification, source)
-             VALUES ('peer-repair', 'Peer', 'public', 'fingerprint', 'VERIFIED', 'PAIRING');",
+            include_str!("sql/fresh_pairing_advances_epoch_beyond_removal_tombstone/fresh_pairing_advances_epoch_beyond_removal_tombstone_1.sql"),
             [],
         )
         .expect("contact should be inserted");
@@ -263,7 +242,7 @@ fn fresh_pairing_advances_epoch_beyond_removal_tombstone() {
     let tombstones: i64 = database
         .connection()
         .query_row(
-            "SELECT COUNT(*) FROM relationship_tombstones WHERE contact_installation_id = 'peer-repair';",
+            include_str!("sql/fresh_pairing_advances_epoch_beyond_removal_tombstone/fresh_pairing_advances_epoch_beyond_removal_tombstone_2.sql"),
             [],
             |row| row.get(0),
         )
@@ -280,16 +259,14 @@ fn typed_remove_transition_has_atomic_side_effects() {
     database
         .connection()
         .execute(
-            "INSERT INTO contacts (installation_id, nickname, public_key, fingerprint, verification, source)
-             VALUES ('peer-transition', 'Peer', 'public', 'fingerprint', 'VERIFIED', 'PAIRING');",
+            include_str!("sql/typed_remove_transition_has_atomic_side_effects/typed_remove_transition_has_atomic_side_effects_1.sql"),
             [],
         )
         .expect("contact should exist");
     database
         .connection()
         .execute(
-            "INSERT INTO conversations (id, contact_installation_id, state)
-             VALUES ('conversation-transition', 'peer-transition', 'ESTABLISHED');",
+            include_str!("sql/typed_remove_transition_has_atomic_side_effects/typed_remove_transition_has_atomic_side_effects_2.sql"),
             [],
         )
         .expect("conversation should exist");
@@ -309,11 +286,7 @@ fn typed_remove_transition_has_atomic_side_effects() {
     let state: (i64, String, i64) = database
         .connection()
         .query_row(
-            "SELECT c.blocked, o.state, t.relationship_epoch
-               FROM contacts c
-               JOIN relationship_removal_outbox o ON o.removal_id = 'removal-transition'
-               JOIN relationship_tombstones t ON t.contact_installation_id = c.installation_id
-              WHERE c.installation_id = 'peer-transition';",
+            include_str!("sql/typed_remove_transition_has_atomic_side_effects/typed_remove_transition_has_atomic_side_effects_3.sql"),
             [],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
@@ -330,28 +303,21 @@ fn removal_without_history_preserves_tombstone_but_deletes_local_history() {
     database
         .connection()
         .execute(
-            "INSERT INTO contacts (installation_id, nickname, public_key, fingerprint, verification, source)
-             VALUES ('peer-history', 'History peer', 'public', 'fingerprint', 'VERIFIED', 'PAIRING');",
+            include_str!("sql/removal_without_history_preserves_tombstone_but_deletes_local_history/removal_without_history_preserves_tombstone_but_deletes_local_history_1.sql"),
             [],
         )
         .expect("contact should be inserted");
     database
         .connection()
         .execute(
-            "INSERT INTO conversations (
-                id, contact_installation_id, state, unread_count,
-                last_message_preview, last_message_at
-             ) VALUES ('conversation-history', 'peer-history', 'ACTIVE', 0, 'history', 1);",
+            include_str!("sql/removal_without_history_preserves_tombstone_but_deletes_local_history/removal_without_history_preserves_tombstone_but_deletes_local_history_2.sql"),
             [],
         )
         .expect("conversation should be inserted");
     database
         .connection()
         .execute(
-            "INSERT INTO messages (
-                id, conversation_id, outgoing, body, state, created_at,
-                attempt_count, next_attempt_at
-             ) VALUES ('history-message', 'conversation-history', 0, 'secret history', 'DELIVERED', 1, 0, 0);",
+            include_str!("sql/removal_without_history_preserves_tombstone_but_deletes_local_history/removal_without_history_preserves_tombstone_but_deletes_local_history_3.sql"),
             [],
         )
         .expect("message should be inserted");
@@ -367,7 +333,7 @@ fn removal_without_history_preserves_tombstone_but_deletes_local_history() {
     let message_count: i64 = database
         .connection()
         .query_row(
-            "SELECT COUNT(*) FROM messages WHERE conversation_id = 'conversation-history';",
+            include_str!("sql/removal_without_history_preserves_tombstone_but_deletes_local_history/removal_without_history_preserves_tombstone_but_deletes_local_history_4.sql"),
             [],
             |row| row.get(0),
         )
@@ -376,8 +342,7 @@ fn removal_without_history_preserves_tombstone_but_deletes_local_history() {
     let preserve_history: i64 = database
         .connection()
         .query_row(
-            "SELECT preserve_history FROM relationship_tombstones
-             WHERE contact_installation_id = 'peer-history';",
+            include_str!("sql/removal_without_history_preserves_tombstone_but_deletes_local_history/removal_without_history_preserves_tombstone_but_deletes_local_history_5.sql"),
             [],
             |row| row.get(0),
         )
@@ -386,8 +351,7 @@ fn removal_without_history_preserves_tombstone_but_deletes_local_history() {
     let outbox_state: String = database
         .connection()
         .query_row(
-            "SELECT state FROM relationship_removal_outbox
-             WHERE removal_id = 'removal-no-history';",
+            include_str!("sql/removal_without_history_preserves_tombstone_but_deletes_local_history/removal_without_history_preserves_tombstone_but_deletes_local_history_6.sql"),
             [],
             |row| row.get(0),
         )
@@ -405,8 +369,7 @@ fn stale_relationship_epoch_is_rejected_before_creating_outbox_side_effects() {
     database
         .connection()
         .execute(
-            "INSERT INTO contacts (installation_id, nickname, public_key, fingerprint, verification, source)
-             VALUES ('peer-epoch', 'Epoch peer', 'public', 'fingerprint', 'VERIFIED', 'PAIRING');",
+            include_str!("sql/stale_relationship_epoch_is_rejected_before_creating_outbox_side_effects/stale_relationship_epoch_is_rejected_before_creating_outbox_side_effects_1.sql"),
             [],
         )
         .expect("contact should be inserted");
@@ -427,8 +390,7 @@ fn stale_relationship_epoch_is_rejected_before_creating_outbox_side_effects() {
     let tombstone: (String, i64, i64) = database
         .connection()
         .query_row(
-            "SELECT removal_id, relationship_epoch, preserve_history
-             FROM relationship_tombstones WHERE contact_installation_id = 'peer-epoch';",
+            include_str!("sql/stale_relationship_epoch_is_rejected_before_creating_outbox_side_effects/stale_relationship_epoch_is_rejected_before_creating_outbox_side_effects_2.sql"),
             [],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
@@ -437,7 +399,7 @@ fn stale_relationship_epoch_is_rejected_before_creating_outbox_side_effects() {
     let stale_outbox: i64 = database
         .connection()
         .query_row(
-            "SELECT COUNT(*) FROM relationship_removal_outbox WHERE removal_id = 'removal-stale';",
+            include_str!("sql/stale_relationship_epoch_is_rejected_before_creating_outbox_side_effects/stale_relationship_epoch_is_rejected_before_creating_outbox_side_effects_3.sql"),
             [],
             |row| row.get(0),
         )

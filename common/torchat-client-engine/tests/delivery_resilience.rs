@@ -31,27 +31,26 @@ fn insert_outbound_fixture(database: &ClientDatabase) {
     let connection = database.connection();
     connection
         .execute(
-            "INSERT INTO contacts (
-                installation_id, nickname, public_key, fingerprint,
-                verification, source
-             ) VALUES (?1, ?2, ?3, ?4, 'VERIFIED', 'PAIRING');",
-            params!["peer-delivery", "Peer", "public-key", "fingerprint"],
+            include_str!("sql/fixture/fixture_1.sql"),
+            params![
+                "peer-delivery",
+                "Peer",
+                "public-key",
+                "fingerprint",
+                "verified",
+                "test"
+            ],
         )
         .expect("contact should be stored");
     connection
         .execute(
-            "INSERT INTO conversations (
-                id, contact_installation_id, state, unread_count
-             ) VALUES (?1, ?2, 'ACTIVE', 0);",
-            params!["peer-delivery", "peer-delivery"],
+            include_str!("sql/fixture/fixture_2.sql"),
+            params!["peer-delivery", "peer-delivery", "ACTIVE", 0_i64, "", 0_i64],
         )
         .expect("conversation should be stored");
     connection
         .execute(
-            "INSERT INTO messages (
-                id, conversation_id, outgoing, body, state, created_at,
-                wire_ciphertext, attempt_count, next_attempt_at
-             ) VALUES (?1, ?2, 1, ?3, 'QUEUED', ?4, ?5, 0, 0);",
+            include_str!("sql/fixture/fixture_3.sql"),
             params![
                 "outbound-message",
                 "peer-delivery",
@@ -91,7 +90,7 @@ fn in_flight_outbound_delivery_requeues_after_database_restart_without_duplicati
         database
             .connection()
             .execute(
-                "UPDATE outbound_deliveries SET ack_deadline = ?2 WHERE message_id = ?1",
+                include_str!("sql/in_flight_outbound_delivery_requeues_after_database_restart_without_duplication/in_flight_outbound_delivery_requeues_after_database_restart_without_duplication_1.sql"),
                 params!["outbound-message", i64::MAX],
             )
             .expect("lease should be extendable");
@@ -134,7 +133,7 @@ fn in_flight_outbound_delivery_requeues_after_database_restart_without_duplicati
         let message_state: String = database
             .connection()
             .query_row(
-                "SELECT state FROM messages WHERE id = ?1;",
+                include_str!("sql/in_flight_outbound_delivery_requeues_after_database_restart_without_duplication/in_flight_outbound_delivery_requeues_after_database_restart_without_duplication_2.sql"),
                 ["outbound-message"],
                 |row| row.get(0),
             )

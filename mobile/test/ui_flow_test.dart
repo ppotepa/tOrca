@@ -699,6 +699,7 @@ void main() {
           child: Scaffold(
             body: ContactsView(
               saved: [_contact()],
+              conversations: const [],
               search: search,
               onSearch: () {},
               onSelect: (_) => selected = true,
@@ -1003,7 +1004,6 @@ void main() {
             conversations: const [],
             selectedConversation: null,
             selectedContact: null,
-            onlineContacts: const {},
             content: const SizedBox.shrink(),
             onTab: (_) {},
             onOpenConversation: (_) {},
@@ -1145,6 +1145,9 @@ class _EventRuntime implements ClientRuntime {
 
   @override
   Future<List<PairingItem>> pairingOutbox() async => const [];
+
+  @override
+  Future<List<PairingItem>> listPairings() async => const [];
 
   @override
   Future<PeerEndpoint?> peerEndpoint() async => null;
@@ -1467,6 +1470,32 @@ class _StatefulRuntime implements ClientRuntime {
   @override
   Future<List<PairingItem>> pairingOutbox() async =>
       List<PairingItem>.from(_outbox);
+
+  @override
+  Future<List<PairingItem>> listPairings() async => <PairingItem>[
+    ..._inbox.map(
+      (item) => PairingItem(
+        id: item.id,
+        status: item.status,
+        availableActions: item.availableActions,
+        peer: item.peer,
+        expiresAt: item.expiresAt,
+        received: item.received,
+        origin: PairingOrigin.inbox,
+      ),
+    ),
+    ..._outbox.map(
+      (item) => PairingItem(
+        id: item.id,
+        status: item.status,
+        availableActions: item.availableActions,
+        peer: item.peer,
+        expiresAt: item.expiresAt,
+        received: item.received,
+        origin: PairingOrigin.outbox,
+      ),
+    ),
+  ];
 
   @override
   Future<PeerEndpoint?> peerEndpoint() async => null;

@@ -7,15 +7,24 @@ if ([string]::IsNullOrWhiteSpace($RepositoryRoot)) {
 }
 
 $server = Join-Path $RepositoryRoot 'server\torchat-server\src\main.rs'
+$queries = Join-Path $RepositoryRoot 'server\torchat-server\src\queries.rs'
+$instanceLockSql = Join-Path $RepositoryRoot 'server\torchat-server\sql\queries\instance\try_advisory_lock.sql'
 $compose = Join-Path $RepositoryRoot 'infra\docker\compose.host.yml'
-if (-not (Test-Path -LiteralPath $server) -or -not (Test-Path -LiteralPath $compose)) {
+if (-not (Test-Path -LiteralPath $server) -or
+    -not (Test-Path -LiteralPath $queries) -or
+    -not (Test-Path -LiteralPath $instanceLockSql) -or
+    -not (Test-Path -LiteralPath $compose)) {
     throw 'Single-instance release files are missing.'
 }
 
 $serverText = Get-Content -LiteralPath $server -Raw
+$queriesText = Get-Content -LiteralPath $queries -Raw
+$instanceLockSqlText = Get-Content -LiteralPath $instanceLockSql -Raw
 $composeText = Get-Content -LiteralPath $compose -Raw
 
-if ($serverText -notmatch 'pg_try_advisory_lock') {
+if ($serverText -notmatch 'TRY_ADVISORY_LOCK' -or
+    $queriesText -notmatch 'try_advisory_lock\.sql' -or
+    $instanceLockSqlText -notmatch 'pg_try_advisory_lock') {
     throw 'Server does not acquire the PostgreSQL single-instance advisory lock.'
 }
 if ($serverText -notmatch 'single-instance-v0\.1') {

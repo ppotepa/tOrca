@@ -9,17 +9,7 @@ impl ClientDatabase {
     ) -> EngineResult<()> {
         self.connection
             .execute(
-                "INSERT INTO pending_contact_confirmations (
-                    pairing_id, peer_installation_id, capability, attempt_count,
-                    next_attempt_at, last_error, created_at, updated_at
-                 ) VALUES (?1, ?2, ?3, 0, 0, NULL, unixepoch(), unixepoch())
-                 ON CONFLICT(pairing_id) DO UPDATE SET
-                    peer_installation_id = excluded.peer_installation_id,
-                    capability = excluded.capability,
-                    attempt_count = 0,
-                    next_attempt_at = 0,
-                    last_error = NULL,
-                    updated_at = unixepoch();",
+                super::sql_catalog::pairing::PUT_PENDING_CONTACT_CONFIRMATION,
                 params![pairing_id, peer_installation_id, capability],
             )
             .map_err(sqlite_error)?;
@@ -33,12 +23,7 @@ impl ClientDatabase {
     ) -> EngineResult<()> {
         self.connection
             .execute(
-                "INSERT INTO pending_pairing_acknowledgements (
-                    pairing_id, attempt_count, next_attempt_at, last_error
-                 ) VALUES (?1, 0, 0, ?2)
-                 ON CONFLICT(pairing_id) DO UPDATE SET
-                    next_attempt_at = 0,
-                    last_error = excluded.last_error;",
+                super::sql_catalog::pairing::PUT_PENDING_PAIRING_ACKNOWLEDGEMENT,
                 params![pairing_id, last_error],
             )
             .map_err(sqlite_error)?;
@@ -51,12 +36,7 @@ impl ClientDatabase {
     ) -> EngineResult<Vec<(String, u32)>> {
         let mut statement = self
             .connection
-            .prepare(
-                "SELECT pairing_id, attempt_count
-                 FROM pending_pairing_acknowledgements
-                 WHERE next_attempt_at <= ?1
-                 ORDER BY next_attempt_at ASC, pairing_id ASC;",
-            )
+            .prepare(super::sql_catalog::pairing::DUE_PENDING_PAIRING_ACKNOWLEDGEMENTS)
             .map_err(sqlite_error)?;
         let rows = statement
             .query_map([now_ms], |row| {
@@ -79,12 +59,7 @@ impl ClientDatabase {
         let changed = self
             .connection
             .execute(
-                "UPDATE pending_pairing_acknowledgements
-                 SET attempt_count = attempt_count + 1,
-                     next_attempt_at = ?1,
-                     last_error = ?2
-                 WHERE pairing_id = ?3
-                   AND next_attempt_at <= ?4;",
+                super::sql_catalog::pairing::CLAIM_PENDING_PAIRING_ACKNOWLEDGEMENT,
                 params![next_attempt_at, last_error, pairing_id, now_ms],
             )
             .map_err(sqlite_error)?;
@@ -94,8 +69,7 @@ impl ClientDatabase {
     pub fn complete_pending_pairing_acknowledgement(&self, pairing_id: &str) -> EngineResult<()> {
         self.connection
             .execute(
-                "DELETE FROM pending_pairing_acknowledgements
-                 WHERE pairing_id = ?1;",
+                super::sql_catalog::pairing::COMPLETE_PENDING_PAIRING_ACKNOWLEDGEMENT,
                 [pairing_id],
             )
             .map_err(sqlite_error)?;
@@ -107,8 +81,7 @@ impl ClientDatabase {
     ) -> EngineResult<Option<i64>> {
         self.connection
             .query_row(
-                "SELECT MIN(next_attempt_at)
-                 FROM pending_pairing_acknowledgements;",
+                super::sql_catalog::pairing::NEXT_PENDING_PAIRING_ACKNOWLEDGEMENT_RETRY,
                 [],
                 |row| row.get(0),
             )
@@ -123,13 +96,7 @@ impl ClientDatabase {
     ) -> EngineResult<Vec<PendingContactConfirmationRecord>> {
         let mut statement = self
             .connection
-            .prepare(
-                "SELECT pairing_id, peer_installation_id, capability, attempt_count,
-                        next_attempt_at, last_error
-                 FROM pending_contact_confirmations
-                 WHERE next_attempt_at <= ?1
-                 ORDER BY next_attempt_at ASC, pairing_id ASC;",
-            )
+            .prepare(super::sql_catalog::pairing::DUE_PENDING_CONTACT_CONFIRMATIONS)
             .map_err(sqlite_error)?;
         let rows = statement
             .query_map([now_ms], |row| {
@@ -155,13 +122,7 @@ impl ClientDatabase {
         let changed = self
             .connection
             .execute(
-                "UPDATE pending_contact_confirmations
-                 SET attempt_count = attempt_count + 1,
-                     next_attempt_at = ?1,
-                     last_error = ?2,
-                     updated_at = unixepoch()
-                 WHERE pairing_id = ?3
-                   AND next_attempt_at <= ?4;",
+                super::sql_catalog::pairing::CLAIM_PENDING_CONTACT_CONFIRMATION,
                 params![next_attempt_at, last_error, pairing_id, unix_ms()],
             )
             .map_err(sqlite_error)?;
@@ -171,8 +132,7 @@ impl ClientDatabase {
     pub fn complete_pending_contact_confirmation(&self, pairing_id: &str) -> EngineResult<()> {
         self.connection
             .execute(
-                "DELETE FROM pending_contact_confirmations
-                 WHERE pairing_id = ?1;",
+                super::sql_catalog::pairing::COMPLETE_PENDING_CONTACT_CONFIRMATION,
                 [pairing_id],
             )
             .map_err(sqlite_error)?;
@@ -186,11 +146,7 @@ impl ClientDatabase {
     ) -> EngineResult<()> {
         self.connection
             .execute(
-                "UPDATE pending_contact_confirmations
-                 SET last_error = ?1,
-                     dead_lettered_at = CASE WHEN ?1 LIKE 'permanent:%' OR ?1 LIKE 'protocol:%' THEN unixepoch() ELSE dead_lettered_at END,
-                     updated_at = unixepoch()
-                 WHERE pairing_id = ?2;",
+                super::sql_catalog::pairing::RECORD_PENDING_CONTACT_CONFIRMATION_ERROR,
                 params![error, pairing_id],
             )
             .map_err(sqlite_error)?;
@@ -200,8 +156,7 @@ impl ClientDatabase {
     pub fn next_pending_contact_confirmation_retry_deadline_ms(&self) -> EngineResult<Option<i64>> {
         self.connection
             .query_row(
-                "SELECT MIN(next_attempt_at) AS next_attempt_at
-                 FROM pending_contact_confirmations;",
+                super::sql_catalog::pairing::NEXT_PENDING_CONTACT_CONFIRMATION_RETRY,
                 [],
                 |row| row.get("next_attempt_at"),
             )
@@ -213,13 +168,7 @@ impl ClientDatabase {
     ) -> EngineResult<()> {
         self.connection
             .execute(
-                "INSERT INTO pending_local_invite_mls (
-                    invite_id, recipient_installation_id, snapshot, expires_at
-                 ) VALUES (?1, ?2, ?3, ?4)
-                 ON CONFLICT(invite_id) DO UPDATE SET
-                    recipient_installation_id = excluded.recipient_installation_id,
-                    snapshot = excluded.snapshot,
-                    expires_at = excluded.expires_at;",
+                super::sql_catalog::pairing::PUT_PENDING_LOCAL_INVITE_MLS,
                 params![
                     record.invite_id,
                     record.recipient_installation_id,
@@ -238,9 +187,7 @@ impl ClientDatabase {
     ) -> EngineResult<Option<PendingLocalInviteMlsRecord>> {
         self.connection
             .query_row(
-                "SELECT invite_id, recipient_installation_id, snapshot, expires_at
-                 FROM pending_local_invite_mls
-                 WHERE invite_id = ?1 AND expires_at >= ?2;",
+                super::sql_catalog::pairing::PENDING_LOCAL_INVITE_MLS,
                 params![invite_id, now_secs],
                 |row| {
                     Ok(PendingLocalInviteMlsRecord {
@@ -258,7 +205,7 @@ impl ClientDatabase {
     pub fn delete_expired_pending_local_invite_mls(&self, now_secs: i64) -> EngineResult<usize> {
         self.connection
             .execute(
-                "DELETE FROM pending_local_invite_mls WHERE expires_at < ?1;",
+                super::sql_catalog::pairing::DELETE_EXPIRED_PENDING_LOCAL_INVITE_MLS,
                 [now_secs],
             )
             .map_err(sqlite_error)
@@ -267,13 +214,7 @@ impl ClientDatabase {
     pub fn pending_welcomes(&self, now_secs: i64) -> EngineResult<Vec<PendingWelcomeRecord>> {
         let mut statement = self
             .connection
-            .prepare(
-                "SELECT invite_id, recipient_installation_id, payload, expires_at,
-                        attempt_count, next_attempt_at, last_error
-                 FROM pending_welcomes
-                 WHERE expires_at >= ?1
-                 ORDER BY expires_at ASC, invite_id ASC;",
-            )
+            .prepare(super::sql_catalog::pairing::PENDING_WELCOMES)
             .map_err(sqlite_error)?;
         let rows = statement
             .query_map([now_secs], |row| {
@@ -294,10 +235,7 @@ impl ClientDatabase {
     pub fn pending_welcome(&self, invite_id: &str) -> EngineResult<Option<PendingWelcomeRecord>> {
         self.connection
             .query_row(
-                "SELECT invite_id, recipient_installation_id, payload, expires_at,
-                        attempt_count, next_attempt_at, last_error
-                 FROM pending_welcomes
-                 WHERE invite_id = ?1;",
+                super::sql_catalog::pairing::PENDING_WELCOME,
                 [invite_id],
                 |row| {
                     Ok(PendingWelcomeRecord {
@@ -318,17 +256,7 @@ impl ClientDatabase {
     pub fn put_pending_welcome(&self, record: &PendingWelcomeRecord) -> EngineResult<()> {
         self.connection
             .execute(
-                "INSERT INTO pending_welcomes (
-                    invite_id, recipient_installation_id, payload, expires_at,
-                    attempt_count, next_attempt_at, last_error
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-                 ON CONFLICT(invite_id) DO UPDATE SET
-                    recipient_installation_id = excluded.recipient_installation_id,
-                    payload = excluded.payload,
-                    expires_at = excluded.expires_at,
-                    attempt_count = excluded.attempt_count,
-                    next_attempt_at = excluded.next_attempt_at,
-                    last_error = excluded.last_error;",
+                super::sql_catalog::pairing::PUT_PENDING_WELCOME,
                 params![
                     record.invite_id,
                     record.recipient_installation_id,
@@ -346,8 +274,7 @@ impl ClientDatabase {
     pub fn remove_pending_welcome(&self, invite_id: &str) -> EngineResult<()> {
         self.connection
             .execute(
-                "DELETE FROM pending_welcomes
-                 WHERE invite_id = ?1;",
+                super::sql_catalog::pairing::REMOVE_PENDING_WELCOME,
                 [invite_id],
             )
             .map_err(sqlite_error)?;
@@ -360,14 +287,7 @@ impl ClientDatabase {
     ) -> EngineResult<()> {
         self.connection
             .execute(
-                "INSERT INTO pending_peer_endpoint_inbox (
-                    contact_installation_id, payload, endpoint_sequence, received_at
-                 ) VALUES (?1, ?2, ?3, ?4)
-                 ON CONFLICT(contact_installation_id) DO UPDATE SET
-                    payload = excluded.payload,
-                    endpoint_sequence = excluded.endpoint_sequence,
-                    received_at = excluded.received_at
-                 WHERE excluded.endpoint_sequence > pending_peer_endpoint_inbox.endpoint_sequence;",
+                super::sql_catalog::pairing::PUT_PENDING_PEER_ENDPOINT_INBOX,
                 params![
                     record.contact_installation_id,
                     record.payload,
@@ -385,9 +305,7 @@ impl ClientDatabase {
     ) -> EngineResult<Option<PendingPeerEndpointInboxRecord>> {
         self.connection
             .query_row(
-                "SELECT contact_installation_id, payload, endpoint_sequence, received_at
-                 FROM pending_peer_endpoint_inbox
-                 WHERE contact_installation_id = ?1;",
+                super::sql_catalog::pairing::PENDING_PEER_ENDPOINT_INBOX,
                 [contact_installation_id],
                 |row| {
                     Ok(PendingPeerEndpointInboxRecord {
@@ -408,8 +326,7 @@ impl ClientDatabase {
     ) -> EngineResult<()> {
         self.connection
             .execute(
-                "DELETE FROM pending_peer_endpoint_inbox
-                 WHERE contact_installation_id = ?1;",
+                super::sql_catalog::pairing::REMOVE_PENDING_PEER_ENDPOINT_INBOX,
                 [contact_installation_id],
             )
             .map_err(sqlite_error)?;

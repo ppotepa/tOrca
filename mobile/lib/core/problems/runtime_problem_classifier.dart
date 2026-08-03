@@ -53,6 +53,11 @@ RuntimeProblemClassification classifyRuntimeProblem(String message) {
   }
 
   if (normalized.contains('relay transport error') ||
+      normalized.contains('relay http 502') ||
+      normalized.contains('relay http 503') ||
+      normalized.contains('relay http 504') ||
+      normalized.contains('bad gateway') ||
+      normalized.contains('gateway timeout') ||
       normalized.contains('relay bootstrap') ||
       normalized.contains('websocket') ||
       normalized.contains('connection reset') ||

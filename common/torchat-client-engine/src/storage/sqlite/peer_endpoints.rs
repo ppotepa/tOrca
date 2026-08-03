@@ -4,18 +4,12 @@ impl ClientDatabase {
     pub fn local_peer_endpoint(&self) -> EngineResult<Option<(PeerEndpointBundle, u64)>> {
         let stored = self
             .connection
-            .query_row(
-                "SELECT bundle_json, generation
-                 FROM local_peer_endpoint
-                 WHERE singleton = 1;",
-                [],
-                |row| {
-                    Ok((
-                        row.get::<_, Vec<u8>>("bundle_json")?,
-                        row.get::<_, i64>("generation")?,
-                    ))
-                },
-            )
+            .query_row(super::sql_catalog::peer_endpoints::LOCAL, [], |row| {
+                Ok((
+                    row.get::<_, Vec<u8>>("bundle_json")?,
+                    row.get::<_, i64>("generation")?,
+                ))
+            })
             .optional()
             .map_err(sqlite_error)?;
         stored
@@ -39,14 +33,7 @@ impl ClientDatabase {
         })?;
         self.connection
             .execute(
-                "INSERT INTO local_peer_endpoint (
-                    singleton, bundle_json, sequence, generation, updated_at
-                 ) VALUES (1, ?1, ?2, ?3, unixepoch())
-                 ON CONFLICT(singleton) DO UPDATE SET
-                    bundle_json = excluded.bundle_json,
-                    sequence = excluded.sequence,
-                    generation = excluded.generation,
-                    updated_at = unixepoch();",
+                super::sql_catalog::peer_endpoints::PUT_LOCAL,
                 params![json, endpoint.sequence as i64, generation as i64],
             )
             .map_err(sqlite_error)?;
@@ -55,7 +42,7 @@ impl ClientDatabase {
 
     pub fn delete_local_peer_endpoint(&self) -> EngineResult<()> {
         self.connection
-            .execute("DELETE FROM local_peer_endpoint WHERE singleton = 1;", [])
+            .execute(super::sql_catalog::peer_endpoints::DELETE_LOCAL, [])
             .map_err(sqlite_error)?;
         Ok(())
     }
@@ -67,9 +54,7 @@ impl ClientDatabase {
         let json = self
             .connection
             .query_row(
-                "SELECT bundle_json
-                 FROM contact_peer_endpoints
-                 WHERE contact_installation_id = ?1;",
+                super::sql_catalog::peer_endpoints::CONTACT,
                 [installation_id],
                 |row| row.get::<_, Vec<u8>>("bundle_json"),
             )
@@ -87,10 +72,7 @@ impl ClientDatabase {
         let removed: bool = self
             .connection
             .query_row(
-                "SELECT EXISTS(
-                    SELECT 1 FROM relationship_tombstones
-                    WHERE contact_installation_id = ?1
-                );",
+                super::sql_catalog::peer_endpoints::PUT_CONTACT,
                 [&endpoint.installation_id],
                 |row| row.get(0),
             )
@@ -103,14 +85,7 @@ impl ClientDatabase {
         })?;
         self.connection
             .execute(
-                "INSERT INTO contact_peer_endpoints (
-                    contact_installation_id, bundle_json, sequence, updated_at
-                 ) VALUES (?1, ?2, ?3, unixepoch())
-                 ON CONFLICT(contact_installation_id) DO UPDATE SET
-                    bundle_json = excluded.bundle_json,
-                    sequence = excluded.sequence,
-                    updated_at = unixepoch()
-                 WHERE excluded.sequence > contact_peer_endpoints.sequence;",
+                super::sql_catalog::peer_endpoints::PUT_CONTACT_COMMAND,
                 params![endpoint.installation_id, json, endpoint.sequence as i64,],
             )
             .map_err(sqlite_error)?;
@@ -124,10 +99,7 @@ impl ClientDatabase {
         if let Some(value) = self
             .connection
             .query_row(
-                "SELECT capability_id FROM contact_endpoint_capabilities
-                 WHERE contact_installation_id = ?1
-                   AND revoked_at IS NULL
-                   AND (expires_at IS NULL OR expires_at >= unixepoch());",
+                super::sql_catalog::peer_endpoints::ENSURE_CONTACT_CAPABILITY,
                 [contact_installation_id],
                 |row| row.get::<_, String>(0),
             )
@@ -141,18 +113,7 @@ impl ClientDatabase {
         let secret_hash = sha2::Sha256::digest(&secret).to_vec();
         self.connection
             .execute(
-                "INSERT INTO contact_endpoint_capabilities (
-                    contact_installation_id, capability_id, secret_hash, secret_ciphertext,
-                    issued_at, updated_at
-                 ) VALUES (?1, ?2, ?3, ?4, unixepoch(), unixepoch())
-                 ON CONFLICT(contact_installation_id) DO UPDATE SET
-                    capability_id = excluded.capability_id,
-                    secret_hash = excluded.secret_hash,
-                    secret_ciphertext = excluded.secret_ciphertext,
-                    sequence = contact_endpoint_capabilities.sequence + 1,
-                    issued_at = unixepoch(),
-                    revoked_at = NULL,
-                    updated_at = unixepoch();",
+                super::sql_catalog::peer_endpoints::ENSURE_CONTACT_CAPABILITY_COMMAND,
                 params![contact_installation_id, capability_id, secret_hash, secret],
             )
             .map_err(sqlite_error)?;
@@ -165,9 +126,7 @@ impl ClientDatabase {
     ) -> EngineResult<()> {
         self.connection
             .execute(
-                "UPDATE contact_endpoint_capabilities
-                 SET revoked_at = unixepoch(), updated_at = unixepoch()
-                 WHERE contact_installation_id = ?1;",
+                super::sql_catalog::peer_endpoints::REVOKE_CONTACT_CAPABILITY,
                 [contact_installation_id],
             )
             .map_err(sqlite_error)?;
@@ -184,9 +143,7 @@ impl ClientDatabase {
             .as_secs() as i64;
         self.connection
             .query_row(
-                "SELECT capability_id, secret_ciphertext, sequence, revoked_at, expires_at
-                 FROM contact_endpoint_capabilities
-                 WHERE contact_installation_id = ?1;",
+                super::sql_catalog::peer_endpoints::CONTACT_CAPABILITY,
                 [contact_installation_id],
                 |row| {
                     let revoked_at: Option<i64> = row.get(3)?;
@@ -222,20 +179,7 @@ impl ClientDatabase {
         let secret_hash = sha2::Sha256::digest(secret).to_vec();
         self.connection
             .execute(
-                "INSERT INTO peer_endpoint_capabilities (
-                    contact_installation_id, capability_id, secret_hash,
-                    secret_ciphertext, sequence, issued_at, expires_at, updated_at
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, unixepoch())
-                 ON CONFLICT(contact_installation_id) DO UPDATE SET
-                    capability_id = excluded.capability_id,
-                    secret_hash = excluded.secret_hash,
-                    secret_ciphertext = excluded.secret_ciphertext,
-                    sequence = excluded.sequence,
-                    issued_at = excluded.issued_at,
-                    expires_at = excluded.expires_at,
-                    revoked_at = NULL,
-                    updated_at = unixepoch()
-                 WHERE excluded.sequence >= peer_endpoint_capabilities.sequence;",
+                super::sql_catalog::peer_endpoints::PUT_CAPABILITY,
                 params![
                     contact_installation_id,
                     capability_id,
@@ -257,11 +201,7 @@ impl ClientDatabase {
     ) -> EngineResult<Option<Vec<u8>>> {
         self.connection
             .query_row(
-                "SELECT secret_ciphertext FROM peer_endpoint_capabilities
-                 WHERE contact_installation_id = ?1
-                   AND capability_id = ?2
-                   AND revoked_at IS NULL
-                   AND (expires_at IS NULL OR expires_at >= unixepoch());",
+                super::sql_catalog::peer_endpoints::CAPABILITY_SECRET,
                 params![contact_installation_id, capability_id],
                 |row| row.get(0),
             )
@@ -275,9 +215,7 @@ impl ClientDatabase {
     ) -> EngineResult<()> {
         self.connection
             .execute(
-                "UPDATE peer_endpoint_capabilities
-                 SET revoked_at = unixepoch(), updated_at = unixepoch()
-                 WHERE contact_installation_id = ?1;",
+                super::sql_catalog::peer_endpoints::REVOKE_CAPABILITY,
                 [contact_installation_id],
             )
             .map_err(sqlite_error)?;
@@ -291,9 +229,7 @@ impl ClientDatabase {
     ) -> EngineResult<()> {
         self.connection
             .execute(
-                "UPDATE contact_peer_endpoints
-                 SET last_connected_at = ?2, updated_at = unixepoch()
-                 WHERE contact_installation_id = ?1;",
+                super::sql_catalog::peer_endpoints::MARK_CONNECTED,
                 params![installation_id, connected_at],
             )
             .map_err(sqlite_error)?;
@@ -309,12 +245,7 @@ impl ClientDatabase {
         })?;
         self.connection
             .execute(
-                "INSERT OR IGNORE INTO endpoint_update_outbox (
-                    contact_installation_id, payload, sequence, attempt_count,
-                    next_attempt_at, last_error, updated_at
-                 )
-                 SELECT installation_id, ?1, ?2, 0, 0, NULL, unixepoch()
-                 FROM contacts;",
+                super::sql_catalog::peer_endpoints::ENQUEUE_UPDATE,
                 params![payload, update.endpoint.sequence as i64],
             )
             .map_err(sqlite_error)?;
@@ -327,12 +258,7 @@ impl ClientDatabase {
     ) -> EngineResult<Vec<PeerEndpointUpdate>> {
         let mut statement = self
             .connection
-            .prepare(
-                "SELECT payload
-                 FROM endpoint_update_outbox
-                 WHERE contact_installation_id = ?1
-                 ORDER BY sequence ASC;",
-            )
+            .prepare(super::sql_catalog::peer_endpoints::PENDING_UPDATES)
             .map_err(sqlite_error)?;
         let rows = statement
             .query_map([contact_installation_id], |row| row.get::<_, Vec<u8>>(0))
@@ -353,8 +279,7 @@ impl ClientDatabase {
     ) -> EngineResult<()> {
         self.connection
             .execute(
-                "DELETE FROM endpoint_update_outbox
-                 WHERE contact_installation_id = ?1 AND sequence <= ?2;",
+                super::sql_catalog::peer_endpoints::COMPLETE_UPDATES,
                 params![contact_installation_id, through_sequence as i64],
             )
             .map_err(sqlite_error)?;
@@ -369,18 +294,7 @@ impl ClientDatabase {
     ) -> EngineResult<()> {
         self.connection
             .execute(
-                "INSERT INTO peer_endpoint_bootstrap_outbox (
-                    contact_installation_id, payload, endpoint_sequence, attempt_count,
-                    next_attempt_at, last_error, updated_at
-                 ) VALUES (?1, ?2, ?3, 0, 0, NULL, unixepoch())
-                 ON CONFLICT(contact_installation_id) DO UPDATE SET
-                    payload = excluded.payload,
-                    endpoint_sequence = excluded.endpoint_sequence,
-                    attempt_count = 0,
-                    next_attempt_at = 0,
-                    last_error = NULL,
-                    updated_at = unixepoch()
-                 WHERE excluded.endpoint_sequence >= peer_endpoint_bootstrap_outbox.endpoint_sequence;",
+                super::sql_catalog::peer_endpoints::PUT_BOOTSTRAP,
                 params![contact_installation_id, payload, endpoint_sequence as i64],
             )
             .map_err(sqlite_error)?;
@@ -393,13 +307,7 @@ impl ClientDatabase {
     ) -> EngineResult<Vec<PeerEndpointBootstrapRecord>> {
         let mut statement = self
             .connection
-            .prepare(
-                "SELECT contact_installation_id, payload, endpoint_sequence, attempt_count,
-                        next_attempt_at, last_error
-                 FROM peer_endpoint_bootstrap_outbox
-                 WHERE next_attempt_at <= ?1 AND dead_lettered_at IS NULL
-                 ORDER BY next_attempt_at ASC, contact_installation_id ASC;",
-            )
+            .prepare(super::sql_catalog::peer_endpoints::DUE_BOOTSTRAPS)
             .map_err(sqlite_error)?;
         let rows = statement
             .query_map([now_ms], |row| {
@@ -426,14 +334,7 @@ impl ClientDatabase {
         let changed = self
             .connection
             .execute(
-                "UPDATE peer_endpoint_bootstrap_outbox
-                 SET attempt_count = attempt_count + 1,
-                     next_attempt_at = ?1,
-                     last_error = ?2,
-                     updated_at = unixepoch()
-                 WHERE contact_installation_id = ?3
-                   AND endpoint_sequence = ?4
-                   AND next_attempt_at <= ?5;",
+                super::sql_catalog::peer_endpoints::CLAIM_BOOTSTRAP,
                 params![
                     next_attempt_at,
                     last_error,
@@ -453,9 +354,7 @@ impl ClientDatabase {
     ) -> EngineResult<()> {
         self.connection
             .execute(
-                "DELETE FROM peer_endpoint_bootstrap_outbox
-                 WHERE contact_installation_id = ?1
-                   AND endpoint_sequence <= ?2;",
+                super::sql_catalog::peer_endpoints::COMPLETE_BOOTSTRAP,
                 params![contact_installation_id, endpoint_sequence as i64],
             )
             .map_err(sqlite_error)?;
@@ -465,8 +364,7 @@ impl ClientDatabase {
     pub fn next_peer_endpoint_bootstrap_retry_deadline_ms(&self) -> EngineResult<Option<i64>> {
         self.connection
             .query_row(
-                "SELECT MIN(next_attempt_at) AS next_attempt_at
-                 FROM peer_endpoint_bootstrap_outbox;",
+                super::sql_catalog::peer_endpoints::NEXT_BOOTSTRAP_RETRY,
                 [],
                 |row| row.get("next_attempt_at"),
             )
@@ -480,12 +378,7 @@ impl ClientDatabase {
     ) -> EngineResult<()> {
         self.connection
             .execute(
-                "UPDATE peer_endpoint_bootstrap_outbox
-                 SET last_error = ?1,
-                     dead_lettered_at = CASE WHEN ?1 LIKE 'permanent:%' OR ?1 LIKE 'protocol:%' THEN unixepoch() ELSE dead_lettered_at END,
-                     updated_at = unixepoch()
-                 WHERE contact_installation_id = ?2
-                   AND endpoint_sequence = ?3;",
+                super::sql_catalog::peer_endpoints::RECORD_BOOTSTRAP_ERROR,
                 params![error, contact_installation_id, endpoint_sequence as i64],
             )
             .map_err(sqlite_error)?;

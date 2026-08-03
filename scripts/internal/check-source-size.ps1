@@ -73,7 +73,6 @@ $oversizedBaselines = @{
     'mobile/lib/app/app_controller_base.dart' = 958
     'mobile/lib/app/sequential_app_controller.dart' = 602
     'mobile/lib/app/theme/families/retro_theme.dart' = 722
-    'mobile/lib/features/chats/chats_view.dart' = 1031
     'mobile/lib/features/contacts/contacts_view.dart' = 640
     'mobile/lib/features/onboarding/onboarding_views.dart' = 535
     'mobile/lib/features/shell/desktop/desktop_workspace.dart' = 706

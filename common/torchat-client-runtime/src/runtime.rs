@@ -221,6 +221,13 @@ where
         self.merge_pairing_inbox(remote)
     }
 
+    pub fn local_pairing_lists(&self) -> RuntimeResult<(Vec<PairingItem>, Vec<PairingItem>)> {
+        Ok((
+            self.storage.pairing_inbox()?,
+            self.storage.pairing_outbox()?,
+        ))
+    }
+
     /// Expire locally persisted invitations even when the relay is offline.
     /// The relay removes an invitation after ACK, so local state must own the
     /// final deadline and emit the state transition independently.

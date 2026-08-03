@@ -141,6 +141,7 @@ class ContactListTile extends StatelessWidget {
     required this.onTap,
     this.subtitle,
     this.trailing,
+    this.unread = 0,
     this.asCard = true,
     this.activity = ContactActivityVisualState.unknown,
   });
@@ -149,11 +150,28 @@ class ContactListTile extends StatelessWidget {
   final ValueChanged<ContactRecord> onTap;
   final String? subtitle;
   final Widget? trailing;
+  final int unread;
   final bool asCard;
   final ContactActivityVisualState activity;
 
   @override
   Widget build(BuildContext context) {
+    final hasUnread = unread > 0;
+    final unreadTheme = context.chatTheme;
+    final trailingWidget = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (hasUnread) ...[
+          CounterBadge(
+            count: unread,
+            glow: true,
+            color: unreadTheme.unreadBorder,
+          ),
+          const SizedBox(width: 8),
+        ],
+        trailing ?? const Icon(Icons.chevron_right),
+      ],
+    );
     final tile = ListTile(
       contentPadding: EdgeInsets.zero,
       onTap: () => onTap(contact),
@@ -171,7 +189,7 @@ class ContactListTile extends StatelessWidget {
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
       ),
-      trailing: trailing ?? const Icon(Icons.chevron_right),
+      trailing: trailingWidget,
       titleAlignment: ListTileTitleAlignment.center,
     );
     return asCard ? Card(child: tile) : tile;

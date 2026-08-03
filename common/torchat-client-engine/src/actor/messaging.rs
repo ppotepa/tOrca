@@ -239,12 +239,7 @@ impl ClientEngineActor {
                 super::RetryDisposition::Transient => "retry_exhausted",
             };
             self.database
-                .connection()
-                .execute(
-                    "UPDATE messages SET dead_lettered_at = unixepoch(), last_error_code = ?1 WHERE id = ?2;",
-                    rusqlite::params![error_code, message_id],
-                )
-                .map_err(|error| EngineError::Storage(error.to_string()))?;
+                .mark_message_dead_lettered(error_code, message_id)?;
             self.database.complete_outbound_delivery(message_id)?;
             if super::RetryPolicy::DELIVERY.exhausted(attempt) || age_exhausted {
                 self.database.record_delivery_dead_letter(

@@ -463,26 +463,27 @@ abstract class AppController extends Notifier<AppState> {
   Future<void> acceptPairing(String id) async {
     await _runAction(OperationAction.acceptPairing, () async {
       await _repository.acceptPairing(id);
-    });
+    }, refreshPairing: true);
   }
 
   Future<void> rejectPairing(String id) async {
     await _runAction(OperationAction.rejectPairing, () async {
       await _repository.rejectPairing(id);
-    });
+    }, refreshPairing: true);
   }
 
   Future<void> archiveInvite(String id) async {
     await _runAction(
       OperationAction.archivePairing,
       () => _repository.archiveInvite(id),
+      refreshPairing: true,
     );
   }
 
   Future<void> cancelPairing(String id) async {
     await _runAction(OperationAction.cancelPairing, () async {
       await _repository.cancelPairing(id);
-    });
+    }, refreshPairing: true);
   }
 
   Future<void> verifyContact(String id) async {
@@ -516,12 +517,13 @@ abstract class AppController extends Notifier<AppState> {
 
   Future<void> _runAction(
     String action,
-    Future<void> Function() operation,
-  ) async {
+    Future<void> Function() operation, {
+    bool refreshPairing = false,
+  }) async {
     state = state.copyWith(action: action, error: '');
     try {
       await operation();
-      await refreshData();
+      await refreshData(forcePairing: refreshPairing);
       state = state.copyWith(action: '');
     } catch (error) {
       state = state.copyWith(action: '', error: _message(error));
@@ -585,6 +587,10 @@ abstract class AppController extends Notifier<AppState> {
             normalized.contains('expired') ||
             normalized.contains('stale'))) {
       return 'Endpoint P2P kontaktu jest nieprawidłowy albo wygasł.';
+    }
+    if (normalized.contains('contact must be verified') ||
+        normalized.contains('contact is not verified')) {
+      return 'Najpierw zweryfikuj fingerprint kontaktu w szczegółach kontaktu.';
     }
     if (normalized.contains('contact') &&
         (normalized.contains('already exists') ||

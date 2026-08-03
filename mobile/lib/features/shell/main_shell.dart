@@ -190,6 +190,7 @@ class MainShell extends ConsumerWidget {
           )
         : ContactsView(
             saved: contacts,
+            conversations: conversations,
             pendingPairings: pendingPairings,
             search: search,
             onSearch: onSearch,

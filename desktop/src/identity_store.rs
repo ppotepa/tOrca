@@ -1,8 +1,8 @@
+use crate::secret_store::DesktopSecretStore;
 #[cfg(feature = "torka-file-secrets")]
 use crate::secret_store::FileSecretStore;
 #[cfg(feature = "os-vault")]
-use crate::secret_store::OsVaultSecretStore;
-use crate::secret_store::{DesktopSecretKind, DesktopSecretStore};
+use crate::secret_store::{DesktopSecretKind, OsVaultSecretStore};
 use anyhow::{Context, Result, bail};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use directories::ProjectDirs;

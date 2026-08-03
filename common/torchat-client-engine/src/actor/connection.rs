@@ -115,6 +115,14 @@ impl ClientEngineActor {
         }
     }
 
+    fn schedule_pairing_inbox_retry(&mut self) -> u64 {
+        let attempt = self.pairing_inbox_retry_attempt;
+        self.pairing_inbox_retry_attempt = attempt.saturating_add(1);
+        let retry_in_ms = pairing_retry_backoff_ms(attempt).max(250) as u64;
+        self.pairing_inbox_retry_at = Some(Instant::now() + Duration::from_millis(retry_in_ms));
+        retry_in_ms
+    }
+
     pub(super) fn start_next_relay_control(&mut self, outcomes: mpsc::Sender<RelayControlOutcome>) {
         if self.relay_control_in_flight || self.relay_control_queue.is_empty() {
             return;
@@ -248,14 +256,41 @@ impl ClientEngineActor {
             (
                 RelayControlOperation::Command(EngineCommand::PairingInbox),
                 Ok(RelayControlResult::PairingInbox(remote)),
-            ) => self
-                .with_runtime(|runtime| runtime.merge_pairing_inbox(remote))
-                .and_then(|(result, runtime_events)| {
-                    for acknowledgement in &result.acknowledgements {
-                        self.enqueue_pairing_acknowledgement(&acknowledgement.pairing_id);
-                    }
-                    Ok((json_response(result)?, runtime_events))
-                }),
+            ) => {
+                let result = self
+                    .with_runtime(|runtime| runtime.merge_pairing_inbox(remote))
+                    .and_then(|(result, runtime_events)| {
+                        for acknowledgement in &result.acknowledgements {
+                            self.enqueue_pairing_acknowledgement(&acknowledgement.pairing_id);
+                        }
+                        Ok((json_response(result)?, runtime_events))
+                    });
+                if result.is_ok() {
+                    self.pairing_inbox_retry_at = None;
+                    self.pairing_inbox_retry_attempt = 0;
+                    let _ = events
+                        .send(EngineEvent::Log {
+                            log: EngineLogEvent {
+                                level: "info".to_owned(),
+                                message: "pairing inbox synchronization completed".to_owned(),
+                            },
+                        })
+                        .await;
+                } else if let Err(error) = &result {
+                    let retry_in_ms = self.schedule_pairing_inbox_retry();
+                    let _ = events
+                        .send(EngineEvent::Log {
+                            log: EngineLogEvent {
+                                level: "warn".to_owned(),
+                                message: format!(
+                                    "pairing inbox merge failed retry_in_ms={retry_in_ms}: {error}"
+                                ),
+                            },
+                        })
+                        .await;
+                }
+                result
+            }
             (
                 RelayControlOperation::Command(EngineCommand::CancelPairing { pairing_id }),
                 Ok(RelayControlResult::Unit),
@@ -294,6 +329,20 @@ impl ClientEngineActor {
                 let _ = self
                     .database
                     .record_pending_contact_confirmation_error(&pairing_id, &error.to_string());
+                Err(error)
+            }
+            (RelayControlOperation::Command(EngineCommand::PairingInbox), Err(error)) => {
+                let retry_in_ms = self.schedule_pairing_inbox_retry();
+                let _ = events
+                    .send(EngineEvent::Log {
+                        log: EngineLogEvent {
+                            level: "warn".to_owned(),
+                            message: format!(
+                                "pairing inbox synchronization failed retry_in_ms={retry_in_ms}: {error}"
+                            ),
+                        },
+                    })
+                    .await;
                 Err(error)
             }
             (_, Ok(_)) => Err(EngineError::InvalidCommand(

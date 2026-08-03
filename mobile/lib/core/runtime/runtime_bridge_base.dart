@@ -143,6 +143,24 @@ mixin RuntimeBridgeMethods implements ClientRuntime, RuntimeProjectionProvider {
           .toList();
 
   @override
+  Future<List<PairingItem>> listPairings() async {
+    final raw = await callRuntime(EngineContract.listPairings);
+    if (raw is! Map) return const <PairingItem>[];
+    final map = Map<String, dynamic>.from(raw);
+    final inbox = RuntimePayload.itemsFromDynamicOrNull(map['inbox'])
+        .map((payload) => PairingItem.fromMap(
+              payload.toMap(),
+              origin: PairingOrigin.inbox,
+            ));
+    final outbox = RuntimePayload.itemsFromDynamicOrNull(map['outbox'])
+        .map((payload) => PairingItem.fromMap(
+              payload.toMap(),
+              origin: PairingOrigin.outbox,
+            ));
+    return <PairingItem>[...inbox, ...outbox];
+  }
+
+  @override
   Future<PeerEndpoint?> peerEndpoint() async =>
       RuntimePayload.fromDynamicOrNull(
         await callRuntime(EngineContract.getPeerEndpoint),

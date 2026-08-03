@@ -39,17 +39,7 @@ pub(crate) async fn acquire_shared_lease(
 ) -> Result<bool, tokio_postgres::Error> {
     let changed = db
         .execute(
-            "INSERT INTO connection_leases
-                 (installation_id, instance_id, connection_id, expires_at)
-             VALUES ($1, $2, $3, $4)
-             ON CONFLICT (installation_id) DO UPDATE
-             SET instance_id = EXCLUDED.instance_id,
-                 connection_id = EXCLUDED.connection_id,
-                 expires_at = EXCLUDED.expires_at,
-                 updated_at = NOW()
-             WHERE connection_leases.expires_at <= $5
-                OR connection_leases.instance_id = $2
-                OR connection_leases.connection_id = $3",
+            crate::queries::SQL_LEASE_ACQUIRE,
             &[
                 &installation_id,
                 &instance_id,
@@ -69,8 +59,7 @@ pub(crate) async fn release_shared_lease(
     connection_id: Uuid,
 ) -> Result<(), tokio_postgres::Error> {
     db.execute(
-        "DELETE FROM connection_leases
-         WHERE installation_id = $1 AND instance_id = $2 AND connection_id = $3",
+        crate::queries::SQL_LEASE_RELEASE,
         &[&installation_id, &instance_id, &connection_id],
     )
     .await?;
@@ -84,9 +73,7 @@ pub(crate) async fn active_shared_lease(
 ) -> Result<Option<ConnectionLease>, tokio_postgres::Error> {
     let row = db
         .query_opt(
-            "SELECT instance_id, connection_id, expires_at
-             FROM connection_leases
-             WHERE installation_id = $1 AND expires_at > $2",
+            crate::queries::SQL_LEASE_GET_ACTIVE,
             &[&installation_id, &(now as i64)],
         )
         .await?;
@@ -109,11 +96,7 @@ pub(crate) async fn publish_route(
     expires_at: u64,
 ) -> Result<(), tokio_postgres::Error> {
     db.execute(
-        "INSERT INTO connection_route_stream
-             (route_id, installation_id, instance_id, connection_id,
-              payload, created_at, expires_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
-         ON CONFLICT (route_id) DO NOTHING",
+        crate::queries::SQL_ROUTE_PUBLISH,
         &[
             &route_id,
             &installation_id,
@@ -138,21 +121,7 @@ pub(crate) async fn claim_route(
 ) -> Result<Option<(Uuid, Vec<u8>)>, tokio_postgres::Error> {
     let row = db
         .query_opt(
-            "WITH candidate AS (
-                 SELECT route_id
-                 FROM connection_route_stream
-                 WHERE installation_id = $1
-                   AND expires_at > $2
-                   AND (claimed_until IS NULL OR claimed_until <= $2)
-                 ORDER BY created_at, route_id
-                 FOR UPDATE SKIP LOCKED
-                 LIMIT 1
-             )
-             UPDATE connection_route_stream route
-             SET claimed_by = $3, claimed_until = $4
-             FROM candidate
-             WHERE route.route_id = candidate.route_id
-             RETURNING route.route_id, route.payload",
+            crate::queries::SQL_ROUTE_CLAIM,
             &[
                 &installation_id,
                 &(now as i64),
@@ -171,7 +140,7 @@ pub(crate) async fn complete_route(
     instance_id: Uuid,
 ) -> Result<(), tokio_postgres::Error> {
     db.execute(
-        "DELETE FROM connection_route_stream WHERE route_id = $1 AND claimed_by = $2",
+        crate::queries::SQL_ROUTE_COMPLETE,
         &[&route_id, &instance_id],
     )
     .await?;

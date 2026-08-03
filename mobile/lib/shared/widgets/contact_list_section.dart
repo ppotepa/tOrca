@@ -21,6 +21,7 @@ class ContactListSection extends ConsumerWidget {
     this.showHeader = true,
     this.contactSubtitleBuilder,
     this.contactTrailingBuilder,
+    this.contactUnreadBuilder,
     this.onDetails,
     this.onToggleMute,
     this.onRemove,
@@ -36,6 +37,7 @@ class ContactListSection extends ConsumerWidget {
   final bool showHeader;
   final String Function(ContactRecord contact)? contactSubtitleBuilder;
   final Widget Function(ContactRecord contact)? contactTrailingBuilder;
+  final int Function(ContactRecord contact)? contactUnreadBuilder;
   final ValueChanged<ContactRecord>? onDetails;
   final Future<void> Function(ContactRecord contact)? onToggleMute;
   final Future<void> Function(ContactRecord contact)? onRemove;
@@ -82,6 +84,7 @@ class ContactListSection extends ConsumerWidget {
                         onTap: onSelect,
                         subtitle: contactSubtitleBuilder?.call(contact),
                         trailing: contactTrailingBuilder?.call(contact),
+                        unread: contactUnreadBuilder?.call(contact) ?? 0,
                         activity:
                             contactActivityBuilder?.call(contact) ??
                             ContactActivityVisualState.unknown,

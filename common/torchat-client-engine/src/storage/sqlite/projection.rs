@@ -20,21 +20,13 @@ impl ClientDatabase {
         let mut removed = self
             .connection
             .execute(
-                "DELETE FROM processed_commands WHERE created_at < ?1;",
+                super::sql_catalog::projection::PRUNE_BY_AGE,
                 [now.saturating_sub(retention_secs)],
             )
             .map_err(sqlite_error)?;
         let overflow = self
             .connection
-            .execute(
-                "DELETE FROM processed_commands
-             WHERE rowid IN (
-                 SELECT rowid FROM processed_commands
-                 ORDER BY created_at ASC, rowid ASC
-                 LIMIT MAX((SELECT COUNT(*) FROM processed_commands) - ?1, 0)
-             );",
-                [max_rows],
-            )
+            .execute(super::sql_catalog::projection::PRUNE_OVER_LIMIT, [max_rows])
             .map_err(sqlite_error)?;
         removed += overflow;
         Ok(removed)
@@ -46,8 +38,7 @@ impl ClientDatabase {
     ) -> EngineResult<Option<(String, String, i64)>> {
         self.connection
             .query_row(
-                "SELECT command_type, result_json, committed_revision
-                 FROM processed_commands WHERE command_id = ?1;",
+                super::sql_catalog::projection::GET_PROCESSED_COMMAND,
                 [command_id],
                 |row| {
                     Ok((
@@ -70,9 +61,7 @@ impl ClientDatabase {
     ) -> EngineResult<()> {
         self.connection
             .execute(
-                "INSERT OR IGNORE INTO processed_commands
-                 (command_id, command_type, result_json, committed_revision)
-                 VALUES (?1, ?2, ?3, ?4);",
+                super::sql_catalog::projection::SAVE_PROCESSED_COMMAND,
                 rusqlite::params![
                     command_id,
                     command_type,
@@ -86,11 +75,9 @@ impl ClientDatabase {
 
     pub fn projection_head(&self) -> EngineResult<(String, u64)> {
         self.connection
-            .query_row(
-                "SELECT store_id, global_revision FROM projection_meta WHERE singleton = 1;",
-                [],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64)),
-            )
+            .query_row(super::sql_catalog::projection::GET_HEAD, [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64))
+            })
             .map_err(sqlite_error)
     }
 }

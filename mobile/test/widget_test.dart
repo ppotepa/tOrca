@@ -41,6 +41,8 @@ class _SplashRuntime implements ClientRuntime {
   @override
   Future<List<PairingItem>> pairingOutbox() async => const [];
   @override
+  Future<List<PairingItem>> listPairings() async => const [];
+  @override
   Future<PeerEndpoint?> peerEndpoint() async => null;
   @override
   Future<bool> peerEndpointAvailable() async => false;

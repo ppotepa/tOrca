@@ -36,7 +36,6 @@ use uuid::Uuid;
 use super::{EngineRelay, RelayEvent};
 
 type RelayStream = WebSocketStream<RelaySocket>;
-
 // Relay HTTP calls currently run on the engine actor. Keep their failure
 // budget short so an unavailable or warming onion cannot starve local
 // commands (profile, contacts, conversations, and P2P state) for minutes.
@@ -54,7 +53,6 @@ enum RelaySocket {
     Direct(TcpStream),
     Socks(Socks5Stream<TcpStream>),
 }
-
 impl AsyncRead for RelaySocket {
     fn poll_read(
         mut self: Pin<&mut Self>,
@@ -97,7 +95,6 @@ impl AsyncWrite for RelaySocket {
         }
     }
 }
-
 #[derive(Clone)]
 enum WriterCommand {
     Envelope {
@@ -107,7 +104,6 @@ enum WriterCommand {
     },
     Shutdown,
 }
-
 pub struct SharedRelayActor {
     pub connection: super::RelayConnectionConfig,
     pub writer: super::RelayWriterConfig,

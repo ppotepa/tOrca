@@ -7,6 +7,7 @@ import '../../app/app_theme.dart';
 import '../../app/app_controller.dart';
 import '../../app/notifications/ui_notification_center.dart';
 import '../../app/ui_operation_registry.dart';
+import '../../core/application_state/unread_summary.dart';
 import '../../core/models/domain.dart';
 import '../../core/presence/contact_presence_snapshot.dart';
 import '../../core/presence/contact_presence_store.dart';
@@ -16,7 +17,6 @@ import '../../shared/formatters/invite_code.dart';
 import '../../shared/widgets/contact_list_section.dart';
 import '../../shared/widgets/feature_header.dart';
 import '../../shared/widgets/identity_avatar.dart';
-import '../../shared/widgets/list_items.dart';
 import '../../shared/widgets/status_banner.dart';
 import '../../shared/widgets/themed_switch_list_tile.dart';
 
@@ -24,6 +24,7 @@ class ContactsView extends ConsumerWidget {
   const ContactsView({
     super.key,
     required this.saved,
+    required this.conversations,
     required this.search,
     required this.onSearch,
     required this.onSelect,
@@ -38,6 +39,7 @@ class ContactsView extends ConsumerWidget {
   });
 
   final List<ContactRecord> saved;
+  final List<ConversationSummary> conversations;
   final TextEditingController search;
   final VoidCallback onSearch;
   final ValueChanged<ContactRecord> onSelect;
@@ -67,6 +69,7 @@ class ContactsView extends ConsumerWidget {
     final inviteCode = ref.watch(
       uiOperationProvider(UiOperationKey.inviteCodeLoad),
     );
+    final unread = conversations.unreadSummary;
     final visible = <ContactRecord>[];
     for (final contact in saved) {
       if (contact.id.isNotEmpty &&
@@ -173,6 +176,8 @@ class ContactsView extends ConsumerWidget {
                   contact.transportPolicy,
                   closeParentOnSuccess: false,
                 ),
+                contactUnreadBuilder: (contact) =>
+                    unread.messagesForContact(contact.id),
                 contactSubtitleBuilder: (contact) {
                   final snapshot = presenceStore.snapshot(contact.id);
                   final status = switch (snapshot.availability) {

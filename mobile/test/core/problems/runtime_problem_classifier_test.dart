@@ -18,6 +18,18 @@ void main() {
     expect(result.userVisible, isFalse);
   });
 
+  test('relay gateway responses are recoverable connection status', () {
+    for (final message in [
+      'relay HTTP 502: Bad Gateway',
+      'relay HTTP 503: Service Unavailable',
+      'relay HTTP 504: Gateway Timeout',
+    ]) {
+      final result = classifyRuntimeProblem(message);
+      expect(result.code, 'connection_recovering');
+      expect(result.userVisible, isFalse);
+    }
+  });
+
   test('automation deferrals never reach the user', () {
     final result = classifyRuntimeProblem(
       'message poll deferred: contact must be verified before sending',

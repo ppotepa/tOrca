@@ -4,37 +4,37 @@ use tracing::info;
 const DATABASE_MIGRATIONS: &[(&str, &str)] = &[
     (
         "004_schema_sql_files.sql",
-        include_str!("../../../infra/db/migrations/004_schema_sql_files.sql"),
+        include_str!("../sql/migrations/004_schema_sql_files.sql"),
     ),
     (
         "005_pairing_sql_file.sql",
-        include_str!("../../../infra/db/migrations/005_pairing_sql_file.sql"),
+        include_str!("../sql/migrations/005_pairing_sql_file.sql"),
     ),
     (
         "006_pairing_request_deduplication.sql",
-        include_str!("../../../infra/db/migrations/006_pairing_request_deduplication.sql"),
+        include_str!("../sql/migrations/006_pairing_request_deduplication.sql"),
     ),
     (
         "007_contacts.sql",
-        include_str!("../../../infra/db/migrations/007_contacts.sql"),
+        include_str!("../sql/migrations/007_contacts.sql"),
     ),
     (
         "008_connection_leases.sql",
-        include_str!("../../../infra/db/migrations/008_connection_leases.sql"),
+        include_str!("../sql/migrations/008_connection_leases.sql"),
     ),
     (
         "009_connection_route_stream.sql",
-        include_str!("../../../infra/db/migrations/009_connection_route_stream.sql"),
+        include_str!("../sql/migrations/009_connection_route_stream.sql"),
     ),
 ];
 const SQL_SCHEMA_MIGRATIONS: &str = include_str!("../sql/schema_migrations.sql");
 const SQL_SCHEMA_MIGRATION_LOOKUP: &str =
     include_str!("../sql/queries/schema_migration_lookup.sql");
 const SQL_SCHEMA_MIGRATION_INSERT: &str =
-    include_str!("../sql/queries/schema_migration_insert.sql");
-const SQL_PRUNE_SESSIONS: &str = include_str!("../sql/queries/prune_sessions.sql");
-const SQL_PRUNE_PAIRING_CODES: &str = include_str!("../sql/queries/prune_pairing_codes.sql");
-const SQL_PRUNE_PENDING_PAIRINGS: &str = include_str!("../sql/queries/prune_pending_pairings.sql");
+    include_str!("../sql/commands/metadata/insert_schema_migration.sql");
+const SQL_PRUNE_SESSIONS: &str = include_str!("../sql/commands/sessions/prune.sql");
+const SQL_PRUNE_PAIRING_CODES: &str = include_str!("../sql/commands/pairing/prune_codes.sql");
+const SQL_PRUNE_PENDING_PAIRINGS: &str = include_str!("../sql/commands/pairing/prune_pending.sql");
 
 pub(crate) async fn apply_database_migrations(
     db: &mut tokio_postgres::Client,

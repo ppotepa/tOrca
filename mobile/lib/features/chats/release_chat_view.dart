@@ -17,7 +17,7 @@ import '../../shared/async/busy_surface.dart';
 import '../../shared/async/themed_activity_indicator.dart';
 import '../../shared/formatters/message_timestamps.dart';
 import '../../shared/widgets/identity_avatar.dart';
-import '../../shared/widgets/list_items.dart';
+import 'chat_view_components.dart';
 import 'composer_draft.dart';
 import 'release_message_bubble.dart';
 
@@ -515,7 +515,7 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
                 ),
           actions: [
             if (widget.peerFocused)
-              const _ConversationHeaderAction(
+              const ConversationHeaderAction(
                 tooltip: 'Kontakt ma otwartą tę rozmowę',
                 child: ThemedIcon(Icons.visibility_outlined, size: 19),
               ),
@@ -525,7 +525,7 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
                 child: Center(child: widget.headerStatus!),
               ),
             if (!compactHeader)
-              _ConversationHeaderAction(
+              ConversationHeaderAction(
                 tooltip: _searching ? 'Zamknij wyszukiwanie' : 'Szukaj',
                 onPressed: _toggleSearch,
                 child: ThemedIcon(
@@ -573,9 +573,9 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
         body: Column(
           children: [
             if (widget.error.trim().isNotEmpty)
-              _InlineStatus(message: widget.error, error: true),
+              InlineStatus(message: widget.error, error: true),
             if (_attachmentError.isNotEmpty)
-              _InlineStatus(message: _attachmentError, error: true),
+              InlineStatus(message: _attachmentError, error: true),
             Expanded(
               child: Stack(
                 children: [
@@ -777,14 +777,23 @@ class _MessageTimeline extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (messages.isEmpty) {
+      if (!contact.verified) {
+        return Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Text(
+              'Zweryfikuj tożsamość kontaktu w szczegółach, aby rozpocząć rozmowę.',
+              textAlign: TextAlign.center,
+            ),
+          ),
+        );
+      }
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: canSend
               ? Text(
-                  canSend
-                      ? 'To początek rozmowy z ${contact.displayName}.'
-                      : 'Rozmowa oczekuje na bezpieczne połączenie.',
+                  'To początek rozmowy z ${contact.displayName}.',
                   textAlign: TextAlign.center,
                 )
               : Column(
@@ -799,7 +808,7 @@ class _MessageTimeline extends StatelessWidget {
                     ),
                     const SizedBox(height: 14),
                     const Text(
-                      'Rozmowa oczekuje na bezpieczne poÅ‚Ä…czenie.',
+                      'Rozmowa oczekuje na bezpieczne połączenie.',
                       textAlign: TextAlign.center,
                     ),
                   ],
@@ -841,7 +850,7 @@ class _MessageTimeline extends StatelessWidget {
               key: ValueKey(message.id),
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                if (showDay) _DayDivider(date: message.createdAt),
+                if (showDay) DayDivider(date: message.createdAt),
                 ReleaseMessageBubble(
                   message: message,
                   contactName: contact.displayName,
@@ -1063,93 +1072,6 @@ class _Composer extends StatelessWidget {
       ),
     );
   }
-}
-
-class _ConversationHeaderAction extends StatelessWidget {
-  const _ConversationHeaderAction({
-    required this.tooltip,
-    required this.child,
-    this.onPressed,
-  });
-
-  final String tooltip;
-  final Widget child;
-  final VoidCallback? onPressed;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 3),
-    child: Tooltip(
-      message: tooltip,
-      child: SizedBox.square(
-        dimension: 40,
-        child: onPressed == null
-            ? DecoratedBox(
-                decoration: BoxDecoration(
-                  border: Border.all(color: context.shellTheme.border),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Center(child: child),
-              )
-            : IconButton(
-                onPressed: onPressed,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints.tightFor(
-                  width: 40,
-                  height: 40,
-                ),
-                icon: child,
-              ),
-      ),
-    ),
-  );
-}
-
-class _InlineStatus extends StatelessWidget {
-  const _InlineStatus({required this.message, this.error = false});
-
-  final String message;
-  final bool error;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    width: double.infinity,
-    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-    color: error
-        ? context.statusTheme.danger.withValues(alpha: .12)
-        : context.statusTheme.success.withValues(alpha: .1),
-    child: Text(
-      message,
-      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-        color: error ? context.statusTheme.danger : context.statusTheme.success,
-      ),
-    ),
-  );
-}
-
-class _DayDivider extends StatelessWidget {
-  const _DayDivider({required this.date});
-
-  final String date;
-
-  @override
-  Widget build(BuildContext context) => Center(
-    child: Container(
-      margin: const EdgeInsets.symmetric(vertical: 12),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-      decoration: BoxDecoration(
-        color: context.shellTheme.surface,
-        border: Border.all(color: context.shellTheme.border),
-        borderRadius: context.effectsTheme.pixelated
-            ? BorderRadius.zero
-            : BorderRadius.circular(999),
-      ),
-      child: Text(
-        formatMessageDay(date),
-        style: Theme.of(context).textTheme.labelSmall,
-      ),
-    ),
-  );
 }
 
 ContactActivityVisualState _availabilityVisual(ContactAvailability value) =>

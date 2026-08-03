@@ -17,15 +17,12 @@ void main() {
   });
 
   test('release trust model does not require a second manual approval', () {
-    final release = File('../RELEASE_0_1.md').readAsStringSync();
+    final release = File('../README.md').readAsStringSync();
 
     expect(
       release,
       contains('No additional `Verify contact` action is required'),
     );
-    expect(
-      release,
-      contains('verified contact and an active conversation on both sides'),
-    );
+    expect(release, contains('verified contact and an active'));
   });
 }

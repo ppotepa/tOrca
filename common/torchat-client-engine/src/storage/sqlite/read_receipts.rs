@@ -3,12 +3,9 @@ use super::*;
 impl ClientDatabase {
     pub fn next_read_receipt_retry_deadline(&self, _now_ms: i64) -> EngineResult<Option<i64>> {
         self.connection
-            .query_row(
-                "SELECT MIN(next_attempt_at) FROM read_receipt_outbox
-                 WHERE UPPER(state) IN ('QUEUED', 'SENT');",
-                [],
-                |row| row.get(0),
-            )
+            .query_row(super::sql_catalog::read_receipts::NEXT_RETRY, [], |row| {
+                row.get(0)
+            })
             .map_err(sqlite_error)
     }
 
@@ -24,15 +21,7 @@ impl ClientDatabase {
         let receipt_id = uuid::Uuid::new_v4().to_string();
         self.connection
             .execute(
-                "INSERT INTO read_receipt_outbox (
-                    receipt_id, contact_installation_id, conversation_id,
-                    message_ids_json, read_at, state, next_attempt_at,
-                    created_at, updated_at
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, 'QUEUED', ?6, ?6, ?6)
-                 ON CONFLICT(contact_installation_id, conversation_id, message_ids_json)
-                 DO UPDATE SET read_at = MAX(read_receipt_outbox.read_at, excluded.read_at),
-                               next_attempt_at = MIN(read_receipt_outbox.next_attempt_at, excluded.next_attempt_at),
-                               updated_at = excluded.updated_at;",
+                super::sql_catalog::read_receipts::ENQUEUE,
                 rusqlite::params![
                     receipt_id,
                     contact_installation_id,
@@ -46,10 +35,7 @@ impl ClientDatabase {
         let id: String = self
             .connection
             .query_row(
-                "SELECT receipt_id FROM read_receipt_outbox
-                 WHERE contact_installation_id = ?1
-                   AND conversation_id = ?2
-                   AND message_ids_json = ?3;",
+                super::sql_catalog::read_receipts::GET_ID,
                 rusqlite::params![contact_installation_id, conversation_id, message_ids_json],
                 |row| row.get(0),
             )
@@ -60,14 +46,7 @@ impl ClientDatabase {
     pub fn due_read_receipts(&self, now_ms: i64) -> EngineResult<Vec<ReadReceiptOutboxRecord>> {
         let mut statement = self
             .connection
-            .prepare(
-                "SELECT receipt_id, contact_installation_id, conversation_id,
-                    message_ids_json, read_at, wire_ciphertext, state,
-                    attempt_count, next_attempt_at, last_error, created_at
-             FROM read_receipt_outbox
-             WHERE next_attempt_at <= ?1 AND UPPER(state) IN ('QUEUED', 'SENT')
-             ORDER BY next_attempt_at ASC, created_at ASC, receipt_id ASC;",
-            )
+            .prepare(super::sql_catalog::read_receipts::LIST_DUE)
             .map_err(sqlite_error)?;
         let rows = statement
             .query_map([now_ms], |row| {
@@ -92,10 +71,7 @@ impl ClientDatabase {
     pub fn read_receipt(&self, receipt_id: &str) -> EngineResult<Option<ReadReceiptOutboxRecord>> {
         self.connection
             .query_row(
-                "SELECT receipt_id, contact_installation_id, conversation_id,
-                        message_ids_json, read_at, wire_ciphertext, state,
-                        attempt_count, next_attempt_at, last_error, created_at
-                 FROM read_receipt_outbox WHERE receipt_id = ?1;",
+                super::sql_catalog::read_receipts::GET,
                 [receipt_id],
                 |row| {
                     Ok(ReadReceiptOutboxRecord {
@@ -128,11 +104,7 @@ impl ClientDatabase {
         let changed = self
             .connection
             .execute(
-                "UPDATE read_receipt_outbox
-             SET wire_ciphertext = COALESCE(wire_ciphertext, ?1),
-                 state = 'SENT', attempt_count = attempt_count + 1,
-                 next_attempt_at = ?2, updated_at = ?3
-             WHERE receipt_id = ?4 AND next_attempt_at <= ?3;",
+                super::sql_catalog::read_receipts::PERSIST_ENCRYPTION,
                 rusqlite::params![wire_ciphertext, next_attempt_at, unix_ms(), receipt_id],
             )
             .map_err(sqlite_error)?;
@@ -141,13 +113,12 @@ impl ClientDatabase {
         }
         self.connection
             .execute(
-                "INSERT INTO conversation_mls (conversation_id, snapshot, state_version, snapshot_hash, updated_at)
-             VALUES (?1, ?2, 1, ?3, unixepoch())
-             ON CONFLICT(conversation_id) DO UPDATE SET snapshot = excluded.snapshot,
-                 state_version = conversation_mls.state_version + 1,
-                 snapshot_hash = excluded.snapshot_hash,
-                 updated_at = excluded.updated_at;",
-                rusqlite::params![conversation_id, snapshot, sha2::Sha256::digest(snapshot).to_vec()],
+                super::sql_catalog::mls::UPSERT_SNAPSHOT,
+                rusqlite::params![
+                    conversation_id,
+                    snapshot,
+                    sha2::Sha256::digest(snapshot).to_vec()
+                ],
             )
             .map_err(sqlite_error)?;
         Ok(true)
@@ -155,10 +126,7 @@ impl ClientDatabase {
 
     pub fn complete_read_receipt(&self, receipt_id: &str) -> EngineResult<()> {
         self.connection
-            .execute(
-                "DELETE FROM read_receipt_outbox WHERE receipt_id = ?1;",
-                [receipt_id],
-            )
+            .execute(super::sql_catalog::read_receipts::COMPLETE, [receipt_id])
             .map_err(sqlite_error)?;
         Ok(())
     }
@@ -169,12 +137,12 @@ impl ClientDatabase {
         next_attempt_at: i64,
         error: &str,
     ) -> EngineResult<()> {
-        self.connection.execute(
-            "UPDATE read_receipt_outbox SET state = 'QUEUED', wire_ciphertext = wire_ciphertext,
-                 next_attempt_at = ?2, last_error = ?3, updated_at = unixepoch()
-             WHERE receipt_id = ?1;",
-            rusqlite::params![receipt_id, next_attempt_at, error],
-        ).map_err(sqlite_error)?;
+        self.connection
+            .execute(
+                super::sql_catalog::read_receipts::REQUEUE,
+                rusqlite::params![receipt_id, next_attempt_at, error],
+            )
+            .map_err(sqlite_error)?;
         Ok(())
     }
 }

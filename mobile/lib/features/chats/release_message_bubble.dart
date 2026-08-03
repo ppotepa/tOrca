@@ -33,7 +33,6 @@ class ReleaseMessageBubble extends ConsumerStatefulWidget {
   final ValueChanged<String> onRetry;
   final ValueChanged<String> onDelete;
   final ValueChanged<ChatMessage> onReply;
-
   @override
   ConsumerState<ReleaseMessageBubble> createState() =>
       _ReleaseMessageBubbleState();
@@ -44,7 +43,6 @@ class _ReleaseMessageBubbleState extends ConsumerState<ReleaseMessageBubble> {
   bool _loading = false;
   bool _saving = false;
   bool _cached = false;
-
   ChatMessage get message => widget.message;
 
   @override
@@ -52,7 +50,6 @@ class _ReleaseMessageBubbleState extends ConsumerState<ReleaseMessageBubble> {
     super.initState();
     unawaited(_loadImage());
   }
-
   @override
   void didUpdateWidget(covariant ReleaseMessageBubble oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -63,7 +60,6 @@ class _ReleaseMessageBubbleState extends ConsumerState<ReleaseMessageBubble> {
       unawaited(_loadImage());
     }
   }
-
   Future<void> _loadImage({bool force = false}) async {
     final messageId = message.id;
     final messageText = message.text;
@@ -97,7 +93,6 @@ class _ReleaseMessageBubbleState extends ConsumerState<ReleaseMessageBubble> {
       }
     }
   }
-
   Future<void> _removeFromCache() async {
     await EncryptedImageStore.instance.remove(message.id);
     if (!mounted) return;
@@ -106,7 +101,6 @@ class _ReleaseMessageBubbleState extends ConsumerState<ReleaseMessageBubble> {
       _cached = false;
     });
   }
-
   Future<void> _saveToGallery() async {
     final bytes = _imageBytes;
     if (bytes == null || _saving) return;
@@ -135,7 +129,6 @@ class _ReleaseMessageBubbleState extends ConsumerState<ReleaseMessageBubble> {
       if (mounted) setState(() => _saving = false);
     }
   }
-
   @override
   Widget build(BuildContext context) {
     final removed = RelationshipRemovedMessage.tryDecode(message.text);
@@ -272,7 +265,6 @@ class _ReleaseMessageBubbleState extends ConsumerState<ReleaseMessageBubble> {
       ),
     );
   }
-
   Widget _imageContent(
     BuildContext context,
     DecodedImageMessage? decoded,
@@ -335,7 +327,6 @@ class _ReleaseMessageBubbleState extends ConsumerState<ReleaseMessageBubble> {
       ),
     );
   }
-
   Future<void> _showPreview(
     BuildContext context,
     Uint8List bytes, {

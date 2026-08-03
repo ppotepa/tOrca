@@ -27,6 +27,7 @@ pub(crate) enum DesktopSecretKind {
     MlsCheckpoint,
 }
 
+#[cfg(feature = "os-vault")]
 impl DesktopSecretKind {
     fn label(&self) -> &'static str {
         match self {

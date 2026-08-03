@@ -56,6 +56,15 @@ impl ClientEngineActor {
                 Vec::new(),
                 None,
             )),
+            EngineCommand::ListPairings => {
+                let ((inbox, outbox), runtime_events) =
+                    self.with_runtime(|runtime| runtime.local_pairing_lists())?;
+                Ok((
+                    json_response(crate::PairingList { inbox, outbox })?,
+                    runtime_events,
+                    None,
+                ))
+            }
             EngineCommand::PairingOutbox => {
                 let (result, runtime_events) =
                     self.with_runtime(|runtime| runtime.pairing_outbox())?;
