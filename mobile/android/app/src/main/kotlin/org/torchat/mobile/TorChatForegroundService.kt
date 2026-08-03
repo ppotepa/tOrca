@@ -187,6 +187,7 @@ class TorChatForegroundService : Service() {
                     relayOnionUrl = BuildConfig.TORCHAT_SERVER_URL,
                     initialSocks5Url = null,
                     logDirectory = File(applicationContext.noBackupFilesDir, "engine-logs"),
+                    mlsEpochAnchorStore = secrets,
                 ),
             )
             host.start()

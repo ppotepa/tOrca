@@ -38,7 +38,7 @@ impl ClientEngineActor {
                 self.database.record_peer_endpoint_bootstrap_error(
                     &contact.installation_id,
                     local_endpoint_for_contact.sequence,
-                    &error.to_string(),
+                    &format!("{}: {error}", super::retry_error_code(&error.to_string())),
                 )?;
                 self.pending_engine_events.push(EngineEvent::Log {
                     log: EngineLogEvent {
@@ -170,7 +170,7 @@ impl ClientEngineActor {
             return Ok(());
         }
         for record in self.database.due_peer_endpoint_bootstraps(unix_ms())? {
-            let next_attempt_at = unix_ms() + retry_backoff_ms(record.attempt_count);
+            let next_attempt_at = self.clock.now_ms() + retry_backoff_ms(record.attempt_count);
             if !self.database.claim_peer_endpoint_bootstrap_attempt(
                 &record.contact_installation_id,
                 record.endpoint_sequence,
@@ -183,7 +183,7 @@ impl ClientEngineActor {
                 self.database.record_peer_endpoint_bootstrap_error(
                     &record.contact_installation_id,
                     record.endpoint_sequence,
-                    &error.to_string(),
+                    &format!("{}: {error}", super::retry_error_code(&error.to_string())),
                 )?;
                 self.pending_engine_events.push(EngineEvent::Log {
                     log: EngineLogEvent {
@@ -282,7 +282,7 @@ impl ClientEngineActor {
             return Ok(());
         }
         for record in self.database.due_capability_deliveries(unix_ms())? {
-            let next_attempt = unix_ms() + retry_backoff_ms(record.attempt_count);
+            let next_attempt = self.clock.now_ms() + retry_backoff_ms(record.attempt_count);
             if !self
                 .database
                 .claim_capability_delivery(&record.delivery_id, next_attempt, None)?
@@ -304,7 +304,7 @@ impl ClientEngineActor {
                 self.database.record_capability_delivery_error(
                     &record.delivery_id,
                     next_attempt,
-                    &error.to_string(),
+                    &format!("{}: {error}", super::retry_error_code(&error.to_string())),
                 )?;
             }
         }

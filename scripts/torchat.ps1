@@ -176,10 +176,8 @@ $mutex = $null
 $mutexAcquired = $false
 $mutating = -not $DryRun -and $Command -in @('stack','build','deploy','run','stop','clean')
 if ($mutating) {
-    # Version the mutex name so a process orphaned by the pre-v2 launcher cannot
-    # permanently block the current command runner. The mutex is still global
-    # for all current TorChat invocations on the host.
-    $mutexName = if ($env:OS -eq 'Windows_NT') { 'Global\TorChat-Cli-v2' } else { 'TorChat-Cli-v2' }
+    # Keep one global mutex for all current TorChat invocations on the host.
+    $mutexName = if ($env:OS -eq 'Windows_NT') { 'Global\TorChat-Cli' } else { 'TorChat-Cli' }
     $mutex = New-Object System.Threading.Mutex($false, $mutexName)
     try {
         $mutexAcquired = $mutex.WaitOne(0)

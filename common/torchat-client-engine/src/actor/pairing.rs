@@ -11,7 +11,7 @@ impl ClientEngineActor {
         else {
             return Ok(None);
         };
-        let next_attempt_at = unix_ms() + retry_backoff_ms(stored.attempt_count);
+        let next_attempt_at = self.clock.now_ms() + retry_backoff_ms(stored.attempt_count);
         if !self.database.claim_pairing_response_attempt(
             &effect.pairing_id,
             next_attempt_at,
@@ -138,8 +138,10 @@ impl ClientEngineActor {
                     invite_id: pending.invite_id.clone(),
                 },
             ) {
-                self.database
-                    .record_pending_welcome_error(&pending.invite_id, &error.to_string())?;
+                self.database.record_pending_welcome_error(
+                    &pending.invite_id,
+                    &format!("{}: {error}", super::retry_error_code(&error.to_string())),
+                )?;
                 self.pending_engine_events.push(EngineEvent::Log {
                     log: EngineLogEvent {
                         level: "warn".to_owned(),
@@ -159,7 +161,7 @@ impl ClientEngineActor {
             return Ok(());
         }
         for record in self.database.due_pending_contact_confirmations(unix_ms())? {
-            let next_attempt_at = unix_ms() + retry_backoff_ms(record.attempt_count);
+            let next_attempt_at = self.clock.now_ms() + retry_backoff_ms(record.attempt_count);
             if !self.database.claim_pending_contact_confirmation_attempt(
                 &record.pairing_id,
                 next_attempt_at,
@@ -170,7 +172,7 @@ impl ClientEngineActor {
             if let Err(error) = self.send_contact_confirmation(record.clone()) {
                 self.database.record_pending_contact_confirmation_error(
                     &record.pairing_id,
-                    &error.to_string(),
+                    &format!("{}: {error}", super::retry_error_code(&error.to_string())),
                 )?;
                 self.pending_engine_events.push(EngineEvent::Log {
                     log: EngineLogEvent {
@@ -197,7 +199,7 @@ impl ClientEngineActor {
             .database
             .due_pending_pairing_acknowledgements(unix_ms())?
         {
-            let next_attempt_at = unix_ms() + retry_backoff_ms(attempt_count);
+            let next_attempt_at = self.clock.now_ms() + retry_backoff_ms(attempt_count);
             if !self
                 .database
                 .claim_pending_pairing_acknowledgement_attempt(&pairing_id, next_attempt_at, None)?
@@ -258,8 +260,10 @@ impl ClientEngineActor {
                         invite_id: pending.invite_id,
                     },
                 ) {
-                    self.database
-                        .record_pending_welcome_error(&invite.invite_id, &error.to_string())?;
+                    self.database.record_pending_welcome_error(
+                        &invite.invite_id,
+                        &format!("{}: {error}", super::retry_error_code(&error.to_string())),
+                    )?;
                     self.pending_engine_events.push(EngineEvent::Log {
                         log: EngineLogEvent {
                             level: "warn".to_owned(),
@@ -393,9 +397,12 @@ impl ClientEngineActor {
                     true,
                     pairing_invite_id.map(str::to_owned),
                 )?;
-                runtime
-                    .storage_mut()
-                    .begin_verified_relationship(&card.installation_id, unix_ms())?;
+                runtime.storage_mut().apply_relationship_transition(
+                    crate::storage::runtime_storage::RelationshipTransition::BeginVerified {
+                        installation_id: card.installation_id.clone(),
+                        boundary_at: unix_ms(),
+                    },
+                )?;
                 runtime.storage_mut().put_conversation_mls_snapshot(
                     &result.conversation.id,
                     &conversation_snapshot,
@@ -437,7 +444,7 @@ impl ClientEngineActor {
             }) {
                 self.database.record_pending_contact_confirmation_error(
                     &confirm.pairing_id,
-                    &error.to_string(),
+                    &format!("{}: {error}", super::retry_error_code(&error.to_string())),
                 )?;
                 self.pending_engine_events.push(EngineEvent::Log {
                     log: EngineLogEvent {

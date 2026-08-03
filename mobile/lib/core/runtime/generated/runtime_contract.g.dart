@@ -150,6 +150,8 @@ abstract final class EngineContract {
   static const closeConversation = 'closeConversation';
   static const sendMessage = 'sendMessage';
   static const retryMessage = 'retryMessage';
+  static const retryDeadLetter = 'retryDeadLetter';
+  static const listDeadLetters = 'listDeadLetters';
   static const deleteMessageLocal = 'deleteMessageLocal';
   static const setTyping = 'setTyping';
   static const setConversationFocus = 'setConversationFocus';
@@ -187,12 +189,14 @@ abstract final class EngineContract {
   static const commandCancelPairing = 'cancel_pairing';
   static const commandVerifyContact = 'verify_contact';
   static const commandUpdateContactSettings = 'update_contact_settings';
-  static const commandRemoveRelationship = 'remove_relationship';
+  static const commandRequestRelationshipRemoval = 'request_relationship_removal';
   static const commandStartConversation = 'start_conversation';
   static const commandOpenConversation = 'open_conversation';
   static const commandCloseConversation = 'close_conversation';
   static const commandSendMessage = 'send_message';
   static const commandRetryMessage = 'retry_message';
+  static const commandRetryDeadLetter = 'retry_dead_letter';
+  static const commandListDeadLetters = 'list_dead_letters';
   static const commandDeleteMessageLocal = 'delete_message_local';
   static const commandSetTyping = 'set_typing';
   static const commandSetConversationFocus = 'set_conversation_focus';

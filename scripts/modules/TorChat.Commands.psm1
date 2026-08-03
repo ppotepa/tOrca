@@ -67,8 +67,11 @@ function Invoke-TorChatAndroidBuildPlan {
         [Parameter(Mandatory = $true)][string]$BuildPolicy
     )
     $skip = $BuildPolicy -eq 'skip'
-    Invoke-TorChatStage -Context $Context -Id 'build.android.engine' -Name 'Build Android Rust engine' -Skip:$skip -Action {
-        Build-TorChatAndroidEngine -Context $Context -Policy $BuildPolicy
+    Invoke-TorChatStage -Context $Context -Id 'build.android.engine.arm64' -Name 'Build Android Rust engine (arm64)' -Skip:$skip -Action {
+        Build-TorChatAndroidEngine -Context $Context -Policy $BuildPolicy -RustTarget 'aarch64-linux-android'
+    }
+    Invoke-TorChatStage -Context $Context -Id 'build.android.engine.x86_64' -Name 'Build Android Rust engine (x86_64 emulator)' -Skip:$skip -Action {
+        Build-TorChatAndroidEngine -Context $Context -Policy $BuildPolicy -RustTarget 'x86_64-linux-android'
     }
     Invoke-TorChatStage -Context $Context -Id 'build.android.client' -Name 'Build Android APK' -Skip:$skip -Action {
         Build-TorChatAndroidClient -Context $Context -EnvironmentState $EnvironmentState -Policy $BuildPolicy

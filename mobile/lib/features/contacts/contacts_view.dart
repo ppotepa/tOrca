@@ -34,8 +34,6 @@ class ContactsView extends ConsumerWidget {
     required this.ownInvite,
     required this.error,
     this.showContactList = true,
-    this.onlineContacts = const {},
-    this.idleContacts = const {},
     this.pendingPairings = const [],
   });
 
@@ -57,8 +55,6 @@ class ContactsView extends ConsumerWidget {
   final String ownInvite;
   final String error;
   final bool showContactList;
-  final Map<String, bool> onlineContacts;
-  final Map<String, bool> idleContacts;
   final List<PairingItem> pendingPairings;
 
   @override
@@ -186,9 +182,13 @@ class ContactsView extends ConsumerWidget {
                     ContactAvailability.unknown => 'status nieznany',
                     ContactAvailability.checking => 'sprawdzanie',
                   };
-                  return contact.fingerprint.isEmpty
-                      ? status
-                      : '$status · ${contact.fingerprint}';
+                  final route = switch (contact.transportPolicy) {
+                    ContactTransportPolicy.peerOnly => 'P2P',
+                    ContactTransportPolicy.peerWithRelayFallback =>
+                      'P2P + relay fallback',
+                    ContactTransportPolicy.relayOnly => 'relay',
+                  };
+                  return '$status · $route';
                 },
                 contactActivityBuilder: (contact) {
                   final availability = presenceStore
@@ -206,12 +206,6 @@ class ContactsView extends ConsumerWidget {
                 contactTrailingBuilder: (contact) => Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    PeerTransportIndicator(
-                      connectionStatus: contact.peerConnectionStatus,
-                      transportPolicy: contact.transportPolicy,
-                      endpointStatus: contact.peerEndpointStatus,
-                    ),
-                    const SizedBox(width: 4),
                     if (contact.devFixture != null)
                       const Chip(label: Text('DEV')),
                     IconButton(
@@ -408,6 +402,72 @@ class ContactsView extends ConsumerWidget {
                           value: _peerConnectionLabel(
                             contact.peerConnectionStatus,
                           ),
+                        ),
+                        const SizedBox(height: 8),
+                        FutureBuilder<List<Map<String, dynamic>>>(
+                          future:
+                              (dialogRef.read(clientRuntimeProvider) as dynamic)
+                                  .listDeadLetters()
+                                  .then(
+                                    (value) => (value as List)
+                                        .whereType<Map>()
+                                        .map(
+                                          (item) => item.map(
+                                            (key, value) =>
+                                                MapEntry(key.toString(), value),
+                                          ),
+                                        )
+                                        .toList()
+                                        .cast<Map<String, dynamic>>(),
+                                  ),
+                          builder: (context, snapshot) {
+                            if (snapshot.connectionState ==
+                                ConnectionState.waiting) {
+                              return const LinearProgressIndicator();
+                            }
+                            if (snapshot.hasError) {
+                              return Text(
+                                'Dead-letter niedostępny: ${snapshot.error}',
+                              );
+                            }
+                            final records = snapshot.data ?? const [];
+                            if (records.isEmpty) {
+                              return const Text('Brak dead-letterów');
+                            }
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('Dead-letter retry'),
+                                for (final record in records)
+                                  ListTile(
+                                    dense: true,
+                                    contentPadding: EdgeInsets.zero,
+                                    title: Text(
+                                      '${record['kind']}: ${record['id']}',
+                                    ),
+                                    subtitle: Text(
+                                      record['lastError']?.toString() ??
+                                          'brak błędu',
+                                    ),
+                                    trailing: IconButton(
+                                      tooltip: 'Ponów',
+                                      icon: const ThemedIcon(Icons.refresh),
+                                      onPressed: () async {
+                                        await dialogRef
+                                            .read(clientRuntimeProvider)
+                                            .retryDeadLetter(
+                                              record['kind'].toString(),
+                                              record['id'].toString(),
+                                            );
+                                        if (context.mounted) {
+                                          setDialogState(() {});
+                                        }
+                                      },
+                                    ),
+                                  ),
+                              ],
+                            );
+                          },
                         ),
                       ],
                       const SizedBox(height: 12),
@@ -679,7 +739,7 @@ String _effectiveRouteLabel(ContactRecord contact) {
     return 'P2P onion';
   }
   if (contact.transportPolicy == ContactTransportPolicy.peerWithRelayFallback) {
-    return 'relay fallback (P2P nieaktywne)';
+    return 'live relay fallback (P2P nieaktywne)';
   }
   return 'P2P oczekuje / offline';
 }
@@ -709,6 +769,6 @@ String _peerConnectionLabel(PeerConnectionStatus status) => switch (status) {
 
 String _transportPolicyLabel(ContactTransportPolicy policy) => switch (policy) {
   ContactTransportPolicy.peerOnly => 'Tylko P2P',
-  ContactTransportPolicy.peerWithRelayFallback => 'P2P z fallbackiem relay',
+  ContactTransportPolicy.peerWithRelayFallback => 'P2P + live relay fallback',
   ContactTransportPolicy.relayOnly => 'Tylko relay',
 };

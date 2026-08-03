@@ -25,6 +25,18 @@ if [[ ! -s "$SECURE_ROOT/secrets/database_url" ]]; then
   umask 077
   printf 'postgres://torchat:%s@postgres:5432/torchat\n' "$password" >"$SECURE_ROOT/secrets/database_url"
 fi
+if [[ ! -s "$SECURE_ROOT/secrets/pairing_secret" ]]; then
+  umask 077
+  tr -dc 'A-Za-z0-9' </dev/urandom | head -c 64 >"$SECURE_ROOT/secrets/pairing_secret"
+fi
+chown "$SERVICE_USER:$SERVICE_USER" \
+  "$SECURE_ROOT/secrets/postgres_password" \
+  "$SECURE_ROOT/secrets/database_url" \
+  "$SECURE_ROOT/secrets/pairing_secret"
+chmod 0600 \
+  "$SECURE_ROOT/secrets/postgres_password" \
+  "$SECURE_ROOT/secrets/database_url" \
+  "$SECURE_ROOT/secrets/pairing_secret"
 
 install -m 0644 "$REPO_ROOT/infra/host/torchat-staging.service" /etc/systemd/system/torchat-staging.service
 systemctl daemon-reload

@@ -29,8 +29,6 @@ class ConversationListSection extends ConsumerWidget {
         'Nie masz jeszcze rozmów.\nWybierz osobę w zakładce Kontakty.',
     this.asCard = true,
     this.showHeader = true,
-    this.onlineContacts = const {},
-    this.idleContacts = const {},
   });
 
   final String title;
@@ -42,8 +40,6 @@ class ConversationListSection extends ConsumerWidget {
   final String emptyMessage;
   final bool asCard;
   final bool showHeader;
-  final Map<String, bool> onlineContacts;
-  final Map<String, bool> idleContacts;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -100,13 +96,6 @@ class ConversationListSection extends ConsumerWidget {
                 lastMessageAt: conversation.lastMessageAt,
                 unread: conversation.unread,
                 lastSeen: lastSeen,
-                peerConnectionStatus:
-                    contact?.peerConnectionStatus ??
-                    PeerConnectionStatus.offline,
-                transportPolicy:
-                    contact?.transportPolicy ?? ContactTransportPolicy.peerOnly,
-                peerEndpointStatus:
-                    contact?.peerEndpointStatus ?? PeerEndpointStatus.missing,
                 selected: selectedConversation == conversation.id,
                 onTap: () => onOpenConversation(conversation.id),
                 asCard: asCard,

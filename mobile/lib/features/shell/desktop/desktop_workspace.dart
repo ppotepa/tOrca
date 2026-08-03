@@ -24,7 +24,6 @@ class DesktopWorkspace extends StatefulWidget {
     required this.conversations,
     required this.selectedConversation,
     required this.selectedContact,
-    required this.onlineContacts,
     this.presenceStore,
     required this.content,
     required this.onTab,
@@ -42,7 +41,6 @@ class DesktopWorkspace extends StatefulWidget {
   final List<ConversationSummary> conversations;
   final String? selectedConversation;
   final ContactRecord? selectedContact;
-  final Map<String, bool> onlineContacts;
   final ContactPresenceStore? presenceStore;
   final Widget content;
   final ValueChanged<MobileTab> onTab;
@@ -111,13 +109,12 @@ class _DesktopWorkspaceState extends State<DesktopWorkspace> {
                     ? _ConversationSidebar(
                         conversations: widget.conversations,
                         contacts: widget.contacts,
-                        onlineContacts: widget.onlineContacts,
+                        presenceStore: _presenceStore,
                         selectedConversation: widget.selectedConversation,
                         onOpenConversation: widget.onOpenConversation,
                       )
                     : _ContactSidebar(
                         contacts: widget.contacts,
-                        onlineContacts: widget.onlineContacts,
                         presenceStore: _presenceStore,
                         onSelect: widget.onStartConversation,
                       ),
@@ -367,14 +364,14 @@ class _ConversationSidebar extends StatefulWidget {
   const _ConversationSidebar({
     required this.conversations,
     required this.contacts,
-    required this.onlineContacts,
+    required this.presenceStore,
     required this.selectedConversation,
     required this.onOpenConversation,
   });
 
   final List<ConversationSummary> conversations;
   final List<ContactRecord> contacts;
-  final Map<String, bool> onlineContacts;
+  final ContactPresenceStore presenceStore;
   final String? selectedConversation;
   final ValueChanged<String> onOpenConversation;
 
@@ -439,7 +436,6 @@ class _ConversationSidebarState extends State<_ConversationSidebar> {
               title: 'Czaty',
               conversations: _filtered,
               contacts: widget.contacts,
-              onlineContacts: widget.onlineContacts,
               selectedConversation: widget.selectedConversation,
               onOpenConversation: widget.onOpenConversation,
               asCard: false,
@@ -460,13 +456,11 @@ enum _ContactFilter { all, online, p2p }
 class _ContactSidebar extends StatefulWidget {
   const _ContactSidebar({
     required this.contacts,
-    required this.onlineContacts,
     required this.presenceStore,
     required this.onSelect,
   });
 
   final List<ContactRecord> contacts;
-  final Map<String, bool> onlineContacts;
   final ContactPresenceStore presenceStore;
   final ValueChanged<ContactRecord> onSelect;
 
@@ -494,7 +488,9 @@ class _ContactSidebarState extends State<_ContactSidebar> {
               contact.fingerprint.toLowerCase().contains(query);
           final matchesFilter = switch (_filter) {
             _ContactFilter.all => true,
-            _ContactFilter.online => widget.onlineContacts[contact.id] == true,
+            _ContactFilter.online =>
+              widget.presenceStore.snapshot(contact.id).availability ==
+                  ContactAvailability.active,
             _ContactFilter.p2p =>
               contact.transportPolicy != ContactTransportPolicy.relayOnly,
           };
@@ -562,19 +558,14 @@ class _ContactSidebarState extends State<_ContactSidebar> {
                 final availability = widget.presenceStore
                     .snapshot(contact.id)
                     .availability;
-                final online =
-                    availability == ContactAvailability.active ||
-                    availability == ContactAvailability.idle;
+                final presenceLabel = _availabilityLabel(availability);
                 final route = switch (contact.transportPolicy) {
                   ContactTransportPolicy.relayOnly => 'Tor relay',
                   ContactTransportPolicy.peerWithRelayFallback =>
-                    contact.peerConnectionStatus ==
-                            PeerConnectionStatus.connected
-                        ? 'Tor P2P'
-                        : 'Tor P2P + relay fallback',
+                    'Tor P2P + live relay fallback',
                   ContactTransportPolicy.peerOnly => 'Tor P2P',
                 };
-                return '${online ? 'online' : 'offline'} · $route';
+                return '$presenceLabel · $route';
               },
               contactTrailingBuilder: (contact) =>
                   const ThemedIcon(Icons.chevron_right, size: 18),
@@ -704,6 +695,13 @@ class _ConversationInspector extends StatelessWidget {
                   ),
                 ),
                 InfoTile(
+                  title: 'Ważność obserwacji',
+                  subtitle: _relativeTimestamp(
+                    presence.expiresAt?.toString(),
+                    empty: 'Brak expiry',
+                  ),
+                ),
+                InfoTile(
                   title: 'Fokus rozmowy',
                   subtitle: presence.isViewingConversation ? 'Tak' : 'Nie',
                 ),
@@ -724,6 +722,19 @@ class _ConversationInspector extends StatelessWidget {
                   subtitle: presence.latencyMs == null
                       ? 'Brak danych'
                       : '${presence.latencyMs} ms',
+                ),
+                InfoTile(
+                  title: 'Następny probe',
+                  subtitle: presence.retryInMs == null
+                      ? 'Brak zaplanowanego retry'
+                      : 'Za ${presence.retryInMs} ms',
+                ),
+                InfoTile(
+                  title: 'Ostatnie połączenie P2P',
+                  subtitle: _relativeTimestamp(
+                    presence.lastPeerConnectedAt?.toString(),
+                    empty: 'Brak danych',
+                  ),
                 ),
                 InfoTile(
                   title: 'Trasa',
@@ -791,7 +802,7 @@ String _inspectorRouteLabel(ContactRecord contact) =>
       ContactTransportPolicy.peerWithRelayFallback =>
         contact.peerConnectionStatus == PeerConnectionStatus.connected
             ? 'Bezpośrednio przez Tor P2P'
-            : 'P2P / awaryjny relay',
+            : 'P2P / live relay fallback',
       ContactTransportPolicy.peerOnly => 'Przez Tor P2P / oczekiwanie na peer',
     };
 
@@ -821,7 +832,7 @@ String _endpointLabel(PeerEndpointStatus status) => switch (status) {
 
 String _policyLabel(ContactTransportPolicy policy) => switch (policy) {
   ContactTransportPolicy.peerOnly => 'Tylko P2P',
-  ContactTransportPolicy.peerWithRelayFallback => 'P2P + awaryjny relay',
+  ContactTransportPolicy.peerWithRelayFallback => 'P2P + live relay fallback',
   ContactTransportPolicy.relayOnly => 'Tylko relay',
 };
 

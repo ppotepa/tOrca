@@ -312,6 +312,23 @@ mixin RuntimeBridgeMethods implements ClientRuntime, RuntimeProjectionProvider {
   );
 
   @override
+  Future<void> retryDeadLetter(String kind, String id) => callRuntime(
+    EngineContract.retryDeadLetter,
+    RuntimeArguments.deadLetter(kind, id),
+  );
+
+  Future<List<Map<String, dynamic>>> listDeadLetters() async {
+    final raw = await callRuntime(EngineContract.listDeadLetters);
+    if (raw is! List) return const [];
+    return raw
+        .whereType<Map>()
+        .map(
+          (item) => item.map((key, value) => MapEntry(key.toString(), value)),
+        )
+        .toList();
+  }
+
+  @override
   Future<void> deleteMessageLocal(String messageId) => callRuntime(
     EngineContract.deleteMessageLocal,
     RuntimeArguments.messageId(messageId),

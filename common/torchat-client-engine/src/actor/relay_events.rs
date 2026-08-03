@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 
 impl ClientEngineActor {
     pub(super) async fn drain_relay_events(&mut self, events: &mpsc::Sender<EngineEvent>) {
@@ -228,7 +228,7 @@ impl ClientEngineActor {
                         .unwrap_or(0);
                     self.database.requeue_outbound_delivery(
                         &message_id,
-                        unix_ms() + retry_backoff_ms(attempt),
+                        self.clock.now_ms() + retry_backoff_ms(attempt),
                         "relay did not forward message",
                     )?;
                     self.apply_message_transport_outcome(
@@ -258,8 +258,31 @@ impl ClientEngineActor {
                             .unwrap_or(0);
                         self.database.requeue_delivery_receipt(
                             &message_id,
-                            unix_ms() + retry_backoff_ms(attempt),
+                            self.clock.now_ms() + retry_backoff_ms(attempt),
                             "relay did not forward receipt",
+                        )?;
+                    }
+                }
+                Ok(Vec::new())
+            }
+            Some(PendingRelayDelivery::ReadReceipt { receipt_id }) => {
+                match outcome {
+                    MessageTransportOutcome::Forwarded
+                    | MessageTransportOutcome::Delivered
+                    | MessageTransportOutcome::PeerPersisted
+                    | MessageTransportOutcome::PeerDelivered => {
+                        self.database.complete_read_receipt(&receipt_id)?;
+                    }
+                    _ => {
+                        let attempt = self
+                            .database
+                            .read_receipt(&receipt_id)?
+                            .map(|record| record.attempt_count)
+                            .unwrap_or(0);
+                        self.database.requeue_read_receipt(
+                            &receipt_id,
+                            self.clock.now_ms() + retry_backoff_ms(attempt),
+                            "relay did not forward read receipt",
                         )?;
                     }
                 }
@@ -269,20 +292,24 @@ impl ClientEngineActor {
                 installation_id,
                 delivery_id,
             }) => {
-                if let Some(delivery_id) = delivery_id
-                    && !matches!(
+                if let Some(delivery_id) = delivery_id {
+                    if matches!(
                         outcome,
                         MessageTransportOutcome::Forwarded
                             | MessageTransportOutcome::Delivered
                             | MessageTransportOutcome::PeerPersisted
                             | MessageTransportOutcome::PeerDelivered
-                    )
-                {
-                    self.database.record_capability_delivery_error(
-                        &delivery_id,
-                        unix_ms() + retry_backoff_ms(1),
-                        &format!("capability relay outcome: {outcome:?}"),
-                    )?;
+                    ) {
+                        self.database.complete_capability_delivery(&delivery_id)?;
+                        self.database
+                            .complete_relationship_removal_ack(&delivery_id)?;
+                    } else {
+                        self.database.record_capability_delivery_error(
+                            &delivery_id,
+                            self.clock.now_ms() + retry_backoff_ms(1),
+                            &format!("capability relay outcome: {outcome:?}"),
+                        )?;
+                    }
                 }
                 self.pending_engine_events.push(EngineEvent::Log {
                     log: EngineLogEvent {

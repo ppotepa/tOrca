@@ -13,7 +13,11 @@ class ContactPresenceStore extends ChangeNotifier {
       Map.unmodifiable(_snapshots);
 
   void publish(ContactPresenceSnapshot value) {
-    if (_snapshots[value.contactId] == value) return;
+    final previous = _snapshots[value.contactId];
+    if (previous == value ||
+        (previous != null && previous.revision > value.revision)) {
+      return;
+    }
     _snapshots[value.contactId] = value;
     notifyListeners();
   }

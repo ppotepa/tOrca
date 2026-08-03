@@ -51,6 +51,15 @@ final class ActivatedConversation {
 
 enum ConversationMessagesPhase { idle, loading, ready, failed }
 
+enum ReadReceiptQueueStatus { queued, disabled, error }
+
+final class ReadReceiptQueueResult {
+  const ReadReceiptQueueResult(this.status, {this.error = ''});
+
+  final ReadReceiptQueueStatus status;
+  final String error;
+}
+
 final class ConversationMessagesLoadState {
   const ConversationMessagesLoadState({
     required this.conversationId,

@@ -24,6 +24,26 @@ fn send_message_command_round_trips_without_losing_correlation_fields() {
 }
 
 #[test]
+fn relationship_removal_command_round_trips_with_explicit_wire_type() {
+    let envelope = EngineCommandEnvelope {
+        request_id: "request-removal-1".to_owned(),
+        command_id: Some("operation-removal-1".to_owned()),
+        command: EngineCommand::RequestRelationshipRemoval {
+            installation_id: "peer-1".to_owned(),
+            preserve_history: false,
+        },
+    };
+
+    let value = serde_json::to_value(&envelope).expect("command serializes");
+    assert_eq!(value["command"]["type"], "request_relationship_removal");
+    assert_eq!(value["command"]["preserve_history"], false);
+
+    let decoded: EngineCommandEnvelope =
+        serde_json::from_value(value).expect("command deserializes");
+    assert_eq!(decoded, envelope);
+}
+
+#[test]
 fn response_event_keeps_request_id_and_payload_shape() {
     let event = EngineEvent::Response {
         request_id: "request-2".to_owned(),

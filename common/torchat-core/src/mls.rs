@@ -16,8 +16,12 @@ use openmls::{
 use openmls_basic_credential::SignatureKeyPair;
 use openmls_rust_crypto::{MemoryStorage, RustCrypto};
 use openmls_traits::OpenMlsProvider;
+use sha2::{Digest, Sha256};
 
 const SUITE: Ciphersuite = Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519;
+const MLS_SNAPSHOT_HEADER: &[u8] = b"TCMLS1";
+const MLS_SNAPSHOT_APP_SCHEMA: u16 = 1;
+const MLS_SNAPSHOT_OPENMLS_VERSION: &[u8] = b"0.8.1";
 
 /// A local MLS identity and its provider-backed cryptographic state.
 ///
@@ -199,8 +203,76 @@ impl MlsMember {
 }
 
 impl DirectConversation {
-    /// Serializes the complete OpenMLS provider/group state for encrypted client storage.
+    pub fn epoch(&self) -> u64 {
+        self.group.epoch().as_u64()
+    }
+
+    /// Serializes the current versioned OpenMLS state envelope.
+    pub fn snapshot_current(&self) -> Result<Vec<u8>, String> {
+        let payload = self.snapshot_payload()?;
+        let group_id = self.group.group_id().as_slice();
+        let epoch = self.group.epoch().as_u64();
+        let checksum = Sha256::digest(&payload);
+        let suite = format!("{:?}", SUITE);
+        let mut output = Vec::with_capacity(64 + suite.len() + payload.len());
+        output.extend_from_slice(MLS_SNAPSHOT_HEADER);
+        output.extend_from_slice(&MLS_SNAPSHOT_APP_SCHEMA.to_be_bytes());
+        write_blob(&mut output, MLS_SNAPSHOT_OPENMLS_VERSION);
+        write_blob(&mut output, suite.as_bytes());
+        write_blob(&mut output, group_id);
+        output.extend_from_slice(&epoch.to_be_bytes());
+        output.extend_from_slice(&checksum);
+        write_blob(&mut output, &payload);
+        Ok(output)
+    }
+
+    /// Restores the current snapshot envelope.
+    pub fn restore_current(snapshot: &[u8]) -> Result<Self, String> {
+        let mut input = snapshot;
+        if take(&mut input, 6)? != MLS_SNAPSHOT_HEADER {
+            return Err("invalid MLS snapshot header".into());
+        }
+        let schema = u16::from_be_bytes(
+            take(&mut input, 2)?
+                .try_into()
+                .map_err(|_| "invalid MLS app schema")?,
+        );
+        if schema != MLS_SNAPSHOT_APP_SCHEMA {
+            return Err("unsupported MLS app schema".into());
+        }
+        let openmls_version = take_blob(&mut input)?;
+        if openmls_version != MLS_SNAPSHOT_OPENMLS_VERSION {
+            return Err("unsupported OpenMLS snapshot version".into());
+        }
+        let suite = take_blob(&mut input)?;
+        if suite != format!("{:?}", SUITE).as_bytes() {
+            return Err("unsupported MLS ciphersuite".into());
+        }
+        let envelope_group_id = take_blob(&mut input)?;
+        let epoch = u64::from_be_bytes(
+            take(&mut input, 8)?
+                .try_into()
+                .map_err(|_| "invalid MLS snapshot epoch")?,
+        );
+        let checksum = take(&mut input, 32)?;
+        let payload = take_blob(&mut input)?.to_vec();
+        if !input.is_empty() || Sha256::digest(&payload).as_slice() != checksum {
+            return Err("MLS snapshot checksum or trailing data mismatch".into());
+        }
+        let conversation = Self::restore_payload(&payload)?;
+        if conversation.group.group_id().as_slice() != envelope_group_id
+            || conversation.group.epoch().as_u64() != epoch
+        {
+            return Err("MLS snapshot envelope metadata mismatch".into());
+        }
+        Ok(conversation)
+    }
+
     pub fn snapshot(&self) -> Result<Vec<u8>, String> {
+        self.snapshot_current()
+    }
+
+    fn snapshot_payload(&self) -> Result<Vec<u8>, String> {
         let group_id = self.group.group_id().as_slice();
         let signer = self.signer.to_public_vec();
         let values = self
@@ -222,6 +294,10 @@ impl DirectConversation {
     }
 
     pub fn restore(snapshot: &[u8]) -> Result<Self, String> {
+        Self::restore_current(snapshot)
+    }
+
+    fn restore_payload(snapshot: &[u8]) -> Result<Self, String> {
         let mut input = snapshot;
         if take(&mut input, 6)? != b"TCMLS1" {
             return Err("invalid MLS snapshot header".into());
@@ -456,6 +532,64 @@ mod tests {
         let mut restored = DirectConversation::restore(&snapshot).unwrap();
         let outbound = alice_chat.encrypt(b"after restart").unwrap();
         assert_eq!(restored.decrypt(&outbound).unwrap(), b"after restart");
+    }
+
+    #[test]
+    fn current_snapshot_validates_checksum_and_metadata() {
+        let alice = MlsMember::create(b"alice-v2").unwrap();
+        let bob = MlsMember::create(b"bob-v2").unwrap();
+        let mut alice_chat = alice.create_conversation().unwrap();
+        let (welcome, tree) = alice_chat.invite(&bob.key_package().unwrap()).unwrap();
+        let bob_chat = bob.accept_conversation(&welcome, &tree).unwrap();
+        let snapshot = bob_chat.snapshot_current().unwrap();
+        let mut restored = DirectConversation::restore_current(&snapshot).unwrap();
+        let outbound = alice_chat.encrypt(b"v2 restart").unwrap();
+        assert_eq!(restored.decrypt(&outbound).unwrap(), b"v2 restart");
+
+        let mut corrupted = snapshot.clone();
+        *corrupted.last_mut().unwrap() ^= 0x01;
+        assert!(DirectConversation::restore_current(&corrupted).is_err());
+
+        let mut downgraded = snapshot;
+        downgraded[6] = 0;
+        downgraded[7] = 0;
+        assert!(DirectConversation::restore_current(&downgraded).is_err());
+    }
+
+    #[test]
+    fn current_snapshot_decoder_rejects_bounded_malformed_corpus_without_panic() {
+        let mut seed = 0x9e37_79b9_u32;
+        for length in 0..=1024_usize {
+            let mut input = vec![0_u8; length];
+            for byte in &mut input {
+                seed ^= seed << 13;
+                seed ^= seed >> 17;
+                seed ^= seed << 5;
+                *byte = seed as u8;
+            }
+            let _ = DirectConversation::restore_current(&input);
+        }
+    }
+
+    #[test]
+    fn checked_in_current_snapshot_fixture_restores() {
+        use base64::Engine;
+
+        #[derive(serde::Deserialize)]
+        struct Fixture {
+            android_snapshot: String,
+            peer_snapshot: String,
+        }
+        let fixture: Fixture = serde_json::from_str(include_str!(
+            "../../../protocol/dev-fixtures/android-peer.json"
+        ))
+        .expect("current MLS fixture JSON");
+        for encoded in [fixture.android_snapshot, fixture.peer_snapshot] {
+            let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(encoded)
+                .expect("fixture base64");
+            DirectConversation::restore(&bytes).expect("current MLS fixture restores");
+        }
     }
 
     #[test]

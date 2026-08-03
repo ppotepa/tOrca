@@ -41,12 +41,10 @@ class ReleaseChatView extends ConsumerStatefulWidget {
     this.showConversationListWhenEmpty = true,
     this.canSend = false,
     this.peerTyping = false,
-    this.peerOnline = false,
-    this.peerIdle = false,
+    this.availability = ContactAvailability.unknown,
     this.peerFocused = false,
     this.lastSeenAt,
     this.headerStatus,
-    this.onlineContacts = const {},
   });
 
   final ContactRecord? selected;
@@ -67,12 +65,10 @@ class ReleaseChatView extends ConsumerStatefulWidget {
   final bool showConversationListWhenEmpty;
   final bool canSend;
   final bool peerTyping;
-  final bool peerOnline;
-  final bool peerIdle;
+  final ContactAvailability availability;
   final bool peerFocused;
   final int? lastSeenAt;
   final Widget? headerStatus;
-  final Map<String, bool> onlineContacts;
 
   @override
   ConsumerState<ReleaseChatView> createState() => _ReleaseChatViewState();
@@ -479,11 +475,7 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
                       label: contact.displayName,
                       activity: widget.peerTyping
                           ? ContactActivityVisualState.typing
-                          : widget.peerIdle
-                          ? ContactActivityVisualState.away
-                          : widget.peerOnline
-                          ? ContactActivityVisualState.online
-                          : ContactActivityVisualState.offline,
+                          : _availabilityVisual(widget.availability),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
@@ -498,18 +490,20 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
                             style: Theme.of(context).textTheme.titleSmall,
                           ),
                           Text(
-                            '${contactActivityLabel(widget.peerTyping
-                                ? ContactActivityVisualState.typing
-                                : widget.peerIdle
-                                ? ContactActivityVisualState.away
-                                : widget.peerOnline
-                                ? ContactActivityVisualState.online
-                                : ContactActivityVisualState.offline, lastSeenAt: widget.lastSeenAt)} · ${_routeLabel(contact)}',
+                            contactActivityLabel(
+                              widget.peerTyping
+                                  ? ContactActivityVisualState.typing
+                                  : _availabilityVisual(widget.availability),
+                              lastSeenAt: widget.lastSeenAt,
+                            ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: Theme.of(context).textTheme.labelSmall
                                 ?.copyWith(
-                                  color: widget.peerTyping || widget.peerOnline
+                                  color:
+                                      widget.peerTyping ||
+                                          widget.availability ==
+                                              ContactAvailability.active
                                       ? context.statusTheme.success
                                       : context.shellTheme.navigationForeground,
                                 ),
@@ -525,14 +519,6 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
                 tooltip: 'Kontakt ma otwartą tę rozmowę',
                 child: ThemedIcon(Icons.visibility_outlined, size: 19),
               ),
-            _ConversationHeaderAction(
-              tooltip: 'Stan bezpośredniego połączenia P2P',
-              child: PeerTransportIndicator(
-                connectionStatus: contact.peerConnectionStatus,
-                transportPolicy: contact.transportPolicy,
-                endpointStatus: contact.peerEndpointStatus,
-              ),
-            ),
             if (widget.headerStatus != null)
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 3),
@@ -755,17 +741,7 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
                       ),
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (_contact(conversation.contactId, widget.contacts)
-                              case final contact?)
-                            PeerTransportIndicator(
-                              connectionStatus: contact.peerConnectionStatus,
-                              transportPolicy: contact.transportPolicy,
-                              endpointStatus: contact.peerEndpointStatus,
-                            ),
-                          const SizedBox(width: 6),
-                          const ThemedIcon(Icons.chevron_right),
-                        ],
+                        children: [const ThemedIcon(Icons.chevron_right)],
                       ),
                       onTap: () => widget.onOpenConversation(conversation.id),
                     ),
@@ -1176,27 +1152,20 @@ class _DayDivider extends StatelessWidget {
   );
 }
 
-String _routeLabel(ContactRecord contact) => switch (contact.transportPolicy) {
-  ContactTransportPolicy.relayOnly => 'Tor relay',
-  ContactTransportPolicy.peerWithRelayFallback =>
-    contact.peerConnectionStatus == PeerConnectionStatus.connected
-        ? 'Tor P2P'
-        : 'Tor P2P + relay fallback',
-  ContactTransportPolicy.peerOnly => 'Tor P2P',
-};
+ContactActivityVisualState _availabilityVisual(ContactAvailability value) =>
+    switch (value) {
+      ContactAvailability.active => ContactActivityVisualState.online,
+      ContactAvailability.idle => ContactActivityVisualState.away,
+      ContactAvailability.checking => ContactActivityVisualState.typing,
+      ContactAvailability.offline => ContactActivityVisualState.offline,
+      ContactAvailability.unknown => ContactActivityVisualState.unknown,
+    };
 
 String _contactName(String id, List<ContactRecord> contacts) {
   for (final contact in contacts) {
     if (contact.id == id) return contact.displayName;
   }
   return 'Kontakt';
-}
-
-ContactRecord? _contact(String id, List<ContactRecord> contacts) {
-  for (final contact in contacts) {
-    if (contact.id == id) return contact;
-  }
-  return null;
 }
 
 String _previewLabel(String preview) {

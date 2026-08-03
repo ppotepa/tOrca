@@ -91,6 +91,48 @@ if ($androidModule -match "Where-Object\s*\{\s*`$_\s*-notmatch\s*'\\\._adb-tls-c
     Write-Host '[FAIL] TorChat.Android.psm1 filters a valid ADB mDNS device.' -ForegroundColor Red
 }
 
+$bootstrapPath = Join-Path (Split-Path -Parent $scriptsRoot) 'infra\host\bootstrap-staging.sh'
+$bootstrap = Get-Content -LiteralPath $bootstrapPath -Raw
+foreach ($requiredPattern in @(
+    'secrets/pairing_secret',
+    'head -c 64',
+    'chmod 0600',
+    'chown'
+)) {
+    if ($bootstrap -match [regex]::Escape($requiredPattern)) { continue }
+    [void]$failures.Add([pscustomobject]@{
+        File = $bootstrapPath
+        Line = 0
+        Column = 0
+        Message = "Staging bootstrap is missing pairing-secret contract: $requiredPattern"
+    })
+    Write-Host "[FAIL] bootstrap-staging.sh missing $requiredPattern" -ForegroundColor Red
+}
+
+$composeHostPath = Join-Path (Split-Path -Parent $scriptsRoot) 'infra\docker\compose.host.yml'
+$composeHost = Get-Content -LiteralPath $composeHostPath -Raw
+foreach ($requiredPattern in @(
+    'replicas:\s*1',
+    'TORCHAT_PAIRING_SECRET_FILE:\s*/run/secrets/pairing_secret',
+    'secrets:\s*- database_url\s*- pairing_secret',
+    'condition:\s*service_healthy',
+    'pg_isready -U torchat -d torchat',
+    'test -s /var/lib/tor/hidden_service/hostname',
+    'TORCHAT_SECURE_ROOT:\?TORCHAT_SECURE_ROOT is required',
+    'driver:\s*json-file',
+    'max-size:\s*10m',
+    'max-file:\s*"7"'
+)) {
+    if ($composeHost -match $requiredPattern) { continue }
+    [void]$failures.Add([pscustomobject]@{
+        File = $composeHostPath
+        Line = 0
+        Column = 0
+        Message = "Host Compose is missing deployment/secret/health contract: $requiredPattern"
+    })
+    Write-Host "[FAIL] compose.host.yml missing $requiredPattern" -ForegroundColor Red
+}
+
 if ($failures.Count -gt 0) {
     throw "PowerShell validation failed with $($failures.Count) error(s)."
 }

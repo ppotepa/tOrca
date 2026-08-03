@@ -5,7 +5,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../client_runtime.dart';
 import '../core/models/domain.dart';
-import '../core/relationships/relationship_message.dart';
 import '../core/runtime/message_paging.dart';
 import 'app_controller_base.dart' as base;
 import 'conversation_navigation_intent.dart';
@@ -125,38 +124,15 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
     bool blocked,
     ContactTransportPolicy transportPolicy,
   ) async {
-    ConversationSummary? relationshipConversation;
     var preserveHistory = true;
-    Object? removalDeliveryError;
-    StackTrace? removalDeliveryStackTrace;
 
     if (blocked && !contact.blocked) {
-      for (final candidate in state.conversations) {
-        if (candidate.contactId == contact.id) {
-          relationshipConversation = candidate;
-          break;
-        }
-      }
       final preferences = await SharedPreferences.getInstance();
       final preferenceKey =
           'torchat.relationship.preserveHistory.${contact.id}';
       preserveHistory = preferences.getBool(preferenceKey) ?? true;
       await preferences.remove(preferenceKey);
 
-      if (relationshipConversation != null) {
-        final payload = RelationshipRemovedMessage(
-          removedAt: DateTime.now(),
-          preserveHistory: preserveHistory,
-        ).encode();
-        try {
-          await ref
-              .read(base.runtimeRepositoryProvider)
-              .sendMessage(relationshipConversation.id, payload);
-        } catch (error, stackTrace) {
-          removalDeliveryError = error;
-          removalDeliveryStackTrace = stackTrace;
-        }
-      }
     }
 
     await super.updateContactSettings(
@@ -174,15 +150,6 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
     await super.refreshData(forcePairing: false, allowAutoTorka: false);
     _hideRemovedRelationships();
 
-    if (removalDeliveryError != null) {
-      Error.throwWithStackTrace(
-        StateError(
-          'Relacja została usunięta lokalnie, ale komunikat dla kontaktu '
-          'nie został zakolejkowany: $removalDeliveryError',
-        ),
-        removalDeliveryStackTrace ?? StackTrace.current,
-      );
-    }
   }
 
   Future<void> _persistActiveConversation(String? conversationId) async {

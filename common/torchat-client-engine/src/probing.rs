@@ -168,6 +168,17 @@ pub struct ProbeSnapshot {
     pub in_flight_until: Option<Instant>,
 }
 
+/// All contact-scoped probe streams exposed as one subscription boundary.
+/// Consumers can render a contact summary or inspect a technical detail
+/// without registering independent schedulers for each probe kind.
+pub struct ContactProbeSubscription {
+    pub peer: watch::Receiver<ProbeSnapshot>,
+    pub presence: watch::Receiver<ProbeSnapshot>,
+    pub focus: watch::Receiver<ProbeSnapshot>,
+    pub endpoint: watch::Receiver<ProbeSnapshot>,
+    pub capability: watch::Receiver<ProbeSnapshot>,
+}
+
 #[derive(Debug)]
 struct ProbeEntry {
     state: ProbeState,
@@ -232,6 +243,21 @@ impl ProbeCoordinator {
             .expect("probe entry exists after ensure")
             .snapshot_tx
             .subscribe()
+    }
+
+    pub fn subscribe_contact(
+        &mut self,
+        contact_id: impl Into<String>,
+        now: Instant,
+    ) -> ContactProbeSubscription {
+        let contact_id = contact_id.into();
+        ContactProbeSubscription {
+            peer: self.subscribe(ProbeKey::contact(contact_id.clone()), now),
+            presence: self.subscribe(ProbeKey::contact_presence(contact_id.clone()), now),
+            focus: self.subscribe(ProbeKey::contact_focus(contact_id.clone()), now),
+            endpoint: self.subscribe(ProbeKey::peer_endpoint(contact_id.clone()), now),
+            capability: self.subscribe(ProbeKey::capability(contact_id), now),
+        }
     }
 
     pub fn next_round_at(&self) -> Instant {

@@ -47,7 +47,7 @@ class ConnectionCenterSheet extends ConsumerWidget {
               contact.peerConnectionStatus == PeerConnectionStatus.connected,
         )
         .length;
-    final onlineContacts = presence.snapshots.values
+    final activeContacts = presence.snapshots.values
         .where(
           (value) =>
               value.availability == ContactAvailability.active ||
@@ -115,7 +115,7 @@ class ConnectionCenterSheet extends ConsumerWidget {
               _StatusTile(
                 icon: Icons.people_alt_outlined,
                 title: 'Obecność kontaktów',
-                state: '$onlineContacts/${contacts.length}',
+                state: '$activeContacts/${contacts.length}',
                 detail: 'Kontakty zgłaszające aktywną obecność w runtime.',
               ),
               _StatusTile(

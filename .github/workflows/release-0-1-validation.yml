@@ -17,16 +17,21 @@ concurrency:
   group: release-0-1-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
 jobs:
   rust:
     name: Rust runtime and engine
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330 # v2.7.8
       - name: Clean architecture check
         shell: pwsh
         run: ./scripts/internal/check-clean-architecture.ps1
@@ -39,6 +44,18 @@ jobs:
       - name: Text encoding check
         shell: pwsh
         run: ./scripts/internal/check-text-encoding.ps1
+      - name: Release policy check
+        shell: pwsh
+        run: ./scripts/internal/check-release-policy.ps1
+      - name: Relay semantics check
+        shell: pwsh
+        run: ./scripts/internal/check-relay-semantics.ps1
+      - name: Server log privacy check
+        shell: pwsh
+        run: ./scripts/internal/check-server-log-privacy.ps1
+      - name: Server log privacy negative test
+        shell: pwsh
+        run: ./scripts/tests/Test-ServerLogPrivacy.ps1
       - name: Source-size ratchet
         shell: pwsh
         run: ./scripts/internal/check-source-size.ps1
@@ -48,8 +65,67 @@ jobs:
         run: cargo check --workspace
       - name: Workspace tests
         run: cargo test --workspace
+      - name: Fuzz target compile gate
+        run: cargo check --manifest-path fuzz/Cargo.toml --bins --locked
+      - name: Bounded decoder corpus
+        run: cargo test -p torchat-core --quiet
       - name: Workspace clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Dependency policy
+        run: |
+          cargo install cargo-deny --locked --version 0.18.3
+          cargo deny check bans licenses sources
+          cargo install cargo-audit --locked --version 0.22.0
+          cargo audit
+      - name: Dependency SBOM inventory
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/torchat-sbom"
+          cargo metadata --locked --format-version 1 > "$RUNNER_TEMP/torchat-sbom/cargo-metadata.json"
+          cargo install cargo-cyclonedx --locked --version 0.5.9
+          cargo cyclonedx \
+            --manifest-path common/torchat-client-engine/Cargo.toml \
+            --format json \
+            --spec-version 1.5 \
+            --override-filename torchat-sbom
+          find . -name torchat-sbom.json -not -path './target/*' -print0 |
+            while IFS= read -r -d '' sbom; do
+              package_dir="$(basename "$(dirname "$sbom")")"
+              cp "$sbom" "$RUNNER_TEMP/torchat-sbom/${package_dir}.cdx.json"
+            done
+          {
+            echo '{'
+            echo '  "schema": "torchat.provenance.v1",'
+            echo "  \"commit\": \"${GITHUB_SHA}\","
+            echo "  \"workflow\": \"${GITHUB_WORKFLOW}\","
+            echo "  \"runId\": \"${GITHUB_RUN_ID}\","
+            echo "  \"runner\": \"${RUNNER_OS}\","
+            echo "  \"rust\": \"$(rustc --version)\","
+            echo "  \"cargoCycloneDx\": \"$(cargo cyclonedx --version)\","
+            echo '  "subjects": ['
+            first=true
+            while IFS= read -r file; do
+              [ "$first" = true ] || echo ','
+              first=false
+              name="$(basename "$file")"
+              hash="$(sha256sum "$file" | cut -d ' ' -f 1)"
+              printf '    {"name":"%s","sha256":"%s"}' "$name" "$hash"
+            done < <(find "$RUNNER_TEMP/torchat-sbom" -type f -name '*.json' ! -name provenance.json | sort)
+            echo
+            echo '  ]'
+            echo '}'
+          } > "$RUNNER_TEMP/torchat-sbom/provenance.json"
+      - name: Upload dependency SBOM inventory
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: torchat-rust-sbom-${{ github.sha }}
+          path: ${{ runner.temp }}/torchat-sbom
+          if-no-files-found: error
+      - name: Attest dependency SBOM provenance
+        if: github.event_name != 'pull_request'
+        uses: actions/attest-build-provenance@c074443f1aee8d4aeeae555aebba3282517141b2 # v2.2.3
+        with:
+          subject-path: ${{ runner.temp }}/torchat-sbom/*.json
 
   tor-integration:
     name: Two real engines through Tor
@@ -60,10 +136,36 @@ jobs:
     needs: rust
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Pair two independent engines and verify direct ping/pong
         shell: pwsh
         run: ./scripts/tests/Test-TorChatTwoEngineIntegration.ps1 -TimeoutSeconds 360
+
+  container-security:
+    name: Server image SBOM and vulnerability scan
+    needs: rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+      - name: Build server image for scanning
+        run: docker build --tag torchat-server:ci --file infra/docker/Dockerfile.server .
+      - name: Scan image and generate CycloneDX SBOM
+        uses: aquasecurity/trivy-action@6c175e9c4083a92bbca2f9724c8a5e33bc2d97a5 # v0.30.0
+        with:
+          image-ref: torchat-server:ci
+          format: cyclonedx
+          output: torchat-server-image.cdx.json
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: '1'
+      - name: Upload server image SBOM
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: torchat-server-image-sbom-${{ github.sha }}
+          path: torchat-server-image.cdx.json
+          if-no-files-found: error
 
   flutter:
     name: Flutter analyze and tests
@@ -72,10 +174,10 @@ jobs:
       run:
         working-directory: mobile
     steps:
-      - uses: actions/checkout@v4
-      - uses: subosito/flutter-action@v2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: subosito/flutter-action@395322a6cded4e9ed503aebd4cc1965625f8e59a # v2.20.0
         with:
-          channel: stable
+          flutter-version-file: mobile/.flutter-version
           cache: true
       - run: flutter pub get
       - name: Format
@@ -92,14 +194,19 @@ jobs:
       run:
         working-directory: mobile
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
         with:
           distribution: temurin
-          java-version: '17'
-      - uses: subosito/flutter-action@v2
+          java-version: '21'
+      - name: Install locked Android toolchain
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358"
+      - uses: subosito/flutter-action@395322a6cded4e9ed503aebd4cc1965625f8e59a # v2.20.0
         with:
-          channel: stable
+          flutter-version-file: mobile/.flutter-version
           cache: true
       - run: flutter pub get
       - run: flutter build apk --debug
@@ -107,6 +214,25 @@ jobs:
         shell: pwsh
         working-directory: ${{ github.workspace }}
         run: ./scripts/internal/check-android-engine-symbols.ps1
+      - name: Generate Android APK SBOM
+        uses: aquasecurity/trivy-action@6c175e9c4083a92bbca2f9724c8a5e33bc2d97a5 # v0.30.0
+        with:
+          scan-type: fs
+          scan-ref: mobile/build/app/outputs/flutter-apk/app-debug.apk
+          format: cyclonedx
+          output: android-debug.cdx.json
+          severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+          exit-code: '0'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: torchat-android-debug-sbom-${{ github.sha }}
+          path: android-debug.cdx.json
+          if-no-files-found: error
+      - name: Attest Android SBOM
+        if: github.event_name != 'pull_request'
+        uses: actions/attest-build-provenance@c074443f1aee8d4aeeae555aebba3282517141b2 # v2.2.3
+        with:
+          subject-path: android-debug.cdx.json
 
   android-release:
     name: Android signed release verification
@@ -118,14 +244,19 @@ jobs:
       run:
         working-directory: mobile
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
         with:
           distribution: temurin
-          java-version: '17'
-      - uses: subosito/flutter-action@v2
+          java-version: '21'
+      - name: Install locked Android toolchain
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358"
+      - uses: subosito/flutter-action@395322a6cded4e9ed503aebd4cc1965625f8e59a # v2.20.0
         with:
-          channel: stable
+          flutter-version-file: mobile/.flutter-version
           cache: true
       - name: Materialize release keystore
         shell: bash
@@ -147,7 +278,7 @@ jobs:
         run: |
           keytool -printcert -jarfile build/app/outputs/flutter-apk/app-release.apk
           sha256sum build/app/outputs/flutter-apk/app-release.apk > app-release.apk.sha256
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: torchat-android-release
           path: |
@@ -161,15 +292,34 @@ jobs:
       run:
         working-directory: mobile
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Diagnostic sanitization test
         shell: pwsh
         working-directory: ${{ github.workspace }}
         run: ./scripts/tests/test-diagnostic-sanitization.ps1
-      - uses: subosito/flutter-action@v2
+      - uses: subosito/flutter-action@395322a6cded4e9ed503aebd4cc1965625f8e59a # v2.20.0
         with:
-          channel: stable
+          flutter-version-file: mobile/.flutter-version
           cache: true
       - run: flutter config --enable-windows-desktop
       - run: flutter pub get
       - run: flutter build windows --debug
+      - name: Generate Windows desktop SBOM
+        uses: aquasecurity/trivy-action@6c175e9c4083a92bbca2f9724c8a5e33bc2d97a5 # v0.30.0
+        with:
+          scan-type: fs
+          scan-ref: mobile/build/windows/x64/runner/Debug
+          format: cyclonedx
+          output: windows-desktop.cdx.json
+          severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+          exit-code: '0'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: torchat-windows-desktop-sbom-${{ github.sha }}
+          path: windows-desktop.cdx.json
+          if-no-files-found: error
+      - name: Attest Windows SBOM
+        if: github.event_name != 'pull_request'
+        uses: actions/attest-build-provenance@c074443f1aee8d4aeeae555aebba3282517141b2 # v2.2.3
+        with:
+          subject-path: windows-desktop.cdx.json

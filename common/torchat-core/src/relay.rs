@@ -503,4 +503,20 @@ mod tests {
                 .is_err()
         );
     }
+
+    #[test]
+    fn relay_decoder_rejects_bounded_malformed_corpus_without_panic() {
+        use base64::Engine;
+
+        let mut seed = 0x0bad_cafe_u32;
+        for length in 0..=512_usize {
+            let mut bytes = vec![0_u8; length];
+            for byte in &mut bytes {
+                seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+                *byte = (seed >> 16) as u8;
+            }
+            let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
+            let _ = RelayPayloadV1::decode(&encoded);
+        }
+    }
 }

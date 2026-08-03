@@ -7,6 +7,11 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// Keep resolved Android/Flutter plugin dependencies reproducible in CI.
+dependencyLocking {
+    lockAllConfigurations()
+}
+
 val selectedConfigFile = System.getenv("TORCHAT_CONFIG_FILE")?.takeIf { it.isNotBlank() }
     ?.let { file(it).canonicalFile }
     ?: listOf(
@@ -22,7 +27,8 @@ fun configuredOnion(): String = selectedConfigFile.readLines()
 android {
     namespace = "org.torchat.mobile"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    // Keep native ABI builds reproducible across Flutter SDK upgrades.
+    ndkVersion = "28.2.13676358"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

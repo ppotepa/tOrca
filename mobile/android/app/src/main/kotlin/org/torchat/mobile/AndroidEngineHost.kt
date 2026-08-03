@@ -7,15 +7,21 @@ import kotlinx.coroutines.withTimeout
 import org.json.JSONArray
 import org.json.JSONObject
 import org.torchat.core.NativeClientEngine
+import org.torchat.core.MlsEpochGetCallback
+import org.torchat.core.MlsEpochSetCallback
 import org.torchat.generated.EngineContract
 import org.torchat.generated.GeneratedEngineEvent
 import org.torchat.generated.GeneratedEngineResponse
+import org.torchat.security.LocalSecretStore
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 class AndroidEngineHost private constructor(
     private val engine: NativeClientEngine,
+    private val operationJournalFile: File,
 ) : AutoCloseable {
     private val pendingResponses = ConcurrentHashMap<String, CompletableDeferred<JSONObject>>()
 
@@ -27,13 +33,71 @@ class AndroidEngineHost private constructor(
         engine.submitJson(requestJson)
     }
 
-    fun submitCommand(requestId: String, command: JSONObject) {
+    fun submitCommand(requestId: String, command: JSONObject, commandId: String = stableCommandId(command)) {
         submitJson(
             JSONObject()
                 .put(EngineContract.REQUEST_ID, requestId)
-                .put(EngineContract.COMMAND_ID, requestId)
+                .put(EngineContract.COMMAND_ID, commandId)
                 .put(EngineContract.COMMAND, command)
                 .toString(),
+        )
+    }
+
+    @Synchronized
+    private fun stableCommandId(command: JSONObject): String {
+        val type = command.optString(EngineContract.TYPE).ifBlank { "unknown" }
+        val targetKeys = when (type) {
+            EngineContract.COMMAND_SEND_MESSAGE -> listOf(EngineContract.ARG_ID)
+            EngineContract.COMMAND_RETRY_MESSAGE,
+            EngineContract.COMMAND_DELETE_MESSAGE_LOCAL -> listOf(EngineContract.MESSAGE_ID)
+            EngineContract.COMMAND_ACCEPT_PAIRING,
+            EngineContract.COMMAND_REJECT_PAIRING,
+            EngineContract.COMMAND_ARCHIVE_PAIRING,
+            EngineContract.COMMAND_CANCEL_PAIRING -> listOf(EngineContract.COMMAND_PAIRING_ID)
+            EngineContract.COMMAND_REQUEST_RELATIONSHIP_REMOVAL,
+            EngineContract.COMMAND_VERIFY_CONTACT,
+            EngineContract.COMMAND_UPDATE_CONTACT_SETTINGS,
+            EngineContract.COMMAND_ROTATE_PEER_ENDPOINT,
+            EngineContract.COMMAND_ROTATE_CONTACT_ENDPOINT_CAPABILITY,
+            EngineContract.COMMAND_REVOKE_CONTACT_ENDPOINT_CAPABILITY ->
+                listOf(EngineContract.COMMAND_INSTALLATION_ID)
+            EngineContract.COMMAND_START_CONVERSATION -> listOf(EngineContract.COMMAND_CONTACT_ID)
+            else -> emptyList()
+        }
+        val stableTarget = targetKeys.asSequence()
+            .map { key -> command.optString(key) }
+            .firstOrNull { it.isNotBlank() }
+        if (stableTarget == null) return "command-${UUID.randomUUID()}"
+        val key = "$type:$stableTarget"
+        val retained = readOperationJournal().optString(key).takeIf { it.isNotBlank() }
+        if (retained != null) return retained
+        val id = "command-$type-$stableTarget"
+        val journal = readOperationJournal()
+        while (journal.length() >= MAX_OPERATION_JOURNAL_ENTRIES) {
+            val keys = journal.keys()
+            if (!keys.hasNext()) break
+            journal.remove(keys.next())
+        }
+        journal.put(key, id)
+        writeOperationJournal(journal)
+        return id
+    }
+
+    private fun readOperationJournal(): JSONObject = try {
+        if (!operationJournalFile.exists()) JSONObject()
+        else JSONObject(operationJournalFile.readText(Charsets.UTF_8))
+    } catch (_: Throwable) {
+        JSONObject()
+    }
+
+    private fun writeOperationJournal(value: JSONObject) {
+        val temporary = File(operationJournalFile.path + ".tmp")
+        temporary.writeText(value.toString(), Charsets.UTF_8)
+        Files.move(
+            temporary.toPath(),
+            operationJournalFile.toPath(),
+            StandardCopyOption.REPLACE_EXISTING,
+            StandardCopyOption.ATOMIC_MOVE,
         )
     }
 
@@ -117,8 +181,36 @@ class AndroidEngineHost private constructor(
     }
 
     companion object {
-        fun create(config: Config): AndroidEngineHost =
-            AndroidEngineHost(NativeClientEngine.create(config.toJson().toString()))
+        private const val MAX_OPERATION_JOURNAL_ENTRIES = 256
+
+        fun create(config: Config): AndroidEngineHost = AndroidEngineHost(
+            config.mlsEpochAnchorStore?.let { secrets ->
+                val getEpoch = MlsEpochGetCallback { id, length, output ->
+                    runCatching {
+                        val conversationId = id.getByteArray(0, length.toInt())
+                            .toString(Charsets.UTF_8)
+                        val epoch = secrets.mlsEpochAnchor(conversationId)
+                            ?: return@MlsEpochGetCallback 1
+                        output.setLong(0, epoch)
+                        0
+                    }.getOrDefault(-1)
+                }
+                val setEpoch = MlsEpochSetCallback { id, length, epoch ->
+                    runCatching {
+                        val conversationId = id.getByteArray(0, length.toInt())
+                            .toString(Charsets.UTF_8)
+                        secrets.storeMlsEpochAnchor(conversationId, epoch)
+                        0
+                    }.getOrDefault(-1)
+                }
+                NativeClientEngine.createWithMlsEpochAnchor(
+                    config.toJson().toString(),
+                    getEpoch,
+                    setEpoch,
+                )
+            } ?: NativeClientEngine.create(config.toJson().toString()),
+            File(config.databasePath.parentFile, ".operation-command-ids.json"),
+        )
     }
 
     data class Config(
@@ -128,6 +220,7 @@ class AndroidEngineHost private constructor(
         val relayOnionUrl: String,
         val initialSocks5Url: String? = null,
         val logDirectory: File? = null,
+        val mlsEpochAnchorStore: LocalSecretStore? = null,
     ) {
         fun toJson(): JSONObject = JSONObject()
             .put(EngineContract.DATABASE_PATH, databasePath.absolutePath)

@@ -1,6 +1,37 @@
 use super::*;
 
+fn push_bounded<T>(queue: &mut VecDeque<T>, item: T, limit: usize) -> bool {
+    if queue.len() >= limit {
+        return false;
+    }
+    queue.push_back(item);
+    true
+}
+
 impl ClientEngineActor {
+    fn enqueue_relay_control(&mut self, pending: PendingRelayControl) -> bool {
+        if !push_bounded(
+            &mut self.relay_control_queue,
+            pending,
+            super::MAX_RELAY_CONTROL_QUEUE,
+        ) {
+            self.relay_control_rejected = self.relay_control_rejected.saturating_add(1);
+            self.pending_engine_events.push(EngineEvent::Log {
+                log: EngineLogEvent {
+                    level: "warn".to_owned(),
+                    message: format!(
+                        "relay_control_queue_full source=internal depth={} rejected={} coalesced={}",
+                        self.relay_control_queue.len(),
+                        self.relay_control_rejected,
+                        self.relay_control_coalesced
+                    ),
+                },
+            });
+            return false;
+        }
+        true
+    }
+
     fn relay_control_is_queued<F>(&self, predicate: F) -> bool
     where
         F: Fn(&RelayControlOperation) -> bool,
@@ -20,7 +51,7 @@ impl ClientEngineActor {
         }) {
             return;
         }
-        self.relay_control_queue.push(PendingRelayControl {
+        self.enqueue_relay_control(PendingRelayControl {
             request_id: String::new(),
             respond: false,
             command_id: None,
@@ -47,7 +78,7 @@ impl ClientEngineActor {
         }) {
             return;
         }
-        self.relay_control_queue.push(PendingRelayControl {
+        self.enqueue_relay_control(PendingRelayControl {
             request_id: String::new(),
             respond: false,
             command_id: None,
@@ -72,7 +103,7 @@ impl ClientEngineActor {
         }) {
             return;
         }
-        self.relay_control_queue.push(PendingRelayControl {
+        self.enqueue_relay_control(PendingRelayControl {
             request_id: String::new(),
             respond: false,
             command_id: None,
@@ -84,14 +115,13 @@ impl ClientEngineActor {
         }
     }
 
-    pub(super) fn start_next_relay_control(
-        &mut self,
-        outcomes: mpsc::UnboundedSender<RelayControlOutcome>,
-    ) {
+    pub(super) fn start_next_relay_control(&mut self, outcomes: mpsc::Sender<RelayControlOutcome>) {
         if self.relay_control_in_flight || self.relay_control_queue.is_empty() {
             return;
         }
-        let pending = self.relay_control_queue.remove(0);
+        let Some(pending) = self.relay_control_queue.pop_front() else {
+            return;
+        };
         self.relay_control_in_flight = true;
         let relay_onion_url = self.relay_onion_url.clone();
         let socks5_url = self.socks5_url.clone();
@@ -139,7 +169,7 @@ impl ClientEngineActor {
                         "unsupported relay control operation".to_owned(),
                     )),
                 });
-            let _ = outcomes.send(RelayControlOutcome {
+            let _ = outcomes.try_send(RelayControlOutcome {
                 request_id: pending.request_id,
                 respond: pending.respond,
                 command_id: pending.command_id,
@@ -374,10 +404,7 @@ impl ClientEngineActor {
         self.connection_state = ConnectionState::Connecting;
     }
 
-    pub(super) fn start_relay_bootstrap(
-        &mut self,
-        outcomes: mpsc::UnboundedSender<RelayBootstrapOutcome>,
-    ) {
+    pub(super) fn start_relay_bootstrap(&mut self, outcomes: mpsc::Sender<RelayBootstrapOutcome>) {
         self.relay_retry_at = None;
         if self.socks5_url.is_none() || !self.network_online {
             self.schedule_relay_retry();
@@ -400,7 +427,7 @@ impl ClientEngineActor {
                 },
                 Err(error) => RelayBootstrapOutcome::Failed { generation, error },
             };
-            let _ = outcomes.send(outcome);
+            let _ = outcomes.try_send(outcome);
         });
     }
 
@@ -455,13 +482,16 @@ impl ClientEngineActor {
                     return;
                 }
                 if let Err(error) = self.flush_pending_receipt_effects() {
+                    self.receipt_queue_failed_after_commit =
+                        self.receipt_queue_failed_after_commit.saturating_add(1);
                     self.schedule_relay_retry();
                     let _ = events
                         .send(EngineEvent::Log {
                             log: EngineLogEvent {
                                 level: "warn".to_owned(),
                                 message: format!(
-                                    "relay bootstrap recovered but receipt flush failed: {error}"
+                                    "receipt_queue_failed_after_commit: relay recovery flush deferred ({error_kind})",
+                                    error_kind = super::error_kind(&error),
                                 ),
                             },
                         })
@@ -528,5 +558,25 @@ impl ClientEngineActor {
                     .await;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::push_bounded;
+    use std::collections::VecDeque;
+
+    #[test]
+    fn bounded_relay_control_queue_rejects_flood_and_preserves_fifo() {
+        let mut queue = VecDeque::new();
+        for item in 0..64 {
+            assert!(push_bounded(&mut queue, item, 64));
+        }
+        assert!(!push_bounded(&mut queue, 64, 64));
+        assert_eq!(queue.len(), 64);
+        assert_eq!(
+            queue.into_iter().collect::<Vec<_>>(),
+            (0..64).collect::<Vec<_>>()
+        );
     }
 }

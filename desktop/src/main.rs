@@ -2,6 +2,7 @@ mod cli;
 mod identity_store;
 mod process_lock;
 mod runtime_engine_stdio;
+mod secret_store;
 mod tor_runtime;
 
 use anyhow::Result;

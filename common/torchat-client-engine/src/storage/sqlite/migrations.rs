@@ -54,6 +54,22 @@ pub const BASELINE_SCHEMA: &str = concat!(
     "\n",
     include_str!("../../../sql/migrations/021_capability_delivery_outbox.sql"),
     "\n",
+    include_str!("../../../sql/migrations/022_delivery_dead_letters.sql"),
+    "\n",
+    include_str!("../../../sql/migrations/023_delivery_lifecycle.sql"),
+    "\n",
+    include_str!("../../../sql/migrations/024_read_receipt_outbox.sql"),
+    "\n",
+    include_str!("../../../sql/migrations/025_relationship_removal_outbox.sql"),
+    "\n",
+    include_str!("../../../sql/migrations/026_remove_legacy_relationship_triggers.sql"),
+    "\n",
+    include_str!("../../../sql/migrations/027_retry_dead_letters.sql"),
+    "\n",
+    include_str!("../../../sql/migrations/028_relationship_epoch_boundary.sql"),
+    "\n",
+    include_str!("../../../sql/migrations/029_remove_relationship_guard_triggers.sql"),
+    "\n",
     "INSERT OR IGNORE INTO schema_migrations (version, name) VALUES ",
     "(0, '000_schema_migrations.sql'),",
     "(1, '001_canonical_client.sql'),",
@@ -76,7 +92,15 @@ pub const BASELINE_SCHEMA: &str = concat!(
     "(18, '018_contact_endpoint_capabilities.sql'),",
     "(19, '019_peer_endpoint_capabilities.sql'),",
     "(20, '020_pending_application_envelopes.sql'),",
-    "(21, '021_capability_delivery_outbox.sql');"
+    "(21, '021_capability_delivery_outbox.sql'),",
+    "(22, '022_delivery_dead_letters.sql'),",
+    "(23, '023_delivery_lifecycle.sql'),",
+    "(24, '024_read_receipt_outbox.sql'),",
+    "(25, '025_relationship_removal_outbox.sql'),",
+    "(26, '026_remove_legacy_relationship_triggers.sql'),",
+    "(27, '027_retry_dead_letters.sql'),",
+    "(28, '028_relationship_epoch_boundary.sql'),",
+    "(29, '029_remove_relationship_guard_triggers.sql');"
 );
 
 pub const MIGRATIONS: &[Migration] = &[
@@ -189,5 +213,45 @@ pub const MIGRATIONS: &[Migration] = &[
         version: 21,
         name: "021_capability_delivery_outbox.sql",
         sql: include_str!("../../../sql/migrations/021_capability_delivery_outbox.sql"),
+    },
+    Migration {
+        version: 22,
+        name: "022_delivery_dead_letters.sql",
+        sql: include_str!("../../../sql/migrations/022_delivery_dead_letters.sql"),
+    },
+    Migration {
+        version: 23,
+        name: "023_delivery_lifecycle.sql",
+        sql: include_str!("../../../sql/migrations/023_delivery_lifecycle.sql"),
+    },
+    Migration {
+        version: 24,
+        name: "024_read_receipt_outbox.sql",
+        sql: include_str!("../../../sql/migrations/024_read_receipt_outbox.sql"),
+    },
+    Migration {
+        version: 25,
+        name: "025_relationship_removal_outbox.sql",
+        sql: include_str!("../../../sql/migrations/025_relationship_removal_outbox.sql"),
+    },
+    Migration {
+        version: 26,
+        name: "026_remove_legacy_relationship_triggers.sql",
+        sql: include_str!("../../../sql/migrations/026_remove_legacy_relationship_triggers.sql"),
+    },
+    Migration {
+        version: 27,
+        name: "027_retry_dead_letters.sql",
+        sql: include_str!("../../../sql/migrations/027_retry_dead_letters.sql"),
+    },
+    Migration {
+        version: 28,
+        name: "028_relationship_epoch_boundary.sql",
+        sql: include_str!("../../../sql/migrations/028_relationship_epoch_boundary.sql"),
+    },
+    Migration {
+        version: 29,
+        name: "029_remove_relationship_guard_triggers.sql",
+        sql: include_str!("../../../sql/migrations/029_remove_relationship_guard_triggers.sql"),
     },
 ];

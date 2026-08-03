@@ -17,7 +17,9 @@ impl CommandQueues {
     pub(super) fn enqueue(&mut self, command: PeerOutboundCommand) {
         if matches!(
             &command.delivery,
-            PeerDeliveryTag::Message { .. } | PeerDeliveryTag::Receipt { .. }
+            PeerDeliveryTag::Message { .. }
+                | PeerDeliveryTag::Receipt { .. }
+                | PeerDeliveryTag::ReadReceipt { .. }
         ) {
             if self.insert_dedupe(&command) {
                 // Message and receipt ciphertexts advance the same MLS state.
@@ -79,7 +81,9 @@ impl CommandQueues {
     pub(super) fn push_front(&mut self, command: PeerOutboundCommand) {
         if matches!(
             &command.delivery,
-            PeerDeliveryTag::Message { .. } | PeerDeliveryTag::Receipt { .. }
+            PeerDeliveryTag::Message { .. }
+                | PeerDeliveryTag::Receipt { .. }
+                | PeerDeliveryTag::ReadReceipt { .. }
         ) {
             self.durable.push_front(command);
         } else if matches!(&command.delivery, PeerDeliveryTag::EndpointUpdate) {

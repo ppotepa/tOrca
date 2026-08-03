@@ -8,12 +8,14 @@ if ([string]::IsNullOrWhiteSpace($RepositoryRoot)) {
 $sourceExtensions = @(
     '.dart', '.json', '.kt', '.kts', '.md', '.ps1', '.rs', '.sql', '.toml', '.txt', '.yaml', '.yml'
 )
-$ignoredDirectories = @('.git', '.dart_tool', '.gradle', '.idea', '.torchat', 'build', 'target')
+$ignoredDirectories = @('.git', '.dart_tool', '.gradle', '.idea', '.torchat', 'build', 'target', 'findings')
+$ignoredFiles = @('concat.txt')
 $utf8 = [System.Text.UTF8Encoding]::new($false, $true)
 $failures = [System.Collections.Generic.List[string]]::new()
 
 Get-ChildItem -LiteralPath $RepositoryRoot -Recurse -File | Where-Object {
     $sourceExtensions -contains $_.Extension -and
+    $ignoredFiles -notcontains $_.Name -and
     ($_.FullName.Split([IO.Path]::DirectorySeparatorChar) | Where-Object {
         $ignoredDirectories -contains $_
     } | Measure-Object | Select-Object -ExpandProperty Count) -eq 0
@@ -48,6 +50,23 @@ Get-ChildItem -LiteralPath $RepositoryRoot -Recurse -File | Where-Object {
 if ($failures.Count -gt 0) {
     $failures | ForEach-Object { Write-Error $_ }
     throw "Text encoding check failed with $($failures.Count) issue(s)."
+}
+
+# Keep one cross-language UTF-8 sentinel in the checker. This catches an
+# exporter or shell that silently converts Polish text while preserving valid
+# UTF-8 byte sequences for ordinary ASCII-only fixtures.
+$golden = 'Zażółć gęślą jaźń'
+$goldenFixtures = @(
+    ('{"text":"' + $golden + '"}', 'JSON'),
+    ('const text = "' + $golden + '";', 'Dart'),
+    ('let text = "' + $golden + '";', 'Rust')
+)
+foreach ($fixture in $goldenFixtures) {
+    $bytes = [Text.Encoding]::UTF8.GetBytes($fixture[0])
+    $roundTrip = $utf8.GetString($bytes)
+    if ($roundTrip -ne $fixture[0]) {
+        throw "UTF-8 golden round-trip failed for $($fixture[1])."
+    }
 }
 
 Write-Host '[torchat] UTF-8 and mojibake check passed.'

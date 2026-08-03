@@ -137,6 +137,12 @@ impl ClientDatabase {
         }
         transaction
             .execute(
+                "UPDATE delivery_receipts SET claimed_until = ?1, last_error_code = NULL WHERE message_id = ?2;",
+                params![next_attempt_at, message_id],
+            )
+            .map_err(sqlite_error)?;
+        transaction
+            .execute(
                 "INSERT INTO conversation_mls (conversation_id, snapshot, updated_at)
                  VALUES (?1, ?2, unixepoch())
                  ON CONFLICT(conversation_id) DO UPDATE SET
@@ -179,6 +185,12 @@ impl ClientDatabase {
             )
             .map_err(sqlite_error)?;
         if changed > 0 {
+            transaction
+                .execute(
+                    "UPDATE delivery_receipts SET claimed_until = ?1, last_error_code = NULL WHERE message_id = ?2;",
+                    params![next_attempt_at, message_id],
+                )
+                .map_err(sqlite_error)?;
             transaction
                 .execute(
                     "UPDATE received_envelopes

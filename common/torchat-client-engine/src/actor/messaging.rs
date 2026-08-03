@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 
 impl ClientEngineActor {
     pub(super) fn send_message_command(
@@ -217,15 +217,44 @@ impl ClientEngineActor {
             });
             return Ok(Vec::new());
         }
-        let attempt = self
-            .database
-            .outbound_delivery(message_id)?
+        let delivery = self.database.outbound_delivery(message_id)?;
+        let attempt = delivery
+            .as_ref()
             .map(|record| record.attempt_count)
             .unwrap_or(0);
-        if error.contains("peer frame exceeds size limit")
-            || error.contains("peer payload exceeds safe frame budget")
+        let age_exhausted = delivery.as_ref().is_some_and(|record| {
+            super::RetryPolicy::DELIVERY
+                .age_exhausted(record.created_at.saturating_mul(1_000), unix_ms())
+        });
+        if matches!(
+            super::classify_retry_error(error),
+            super::RetryDisposition::Permanent | super::RetryDisposition::Protocol
+        ) || super::RetryPolicy::DELIVERY.exhausted(attempt)
+            || age_exhausted
         {
+            let error_code = match super::classify_retry_error(error) {
+                super::RetryDisposition::Protocol => "protocol",
+                super::RetryDisposition::Authentication => "authentication",
+                super::RetryDisposition::Permanent => "permanent",
+                super::RetryDisposition::Transient => "retry_exhausted",
+            };
+            self.database
+                .connection()
+                .execute(
+                    "UPDATE messages SET dead_lettered_at = unixepoch(), last_error_code = ?1 WHERE id = ?2;",
+                    rusqlite::params![error_code, message_id],
+                )
+                .map_err(|error| EngineError::Storage(error.to_string()))?;
             self.database.complete_outbound_delivery(message_id)?;
+            if super::RetryPolicy::DELIVERY.exhausted(attempt) || age_exhausted {
+                self.database.record_delivery_dead_letter(
+                    "message",
+                    message_id,
+                    Some(installation_id),
+                    attempt,
+                    error,
+                )?;
+            }
             self.apply_message_transport_outcome(
                 message_id,
                 MessageTransportOutcome::PermanentFailure,
@@ -233,7 +262,7 @@ impl ClientEngineActor {
         } else {
             self.database.requeue_outbound_delivery(
                 message_id,
-                unix_ms() + retry_backoff_ms(attempt),
+                self.clock.now_ms() + retry_backoff_ms(attempt),
                 error,
             )?;
             self.apply_message_transport_outcome(
@@ -252,7 +281,7 @@ impl ClientEngineActor {
         let stored = self.database.message(&effect.message_id)?.ok_or_else(|| {
             EngineError::Storage("runtime message is missing from engine store".to_owned())
         })?;
-        let next_attempt_at = unix_ms() + retry_backoff_ms(stored.attempt_count);
+        let next_attempt_at = self.clock.now_ms() + retry_backoff_ms(stored.attempt_count);
         let ack_deadline = Some(unix_ms() + 60_000);
         if let Some(existing) = stored.wire_ciphertext {
             if !self.database.claim_outgoing_attempt(

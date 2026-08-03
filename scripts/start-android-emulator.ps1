@@ -8,6 +8,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
+$emulatorLogDirectory = Join-Path $repoRoot '.torchat\logs'
+New-Item -ItemType Directory -Force -Path $emulatorLogDirectory | Out-Null
+$emulatorStdout = Join-Path $emulatorLogDirectory 'android-emulator.stdout.log'
+$emulatorStderr = Join-Path $emulatorLogDirectory 'android-emulator.stderr.log'
 
 $sdkRoot = $env:ANDROID_SDK_ROOT
 if ([string]::IsNullOrWhiteSpace($sdkRoot)) { $sdkRoot = $env:ANDROID_HOME }
@@ -55,10 +59,37 @@ if ([string]::IsNullOrWhiteSpace($Avd)) {
     }
 }
 
+if ($RunApp) {
+    Write-Host 'Buduje TorChat APK (arm64 + x86_64)...'
+    $buildParameters = @{
+        Command = 'build'
+        Target = 'android'
+        BuildPolicy = 'smart'
+    }
+    if ($SkipStack) { $buildParameters.StackPolicy = 'skip' }
+    & (Join-Path $repoRoot 'scripts\torchat.ps1') @buildParameters
+    if (-not $?) { throw 'Build TorChat APK zakonczyl sie bledem.' }
+}
+
 $running = @(adb devices | Select-String '^emulator-\d+\s+device$')
 if ($running.Count -eq 0) {
+    # A failed emulator boot can leave only its lightweight launcher alive.
+    # It still owns the AVD lock but has no adb device or QEMU child. Stop only
+    # launchers for this exact AVD before retrying.
+    $staleLaunchers = @(Get-CimInstance Win32_Process -Filter "Name = 'emulator.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -like "*-avd $Avd*" })
+    foreach ($launcher in $staleLaunchers) {
+        Stop-Process -Id $launcher.ProcessId -Force -ErrorAction SilentlyContinue
+    }
     Write-Host "Uruchamiam emulator '$Avd'..."
-    Start-Process -FilePath $emulatorPath -ArgumentList @('-avd', $Avd)
+    # Redirecting the console launcher's streams prevents extra cmd windows.
+    # The Android emulator GUI remains visible.
+    $emulatorProcess = Start-Process -FilePath $emulatorPath `
+        -ArgumentList @('-avd', $Avd, '-no-snapshot-load', '-no-snapshot-save') `
+        -WindowStyle Hidden `
+        -RedirectStandardOutput $emulatorStdout `
+        -RedirectStandardError $emulatorStderr `
+        -PassThru
 } else {
     Write-Host 'Emulator AVD juz dziala. Fizyczne telefony ADB sa ignorowane.'
 }
@@ -68,19 +99,50 @@ do {
     Start-Sleep -Seconds 2
     $device = @(adb devices | Select-String '^emulator-\d+\s+device$')
     if ($device.Count -gt 0) { break }
+    if ($emulatorProcess -and $emulatorProcess.HasExited) {
+        $details = if (Test-Path -LiteralPath $emulatorStderr) {
+            (Get-Content -LiteralPath $emulatorStderr -Tail 20 | Out-String).Trim()
+        } else { 'brak logu emulatora' }
+        throw "Emulator zakonczyl dzialanie przed rejestracja w ADB. $details"
+    }
     if ((Get-Date) -gt $deadline) {
         throw "Emulator nie pojawil sie w ADB w ciagu $BootTimeoutSeconds sekund."
     }
 } while ($true)
 
 $serial = (($device[0].ToString() -split '\s+')[0]).Trim()
-Write-Host "Emulator gotowy: $serial"
+$bootDeadline = (Get-Date).AddSeconds($BootTimeoutSeconds)
+do {
+    $bootCompleted = (& adb -s $serial shell getprop sys.boot_completed 2>$null | Out-String).Trim()
+    $bootAnimation = (& adb -s $serial shell getprop init.svc.bootanim 2>$null | Out-String).Trim()
+    if ($bootCompleted -eq '1' -and $bootAnimation -eq 'stopped') { break }
+    if ((Get-Date) -gt $bootDeadline) {
+        throw "Android nie zakonczyl uruchamiania w ciagu $BootTimeoutSeconds sekund."
+    }
+    Start-Sleep -Seconds 2
+} while ($true)
+
+& adb -s $serial wait-for-device | Out-Null
+Write-Host "Emulator gotowy: $serial ($Avd)"
 
 if ($RunApp) {
-    $args = @('run', 'android', '-Device', $serial)
-    if ($SkipStack) { $args += '-StackPolicy'; $args += 'skip' }
-    & (Join-Path $repoRoot 'scripts\torchat.ps1') @args
+    # `run android` assumes that an APK is already installed. `deploy android`
+    # owns the complete build -> install -> launch flow and pins every adb
+    # operation to this emulator, regardless of connected physical phones.
+    $deployParameters = @{
+        Command = 'deploy'
+        Target = 'android'
+        Device = $serial
+        BuildPolicy = 'skip'
+        InstallPolicy = 'always'
+        RunPolicy = 'restart'
+    }
+    if ($SkipStack) { $deployParameters.StackPolicy = 'skip' }
+    & (Join-Path $repoRoot 'scripts\torchat.ps1') @deployParameters
+    if (-not $?) {
+        throw "Deploy TorChat na $serial zakonczyl sie bledem."
+    }
 } else {
     Write-Host 'Emulator dziala niezaleznie. Uruchom aplikacje osobno:'
-    Write-Host ("  Set-Location '{0}\mobile'; flutter run -d {1}" -f $repoRoot, $serial)
+    Write-Host ("  .\scripts\start-android-emulator.ps1 -Avd {0} -RunApp -SkipStack" -f $Avd)
 }

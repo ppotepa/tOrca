@@ -87,6 +87,17 @@ impl ContactInvite {
     }
 
     pub fn parse(value: &str) -> Result<Self, String> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_| "system clock is invalid".to_string())?
+            .as_secs();
+        Self::parse_at(value, now)
+    }
+
+    /// Parse and validate an invite against an injected wall-clock value.
+    /// Production callers use `parse`; deterministic runtimes and skew tests
+    /// use this boundary instead of reading the process clock internally.
+    pub fn parse_at(value: &str, now: u64) -> Result<Self, String> {
         let invite: Self =
             serde_json::from_str(value).map_err(|e| format!("invalid invite JSON: {e}"))?;
         if invite.version != PROTOCOL_VERSION {
@@ -120,10 +131,6 @@ impl ContactInvite {
         if uuid::Uuid::parse_str(&invite.invite_id).is_err() {
             return Err("invite ID is invalid".into());
         }
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|_| "system clock is invalid".to_string())?
-            .as_secs();
         if invite.expires_at < now {
             return Err("invite has expired".into());
         }
@@ -322,6 +329,27 @@ mod tests {
             &invite.signing_bytes().unwrap(),
             invite.signature.as_deref().unwrap()
         ));
+    }
+
+    #[test]
+    fn contact_invite_parse_at_is_deterministic_at_expiry_boundary() {
+        let identity = Identity::generate();
+        let mut invite = ContactInvite::from_identity(
+            &identity,
+            Some("Alice".into()),
+            None,
+            "key-package".into(),
+            "00000000-0000-4000-8000-000000000000".into(),
+            1_000,
+        );
+        invite.sign(&identity).unwrap();
+        let encoded = serde_json::to_string(&invite).unwrap();
+        assert!(ContactInvite::parse_at(&encoded, 999).is_ok());
+        assert!(ContactInvite::parse_at(&encoded, 1_000).is_ok());
+        assert_eq!(
+            ContactInvite::parse_at(&encoded, 1_001).unwrap_err(),
+            "invite has expired"
+        );
     }
 
     #[test]

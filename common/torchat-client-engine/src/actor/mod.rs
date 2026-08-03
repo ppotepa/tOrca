@@ -1,4 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    sync::Arc,
+};
 
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::Serialize;
@@ -25,6 +28,7 @@ use torchat_core::{
     relay::{RelayEnvelope, RelayPayloadV1},
 };
 
+use crate::anti_rollback::{MlsEpochAnchor, MlsRecoveryState, validate_snapshot_epoch};
 use crate::{
     ClientDatabase, EngineCommand, EngineCommandEnvelope, EngineConfig, EngineError, EngineEvent,
     EngineLogEvent, EngineResult, PlatformAction, PlatformFact, PlatformKind,
@@ -59,6 +63,18 @@ mod relay_events;
 mod retry_scheduler;
 mod runtime_transaction;
 
+fn error_kind(error: &EngineError) -> &'static str {
+    match error {
+        EngineError::Closed(_) => "closed",
+        EngineError::InvalidConfig(_) => "invalid_config",
+        EngineError::InvalidCommand(_) => "invalid_command",
+        EngineError::Unsupported(_) => "unsupported",
+        EngineError::Serialization(_) => "serialization",
+        EngineError::Storage(_) => "storage",
+        EngineError::Transport(_) => "transport",
+    }
+}
+
 #[cfg(test)]
 use platform_facts::runtime_phase_for_tor_ready;
 
@@ -84,6 +100,9 @@ enum PendingRelayDelivery {
     },
     Receipt {
         message_id: String,
+    },
+    ReadReceipt {
+        receipt_id: String,
     },
     Ephemeral {
         installation_id: String,
@@ -153,6 +172,15 @@ fn is_relay_control_command(command: &EngineCommand) -> bool {
     )
 }
 
+fn relay_control_coalesce_key(command: &EngineCommand) -> Option<&'static str> {
+    match command {
+        EngineCommand::SetNickname { .. } => Some("nickname"),
+        EngineCommand::RefreshPairingCode => Some("pairing_code_refresh"),
+        EngineCommand::PairingInbox => Some("pairing_inbox"),
+        _ => None,
+    }
+}
+
 #[derive(Clone, Debug)]
 struct IdempotencyCommitContext {
     command_id: String,
@@ -170,12 +198,14 @@ pub struct ClientEngineActor {
     pub pending_welcomes: HashMap<String, PendingWelcomeRecord>,
     pending_relay_deliveries: HashMap<uuid::Uuid, PendingRelayDelivery>,
     pending_engine_events: Vec<EngineEvent>,
+    /// Process-local diagnostic count; durable receipt state remains in SQLite.
+    receipt_queue_failed_after_commit: u64,
     active_peer_sessions: HashMap<String, HashSet<uuid::Uuid>>,
     crypto_blocked_peers: HashSet<String>,
     connection_generation: u64,
     app_foreground: bool,
     pub session: RuntimeSession,
-    pub clock: SystemRuntimeClock,
+    pub clock: SharedRuntimeClock,
     pub connection_state: ConnectionState,
     pub tor_status: RuntimeTorStatus,
     pub socks5_url: Option<String>,
@@ -196,25 +226,80 @@ pub struct ClientEngineActor {
     probe_coordinator: ProbeCoordinator,
     relay_retry_attempt: u32,
     relay_bootstrap_in_flight: bool,
-    relay_control_queue: Vec<PendingRelayControl>,
+    relay_control_queue: VecDeque<PendingRelayControl>,
     relay_control_in_flight: bool,
-    relay_control_sender: Option<mpsc::UnboundedSender<RelayControlOutcome>>,
+    relay_control_sender: Option<mpsc::Sender<RelayControlOutcome>>,
+    relay_control_rejected: u64,
+    relay_control_coalesced: u64,
     connect_requested: bool,
     engine_session_id: String,
 }
 
+/// Cloneable clock handle shared by the actor and each temporary runtime
+/// transaction. Tests can inject a deterministic implementation without
+/// changing the production scheduler API.
+#[derive(Clone)]
+pub struct SharedRuntimeClock(Arc<dyn RuntimeClock + Send + Sync>);
+
+impl SharedRuntimeClock {
+    pub fn new(clock: impl RuntimeClock + Send + Sync + 'static) -> Self {
+        Self(Arc::new(clock))
+    }
+}
+
+impl Default for SharedRuntimeClock {
+    fn default() -> Self {
+        Self::new(SystemRuntimeClock)
+    }
+}
+
+impl RuntimeClock for SharedRuntimeClock {
+    fn now_ms(&self) -> i64 {
+        self.0.now_ms()
+    }
+}
+
 const RELAY_POLL_INTERVAL: Duration = Duration::from_millis(100);
+pub(super) const MAX_RELAY_CONTROL_QUEUE: usize = 64;
+const RELAY_OUTCOME_CHANNEL_CAPACITY: usize = 64;
 const RETRY_BLOCKED_RECHECK: Duration = Duration::from_secs(5);
 const RETRY_OFFLINE_RECHECK: Duration = Duration::from_secs(30);
 
 impl ClientEngineActor {
+    pub fn set_clock(&mut self, clock: impl RuntimeClock + Send + Sync + 'static) {
+        self.clock = SharedRuntimeClock::new(clock);
+    }
+
     pub fn new(config: EngineConfig) -> EngineResult<Self> {
+        Self::new_with_optional_anchor(config, None)
+    }
+
+    /// Creates an actor while checking every restored MLS conversation
+    /// against a platform-owned monotonic anchor before exposing it to the
+    /// actor. The anchor is borrowed only during startup and is never copied
+    /// into the actor state.
+    pub fn new_with_anchor(
+        config: EngineConfig,
+        anchor: &mut dyn MlsEpochAnchor<Error = EngineError>,
+    ) -> EngineResult<Self> {
+        Self::new_with_optional_anchor(config, Some(anchor))
+    }
+
+    fn new_with_optional_anchor(
+        config: EngineConfig,
+        mut anchor: Option<&mut dyn MlsEpochAnchor<Error = EngineError>>,
+    ) -> EngineResult<Self> {
         let identity = identity_from_config(&config)?;
         let mut database = ClientDatabase::open(&config.database_path, &config.database_key)?;
+        // Recover claims left by a crashed/restarted process before loading
+        // the technical state. Durable queues remain eligible for retry.
+        database.requeue_after_disconnect(unix_ms())?;
+        database.requeue_peer_deliveries(unix_ms())?;
         seed_runtime_identity(&mut database, &identity)?;
         database.delete_expired_pending_welcomes(unix_secs())?;
         database.delete_expired_pending_local_invite_mls(unix_secs())?;
-        let (conversations, pending_welcomes) = load_engine_technical_state(&database)?;
+        let (conversations, pending_welcomes) =
+            load_engine_technical_state_with_anchor(&database, anchor.take())?;
         let crypto_blocked_peers = database.rejected_inbound_peer_senders()?;
         let relay_identity = identity_from_config(&config)?;
         let (local_peer_endpoint, stored_onion_generation) =
@@ -235,12 +320,13 @@ impl ClientEngineActor {
             pending_welcomes,
             pending_relay_deliveries: HashMap::new(),
             pending_engine_events: Vec::new(),
+            receipt_queue_failed_after_commit: 0,
             active_peer_sessions: HashMap::new(),
             crypto_blocked_peers,
             connection_generation: 0,
             app_foreground: true,
             session: RuntimeSession::new(),
-            clock: SystemRuntimeClock,
+            clock: SharedRuntimeClock::default(),
             connection_state: initial_connection_state,
             tor_status: RuntimeTorStatus {
                 phase: RuntimeStatusPhase::Starting,
@@ -269,9 +355,11 @@ impl ClientEngineActor {
             probe_coordinator: ProbeCoordinator::new(Instant::now() + Duration::from_secs(30)),
             relay_retry_attempt: 0,
             relay_bootstrap_in_flight: false,
-            relay_control_queue: Vec::new(),
+            relay_control_queue: VecDeque::new(),
             relay_control_in_flight: false,
             relay_control_sender: None,
+            relay_control_rejected: 0,
+            relay_control_coalesced: 0,
             connect_requested: false,
             engine_session_id: uuid::Uuid::new_v4().to_string(),
         })
@@ -283,8 +371,10 @@ impl ClientEngineActor {
         events: mpsc::Sender<EngineEvent>,
         shutdown: CancellationToken,
     ) -> EngineResult<()> {
-        let (relay_bootstrap_outcomes, mut relay_bootstrap_outcome_rx) = mpsc::unbounded_channel();
-        let (relay_control_outcomes, mut relay_control_outcome_rx) = mpsc::unbounded_channel();
+        let (relay_bootstrap_outcomes, mut relay_bootstrap_outcome_rx) =
+            mpsc::channel(RELAY_OUTCOME_CHANNEL_CAPACITY);
+        let (relay_control_outcomes, mut relay_control_outcome_rx) =
+            mpsc::channel(RELAY_OUTCOME_CHANNEL_CAPACITY);
         self.relay_control_sender = Some(relay_control_outcomes.clone());
         let (peer_transport, mut peer_events) =
             PeerTransportHandle::bind(self.identity.private_key_bytes()).await?;
@@ -508,7 +598,66 @@ impl ClientEngineActor {
                         }
                     });
                     if is_relay_control_command(&envelope.command) {
-                        self.relay_control_queue.push(PendingRelayControl {
+                        if let Some(key) = relay_control_coalesce_key(&envelope.command)
+                            && self.relay_control_queue.iter().any(|pending| {
+                                matches!(
+                                    &pending.operation,
+                                    RelayControlOperation::Command(command)
+                                        if relay_control_coalesce_key(command) == Some(key)
+                                )
+                            })
+                        {
+                            self.relay_control_coalesced =
+                                self.relay_control_coalesced.saturating_add(1);
+                            self.pending_engine_events.push(EngineEvent::Log {
+                                log: EngineLogEvent {
+                                    level: "info".to_owned(),
+                                    message: format!(
+                                        "relay_control_metrics depth={} rejected={} coalesced={}",
+                                        self.relay_control_queue.len(),
+                                        self.relay_control_rejected,
+                                        self.relay_control_coalesced
+                                    ),
+                                },
+                            });
+                            let _ = events
+                                .send(EngineEvent::Response {
+                                    request_id: envelope.request_id,
+                                    result: ResponseResult::Error {
+                                        code: "relay_control_coalesced".to_owned(),
+                                        message: "equivalent relay control request is already queued"
+                                            .to_owned(),
+                                    },
+                                })
+                                .await;
+                            continue;
+                        }
+                        if self.relay_control_queue.len() >= MAX_RELAY_CONTROL_QUEUE {
+                            self.relay_control_rejected =
+                                self.relay_control_rejected.saturating_add(1);
+                            self.pending_engine_events.push(EngineEvent::Log {
+                                log: EngineLogEvent {
+                                    level: "warn".to_owned(),
+                                    message: format!(
+                                        "relay_control_metrics depth={} rejected={} coalesced={}",
+                                        self.relay_control_queue.len(),
+                                        self.relay_control_rejected,
+                                        self.relay_control_coalesced
+                                    ),
+                                },
+                            });
+                            let _ = events
+                                .send(EngineEvent::Response {
+                                    request_id: envelope.request_id,
+                                    result: ResponseResult::Error {
+                                        code: "relay_control_queue_full".to_owned(),
+                                        message: "relay control queue is full; retry later".to_owned(),
+                                    },
+                                })
+                                .await;
+                            continue;
+                        }
+                        self.relay_control_queue.push_back(PendingRelayControl {
                             request_id: envelope.request_id,
                             respond: true,
                             command_id,
@@ -673,7 +822,15 @@ impl ClientEngineActor {
             ApplicationPayloadV1::CapabilityOffer { .. }
                 | ApplicationPayloadV1::CapabilityOfferAck { .. }
                 | ApplicationPayloadV1::CapabilityRevoked { .. }
+                | ApplicationPayloadV1::RelationshipRemoved { .. }
         );
+        let removal_delivery_id = match &application {
+            ApplicationPayloadV1::RelationshipRemoved {
+                removal_id: Some(removal_id),
+                ..
+            } => Some(removal_id.to_string()),
+            _ => None,
+        };
         if capability_frame && self.connection_state != ConnectionState::Connected {
             return Err(EngineError::Transport(
                 "relay is not ready for capability bootstrap".to_owned(),
@@ -725,12 +882,17 @@ impl ClientEngineActor {
         };
         self.conversations
             .insert(conversation_id.to_owned(), conversation);
-        let requires_ack = matches!(application, ApplicationPayloadV1::CapabilityOffer { .. });
+        let requires_ack = matches!(
+            application,
+            ApplicationPayloadV1::CapabilityOffer { .. }
+                | ApplicationPayloadV1::RelationshipRemoved { .. }
+        );
         if let Err(error) = self.dispatch_ephemeral_payload(
             conversation_id,
             payload,
             capability_frame,
             requires_ack,
+            removal_delivery_id,
         ) {
             let restored = DirectConversation::restore(&snapshot_before)
                 .map_err(|restore| EngineError::Storage(restore.to_string()))?;
@@ -749,6 +911,7 @@ impl ClientEngineActor {
         payload: String,
         capability_frame: bool,
         requires_ack: bool,
+        removal_delivery_id: Option<String>,
     ) -> EngineResult<()> {
         let policy = self.contact_transport_policy(installation_id)?;
         // Capability control frames bootstrap the proof required by the P2P
@@ -761,7 +924,8 @@ impl ClientEngineActor {
                 ));
             }
             let relay_envelope_id = uuid::Uuid::new_v4();
-            let delivery_id = requires_ack.then(|| relay_envelope_id.to_string());
+            let delivery_id = requires_ack
+                .then(|| removal_delivery_id.unwrap_or_else(|| relay_envelope_id.to_string()));
             if let Some(delivery_id) = &delivery_id {
                 self.database
                     .put_capability_delivery(&CapabilityDeliveryRecord {
@@ -886,6 +1050,50 @@ impl ClientEngineActor {
         let (effects, _) = self.with_runtime(|runtime| runtime.prepare_pending_send_effects())?;
         for effect in effects {
             self.deliver_send_effect(effect)?;
+        }
+        self.flush_pending_relationship_removals()?;
+        Ok(())
+    }
+
+    fn flush_pending_relationship_removals(&mut self) -> EngineResult<()> {
+        use torchat_core::application::ApplicationPayloadV1;
+
+        for removal in self.database.due_relationship_removals(unix_ms())? {
+            let message_id = match uuid::Uuid::parse_str(&removal.removal_id) {
+                Ok(value) => value,
+                Err(error) => {
+                    self.pending_engine_events.push(EngineEvent::Log {
+                        log: EngineLogEvent {
+                            level: "warn".to_owned(),
+                            message: format!("invalid relationship removal id: {error}"),
+                        },
+                    });
+                    continue;
+                }
+            };
+            let payload = ApplicationPayloadV1::RelationshipRemoved {
+                version: 1,
+                message_id,
+                removed_at: removal.removed_at,
+                preserve_history: removal.preserve_history,
+                relationship_epoch: Some(removal.relationship_epoch),
+                removal_id: Some(message_id),
+            };
+            if let Err(error) =
+                self.send_ephemeral_payload(&removal.contact_installation_id, payload)
+            {
+                self.pending_engine_events.push(EngineEvent::Log {
+                    log: EngineLogEvent {
+                        level: "debug".to_owned(),
+                        message: format!("relationship removal dispatch deferred: {error}"),
+                    },
+                });
+                continue;
+            }
+            self.database.mark_relationship_removal_dispatched(
+                &removal.removal_id,
+                unix_ms() + retry_backoff_ms(removal.attempt_count + 1),
+            )?;
         }
         Ok(())
     }
@@ -1020,13 +1228,43 @@ fn load_engine_technical_state(
     HashMap<String, DirectConversation>,
     HashMap<String, PendingWelcomeRecord>,
 )> {
+    load_engine_technical_state_with_anchor(database, None)
+}
+
+/// Loads MLS state with an optional platform secure-store anti-rollback gate.
+/// Hosts that have a secure anchor must pass it here before exposing the
+/// conversations to the actor.
+pub(crate) fn load_engine_technical_state_with_anchor(
+    database: &ClientDatabase,
+    mut anchor: Option<&mut dyn MlsEpochAnchor<Error = EngineError>>,
+) -> EngineResult<(
+    HashMap<String, DirectConversation>,
+    HashMap<String, PendingWelcomeRecord>,
+)> {
     let mut conversations = HashMap::new();
     for (conversation_id, snapshot) in database.conversation_mls_snapshots()? {
         let conversation = DirectConversation::restore(&snapshot).map_err(|error| {
+            let action = if error.contains("unsupported MLS")
+                || error.contains("invalid MLS snapshot header")
+            {
+                "re-pair required"
+            } else {
+                "repair local data or re-pair"
+            };
             EngineError::Storage(format!(
-                "restore MLS conversation snapshot for {conversation_id}: {error}"
+                "restore MLS conversation snapshot for {conversation_id}: {error}; {action}"
             ))
         })?;
+        if let Some(anchor) = anchor.as_deref_mut() {
+            match validate_snapshot_epoch(anchor, &conversation_id, conversation.epoch())? {
+                MlsRecoveryState::Ready => {}
+                MlsRecoveryState::RePairRequired => {
+                    return Err(EngineError::Storage(format!(
+                        "MLS conversation snapshot for {conversation_id}: re-pair required"
+                    )));
+                }
+            }
+        }
         conversations.insert(conversation_id, conversation);
     }
 
@@ -1053,9 +1291,155 @@ fn unix_ms() -> i64 {
         .as_millis() as i64
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct RetryPolicy {
+    pub max_attempts: u32,
+    pub base_delay_ms: i64,
+    pub max_delay_ms: i64,
+    pub max_age_ms: i64,
+}
+
+impl RetryPolicy {
+    pub const DELIVERY: Self = Self {
+        max_attempts: 8,
+        base_delay_ms: 5_000,
+        max_delay_ms: 160_000,
+        max_age_ms: 24 * 60 * 60 * 1_000,
+    };
+
+    pub fn delay_ms(self, attempt_count: u32) -> i64 {
+        let shift = attempt_count.min(5);
+        (self.base_delay_ms * (1_i64 << shift)).min(self.max_delay_ms)
+    }
+
+    pub fn full_jitter_ms<R: RetryJitter>(self, attempt_count: u32, rng: &mut R) -> i64 {
+        rng.sample(self.delay_ms(attempt_count))
+    }
+
+    pub fn exhausted(self, attempt_count: u32) -> bool {
+        attempt_count >= self.max_attempts
+    }
+
+    pub fn age_exhausted(self, created_at_ms: i64, now_ms: i64) -> bool {
+        now_ms.saturating_sub(created_at_ms) >= self.max_age_ms
+    }
+}
+
+pub(super) trait RetryJitter {
+    fn sample(&mut self, upper_inclusive_ms: i64) -> i64;
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum RetryDisposition {
+    Transient,
+    Permanent,
+    Authentication,
+    Protocol,
+}
+
+pub(super) fn classify_retry_error(error: &str) -> RetryDisposition {
+    let normalized = error.to_ascii_lowercase();
+    if normalized.contains("authentication")
+        || normalized.contains("invalid capability")
+        || normalized.contains("unauthorized")
+    {
+        RetryDisposition::Authentication
+    } else if normalized.contains("protocol")
+        || normalized.contains("malformed")
+        || normalized.contains("unsupported")
+        || normalized.contains("frame exceeds")
+        || normalized.contains("safe frame budget")
+    {
+        RetryDisposition::Protocol
+    } else if normalized.contains("permanent")
+        || normalized.contains("invalid command")
+        || normalized.contains("not found")
+    {
+        RetryDisposition::Permanent
+    } else {
+        RetryDisposition::Transient
+    }
+}
+
+pub(super) fn retry_error_code(error: &str) -> &'static str {
+    match classify_retry_error(error) {
+        RetryDisposition::Transient => "transient",
+        RetryDisposition::Permanent => "permanent",
+        RetryDisposition::Authentication => "authentication",
+        RetryDisposition::Protocol => "protocol",
+    }
+}
+
+struct SystemRetryJitter;
+
+impl RetryJitter for SystemRetryJitter {
+    fn sample(&mut self, upper_inclusive_ms: i64) -> i64 {
+        if upper_inclusive_ms <= 0 {
+            return 0;
+        }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|value| value.as_nanos())
+            .unwrap_or_default();
+        let digest = Sha256::digest(now.to_le_bytes());
+        let mut bytes = [0_u8; 8];
+        bytes.copy_from_slice(&digest[..8]);
+        i64::from_le_bytes(bytes).unsigned_abs() as i64 % (upper_inclusive_ms + 1)
+    }
+}
+
 fn retry_backoff_ms(attempt_count: u32) -> i64 {
-    let shift = attempt_count.min(5);
-    5_000_i64 * (1_i64 << shift)
+    RetryPolicy::DELIVERY.full_jitter_ms(attempt_count, &mut SystemRetryJitter)
+}
+
+#[cfg(test)]
+mod retry_policy_tests {
+    use super::{
+        RetryDisposition, RetryJitter, RetryPolicy, classify_retry_error, retry_error_code,
+    };
+
+    struct FixedJitter(i64);
+
+    impl RetryJitter for FixedJitter {
+        fn sample(&mut self, upper_inclusive_ms: i64) -> i64 {
+            self.0.min(upper_inclusive_ms)
+        }
+    }
+
+    #[test]
+    fn delivery_policy_caps_backoff_and_exhaustion() {
+        let policy = RetryPolicy::DELIVERY;
+        assert_eq!(policy.delay_ms(0), 5_000);
+        assert_eq!(policy.delay_ms(5), 160_000);
+        assert_eq!(policy.delay_ms(99), 160_000);
+        assert_eq!(policy.full_jitter_ms(0, &mut FixedJitter(123)), 123);
+        assert_eq!(policy.full_jitter_ms(5, &mut FixedJitter(999_999)), 160_000);
+        assert!(!policy.exhausted(7));
+        assert!(policy.exhausted(8));
+        assert!(!policy.age_exhausted(100_000, 100_000 + policy.max_age_ms - 1));
+        assert!(policy.age_exhausted(100_000, 100_000 + policy.max_age_ms));
+        assert_eq!(
+            classify_retry_error("peer frame exceeds size limit"),
+            RetryDisposition::Protocol
+        );
+        assert_eq!(
+            classify_retry_error("invalid capability authentication"),
+            RetryDisposition::Authentication
+        );
+        assert_eq!(
+            classify_retry_error("relay connection reset"),
+            RetryDisposition::Transient
+        );
+        assert_eq!(
+            retry_error_code("invalid capability authentication"),
+            "authentication"
+        );
+        assert_eq!(retry_error_code("malformed peer frame"), "protocol");
+        assert_eq!(
+            retry_error_code("permanent: contact not found"),
+            "permanent"
+        );
+    }
 }
 
 fn is_expected_peer_shutdown(error: &str) -> bool {
@@ -1227,7 +1611,7 @@ fn transport_status_event(
 mod tests {
     use super::{
         idempotency_descriptor, is_expected_peer_shutdown, peer_endpoint_requires_update,
-        protocol_nickname, runtime_phase_for_tor_ready,
+        protocol_nickname, relay_control_coalesce_key, runtime_phase_for_tor_ready,
     };
     use crate::EngineCommand;
     use crate::event::ConnectionState;
@@ -1241,13 +1625,31 @@ mod tests {
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.onion",
             sequence,
             1_700_000_000,
-            Some(1_900_000_000),
+            Some(1_800_000_600),
         )
     }
 
     #[test]
     fn protocol_nickname_uses_profile_when_present() {
         assert_eq!(protocol_nickname("abcdefgh12345678", " Alice "), "Alice");
+    }
+
+    #[test]
+    fn relay_control_coalescing_is_limited_to_refresh_like_commands() {
+        assert_eq!(
+            relay_control_coalesce_key(&EngineCommand::RefreshPairingCode),
+            Some("pairing_code_refresh")
+        );
+        assert_eq!(
+            relay_control_coalesce_key(&EngineCommand::PairingInbox),
+            Some("pairing_inbox")
+        );
+        assert_eq!(
+            relay_control_coalesce_key(&EngineCommand::SubmitPairingCode {
+                code: "ABC".to_owned()
+            }),
+            None
+        );
     }
 
     #[test]

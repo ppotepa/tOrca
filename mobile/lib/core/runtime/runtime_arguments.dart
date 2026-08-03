@@ -59,6 +59,9 @@ class RuntimeArguments {
   factory RuntimeArguments.messageId(String messageId) =>
       RuntimeArguments._({EngineContract.messageId: messageId});
 
+  factory RuntimeArguments.deadLetter(String kind, String id) =>
+      RuntimeArguments._({EngineContract.kind: kind, EngineContract.id: id});
+
   factory RuntimeArguments.typing(String conversationId, bool typing) =>
       RuntimeArguments._({
         EngineContract.conversationId: conversationId,

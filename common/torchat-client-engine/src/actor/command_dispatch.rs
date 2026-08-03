@@ -274,7 +274,7 @@ impl ClientEngineActor {
                 )?;
                 Ok((json_response(contact)?, runtime_events, None))
             }
-            EngineCommand::RemoveRelationship {
+            EngineCommand::RequestRelationshipRemoval {
                 installation_id,
                 preserve_history,
             } => {
@@ -341,6 +341,19 @@ impl ClientEngineActor {
                 self.deliver_send_effect(effect.into())?;
                 Ok((ResponsePayload::Empty, runtime_events, None))
             }
+            EngineCommand::RetryDeadLetter { kind, id } => {
+                if !self.database.retry_dead_letter(&kind, &id)? {
+                    return Err(EngineError::InvalidCommand(
+                        "dead-letter record was not found or is not terminal".to_owned(),
+                    ));
+                }
+                Ok((ResponsePayload::Empty, Vec::new(), None))
+            }
+            EngineCommand::ListDeadLetters => Ok((
+                json_response(self.database.dead_letters()?)?,
+                Vec::new(),
+                None,
+            )),
             EngineCommand::DeleteMessageLocal { message_id } => {
                 let (_, runtime_events) = self.with_runtime_idempotent(
                     idempotency,
@@ -381,14 +394,7 @@ impl ClientEngineActor {
                     .filter_map(|message| uuid::Uuid::parse_str(&message.id).ok())
                     .collect::<Vec<_>>();
                 if !message_ids.is_empty() {
-                    self.send_ephemeral_payload(
-                        &conversation_id,
-                        ApplicationPayloadV1::ReadReceipt {
-                            version: torchat_core::PROTOCOL_VERSION,
-                            message_ids,
-                            read_at: unix_ms(),
-                        },
-                    )?;
+                    self.queue_read_receipts(&conversation_id, message_ids)?;
                 }
                 Ok((ResponsePayload::Empty, Vec::new(), None))
             }

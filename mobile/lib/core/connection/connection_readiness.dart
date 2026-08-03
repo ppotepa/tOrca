@@ -126,6 +126,17 @@ class ConnectionReadiness {
 
   bool get localCoreReady => engine.ready && localData.ready;
 
+  /// Capability gates for individual operations. Local reads must not depend
+  /// on the control-plane relay or the local onion listener; network writes
+  /// may be queued until one of their configured routes is available.
+  bool canPerform(ConnectionOperation operation) => switch (operation) {
+    ConnectionOperation.readLocalData => localCoreReady,
+    ConnectionOperation.diagnose => localCoreReady,
+    ConnectionOperation.pair => localCoreReady && tor.ready && relay.ready,
+    ConnectionOperation.sendP2p => localCoreReady && peerListener.ready,
+    ConnectionOperation.sendRelayFallback => localCoreReady && relay.ready,
+  };
+
   bool get startupComponentsReady =>
       localCoreReady &&
       tor.ready &&
@@ -226,6 +237,14 @@ class ConnectionReadiness {
     }
     return 'Oczekiwanie: ${firstBlocking.component.title.toLowerCase()}';
   }
+}
+
+enum ConnectionOperation {
+  readLocalData,
+  diagnose,
+  pair,
+  sendP2p,
+  sendRelayFallback,
 }
 
 ConnectionComponentStatus _gateByStartupStep(

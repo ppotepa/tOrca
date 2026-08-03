@@ -1,6 +1,12 @@
+mod contact_records;
+mod message_queries;
+mod message_records;
 pub mod migrations;
+mod pairing_records;
 pub mod runtime_storage;
+mod settings;
 pub mod sqlite;
+mod state_codecs;
 pub mod transaction;
 
 pub use migrations::{Migration, MigrationRunner};
@@ -10,6 +16,7 @@ pub use sqlite::{
     InboundPeerEnvelopeRecord, OutboundDeliveryRecord, PairingResponseRecord,
     PeerEndpointBootstrapRecord, PendingApplicationEnvelopeRecord,
     PendingContactConfirmationRecord, PendingLocalInviteMlsRecord, PendingPeerEndpointInboxRecord,
-    PendingWelcomeRecord, ReceivedEnvelopeRecord, RetryDeadline, RetryKind, StoredMessageRecord,
+    PendingWelcomeRecord, ReceivedEnvelopeRecord, RelationshipRemovalOutboxRecord, RetryDeadline,
+    RetryKind, StoredMessageRecord,
 };
 pub use transaction::SqliteTransaction;

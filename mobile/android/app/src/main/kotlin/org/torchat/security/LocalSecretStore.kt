@@ -14,6 +14,31 @@ class LocalSecretStore(private val context: Context) {
     private val alias = "torchat-local-db-wrap-v1"
     private val prefs = context.getSharedPreferences("torchat-secrets", Context.MODE_PRIVATE)
 
+    /**
+     * Monotonic MLS epoch anchor kept under the Android Keystore wrapping key.
+     * The engine must compare before restore and only call store after a
+     * successful non-decreasing transition.
+     */
+    @Synchronized
+    fun mlsEpochAnchor(conversationId: String): Long? =
+        encryptedString(mlsEpochKey(conversationId))?.toLongOrNull()
+
+    @Synchronized
+    fun storeMlsEpochAnchor(conversationId: String, epoch: Long) {
+        require(epoch >= 0) { "MLS epoch must not be negative" }
+        val current = mlsEpochAnchor(conversationId)
+        require(current == null || epoch >= current) {
+            "MLS epoch anchor cannot move backwards"
+        }
+        putEncryptedString(mlsEpochKey(conversationId), epoch.toString())
+    }
+
+    private fun mlsEpochKey(conversationId: String): String {
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(conversationId.toByteArray(Charsets.UTF_8))
+        return "mls-epoch-" + digest.joinToString("") { "%02x".format(it) }
+    }
+
     fun databasePassphrase(): ByteArray {
         val key = key()
         val encoded = prefs.getString("db-passphrase", null)

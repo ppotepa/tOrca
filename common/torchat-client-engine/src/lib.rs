@@ -1,4 +1,5 @@
 pub mod actor;
+pub mod anti_rollback;
 pub mod command;
 pub mod config;
 pub mod engine;
@@ -22,5 +23,6 @@ pub use event::{
 pub use relay::{EngineRelay, NoopEngineRelay};
 pub use storage::{
     ClientDatabase, InboundEnvelopeStoreResult, InboundPeerEnvelopeRecord, Migration,
-    MigrationRunner, OutboundDeliveryRecord, SqliteRuntimeStorage, SqliteTransaction,
+    MigrationRunner, OutboundDeliveryRecord, RelationshipRemovalOutboxRecord, SqliteRuntimeStorage,
+    SqliteTransaction,
 };

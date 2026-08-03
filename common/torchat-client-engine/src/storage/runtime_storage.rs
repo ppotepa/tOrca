@@ -1,16 +1,22 @@
 use rusqlite::{OptionalExtension, Transaction, params};
 use sha2::{Digest, Sha256};
+pub use torchat_client_runtime::RelationshipTransition;
 use torchat_client_runtime::{
-    ChatMessage, ContactRecord, ConversationState, ConversationSummary, InviteCode, InviteState,
-    MessageState, PairingItem, PeerConnectionStatus, PeerEndpointStatus, ReceiptSendEffect,
-    RuntimeError, RuntimeIdentity, RuntimeProfile, RuntimeResult, RuntimeStorage,
-    VerificationState,
+    ChatMessage, ContactRecord, ConversationSummary, InviteCode, PairingItem, PeerConnectionStatus,
+    PeerEndpointStatus, ReceiptSendEffect, RuntimeError, RuntimeIdentity, RuntimeProfile,
+    RuntimeResult, RuntimeStorage, VerificationState,
     logic::{fallback_contact_nickname, normalized_contact_nickname},
 };
 
 use super::{
     SqliteTransaction,
+    contact_records::verification_state_sql,
+    message_queries::{self, MessageQuery},
+    message_records::{decode_reply, decode_stored_message, encode_reply, stored_message_row},
+    pairing_records::{finalize as finalize_pairing_item, state_sql as invite_state_str},
+    settings::{self, IDENTITY_KEY, PAIRING_CODE_KEY, PROFILE_KEY},
     sqlite::{DeliveryReceiptRecord, PendingWelcomeRecord, ReceivedEnvelopeRecord},
+    state_codecs,
 };
 
 pub struct SqliteRuntimeStorage<'db> {
@@ -31,6 +37,31 @@ impl<'db> SqliteRuntimeStorage<'db> {
             .commit()
             .map_err(storage_engine_error)?;
         Ok(())
+    }
+
+    pub fn apply_relationship_transition(
+        &mut self,
+        transition: RelationshipTransition,
+    ) -> RuntimeResult<()> {
+        match transition {
+            RelationshipTransition::BeginVerified {
+                installation_id,
+                boundary_at,
+            } => self.begin_verified_relationship(&installation_id, boundary_at),
+            RelationshipTransition::Remove {
+                installation_id,
+                removed_at,
+                preserve_history,
+                removal_id,
+                relationship_epoch,
+            } => self.remove_relationship_with_id(
+                &installation_id,
+                removed_at,
+                preserve_history,
+                &removal_id,
+                relationship_epoch,
+            ),
+        }
     }
 
     pub fn rollback(&mut self) -> RuntimeResult<()> {
@@ -177,7 +208,7 @@ impl<'db> SqliteRuntimeStorage<'db> {
     }
 
     pub fn put_identity(&mut self, identity: RuntimeIdentity) -> RuntimeResult<()> {
-        self.put_setting_json(SETTING_IDENTITY, &identity)
+        self.put_setting_json(IDENTITY_KEY, &identity)
     }
 
     pub fn ensure_profile(&mut self, profile: RuntimeProfile) -> RuntimeResult<()> {
@@ -205,8 +236,7 @@ impl<'db> SqliteRuntimeStorage<'db> {
             })
             .optional()
             .map_err(storage_error)?;
-        blob.map(|value| serde_json::from_slice(&value).map_err(storage_error_json))
-            .transpose()
+        blob.map(|value| settings::decode(&value)).transpose()
     }
 
     fn put_setting_json<T: serde::Serialize>(
@@ -214,7 +244,7 @@ impl<'db> SqliteRuntimeStorage<'db> {
         key: &'static str,
         value: &T,
     ) -> RuntimeResult<()> {
-        let payload = serde_json::to_vec(value).map_err(storage_error_json)?;
+        let payload = settings::encode(value)?;
         self.tx()
             .execute(
                 "INSERT INTO settings (key, value) VALUES (?1, ?2)
@@ -223,49 +253,6 @@ impl<'db> SqliteRuntimeStorage<'db> {
             )
             .map_err(storage_error)?;
         Ok(())
-    }
-
-    fn decode_verification(value: String) -> RuntimeResult<VerificationState> {
-        match value.trim().to_ascii_uppercase().as_str() {
-            "VERIFIED" => Ok(VerificationState::Verified),
-            "UNVERIFIED" => Ok(VerificationState::Unverified),
-            other => Err(RuntimeError::Storage(format!(
-                "unknown verification state: {other}"
-            ))),
-        }
-    }
-
-    fn decode_conversation_state(value: String) -> RuntimeResult<ConversationState> {
-        ConversationState::try_from(value.as_str()).map_err(RuntimeError::Storage)
-    }
-
-    fn decode_message_state(value: String) -> RuntimeResult<MessageState> {
-        match value.trim().to_ascii_uppercase().as_str() {
-            "QUEUED" => Ok(MessageState::Queued),
-            "SENDING" => Ok(MessageState::Sending),
-            "SENT" => Ok(MessageState::Sent),
-            "DELIVERED" => Ok(MessageState::Delivered),
-            "READ" => Ok(MessageState::Read),
-            "FAILED" => Ok(MessageState::Failed),
-            other => Err(RuntimeError::Storage(format!(
-                "unknown message state: {other}"
-            ))),
-        }
-    }
-
-    fn decode_invite_state(value: String) -> RuntimeResult<InviteState> {
-        match value.trim().to_ascii_uppercase().as_str() {
-            "PENDING" => Ok(InviteState::Pending),
-            "ACCEPTED" => Ok(InviteState::Accepted),
-            "REJECTED" => Ok(InviteState::Rejected),
-            "COMPLETED" => Ok(InviteState::Completed),
-            "EXPIRED" => Ok(InviteState::Expired),
-            "ARCHIVED" => Ok(InviteState::Archived),
-            "CANCELLED" => Ok(InviteState::Cancelled),
-            other => Err(RuntimeError::Storage(format!(
-                "unknown invite state: {other}"
-            ))),
-        }
     }
 
     pub fn remove_pending_local_invite_mls(&mut self, invite_id: &str) -> RuntimeResult<()> {
@@ -283,6 +270,23 @@ impl<'db> SqliteRuntimeStorage<'db> {
         conversation_id: &str,
         snapshot: &[u8],
     ) -> RuntimeResult<()> {
+        let tombstoned: bool = self
+            .tx()
+            .query_row(
+                "SELECT EXISTS(
+                    SELECT 1
+                    FROM conversations c
+                    JOIN relationship_tombstones t
+                      ON t.contact_installation_id = c.contact_installation_id
+                    WHERE c.id = ?1
+                );",
+                [conversation_id],
+                |row| row.get(0),
+            )
+            .map_err(storage_error)?;
+        if tombstoned {
+            return Ok(());
+        }
         self.tx()
             .execute(
                 "INSERT INTO conversation_mls (conversation_id, snapshot, updated_at)
@@ -307,6 +311,25 @@ impl<'db> SqliteRuntimeStorage<'db> {
         installation_id: &str,
         boundary_at: i64,
     ) -> RuntimeResult<()> {
+        let next_epoch = self
+            .tx()
+            .query_row(
+                "SELECT MAX(
+                    COALESCE((SELECT relationship_epoch
+                              FROM relationship_boundaries
+                              WHERE contact_installation_id = ?1), 0),
+                    COALESCE((SELECT relationship_epoch
+                              FROM relationship_tombstones
+                              WHERE contact_installation_id = ?1), 0)
+                );",
+                [installation_id],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .optional()
+            .map_err(storage_error)?
+            .flatten()
+            .unwrap_or(0)
+            .saturating_add(1);
         self.tx()
             .execute(
                 "DELETE FROM relationship_tombstones WHERE contact_installation_id = ?1;",
@@ -315,14 +338,30 @@ impl<'db> SqliteRuntimeStorage<'db> {
             .map_err(storage_error)?;
         self.tx()
             .execute(
-                "INSERT INTO relationship_boundaries (contact_installation_id, boundary_at)
-                 VALUES (?1, ?2)
+                "INSERT INTO relationship_boundaries
+                    (contact_installation_id, boundary_at, relationship_epoch)
+                 VALUES (?1, ?2, ?3)
                  ON CONFLICT(contact_installation_id) DO UPDATE SET
-                    boundary_at = excluded.boundary_at;",
-                rusqlite::params![installation_id, boundary_at],
+                    boundary_at = excluded.boundary_at,
+                    relationship_epoch = MAX(relationship_boundaries.relationship_epoch,
+                                             excluded.relationship_epoch);",
+                rusqlite::params![installation_id, boundary_at, next_epoch],
             )
             .map_err(storage_error)?;
         Ok(())
+    }
+
+    pub fn current_relationship_epoch(&mut self, installation_id: &str) -> RuntimeResult<i64> {
+        self.tx()
+            .query_row(
+                "SELECT relationship_epoch FROM relationship_boundaries
+                 WHERE contact_installation_id = ?1;",
+                [installation_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map(|value| value.unwrap_or(0))
+            .map_err(storage_error)
     }
 
     pub fn put_pending_welcome(&mut self, record: &PendingWelcomeRecord) -> RuntimeResult<()> {
@@ -479,6 +518,25 @@ impl<'db> SqliteRuntimeStorage<'db> {
 }
 
 impl RuntimeStorage for SqliteRuntimeStorage<'_> {
+    fn apply_relationship_transition(
+        &mut self,
+        transition: RelationshipTransition,
+    ) -> RuntimeResult<()> {
+        SqliteRuntimeStorage::apply_relationship_transition(self, transition)
+    }
+
+    fn begin_verified_relationship(
+        &mut self,
+        installation_id: &str,
+        boundary_at: i64,
+    ) -> RuntimeResult<()> {
+        SqliteRuntimeStorage::begin_verified_relationship(self, installation_id, boundary_at)
+    }
+
+    fn current_relationship_epoch(&mut self, installation_id: &str) -> RuntimeResult<i64> {
+        SqliteRuntimeStorage::current_relationship_epoch(self, installation_id)
+    }
+
     fn put_peer_endpoint_capability(
         &mut self,
         contact_installation_id: &str,
@@ -507,15 +565,15 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
     }
 
     fn identity(&self) -> RuntimeResult<Option<RuntimeIdentity>> {
-        self.get_setting_json(SETTING_IDENTITY)
+        self.get_setting_json(IDENTITY_KEY)
     }
 
     fn profile(&self) -> RuntimeResult<Option<RuntimeProfile>> {
-        self.get_setting_json(SETTING_PROFILE)
+        self.get_setting_json(PROFILE_KEY)
     }
 
     fn put_profile(&mut self, profile: RuntimeProfile) -> RuntimeResult<()> {
-        self.put_setting_json(SETTING_PROFILE, &profile)
+        self.put_setting_json(PROFILE_KEY, &profile)
     }
 
     fn remove_relationship(
@@ -524,27 +582,58 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
         removed_at: i64,
         preserve_history: bool,
     ) -> RuntimeResult<()> {
+        let removal_id = uuid::Uuid::new_v4().to_string();
+        self.remove_relationship_with_id(
+            installation_id,
+            removed_at,
+            preserve_history,
+            &removal_id,
+            removed_at,
+        )
+    }
+
+    fn remove_relationship_with_id(
+        &mut self,
+        installation_id: &str,
+        removed_at: i64,
+        preserve_history: bool,
+        removal_id: &str,
+        relationship_epoch: i64,
+    ) -> RuntimeResult<()> {
         if installation_id.trim().is_empty() {
             return Err(RuntimeError::InvalidParams(
                 "contact installation id must not be empty".to_owned(),
             ));
         }
         let tx = self.tx();
-        tx.execute_batch(
-            "CREATE TABLE IF NOT EXISTS relationship_tombstones (
-            contact_installation_id TEXT PRIMARY KEY,
-            removed_at INTEGER NOT NULL,
-            preserve_history INTEGER NOT NULL DEFAULT 1
-        );",
-        )
-        .map_err(storage_error)?;
+        let current_epoch = tx
+            .query_row(
+                "SELECT relationship_epoch FROM relationship_tombstones
+                 WHERE contact_installation_id = ?1;",
+                [installation_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .map_err(storage_error)?;
+        if current_epoch.is_some_and(|current| relationship_epoch < current) {
+            return Ok(());
+        }
         tx.execute(
-            "INSERT INTO relationship_tombstones (contact_installation_id, removed_at, preserve_history)
-             VALUES (?1, ?2, ?3)
+            "INSERT INTO relationship_tombstones (contact_installation_id, removed_at, preserve_history, relationship_epoch, removal_id)
+             VALUES (?1, ?2, ?3, ?4, ?5)
              ON CONFLICT(contact_installation_id) DO UPDATE SET
                 removed_at = MAX(relationship_tombstones.removed_at, excluded.removed_at),
-                preserve_history = excluded.preserve_history;",
-            rusqlite::params![installation_id, removed_at, if preserve_history { 1_i64 } else { 0_i64 }],
+                preserve_history = excluded.preserve_history,
+                relationship_epoch = MAX(relationship_tombstones.relationship_epoch, excluded.relationship_epoch),
+                removal_id = CASE WHEN excluded.relationship_epoch >= relationship_tombstones.relationship_epoch THEN excluded.removal_id ELSE relationship_tombstones.removal_id END;",
+            rusqlite::params![installation_id, removed_at, if preserve_history { 1_i64 } else { 0_i64 }, relationship_epoch, removal_id],
+        ).map_err(storage_error)?;
+        tx.execute(
+            "INSERT INTO relationship_removal_outbox
+                (removal_id, contact_installation_id, relationship_epoch, preserve_history, state, next_attempt_at)
+             VALUES (?1, ?2, ?3, ?4, 'PENDING', 0)
+             ON CONFLICT(removal_id) DO UPDATE SET updated_at = unixepoch();",
+            rusqlite::params![removal_id, installation_id, relationship_epoch, if preserve_history { 1_i64 } else { 0_i64 }],
         ).map_err(storage_error)?;
         tx.execute(
             "UPDATE contacts SET blocked = 1, updated_at = unixepoch() WHERE installation_id = ?1;",
@@ -552,18 +641,16 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
         )
         .map_err(storage_error)?;
         tx.execute("UPDATE conversations SET state = 'OFFLINE', updated_at = unixepoch() WHERE contact_installation_id = ?1;", [installation_id]).map_err(storage_error)?;
-        let prefix = "torchat-relationship-removed-v1:%".to_owned();
         tx.execute(
             "UPDATE messages SET state = 'FAILED', next_attempt_at = 0, ack_deadline = NULL,
              last_transport_error = 'relationship removed'
              WHERE conversation_id IN (SELECT id FROM conversations WHERE contact_installation_id = ?1)
-             AND outgoing = 1 AND UPPER(state) IN ('QUEUED', 'SENDING') AND body NOT LIKE ?2;",
-            rusqlite::params![installation_id, prefix],
+             AND outgoing = 1 AND UPPER(state) IN ('QUEUED', 'SENDING');",
+            [installation_id],
         ).map_err(storage_error)?;
         tx.execute(
-            "DELETE FROM outbound_deliveries WHERE contact_installation_id = ?1
-             AND message_id NOT IN (SELECT id FROM messages WHERE body LIKE ?2);",
-            rusqlite::params![installation_id, prefix],
+            "DELETE FROM outbound_deliveries WHERE contact_installation_id = ?1;",
+            [installation_id],
         )
         .map_err(storage_error)?;
         tx.execute(
@@ -575,9 +662,8 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
         if !preserve_history {
             tx.execute(
                 "DELETE FROM messages WHERE conversation_id IN
-                 (SELECT id FROM conversations WHERE contact_installation_id = ?1)
-                 AND body NOT LIKE ?2;",
-                rusqlite::params![installation_id, prefix],
+                 (SELECT id FROM conversations WHERE contact_installation_id = ?1);",
+                [installation_id],
             )
             .map_err(storage_error)?;
         }
@@ -597,11 +683,11 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
     }
 
     fn pairing_code(&self) -> RuntimeResult<Option<InviteCode>> {
-        self.get_setting_json(SETTING_PAIRING_CODE)
+        self.get_setting_json(PAIRING_CODE_KEY)
     }
 
     fn put_pairing_code(&mut self, code: InviteCode) -> RuntimeResult<()> {
-        self.put_setting_json(SETTING_PAIRING_CODE, &code)
+        self.put_setting_json(PAIRING_CODE_KEY, &code)
     }
 
     fn pairing_inbox(&self) -> RuntimeResult<Vec<PairingItem>> {
@@ -667,7 +753,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                 }),
                 capability: Some(capability),
                 expires_at,
-                state: Self::decode_invite_state(state)?,
+                state: state_codecs::invite(state)?,
                 received: true,
                 available_actions: Vec::new(),
                 offer_invite_id,
@@ -789,7 +875,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                 }),
                 capability,
                 expires_at,
-                state: Self::decode_invite_state(state)?,
+                state: state_codecs::invite(state)?,
                 received: false,
                 available_actions: Vec::new(),
                 offer_invite_id: None,
@@ -909,7 +995,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                 local_alias,
                 muted: muted != 0,
                 blocked: blocked != 0,
-                verification: Self::decode_verification(verification)?,
+                verification: state_codecs::verification(verification)?,
                 peer_endpoint_status: if has_peer_endpoint != 0 {
                     PeerEndpointStatus::Verified
                 } else if has_pending_peer_exchange != 0 {
@@ -959,7 +1045,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                     contact.nickname,
                     contact.public_key,
                     contact.fingerprint,
-                    verification_state_str(contact.verification),
+                    verification_state_sql(contact.verification),
                     contact.local_alias,
                     if contact.muted { 1 } else { 0 },
                     if contact.blocked { 1 } else { 0 },
@@ -1007,7 +1093,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
             Ok(ConversationSummary {
                 id,
                 contact_installation_id,
-                status: Self::decode_conversation_state(state)?,
+                status: state_codecs::conversation(state)?,
                 last_message_preview,
                 last_message_at,
                 unread_count: unread_count as u32,
@@ -1058,7 +1144,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
     }
 
     fn messages(&self, conversation_id: &str) -> RuntimeResult<Vec<ChatMessage>> {
-        match parse_message_query(conversation_id)? {
+        match message_queries::parse(conversation_id)? {
             MessageQuery::All { conversation_id } => {
                 let mut statement = self
                     .tx()
@@ -1248,7 +1334,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                 outgoing: outgoing != 0,
                 body,
                 reply_to: decode_reply(reply_to_json)?,
-                state: Self::decode_message_state(state)?,
+                state: state_codecs::message(state)?,
                 created_at,
                 attempt_count: attempt_count as u32,
                 last_attempt_at,
@@ -1393,7 +1479,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
             outgoing: outgoing != 0,
             body,
             reply_to: decode_reply(reply_to_json)?,
-            state: Self::decode_message_state(state)?,
+            state: state_codecs::message(state)?,
             created_at,
             attempt_count: attempt_count as u32,
             last_attempt_at,
@@ -1401,194 +1487,6 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
             ack_deadline,
             last_transport_error,
         }))
-    }
-}
-
-const SETTING_IDENTITY: &str = "runtime_identity_v1";
-const SETTING_PROFILE: &str = "runtime_profile_v1";
-const SETTING_PAIRING_CODE: &str = "pairing_code_v1";
-const MESSAGE_PAGE_PREFIX: &str = "torchat-page-v1\t";
-const MESSAGE_ALL_PREFIX: &str = "torchat-all-v1\t";
-const DEFAULT_MESSAGE_PAGE_SIZE: usize = 50;
-const MAX_MESSAGE_PAGE_SIZE: usize = 200;
-
-type StoredMessageRow = (
-    String,
-    String,
-    i64,
-    String,
-    Option<String>,
-    String,
-    i64,
-    i64,
-    Option<i64>,
-    i64,
-    Option<i64>,
-    Option<String>,
-);
-
-enum MessageQuery {
-    All {
-        conversation_id: String,
-    },
-    Page {
-        conversation_id: String,
-        limit: usize,
-        before: Option<(i64, String)>,
-    },
-}
-
-fn parse_message_query(value: &str) -> RuntimeResult<MessageQuery> {
-    if let Some(conversation_id) = value.strip_prefix(MESSAGE_ALL_PREFIX) {
-        if conversation_id.trim().is_empty() || conversation_id.contains('\t') {
-            return Err(RuntimeError::Storage(
-                "invalid full-history conversation id".to_owned(),
-            ));
-        }
-        return Ok(MessageQuery::All {
-            conversation_id: conversation_id.to_owned(),
-        });
-    }
-
-    if let Some(encoded) = value.strip_prefix(MESSAGE_PAGE_PREFIX) {
-        let mut parts = encoded.splitn(4, '\t');
-        let conversation_id = parts.next().unwrap_or_default().trim();
-        let limit = parts
-            .next()
-            .unwrap_or_default()
-            .parse::<usize>()
-            .map_err(|_| RuntimeError::Storage("invalid message page limit".to_owned()))?
-            .clamp(1, MAX_MESSAGE_PAGE_SIZE);
-        let before_created_at = parts.next().unwrap_or_default();
-        let before_id = parts.next().unwrap_or_default();
-        if conversation_id.is_empty() || before_id.contains('\t') {
-            return Err(RuntimeError::Storage(
-                "invalid message page conversation id".to_owned(),
-            ));
-        }
-        let before = match (before_created_at.is_empty(), before_id.is_empty()) {
-            (true, true) => None,
-            (false, false) => Some((
-                before_created_at.parse::<i64>().map_err(|_| {
-                    RuntimeError::Storage("invalid message page cursor timestamp".to_owned())
-                })?,
-                before_id.to_owned(),
-            )),
-            _ => {
-                return Err(RuntimeError::Storage(
-                    "incomplete message page cursor".to_owned(),
-                ));
-            }
-        };
-        return Ok(MessageQuery::Page {
-            conversation_id: conversation_id.to_owned(),
-            limit,
-            before,
-        });
-    }
-
-    if value.trim().is_empty() || value.contains('\t') {
-        return Err(RuntimeError::Storage(
-            "invalid conversation id for message query".to_owned(),
-        ));
-    }
-    Ok(MessageQuery::Page {
-        conversation_id: value.to_owned(),
-        limit: DEFAULT_MESSAGE_PAGE_SIZE,
-        before: None,
-    })
-}
-
-fn stored_message_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredMessageRow> {
-    Ok((
-        row.get::<_, String>("id")?,
-        row.get::<_, String>("conversation_id")?,
-        row.get::<_, i64>("outgoing")?,
-        row.get::<_, String>("body")?,
-        row.get::<_, Option<String>>("reply_to_json")?,
-        row.get::<_, String>("state")?,
-        row.get::<_, i64>("created_at")?,
-        row.get::<_, i64>("attempt_count")?,
-        row.get::<_, Option<i64>>("last_attempt_at")?,
-        row.get::<_, i64>("next_attempt_at")?,
-        row.get::<_, Option<i64>>("ack_deadline")?,
-        row.get::<_, Option<String>>("last_transport_error")?,
-    ))
-}
-
-fn decode_stored_message(row: StoredMessageRow) -> RuntimeResult<ChatMessage> {
-    let (
-        id,
-        conversation_id,
-        outgoing,
-        body,
-        reply_to_json,
-        state,
-        created_at,
-        attempt_count,
-        last_attempt_at,
-        next_attempt_at,
-        ack_deadline,
-        last_transport_error,
-    ) = row;
-    Ok(ChatMessage {
-        id,
-        conversation_id,
-        outgoing: outgoing != 0,
-        body,
-        reply_to: decode_reply(reply_to_json)?,
-        state: SqliteRuntimeStorage::decode_message_state(state)?,
-        created_at,
-        attempt_count: attempt_count as u32,
-        last_attempt_at,
-        next_attempt_at,
-        ack_deadline,
-        last_transport_error,
-    })
-}
-
-fn encode_reply(
-    reply: Option<torchat_client_runtime::MessageReply>,
-) -> RuntimeResult<Option<String>> {
-    reply
-        .map(|value| {
-            serde_json::to_string(&value).map_err(|error| RuntimeError::Storage(error.to_string()))
-        })
-        .transpose()
-}
-
-fn decode_reply(
-    value: Option<String>,
-) -> RuntimeResult<Option<torchat_client_runtime::MessageReply>> {
-    value
-        .map(|value| {
-            serde_json::from_str(&value).map_err(|error| RuntimeError::Storage(error.to_string()))
-        })
-        .transpose()
-}
-
-fn finalize_pairing_item(mut item: PairingItem) -> PairingItem {
-    item.available_actions =
-        torchat_client_runtime::pairing_available_actions(item.state, item.received);
-    item
-}
-
-fn invite_state_str(state: InviteState) -> &'static str {
-    match state {
-        InviteState::Pending => "PENDING",
-        InviteState::Accepted => "ACCEPTED",
-        InviteState::Rejected => "REJECTED",
-        InviteState::Completed => "COMPLETED",
-        InviteState::Expired => "EXPIRED",
-        InviteState::Archived => "ARCHIVED",
-        InviteState::Cancelled => "CANCELLED",
-    }
-}
-
-fn verification_state_str(state: VerificationState) -> &'static str {
-    match state {
-        VerificationState::Verified => "VERIFIED",
-        VerificationState::Unverified => "UNVERIFIED",
     }
 }
 
@@ -1602,8 +1500,4 @@ fn storage_engine_error(error: crate::EngineError) -> RuntimeError {
 
 fn storage_error(error: rusqlite::Error) -> RuntimeError {
     RuntimeError::Storage(format!("{error:#}"))
-}
-
-fn storage_error_json(error: serde_json::Error) -> RuntimeError {
-    RuntimeError::Storage(error.to_string())
 }

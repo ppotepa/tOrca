@@ -504,6 +504,6 @@ String _stateLabel(MessageState state) => switch (state) {
   MessageState.sending => 'wysyłanie',
   MessageState.sent => 'wysłano',
   MessageState.delivered => 'dostarczono',
-  MessageState.read => 'odczytano',
+  MessageState.read => 'dostarczono · odczytano',
   MessageState.failed => 'błąd',
 };
