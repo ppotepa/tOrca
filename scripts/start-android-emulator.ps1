@@ -40,18 +40,18 @@ if ([string]::IsNullOrWhiteSpace($Avd)) {
     }
 }
 
-$running = @(adb devices | Select-String '\tdevice$')
+$running = @(adb devices | Select-String '^emulator-\d+\s+device$')
 if ($running.Count -eq 0) {
     Write-Host "Uruchamiam emulator '$Avd'..."
     Start-Process emulator -ArgumentList "-avd", $Avd
 } else {
-    Write-Host 'Emulator/urządzenie ADB już działa.'
+    Write-Host 'Emulator AVD już działa. Fizyczne telefony ADB są ignorowane.'
 }
 
 $deadline = (Get-Date).AddSeconds($BootTimeoutSeconds)
 do {
     Start-Sleep -Seconds 2
-    $device = @(adb devices | Select-String '\tdevice$')
+    $device = @(adb devices | Select-String '^emulator-\d+\s+device$')
     if ($device.Count -gt 0) { break }
     if ((Get-Date) -gt $deadline) {
         throw "Emulator nie pojawił się w ADB w ciągu $BootTimeoutSeconds sekund."
