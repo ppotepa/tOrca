@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/app_theme.dart';
 import '../../core/connection/connection_readiness.dart';
+import '../../core/application_state/unread_summary.dart';
 import '../../core/models/domain.dart';
+import '../../core/presence/contact_presence_snapshot.dart';
+import '../../core/presence/contact_presence_store.dart';
 import '../../core/runtime/message_paging.dart';
 import '../../shared/widgets/counter_badge.dart';
 import '../chats/release_chat_view.dart';
@@ -12,7 +16,7 @@ import '../contacts/contacts_view.dart';
 import 'desktop/desktop_workspace.dart';
 import '../../shared/widgets/tor_status_bar.dart';
 
-class MainShell extends StatelessWidget {
+class MainShell extends ConsumerWidget {
   const MainShell({
     super.key,
     required this.tab,
@@ -33,7 +37,6 @@ class MainShell extends StatelessWidget {
     required this.search,
     required this.composer,
     required this.error,
-    required this.notice,
     required this.action,
     required this.onTab,
     required this.onSearch,
@@ -43,6 +46,7 @@ class MainShell extends StatelessWidget {
     required this.onShowInvite,
     required this.onSend,
     required this.onTypingChanged,
+    this.onConversationFocusChanged = _ignoreConversationFocus,
     required this.onRetryMessage,
     required this.onDeleteMessage,
     required this.onLoadOlderMessages,
@@ -54,6 +58,9 @@ class MainShell extends StatelessWidget {
     required this.onRetryTor,
     required this.typingContacts,
     required this.onlineContacts,
+    this.idleContacts = const {},
+    this.pendingPairings = const [],
+    this.focusedConversations = const {},
     this.lastSeenContacts = const {},
     this.lastSeenEnabled = true,
     this.onOpenConnectionCenter,
@@ -65,7 +72,6 @@ class MainShell extends StatelessWidget {
   final String ownInvite;
   final String status;
   final String error;
-  final String notice;
   final String action;
   final TransportPhase phase;
   final PeerServerStatus peerServerStatus;
@@ -84,6 +90,8 @@ class MainShell extends StatelessWidget {
   final VoidCallback onBack;
   final Future<void> Function(ComposerDraft draft) onSend;
   final ValueChanged<bool> onTypingChanged;
+  final void Function(String conversationId, bool focused)
+  onConversationFocusChanged;
   final ValueChanged<String> onRetryMessage;
   final ValueChanged<String> onDeleteMessage;
   final Future<OlderMessagesResult> Function(String conversationId)
@@ -107,6 +115,9 @@ class MainShell extends StatelessWidget {
   final VoidCallback? onOpenConnectionCenter;
   final Map<String, bool> typingContacts;
   final Map<String, bool> onlineContacts;
+  final Map<String, bool> idleContacts;
+  final List<PairingItem> pendingPairings;
+  final Map<String, bool> focusedConversations;
   final Map<String, int> lastSeenContacts;
   final bool lastSeenEnabled;
 
@@ -129,76 +140,87 @@ class MainShell extends StatelessWidget {
     },
   };
 
-  Widget _content(BuildContext context, {required bool desktop}) =>
-      tab == MobileTab.chats
-      ? ReleaseChatView(
-          selected: selectedContact,
-          contacts: contacts,
-          conversations: conversations,
-          messages: messages,
-          composer: composer,
-          onOpenConversation: onOpenConversation,
-          onSend: onSend,
-          onTypingChanged: onTypingChanged,
-          onRetryMessage: onRetryMessage,
-          onDeleteMessage: onDeleteMessage,
-          onLoadOlderMessages: () =>
-              onLoadOlderMessages(selectedConversation ?? ''),
-          onBack: onBack,
-          error: error,
-          notice: notice,
-          showConversationListWhenEmpty: !desktop,
-          canSend:
-              selectedConversation != null &&
-              selectedContact?.verified == true &&
-              conversations.any(
-                (item) =>
-                    item.id == selectedConversation &&
-                    item.state == ConversationState.active,
-              ),
-          peerTyping:
-              selectedConversation != null &&
-              (typingContacts[selectedConversation] ?? false),
-          peerOnline:
-              selectedContact != null &&
-              (selectedContact!.peerConnectionStatus ==
-                      PeerConnectionStatus.connected ||
-                  (onlineContacts[selectedContact!.id] ?? false)),
-          lastSeenAt: selectedContact == null || !lastSeenEnabled
-              ? null
-              : lastSeenContacts[selectedContact!.id] ??
-                    int.tryParse(selectedContact!.lastSeenAt ?? ''),
-          headerStatus: desktop
-              ? null
-              : TransportStatusDock(
-                  embeddedInHeader: true,
-                  phase: phase,
-                  peerStatus: peerServerStatus,
-                  readiness: readiness,
-                  transportStatuses: transportStatuses,
-                  latencyMs: latencyMs,
-                  onOpenConnectionCenter: _openConnectionCenter,
+  Widget _content(
+    BuildContext context,
+    WidgetRef ref, {
+    required bool desktop,
+  }) {
+    final presence = ref.watch(contactPresenceStoreProvider);
+    final selectedPresence = selectedContact == null
+        ? const ContactPresenceSnapshot(contactId: '')
+        : presence.snapshot(selectedContact!.id);
+    return tab == MobileTab.chats
+        ? ReleaseChatView(
+            selected: selectedContact,
+            contacts: contacts,
+            conversations: conversations,
+            messages: messages,
+            composer: composer,
+            onOpenConversation: onOpenConversation,
+            onSend: onSend,
+            onTypingChanged: onTypingChanged,
+            onConversationFocusChanged: onConversationFocusChanged,
+            onRetryMessage: onRetryMessage,
+            onDeleteMessage: onDeleteMessage,
+            onLoadOlderMessages: () =>
+                onLoadOlderMessages(selectedConversation ?? ''),
+            onBack: onBack,
+            error: error,
+            showConversationListWhenEmpty: !desktop,
+            canSend:
+                selectedConversation != null &&
+                selectedContact?.verified == true &&
+                conversations.any(
+                  (item) =>
+                      item.id == selectedConversation &&
+                      item.state == ConversationState.active,
                 ),
-        )
-      : ContactsView(
-          saved: contacts,
-          search: search,
-          onSearch: onSearch,
-          onSelect: onStartConversation,
-          onScanInvite: onScanInvite,
-          onShowInvite: onShowInvite,
-          onUpdateContactSettings: onUpdateContactSettings,
-          fingerprint: fingerprint,
-          ownInvite: ownInvite,
-          error: error,
-          notice: notice,
-          showContactList: !desktop,
-        );
+            peerTyping:
+                selectedConversation != null &&
+                (typingContacts[selectedConversation] ?? false),
+            peerOnline:
+                selectedPresence.availability == ContactAvailability.active,
+            peerIdle: selectedPresence.availability == ContactAvailability.idle,
+            peerFocused: selectedPresence.isViewingConversation,
+            lastSeenAt: selectedContact == null || !lastSeenEnabled
+                ? null
+                : selectedPresence.lastSeenAt ??
+                      int.tryParse(selectedContact!.lastSeenAt ?? ''),
+            headerStatus: desktop
+                ? null
+                : TransportStatusDock(
+                    embeddedInHeader: true,
+                    phase: phase,
+                    peerStatus: peerServerStatus,
+                    readiness: readiness,
+                    transportStatuses: transportStatuses,
+                    latencyMs: latencyMs,
+                    onOpenConnectionCenter: _openConnectionCenter,
+                  ),
+            onlineContacts: onlineContacts,
+          )
+        : ContactsView(
+            saved: contacts,
+            pendingPairings: pendingPairings,
+            onlineContacts: onlineContacts,
+            idleContacts: idleContacts,
+            search: search,
+            onSearch: onSearch,
+            onSelect: onStartConversation,
+            onScanInvite: onScanInvite,
+            onShowInvite: onShowInvite,
+            onUpdateContactSettings: onUpdateContactSettings,
+            fingerprint: fingerprint,
+            ownInvite: ownInvite,
+            error: error,
+            showContactList: !desktop,
+          );
+  }
 
-  int get unreadTotal => conversations.totalUnread;
+  int get unreadContactCount => conversations.unreadSummary.contactsWithUnread;
 
   @override
-  Widget build(BuildContext context) => CallbackShortcuts(
+  Widget build(BuildContext context, WidgetRef ref) => CallbackShortcuts(
     bindings: _shortcuts,
     child: Focus(
       autofocus: true,
@@ -229,7 +251,8 @@ class MainShell extends StatelessWidget {
                         selectedConversation: selectedConversation,
                         selectedContact: selectedContact,
                         onlineContacts: onlineContacts,
-                        content: _content(context, desktop: true),
+                        presenceStore: ref.watch(contactPresenceStoreProvider),
+                        content: _content(context, ref, desktop: true),
                         onTab: onTab,
                         onOpenConversation: onOpenConversation,
                         onStartConversation: onStartConversation,
@@ -302,7 +325,7 @@ class MainShell extends StatelessWidget {
                       padding: selectedConversation == null
                           ? const EdgeInsets.fromLTRB(16, 4, 16, 0)
                           : EdgeInsets.zero,
-                      child: _content(context, desktop: false),
+                      child: _content(context, ref, desktop: false),
                     ),
                   ),
                 ],
@@ -316,7 +339,9 @@ class MainShell extends StatelessWidget {
                     destinations: [
                       NavigationDestination(
                         icon: CounterBadge(
-                          count: unreadTotal,
+                          count: unreadContactCount,
+                          semanticLabel:
+                              '$unreadContactCount kontaktów z nieprzeczytanymi wiadomościami',
                           child: const ThemedIcon(Icons.chat_bubble_outline),
                         ),
                         label: 'Czaty',
@@ -334,3 +359,5 @@ class MainShell extends StatelessWidget {
     ),
   );
 }
+
+void _ignoreConversationFocus(String conversationId, bool focused) {}

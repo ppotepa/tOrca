@@ -4,11 +4,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/app_controller.dart';
 import '../../app/application_snapshot_provider.dart';
+import '../../app/notifications/ui_notification_center.dart';
 import '../../app/ui_operation_registry.dart';
 import '../../core/application_state/application_snapshot.dart';
 import '../../core/connection/app_state_connection.dart';
 import '../../core/connection/connection_component.dart';
 import '../../core/models/domain.dart';
+import '../../core/presence/contact_presence_snapshot.dart';
+import '../../core/presence/contact_presence_store.dart';
 import '../../shared/async/busy_action_button.dart';
 
 class ConnectionCenterSheet extends ConsumerWidget {
@@ -19,6 +22,7 @@ class ConnectionCenterSheet extends ConsumerWidget {
     final state = ref.watch(appControllerProvider);
     final snapshot = ref.watch(applicationSnapshotProvider).valueOrNull;
     final controller = ref.read(appControllerProvider.notifier);
+    final presence = ref.watch(contactPresenceStoreProvider);
     final retryState = ref.watch(
       uiOperationProvider(UiOperationKey.connectionRetry),
     );
@@ -43,8 +47,12 @@ class ConnectionCenterSheet extends ConsumerWidget {
               contact.peerConnectionStatus == PeerConnectionStatus.connected,
         )
         .length;
-    final onlineContacts = state.onlineContacts.values
-        .where((value) => value)
+    final onlineContacts = presence.snapshots.values
+        .where(
+          (value) =>
+              value.availability == ContactAvailability.active ||
+              value.availability == ContactAvailability.idle,
+        )
         .length;
 
     return SafeArea(
@@ -144,11 +152,12 @@ class ConnectionCenterSheet extends ConsumerWidget {
                       final diagnostic = _diagnosticText(state, snapshot);
                       await Clipboard.setData(ClipboardData(text: diagnostic));
                       if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Diagnostyka skopiowana'),
-                          ),
-                        );
+                        ref
+                            .read(uiNotificationCenterProvider.notifier)
+                            .showSuccess(
+                              'Diagnostyka skopiowana.',
+                              deduplicationKey: 'diagnostics-copied',
+                            );
                       }
                     },
                     icon: const Icon(Icons.copy_all_outlined),

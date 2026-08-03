@@ -50,7 +50,7 @@ where
                     state: if *online {
                         PeerPresenceState::Online
                     } else {
-                        PeerPresenceState::Offline
+                        PeerPresenceState::Away
                     },
                     sent_at: now,
                     expires_at: now + 45_000,
@@ -75,6 +75,21 @@ where
             ))
             .await
             .map_err(|error| format!("write peer typing: {error}"))?;
+            queues.complete(&command.delivery);
+            return Ok(());
+        }
+        PeerDeliveryTag::ConversationFocus { focused } => {
+            sink.send(Message::Binary(
+                torchat_core::peer_protocol::encode_frame(&PeerFrame::ConversationFocus {
+                    focused: *focused,
+                    sent_at: now,
+                    expires_at: now + 30_000,
+                    nonce: command.sequence,
+                })?
+                .into(),
+            ))
+            .await
+            .map_err(|error| format!("write conversation focus: {error}"))?;
             queues.complete(&command.delivery);
             return Ok(());
         }
@@ -275,7 +290,9 @@ where
                 .send(PeerTransportEvent::PresenceChanged {
                     installation_id: installation_id.to_owned(),
                     online,
+                    idle: matches!(state, PeerPresenceState::Away),
                     observed_at: unix_millis(),
+                    expires_at,
                 })
                 .await
                 .map_err(|_| "peer event queue closed".to_owned())?;
@@ -287,6 +304,20 @@ where
                 .send(PeerTransportEvent::TypingChanged {
                     installation_id: installation_id.to_owned(),
                     typing: typing && expires_at >= unix_millis(),
+                    expires_at,
+                })
+                .await
+                .map_err(|_| "peer event queue closed".to_owned())?;
+        }
+        PeerFrame::ConversationFocus {
+            focused,
+            expires_at,
+            ..
+        } => {
+            events
+                .send(PeerTransportEvent::ConversationFocusChanged {
+                    installation_id: installation_id.to_owned(),
+                    focused: focused && expires_at >= unix_millis(),
                     expires_at,
                 })
                 .await
@@ -321,7 +352,9 @@ where
                 .send(PeerTransportEvent::PresenceChanged {
                     installation_id: installation_id.to_owned(),
                     online: !matches!(presence, PeerPresenceState::Offline),
+                    idle: matches!(presence, PeerPresenceState::Away),
                     observed_at: unix_millis(),
+                    expires_at: unix_millis() + 45_000,
                 })
                 .await
                 .map_err(|_| "peer event queue closed".to_owned())?;
@@ -338,6 +371,12 @@ pub(super) async fn connect_outbound(
     events: &mpsc::Sender<PeerTransportEvent>,
 ) -> Result<(WebSocketStream<PeerSocket>, Uuid), String> {
     let installation_id = command.endpoint.installation_id.clone();
+    if command.capability_id.len() != 16 {
+        return Err("peer capability id is unavailable".to_owned());
+    }
+    if command.capability_secret.len() < 16 {
+        return Err("peer capability secret is unavailable".to_owned());
+    }
     let _ = events
         .send(PeerTransportEvent::ConnectionChanged {
             installation_id: installation_id.clone(),

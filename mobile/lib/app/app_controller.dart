@@ -13,3 +13,4 @@ final appControllerProvider =
       unawaited(DesktopWindowLifecycle.initialize());
       return NotificationSafeAppController();
     });
+

@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../app/app_theme.dart';
 import '../../app/desktop_autostart.dart';
+import '../../app/notifications/ui_notification_center.dart';
 import '../../app/ui_operation_registry.dart';
 import '../../shared/async/async_operation_state.dart';
 import '../../shared/async/busy_surface.dart';
@@ -120,9 +121,12 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     } catch (error) {
       if (!mounted) return;
       setState(() => assign(previous));
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(error.toString())));
+      ref
+          .read(uiNotificationCenterProvider.notifier)
+          .showError(
+            error.toString(),
+            deduplicationKey: 'setting:$key:${error.runtimeType}',
+          );
     } finally {
       if (mounted) setState(() => _saving.remove(key));
     }
@@ -141,9 +145,12 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
       setState(() {
         _themePreferences = _themePreferences.copyWith(reducedMotion: previous);
       });
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(error.toString())));
+      ref
+          .read(uiNotificationCenterProvider.notifier)
+          .showError(
+            error.toString(),
+            deduplicationKey: 'setting:reduced-motion:${error.runtimeType}',
+          );
     } finally {
       if (mounted) setState(() => _saving.remove(_reducedMotionKey));
     }
@@ -165,9 +172,12 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     } catch (error) {
       if (!mounted) return;
       setState(() => _autostart = previous);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(error.toString())));
+      ref
+          .read(uiNotificationCenterProvider.notifier)
+          .showError(
+            error.toString(),
+            deduplicationKey: 'setting:autostart:${error.runtimeType}',
+          );
     } finally {
       if (mounted) setState(() => _saving.remove(_autostartOperationKey));
     }

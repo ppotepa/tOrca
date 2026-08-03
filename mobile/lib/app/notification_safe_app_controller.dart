@@ -13,13 +13,11 @@ import 'desktop_notification_service.dart';
 import 'pairing_recovery_app_controller.dart';
 
 class NotificationSafeAppController extends PairingRecoveryAppController {
-  static const _pendingPairingNoticePrefix = 'Oczekujące zaproszenia:';
   static const _relationshipActiveSincePrefix =
       'torchat.relationship.activeSince.';
   static const _activeNotificationConversationKey =
       'torchat.notifications.activeConversationId';
 
-  bool _clearingPendingNotice = false;
   final Set<String> _appliedRelationshipRemovalMessageIds = <String>{};
 
   @override
@@ -29,17 +27,8 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
       if (previous?.selectedConversationId != next.selectedConversationId) {
         unawaited(_persistActiveConversation(next.selectedConversationId));
       }
-      if (_clearingPendingNotice ||
-          !next.notice.startsWith(_pendingPairingNoticePrefix)) {
-        return;
-      }
-      _clearingPendingNotice = true;
-      state = state.copyWith(notice: '');
-      _clearingPendingNotice = false;
     });
-    return initial.notice.startsWith(_pendingPairingNoticePrefix)
-        ? initial.copyWith(notice: '')
-        : initial;
+    return initial;
   }
 
   @override
@@ -227,11 +216,6 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
               conversation.id == state.selectedConversationId &&
               removed.contains(conversation.contactId),
         );
-    state = state.copyWith(
-      clearSelection: selectedRemoved,
-      notice: selectedRemoved
-          ? 'Relacja z kontaktem została zakończona.'
-          : state.notice,
-    );
+    state = state.copyWith(clearSelection: selectedRemoved);
   }
 }

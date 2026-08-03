@@ -25,6 +25,12 @@ poszczególnych plików pomocniczych: jedynym publicznym wejściem jest
 # Tylko Android
 .\scripts\torchat.ps1 deploy android -Device auto
 
+# Uruchom emulator osobno i pozostaw go działającego
+.\scripts\start-android-emulator.ps1
+
+# Uruchom konkretny AVD i od razu aplikację bez restartowania stacka
+.\scripts\start-android-emulator.ps1 -Avd Pixel_7_API_35 -RunApp -SkipStack
+
 # Tylko Windows
 .\scripts\torchat.ps1 deploy windows
 

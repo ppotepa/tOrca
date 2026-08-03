@@ -1,21 +1,23 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/app_theme.dart';
+import '../../app/notifications/ui_notification_center.dart';
 import '../../core/attachments/encrypted_image_store.dart';
 import '../../shared/widgets/action_section.dart';
 import '../../shared/widgets/info_tile.dart';
 import '../../shared/widgets/themed_switch_list_tile.dart';
 
-class ImageStorageSettingsSection extends StatefulWidget {
+class ImageStorageSettingsSection extends ConsumerStatefulWidget {
   const ImageStorageSettingsSection({super.key});
 
   @override
-  State<ImageStorageSettingsSection> createState() =>
+  ConsumerState<ImageStorageSettingsSection> createState() =>
       _ImageStorageSettingsSectionState();
 }
 
 class _ImageStorageSettingsSectionState
-    extends State<ImageStorageSettingsSection> {
+    extends ConsumerState<ImageStorageSettingsSection> {
   bool _automaticDownload = false;
   bool _loading = true;
   bool _saving = false;
@@ -94,9 +96,12 @@ class _ImageStorageSettingsSectionState
       final usage = await EncryptedImageStore.instance.usage();
       if (!mounted) return;
       setState(() => _usage = usage);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Cache obrazów został wyczyszczony.')),
-      );
+      ref
+          .read(uiNotificationCenterProvider.notifier)
+          .showSuccess(
+            'Cache obrazów został wyczyszczony.',
+            deduplicationKey: 'image-cache-cleared',
+          );
     } catch (error) {
       if (mounted) _showError(error);
     } finally {
@@ -105,16 +110,16 @@ class _ImageStorageSettingsSectionState
   }
 
   void _showError(Object error) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          error
-              .toString()
-              .replaceFirst('Exception: ', '')
-              .replaceFirst('Bad state: ', ''),
-        ),
-      ),
-    );
+    final message = error
+        .toString()
+        .replaceFirst('Exception: ', '')
+        .replaceFirst('Bad state: ', '');
+    ref
+        .read(uiNotificationCenterProvider.notifier)
+        .showError(
+          message,
+          deduplicationKey: 'image-cache-error:${error.runtimeType}',
+        );
   }
 
   @override

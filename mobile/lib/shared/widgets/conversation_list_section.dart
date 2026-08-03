@@ -3,13 +3,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/app_controller.dart';
 import '../../app/conversation_preferences.dart';
+import '../../app/notifications/ui_notification_center.dart';
 import '../../app/ui_operation_registry.dart';
 import '../../core/attachments/image_message_codec.dart';
 import '../../core/models/domain.dart';
+import '../../core/presence/contact_presence_snapshot.dart';
+import '../../core/presence/contact_presence_store.dart';
 import '../async/busy_surface.dart';
 import '../formatters/conversation_display.dart';
 import 'empty_state.dart';
 import 'feature_header.dart';
+import 'identity_avatar.dart';
 import 'list_items.dart';
 
 class ConversationListSection extends ConsumerWidget {
@@ -25,6 +29,8 @@ class ConversationListSection extends ConsumerWidget {
         'Nie masz jeszcze rozmów.\nWybierz osobę w zakładce Kontakty.',
     this.asCard = true,
     this.showHeader = true,
+    this.onlineContacts = const {},
+    this.idleContacts = const {},
   });
 
   final String title;
@@ -36,12 +42,15 @@ class ConversationListSection extends ConsumerWidget {
   final String emptyMessage;
   final bool asCard;
   final bool showHeader;
+  final Map<String, bool> onlineContacts;
+  final Map<String, bool> idleContacts;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final listLoad = ref.watch(
       uiOperationProvider(UiOperationKey.conversationsLoad),
     );
+    final presence = ref.watch(contactPresenceStoreProvider);
     final preferences = ref.watch(conversationPreferencesProvider);
     final visibleConversations =
         conversations
@@ -103,6 +112,19 @@ class ConversationListSection extends ConsumerWidget {
                 asCard: asCard,
                 pinned: preference.pinned,
                 muted: preference.muted,
+                activity: switch (presence
+                    .snapshot(conversation.contactId)
+                    .availability) {
+                  ContactAvailability.active =>
+                    ContactActivityVisualState.online,
+                  ContactAvailability.idle => ContactActivityVisualState.away,
+                  ContactAvailability.checking =>
+                    ContactActivityVisualState.typing,
+                  ContactAvailability.offline =>
+                    ContactActivityVisualState.offline,
+                  ContactAvailability.unknown =>
+                    ContactActivityVisualState.unknown,
+                },
               );
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -288,9 +310,12 @@ class ConversationListSection extends ConsumerWidget {
       await appController.openConversation(conversation.id);
     }
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Lokalna historia została wyczyszczona.')),
-      );
+      ref
+          .read(uiNotificationCenterProvider.notifier)
+          .showSuccess(
+            'Lokalna historia została wyczyszczona.',
+            deduplicationKey: 'history-cleared:${conversation.id}',
+          );
     }
   }
 }

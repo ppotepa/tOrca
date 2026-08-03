@@ -15,9 +15,16 @@ abstract interface class RuntimeProjectionProvider {
   Future<ApplicationSnapshot?> applicationSnapshot();
 }
 
+/// Optional lifecycle hook for runtimes that own an external process. Mobile
+/// foreground-service bridges intentionally do not implement it.
+abstract interface class RuntimeDisposable {
+  Future<void> disposeRuntime();
+}
+
 /// Platform-neutral contract consumed by the Flutter UI.
 abstract class ClientRuntime {
   Stream<RuntimeEvent> get events;
+
   Future<bool> connect();
   Future<RuntimeIdentity?> identity();
   Future<RuntimeProfile?> profile();
@@ -71,10 +78,18 @@ final class _SessionAwareClientRuntime
     implements
         ClientRuntime,
         RuntimeAttachmentProvider,
-        RuntimeProjectionProvider {
+        RuntimeProjectionProvider,
+        RuntimeDisposable {
   _SessionAwareClientRuntime(this._delegate);
 
   final ClientRuntime _delegate;
+
+  @override
+  Future<void> disposeRuntime() async {
+    if (_delegate is RuntimeDisposable) {
+      await (_delegate as RuntimeDisposable).disposeRuntime();
+    }
+  }
 
   @override
   Future<ApplicationSnapshot?> applicationSnapshot() async {
@@ -187,6 +202,8 @@ final class _SessionAwareClientRuntime
   @override
   Future<void> setTyping(String conversationId, bool typing) =>
       _delegate.setTyping(conversationId, typing);
+  Future<void> setConversationFocus(String conversationId, bool focused) =>
+      (_delegate as dynamic).setConversationFocus(conversationId, focused);
   @override
   Future<void> setPresence(bool online) => _delegate.setPresence(online);
   @override
@@ -211,10 +228,18 @@ final class _SessionAwareClientRuntime
 
 /// Keeps process-backed desktop calls on one ordered command stream.
 final class _SerializedClientRuntime
-    implements ClientRuntime, RuntimeProjectionProvider {
+    implements ClientRuntime, RuntimeProjectionProvider, RuntimeDisposable {
   _SerializedClientRuntime(this._delegate);
 
   final ClientRuntime _delegate;
+
+  @override
+  Future<void> disposeRuntime() async {
+    if (_delegate is RuntimeDisposable) {
+      await (_delegate as RuntimeDisposable).disposeRuntime();
+    }
+  }
+
   Future<void> _tail = Future<void>.value();
 
   Future<T> _run<T>(Future<T> Function() action) {
@@ -342,6 +367,13 @@ final class _SerializedClientRuntime
   @override
   Future<void> setTyping(String conversationId, bool typing) =>
       _run(() => _delegate.setTyping(conversationId, typing));
+  Future<void> setConversationFocus(String conversationId, bool focused) =>
+      _run(
+        () => (_delegate as dynamic).setConversationFocus(
+          conversationId,
+          focused,
+        ),
+      );
   @override
   Future<void> setPresence(bool online) =>
       _run(() => _delegate.setPresence(online));

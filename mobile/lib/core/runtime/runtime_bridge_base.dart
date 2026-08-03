@@ -119,14 +119,28 @@ mixin RuntimeBridgeMethods implements ClientRuntime, RuntimeProjectionProvider {
   @override
   Future<List<PairingItem>> pairingInbox() async =>
       RuntimePayload.itemsFromDynamicOrNull(
-        await callRuntime(EngineContract.pairingInbox),
-      ).map((payload) => payload.pairingItem()).toList();
+            await callRuntime(EngineContract.pairingInbox),
+          )
+          .map(
+            (payload) => PairingItem.fromMap(
+              payload.toMap(),
+              origin: PairingOrigin.inbox,
+            ),
+          )
+          .toList();
 
   @override
   Future<List<PairingItem>> pairingOutbox() async =>
       RuntimePayload.itemsFromDynamicOrNull(
-        await callRuntime(EngineContract.pairingOutbox),
-      ).map((payload) => payload.pairingItem()).toList();
+            await callRuntime(EngineContract.pairingOutbox),
+          )
+          .map(
+            (payload) => PairingItem.fromMap(
+              payload.toMap(),
+              origin: PairingOrigin.outbox,
+            ),
+          )
+          .toList();
 
   @override
   Future<PeerEndpoint?> peerEndpoint() async =>
@@ -308,6 +322,12 @@ mixin RuntimeBridgeMethods implements ClientRuntime, RuntimeProjectionProvider {
     EngineContract.setTyping,
     RuntimeArguments.typing(conversationId, typing),
   );
+
+  Future<void> setConversationFocus(String conversationId, bool focused) =>
+      callRuntime(
+        EngineContract.setConversationFocus,
+        RuntimeArguments.conversationFocus(conversationId, focused),
+      );
 
   @override
   Future<void> setPresence(bool online) => callRuntime(

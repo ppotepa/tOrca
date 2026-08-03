@@ -39,6 +39,9 @@ jobs:
       - name: Text encoding check
         shell: pwsh
         run: ./scripts/internal/check-text-encoding.ps1
+      - name: Source-size ratchet
+        shell: pwsh
+        run: ./scripts/internal/check-source-size.ps1
       - name: Format
         run: cargo fmt --all -- --check
       - name: Workspace check

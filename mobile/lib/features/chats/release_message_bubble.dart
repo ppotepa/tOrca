@@ -2,17 +2,19 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/app_theme.dart';
+import '../../app/notifications/ui_notification_center.dart';
 import '../../core/attachments/encrypted_image_store.dart';
 import '../../core/attachments/image_gallery_service.dart';
 import '../../core/attachments/image_message_codec.dart';
 import '../../core/models/domain.dart';
 import '../../core/relationships/relationship_message.dart';
 import '../../shared/widgets/message_delivery_surface.dart';
-import 'chats_view.dart' show MessageBubble;
+import 'message_bubble.dart';
 
-class ReleaseMessageBubble extends StatefulWidget {
+class ReleaseMessageBubble extends ConsumerStatefulWidget {
   const ReleaseMessageBubble({
     super.key,
     required this.message,
@@ -33,10 +35,11 @@ class ReleaseMessageBubble extends StatefulWidget {
   final ValueChanged<ChatMessage> onReply;
 
   @override
-  State<ReleaseMessageBubble> createState() => _ReleaseMessageBubbleState();
+  ConsumerState<ReleaseMessageBubble> createState() =>
+      _ReleaseMessageBubbleState();
 }
 
-class _ReleaseMessageBubbleState extends State<ReleaseMessageBubble> {
+class _ReleaseMessageBubbleState extends ConsumerState<ReleaseMessageBubble> {
   Uint8List? _imageBytes;
   bool _loading = false;
   bool _saving = false;
@@ -111,15 +114,22 @@ class _ReleaseMessageBubbleState extends State<ReleaseMessageBubble> {
     try {
       await ImageGalleryService.saveJpeg(bytes, messageId: message.id);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Obraz zapisano w galerii.')),
-        );
+        ref
+            .read(uiNotificationCenterProvider.notifier)
+            .showSuccess(
+              'Obraz zapisano w galerii.',
+              deduplicationKey: 'image-saved:${message.id}',
+            );
       }
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(_cleanError(error))));
+        ref
+            .read(uiNotificationCenterProvider.notifier)
+            .showError(
+              _cleanError(error),
+              deduplicationKey:
+                  'image-save-error:${message.id}:${error.runtimeType}',
+            );
       }
     } finally {
       if (mounted) setState(() => _saving = false);

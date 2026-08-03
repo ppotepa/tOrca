@@ -46,8 +46,8 @@ pub use models::{
     PairingConfirmContactEffect, PairingItem, PairingPeerOutcome, PairingPreparation,
     PairingSendEffect, PairingSendKind, PairingSyncResult, PeerConnectionStatus,
     PeerEndpointStatus, ReceiptSendEffect, RuntimeBootstrap, RuntimeEnvelope, RuntimeFixture,
-    RuntimeIdentity, RuntimeProfile, RuntimeSendEffect, RuntimeTorStatus, RuntimeTransportFact,
-    VerificationState, WelcomeAcceptedResult, pairing_available_actions,
+    RuntimeIdentity, RuntimeProfile, RuntimeSendEffect, RuntimeTorStatus, VerificationState,
+    WelcomeAcceptedResult, pairing_available_actions,
 };
 pub use pairing_rules::{
     PairingAction, RuntimePairingExpiryLike, RuntimePairingIdLike, RuntimePairingStateLike,

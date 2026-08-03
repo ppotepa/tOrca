@@ -4,14 +4,18 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../app/app_theme.dart';
-import '../../app/app_controller_base.dart';
+import '../../app/app_controller.dart';
+import '../../app/notifications/ui_notification_center.dart';
 import '../../app/ui_operation_registry.dart';
 import '../../core/models/domain.dart';
+import '../../core/presence/contact_presence_snapshot.dart';
+import '../../core/presence/contact_presence_store.dart';
 import '../../shared/async/busy_action_button.dart';
 import '../../shared/async/busy_surface.dart';
 import '../../shared/formatters/invite_code.dart';
 import '../../shared/widgets/contact_list_section.dart';
 import '../../shared/widgets/feature_header.dart';
+import '../../shared/widgets/identity_avatar.dart';
 import '../../shared/widgets/list_items.dart';
 import '../../shared/widgets/status_banner.dart';
 import '../../shared/widgets/themed_switch_list_tile.dart';
@@ -29,8 +33,10 @@ class ContactsView extends ConsumerWidget {
     required this.fingerprint,
     required this.ownInvite,
     required this.error,
-    required this.notice,
     this.showContactList = true,
+    this.onlineContacts = const {},
+    this.idleContacts = const {},
+    this.pendingPairings = const [],
   });
 
   final List<ContactRecord> saved;
@@ -50,11 +56,14 @@ class ContactsView extends ConsumerWidget {
   final String fingerprint;
   final String ownInvite;
   final String error;
-  final String notice;
   final bool showContactList;
+  final Map<String, bool> onlineContacts;
+  final Map<String, bool> idleContacts;
+  final List<PairingItem> pendingPairings;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final presenceStore = ref.watch(contactPresenceStoreProvider);
     final contactsLoad = ref.watch(
       uiOperationProvider(UiOperationKey.contactsLoad),
     );
@@ -92,8 +101,6 @@ class ContactsView extends ConsumerWidget {
           ],
         ),
         const SizedBox(height: 10),
-        if (notice.isNotEmpty)
-          StatusBanner(message: notice, color: context.statusTheme.success),
         if (error.isNotEmpty)
           StatusBanner(message: error, color: context.statusTheme.danger),
         Semantics(
@@ -139,6 +146,8 @@ class ContactsView extends ConsumerWidget {
         ),
         if (showContactList) ...[
           const SizedBox(height: 12),
+          if (pendingPairings.isNotEmpty)
+            _PendingPairingSection(items: pendingPairings),
           Expanded(
             child: BusySurface(
               state: contactsLoad,
@@ -168,9 +177,32 @@ class ContactsView extends ConsumerWidget {
                   contact.transportPolicy,
                   closeParentOnSuccess: false,
                 ),
-                contactSubtitleBuilder: (contact) => contact.fingerprint.isEmpty
-                    ? 'Fingerprint niedostępny'
-                    : contact.fingerprint,
+                contactSubtitleBuilder: (contact) {
+                  final snapshot = presenceStore.snapshot(contact.id);
+                  final status = switch (snapshot.availability) {
+                    ContactAvailability.active => 'aktywny w aplikacji',
+                    ContactAvailability.idle => 'bezczynny',
+                    ContactAvailability.offline => 'offline',
+                    ContactAvailability.unknown => 'status nieznany',
+                    ContactAvailability.checking => 'sprawdzanie',
+                  };
+                  return contact.fingerprint.isEmpty
+                      ? status
+                      : '$status · ${contact.fingerprint}';
+                },
+                contactActivityBuilder: (contact) {
+                  final availability = presenceStore
+                      .snapshot(contact.id)
+                      .availability;
+                  return switch (availability) {
+                    ContactAvailability.active =>
+                      ContactActivityVisualState.online,
+                    ContactAvailability.idle => ContactActivityVisualState.away,
+                    ContactAvailability.offline =>
+                      ContactActivityVisualState.offline,
+                    _ => ContactActivityVisualState.unknown,
+                  };
+                },
                 contactTrailingBuilder: (contact) => Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -218,6 +250,9 @@ class ContactsView extends ConsumerWidget {
           final saveState = dialogRef.watch(
             uiOperationProvider(UiOperationKey.contactSettingsFor(contact.id)),
           );
+          final presence = dialogRef
+              .watch(contactPresenceStoreProvider)
+              .snapshot(contact.id);
           return StatefulBuilder(
             builder: (context, setDialogState) => AlertDialog(
               title: Text(contact.displayName),
@@ -240,6 +275,17 @@ class ContactsView extends ConsumerWidget {
                         '${_peerConnectionLabel(contact.peerConnectionStatus)}',
                       ),
                       Text('Aktualna trasa: ${_effectiveRouteLabel(contact)}'),
+                      Text(
+                        'Obecność: ${_availabilityLabel(presence.availability)}',
+                      ),
+                      Text(
+                        'Ogląda rozmowę: ${presence.isViewingConversation ? 'tak' : 'nie'}',
+                      ),
+                      Text(
+                        'Ostatni probe: ${presence.observedAt ?? 'brak danych'}',
+                      ),
+                      if (presence.latencyMs != null)
+                        Text('Latency probe: ${presence.latencyMs} ms'),
                       const SizedBox(height: 12),
                       const Divider(),
                       Text(
@@ -559,13 +605,48 @@ class ContactsView extends ConsumerWidget {
     if (closeParentOnSuccess) {
       Navigator.of(context).pop();
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Relacja z ${contact.displayName} została zakończona.'),
-        ),
-      );
+      ref
+          .read(uiNotificationCenterProvider.notifier)
+          .showSuccess(
+            'Relacja z ${contact.displayName} została zakończona.',
+            deduplicationKey: 'relationship-removed:${contact.id}',
+          );
     }
   }
+}
+
+class _PendingPairingSection extends StatelessWidget {
+  const _PendingPairingSection({required this.items});
+
+  final List<PairingItem> items;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 10),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Oczekujące parowania',
+          style: Theme.of(context).textTheme.labelLarge,
+        ),
+        const SizedBox(height: 6),
+        ...items.map(
+          (item) => Card(
+            margin: const EdgeInsets.only(bottom: 6),
+            child: ListTile(
+              dense: true,
+              leading: const ThemedIcon(Icons.hourglass_top),
+              title: Text(item.peer?.displayName ?? 'Nowy kontakt'),
+              subtitle: const Text(
+                'Oczekiwanie na ustanowienie szyfrowanej rozmowy',
+              ),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 class _DiagnosticLine extends StatelessWidget {
@@ -608,6 +689,14 @@ String _peerEndpointLabel(PeerEndpointStatus status) => switch (status) {
   PeerEndpointStatus.pendingExchange => 'oczekuje na wymianę endpointu',
   PeerEndpointStatus.invalid => 'endpoint nieprawidłowy',
   PeerEndpointStatus.missing => 'endpoint niedostępny',
+};
+
+String _availabilityLabel(ContactAvailability value) => switch (value) {
+  ContactAvailability.active => 'aktywny w aplikacji',
+  ContactAvailability.idle => 'bezczynny',
+  ContactAvailability.checking => 'sprawdzanie',
+  ContactAvailability.offline => 'offline',
+  ContactAvailability.unknown => 'status nieznany',
 };
 
 String _peerConnectionLabel(PeerConnectionStatus status) => switch (status) {

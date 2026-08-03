@@ -13,7 +13,7 @@ import 'mobile_bridge.dart';
 /// The Rust process owns Tor, identity, MLS and the encrypted local store.
 class WindowsRuntime extends Object
     with RuntimeBridgeMethods
-    implements RuntimeCallBridge {
+    implements RuntimeCallBridge, RuntimeDisposable {
   WindowsRuntime();
 
   Process? _process;
@@ -29,6 +29,21 @@ class WindowsRuntime extends Object
 
   @override
   Stream<RuntimeEvent> get events => _events.stream;
+
+  @override
+  Future<void> disposeRuntime() async {
+    final process = _process;
+    if (process == null) {
+      _process = null;
+      return;
+    }
+    _pending.clear();
+    _process = null;
+    _processGeneration += 1;
+    try {
+      process.kill();
+    } catch (_) {}
+  }
 
   Future<void> _ensureProcess() async {
     final currentProcess = _process;
@@ -502,6 +517,13 @@ class WindowsRuntime extends Object
           EngineContract.conversationId,
         ),
         EngineContract.typing: params[EngineContract.typing] == true,
+      },
+      EngineContract.setConversationFocus => {
+        EngineContract.type: EngineContract.commandSetConversationFocus,
+        EngineContract.commandConversationId: text(
+          EngineContract.conversationId,
+        ),
+        EngineContract.focused: params[EngineContract.focused] == true,
       },
       EngineContract.setPresence => {
         EngineContract.type: EngineContract.commandSetPresence,

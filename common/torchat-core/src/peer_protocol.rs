@@ -447,6 +447,12 @@ pub enum PeerFrame {
         expires_at: i64,
         nonce: u64,
     },
+    ConversationFocus {
+        focused: bool,
+        sent_at: i64,
+        expires_at: i64,
+        nonce: u64,
+    },
     ProbeRequest {
         nonce: u64,
     },

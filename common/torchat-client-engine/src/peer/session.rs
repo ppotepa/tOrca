@@ -128,6 +128,7 @@ impl PeerTransportHandle {
     pub fn authorize_contact(
         &self,
         endpoint: &PeerEndpointBundle,
+        local_endpoint: PeerEndpointBundle,
         inbound_capability_id: String,
         capability_secret: Vec<u8>,
     ) {
@@ -137,6 +138,7 @@ impl PeerTransportHandle {
                 AuthorizedPeer {
                     public_key: endpoint.identity_public_key.clone(),
                     endpoint: endpoint.clone(),
+                    local_endpoint,
                     inbound_capability_id,
                     capability_secret,
                 },

@@ -68,6 +68,14 @@ class RuntimeArguments {
   factory RuntimeArguments.presence(bool online) =>
       RuntimeArguments._({EngineContract.online: online});
 
+  factory RuntimeArguments.conversationFocus(
+    String conversationId,
+    bool focused,
+  ) => RuntimeArguments._({
+    EngineContract.conversationId: conversationId,
+    EngineContract.focused: focused,
+  });
+
   factory RuntimeArguments.map(Map<String, Object?> value) =>
       RuntimeArguments._(Map<String, Object?>.from(value));
 

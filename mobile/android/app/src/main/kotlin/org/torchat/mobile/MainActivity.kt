@@ -402,6 +402,19 @@ class MainActivity : FlutterActivity() {
                     ),
                 discardPayload = true,
             )
+            EngineContract.SET_CONVERSATION_FOCUS -> submitCommandResult(
+                result,
+                engineCommand(EngineContract.COMMAND_SET_CONVERSATION_FOCUS)
+                    .put(
+                        EngineContract.COMMAND_CONVERSATION_ID,
+                        call.argument<String>(EngineContract.CONVERSATION_ID).orEmpty(),
+                    )
+                    .put(
+                        EngineContract.FOCUSED,
+                        call.argument<Boolean>(EngineContract.FOCUSED) ?: false,
+                    ),
+                discardPayload = true,
+            )
             EngineContract.SET_PRESENCE -> submitCommandResult(
                 result,
                 engineCommand(EngineContract.COMMAND_SET_PRESENCE)

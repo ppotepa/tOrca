@@ -435,42 +435,6 @@ impl<'de> Deserialize<'de> for RuntimeSendEffect {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum RuntimeTransportFact {
-    AcceptedLocally,
-    Forwarded,
-    Delivered,
-    RecipientOffline,
-    PeerPersisted,
-    PeerDelivered,
-    PeerUnavailable,
-    PeerAuthenticationFailed,
-    PeerRejected,
-    RetryableFailure,
-    PermanentFailure,
-}
-
-impl From<RuntimeTransportFact> for MessageTransportOutcome {
-    fn from(value: RuntimeTransportFact) -> Self {
-        match value {
-            RuntimeTransportFact::AcceptedLocally => MessageTransportOutcome::Forwarded,
-            RuntimeTransportFact::Forwarded => MessageTransportOutcome::Forwarded,
-            RuntimeTransportFact::Delivered => MessageTransportOutcome::Delivered,
-            RuntimeTransportFact::RecipientOffline => MessageTransportOutcome::RecipientOffline,
-            RuntimeTransportFact::PeerPersisted => MessageTransportOutcome::PeerPersisted,
-            RuntimeTransportFact::PeerDelivered => MessageTransportOutcome::PeerDelivered,
-            RuntimeTransportFact::PeerUnavailable => MessageTransportOutcome::PeerUnavailable,
-            RuntimeTransportFact::PeerAuthenticationFailed => {
-                MessageTransportOutcome::PeerAuthenticationFailed
-            }
-            RuntimeTransportFact::PeerRejected => MessageTransportOutcome::PeerRejected,
-            RuntimeTransportFact::RetryableFailure => MessageTransportOutcome::RetryableFailure,
-            RuntimeTransportFact::PermanentFailure => MessageTransportOutcome::PermanentFailure,
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum InviteState {

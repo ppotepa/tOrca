@@ -312,7 +312,36 @@ impl ClientEngineActor {
         }
     }
 
-    pub(super) fn connection_snapshot(&self, detail: &str) -> ConnectionSnapshot {
+    pub(super) fn connection_snapshot(&mut self, detail: &str) -> ConnectionSnapshot {
+        let now = Instant::now();
+        let status = match &self.connection_state {
+            ConnectionState::Connected => ProbeStatus::Online,
+            ConnectionState::Connecting
+            | ConnectionState::Authenticating
+            | ConnectionState::WaitingForReady => ProbeStatus::Checking,
+            ConnectionState::Backoff { .. }
+            | ConnectionState::Disconnected
+            | ConnectionState::WaitingForTor
+            | ConnectionState::Stopped => ProbeStatus::Offline,
+        };
+        for key in [ProbeKey::engine(), ProbeKey::relay()] {
+            self.probe_coordinator.ensure(key.clone(), now);
+            self.probe_coordinator
+                .record_result(&key, now, status, None, Duration::from_secs(10));
+        }
+        let onion_key = ProbeKey::onion_service();
+        self.probe_coordinator.ensure(onion_key.clone(), now);
+        self.probe_coordinator.record_result(
+            &onion_key,
+            now,
+            if self.local_peer_endpoint.is_some() {
+                ProbeStatus::Online
+            } else {
+                ProbeStatus::Offline
+            },
+            None,
+            Duration::from_secs(30),
+        );
         ConnectionSnapshot {
             state: self.connection_state.clone(),
             generation: self.connection_generation,

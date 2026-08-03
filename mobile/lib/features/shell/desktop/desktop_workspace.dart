@@ -1,13 +1,17 @@
 import 'package:flutter/material.dart';
 
 import '../../../app/app_theme.dart';
+import '../../../core/application_state/unread_summary.dart';
 import '../../../core/models/domain.dart';
+import '../../../core/presence/contact_presence_snapshot.dart';
+import '../../../core/presence/contact_presence_store.dart';
 import '../../../shared/widgets/contact_list_section.dart';
 import '../../../shared/widgets/conversation_list_section.dart';
 import '../../../shared/widgets/counter_badge.dart';
 import '../../../shared/widgets/feature_header.dart';
 import '../../../shared/widgets/identity_section.dart';
 import '../../../shared/widgets/info_tile.dart';
+import '../../../shared/widgets/identity_avatar.dart';
 import '../../../shared/widgets/section_card.dart';
 import 'resizable_split_pane.dart';
 
@@ -21,6 +25,7 @@ class DesktopWorkspace extends StatefulWidget {
     required this.selectedConversation,
     required this.selectedContact,
     required this.onlineContacts,
+    this.presenceStore,
     required this.content,
     required this.onTab,
     required this.onOpenConversation,
@@ -38,6 +43,7 @@ class DesktopWorkspace extends StatefulWidget {
   final String? selectedConversation;
   final ContactRecord? selectedContact;
   final Map<String, bool> onlineContacts;
+  final ContactPresenceStore? presenceStore;
   final Widget content;
   final ValueChanged<MobileTab> onTab;
   final ValueChanged<String> onOpenConversation;
@@ -52,123 +58,132 @@ class DesktopWorkspace extends StatefulWidget {
 }
 
 class _DesktopWorkspaceState extends State<DesktopWorkspace> {
+  late final ContactPresenceStore _presenceStore =
+      widget.presenceStore ?? ContactPresenceStore();
   // Keep the inspector visible for an active conversation by default.  It is
   // still user-toggleable from the header, but the desktop layout must expose
   // delivery/connection details without requiring a hidden discovery action.
   bool _inspectorOpen = true;
   bool _railExpanded = true;
 
-  int get _unreadTotal => widget.conversations.totalUnread;
+  int get _unreadContactCount =>
+      widget.conversations.unreadSummary.contactsWithUnread;
 
   @override
-  Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, constraints) {
-      final compactRail = constraints.maxWidth < 900 || !_railExpanded;
-      // Keep the details panel available on ordinary 1080p desktop windows;
-      // the previous 1320 px gate silently removed it on common laptop
-      // resolutions.  Below this width the conversation remains usable in a
-      // single-column layout and the header toggle can still be used when the
-      // window grows again.
-      final canShowInspector = constraints.maxWidth >= 1280;
-      final selected = widget.selectedContact;
-      final showInspector =
-          canShowInspector && _inspectorOpen && selected != null;
+  Widget build(BuildContext context) {
+    final presence = _presenceStore;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compactRail = constraints.maxWidth < 900 || !_railExpanded;
+        // Keep the details panel available on ordinary 1080p desktop windows;
+        // the previous 1320 px gate silently removed it on common laptop
+        // resolutions.  Below this width the conversation remains usable in a
+        // single-column layout and the header toggle can still be used when the
+        // window grows again.
+        final canShowInspector = constraints.maxWidth >= 1280;
+        final selected = widget.selectedContact;
+        final showInspector =
+            canShowInspector && _inspectorOpen && selected != null;
 
-      return Row(
-        children: [
-          SizedBox(
-            // The expanded rail needs enough room for the labels and their
-            // icons.  A 116 px rail looked fine at large sizes but clipped
-            // "Kontakty" and "Ustawienia" as soon as the workspace became
-            // narrower.  Compact mode remains icon-only for truly narrow
-            // windows.
-            width: compactRail ? 68 : 164,
-            child: _CompactNavigationRail(
-              compact: compactRail,
-              tab: widget.tab,
-              nickname: widget.nickname,
-              unreadTotal: _unreadTotal,
-              onTab: widget.onTab,
-              onAccount: widget.onAccount,
-              onSettings: widget.onSettings,
-              onToggle: () => setState(() => _railExpanded = !_railExpanded),
+        return Row(
+          children: [
+            SizedBox(
+              // The expanded rail needs enough room for the labels and their
+              // icons.  A 116 px rail looked fine at large sizes but clipped
+              // "Kontakty" and "Ustawienia" as soon as the workspace became
+              // narrower.  Compact mode remains icon-only for truly narrow
+              // windows.
+              width: compactRail ? 68 : 164,
+              child: _CompactNavigationRail(
+                compact: compactRail,
+                tab: widget.tab,
+                nickname: widget.nickname,
+                unreadContactCount: _unreadContactCount,
+                onTab: widget.onTab,
+                onAccount: widget.onAccount,
+                onSettings: widget.onSettings,
+                onToggle: () => setState(() => _railExpanded = !_railExpanded),
+              ),
             ),
-          ),
-          Expanded(
-            child: ResizableSplitPane(
-              sidebar: widget.tab == MobileTab.chats
-                  ? _ConversationSidebar(
-                      conversations: widget.conversations,
-                      contacts: widget.contacts,
-                      selectedConversation: widget.selectedConversation,
-                      onOpenConversation: widget.onOpenConversation,
-                    )
-                  : _ContactSidebar(
-                      contacts: widget.contacts,
-                      onlineContacts: widget.onlineContacts,
-                      onSelect: widget.onStartConversation,
-                    ),
-              content: Row(
-                children: [
-                  Expanded(
-                    child: Stack(
-                      children: [
-                        Positioned.fill(
-                          child: ColoredBox(
-                            color: Theme.of(context).scaffoldBackgroundColor,
-                            child: widget.tab == MobileTab.chats
-                                ? widget.content
-                                : Padding(
-                                    padding: const EdgeInsets.all(20),
-                                    child: widget.content,
-                                  ),
+            Expanded(
+              child: ResizableSplitPane(
+                sidebar: widget.tab == MobileTab.chats
+                    ? _ConversationSidebar(
+                        conversations: widget.conversations,
+                        contacts: widget.contacts,
+                        onlineContacts: widget.onlineContacts,
+                        selectedConversation: widget.selectedConversation,
+                        onOpenConversation: widget.onOpenConversation,
+                      )
+                    : _ContactSidebar(
+                        contacts: widget.contacts,
+                        onlineContacts: widget.onlineContacts,
+                        presenceStore: _presenceStore,
+                        onSelect: widget.onStartConversation,
+                      ),
+                content: Row(
+                  children: [
+                    Expanded(
+                      child: Stack(
+                        children: [
+                          Positioned.fill(
+                            child: ColoredBox(
+                              color: Theme.of(context).scaffoldBackgroundColor,
+                              child: widget.tab == MobileTab.chats
+                                  ? widget.content
+                                  : Padding(
+                                      padding: const EdgeInsets.all(20),
+                                      child: widget.content,
+                                    ),
+                            ),
                           ),
-                        ),
-                        if (selected != null && canShowInspector)
-                          Positioned(
-                            // Keep the inspector affordance out of the
-                            // conversation AppBar action row. It behaves as a
-                            // floating side tab below the 68 px header.
-                            top: 78,
-                            right: 12,
-                            child: Tooltip(
-                              message: showInspector
-                                  ? 'Ukryj szczegóły'
-                                  : 'Pokaż szczegóły',
-                              child: IconButton.filledTonal(
-                                onPressed: () => setState(
-                                  () => _inspectorOpen = !_inspectorOpen,
-                                ),
-                                icon: ThemedIcon(
-                                  showInspector
-                                      ? Icons.expand_less
-                                      : Icons.info_outline,
-                                  size: 18,
+                          if (selected != null && canShowInspector)
+                            Positioned(
+                              // Keep the inspector affordance out of the
+                              // conversation AppBar action row. It behaves as a
+                              // floating side tab below the 68 px header.
+                              top: 78,
+                              right: 12,
+                              child: Tooltip(
+                                message: showInspector
+                                    ? 'Ukryj szczegóły'
+                                    : 'Pokaż szczegóły',
+                                child: IconButton.filledTonal(
+                                  onPressed: () => setState(
+                                    () => _inspectorOpen = !_inspectorOpen,
+                                  ),
+                                  icon: ThemedIcon(
+                                    showInspector
+                                        ? Icons.expand_less
+                                        : Icons.info_outline,
+                                    size: 18,
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
-                      ],
-                    ),
-                  ),
-                  if (showInspector)
-                    SizedBox(
-                      width: 320,
-                      child: _ConversationInspector(
-                        contact: selected,
-                        onVerify: widget.onVerifyContact,
-                        onClose: () => setState(() => _inspectorOpen = false),
-                        onBack: widget.onBack,
+                        ],
                       ),
                     ),
-                ],
+                    if (showInspector)
+                      SizedBox(
+                        width: 320,
+                        child: _ConversationInspector(
+                          contact: selected,
+                          presence: presence.snapshot(selected.id),
+                          onVerify: widget.onVerifyContact,
+                          onClose: () => setState(() => _inspectorOpen = false),
+                          onBack: widget.onBack,
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ),
-          ),
-        ],
-      );
-    },
-  );
+          ],
+        );
+      },
+    );
+  }
 }
 
 class _CompactNavigationRail extends StatelessWidget {
@@ -176,7 +191,7 @@ class _CompactNavigationRail extends StatelessWidget {
     required this.compact,
     required this.tab,
     required this.nickname,
-    required this.unreadTotal,
+    required this.unreadContactCount,
     required this.onTab,
     required this.onAccount,
     required this.onSettings,
@@ -186,7 +201,7 @@ class _CompactNavigationRail extends StatelessWidget {
   final bool compact;
   final MobileTab tab;
   final String nickname;
-  final int unreadTotal;
+  final int unreadContactCount;
   final ValueChanged<MobileTab> onTab;
   final VoidCallback onAccount;
   final VoidCallback onSettings;
@@ -217,7 +232,7 @@ class _CompactNavigationRail extends StatelessWidget {
               selected: tab == MobileTab.chats,
               icon: Icons.chat_bubble_outline,
               label: 'Czaty',
-              badge: unreadTotal,
+              badge: unreadContactCount,
               onPressed: () => onTab(MobileTab.chats),
             ),
             _RailItem(
@@ -323,7 +338,12 @@ class _RailItem extends StatelessWidget {
                 ? MainAxisAlignment.center
                 : MainAxisAlignment.start,
             children: [
-              CounterBadge(count: badge, child: ThemedIcon(icon, size: 20)),
+              CounterBadge(
+                count: badge,
+                semanticLabel:
+                    '$badge kontaktów z nieprzeczytanymi wiadomościami',
+                child: ThemedIcon(icon, size: 20),
+              ),
               if (!compact) ...[
                 const SizedBox(width: 10),
                 Expanded(
@@ -347,12 +367,14 @@ class _ConversationSidebar extends StatefulWidget {
   const _ConversationSidebar({
     required this.conversations,
     required this.contacts,
+    required this.onlineContacts,
     required this.selectedConversation,
     required this.onOpenConversation,
   });
 
   final List<ConversationSummary> conversations;
   final List<ContactRecord> contacts;
+  final Map<String, bool> onlineContacts;
   final String? selectedConversation;
   final ValueChanged<String> onOpenConversation;
 
@@ -417,6 +439,7 @@ class _ConversationSidebarState extends State<_ConversationSidebar> {
               title: 'Czaty',
               conversations: _filtered,
               contacts: widget.contacts,
+              onlineContacts: widget.onlineContacts,
               selectedConversation: widget.selectedConversation,
               onOpenConversation: widget.onOpenConversation,
               asCard: false,
@@ -438,11 +461,13 @@ class _ContactSidebar extends StatefulWidget {
   const _ContactSidebar({
     required this.contacts,
     required this.onlineContacts,
+    required this.presenceStore,
     required this.onSelect,
   });
 
   final List<ContactRecord> contacts;
   final Map<String, bool> onlineContacts;
+  final ContactPresenceStore presenceStore;
   final ValueChanged<ContactRecord> onSelect;
 
   @override
@@ -534,7 +559,12 @@ class _ContactSidebarState extends State<_ContactSidebar> {
               showHeader: false,
               emptyMessage: 'Brak kontaktów dla wybranego filtra.',
               contactSubtitleBuilder: (contact) {
-                final online = widget.onlineContacts[contact.id] == true;
+                final availability = widget.presenceStore
+                    .snapshot(contact.id)
+                    .availability;
+                final online =
+                    availability == ContactAvailability.active ||
+                    availability == ContactAvailability.idle;
                 final route = switch (contact.transportPolicy) {
                   ContactTransportPolicy.relayOnly => 'Tor relay',
                   ContactTransportPolicy.peerWithRelayFallback =>
@@ -548,6 +578,18 @@ class _ContactSidebarState extends State<_ContactSidebar> {
               },
               contactTrailingBuilder: (contact) =>
                   const ThemedIcon(Icons.chevron_right, size: 18),
+              contactActivityBuilder: (contact) => switch (widget.presenceStore
+                  .snapshot(contact.id)
+                  .availability) {
+                ContactAvailability.active => ContactActivityVisualState.online,
+                ContactAvailability.idle => ContactActivityVisualState.away,
+                ContactAvailability.checking =>
+                  ContactActivityVisualState.typing,
+                ContactAvailability.offline =>
+                  ContactActivityVisualState.offline,
+                ContactAvailability.unknown =>
+                  ContactActivityVisualState.unknown,
+              },
             ),
           ),
         ],
@@ -579,12 +621,14 @@ class _FilterChip extends StatelessWidget {
 class _ConversationInspector extends StatelessWidget {
   const _ConversationInspector({
     required this.contact,
+    required this.presence,
     required this.onVerify,
     required this.onClose,
     required this.onBack,
   });
 
   final ContactRecord contact;
+  final ContactPresenceSnapshot presence;
   final ValueChanged<String> onVerify;
   final VoidCallback onClose;
   final VoidCallback onBack;
@@ -593,7 +637,7 @@ class _ConversationInspector extends StatelessWidget {
   Widget build(BuildContext context) {
     final shell = context.shellTheme;
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
       decoration: BoxDecoration(
         color: shell.surface,
         border: Border(
@@ -602,14 +646,25 @@ class _ConversationInspector extends StatelessWidget {
       ),
       child: ListView(
         children: [
-          Align(
-            alignment: Alignment.centerRight,
-            child: IconButton(
-              tooltip: 'Zamknij szczegóły',
-              onPressed: onClose,
-              icon: const ThemedIcon(Icons.close, size: 18),
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Szczegóły kontaktu',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+              SizedBox.square(
+                dimension: 40,
+                child: IconButton(
+                  tooltip: 'Zamknij szczegóły',
+                  onPressed: onClose,
+                  icon: const ThemedIcon(Icons.close, size: 19),
+                ),
+              ),
+            ],
           ),
+          const SizedBox(height: 12),
           IdentitySection(
             title: 'KONTAKT',
             name: contact.displayName,
@@ -627,9 +682,49 @@ class _ConversationInspector extends StatelessWidget {
             ),
           const SizedBox(height: 12),
           SectionCard(
+            title: 'OBECNOŚĆ',
+            child: Column(
+              children: [
+                InfoTile(
+                  title: 'Status',
+                  subtitle: _availabilityLabel(presence.availability),
+                ),
+                InfoTile(
+                  title: 'Ostatnio widziany',
+                  subtitle: _relativeTimestamp(
+                    presence.lastSeenAt?.toString(),
+                    empty: 'Brak danych',
+                  ),
+                ),
+                InfoTile(
+                  title: 'Obserwowany',
+                  subtitle: _relativeTimestamp(
+                    presence.observedAt?.toString(),
+                    empty: 'Brak danych',
+                  ),
+                ),
+                InfoTile(
+                  title: 'Fokus rozmowy',
+                  subtitle: presence.isViewingConversation ? 'Tak' : 'Nie',
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          SectionCard(
             title: 'POŁĄCZENIE',
             child: Column(
               children: [
+                InfoTile(
+                  title: 'Połączenie P2P',
+                  subtitle: _peerLinkLabel(presence.peerLink),
+                ),
+                InfoTile(
+                  title: 'Opóźnienie probe',
+                  subtitle: presence.latencyMs == null
+                      ? 'Brak danych'
+                      : '${presence.latencyMs} ms',
+                ),
                 InfoTile(
                   title: 'Trasa',
                   subtitle: _inspectorRouteLabel(contact),
@@ -643,11 +738,11 @@ class _ConversationInspector extends StatelessWidget {
                 ),
                 InfoTile(
                   title: 'Endpoint',
-                  subtitle: contact.peerEndpointStatus.name,
+                  subtitle: _endpointLabel(contact.peerEndpointStatus),
                 ),
                 InfoTile(
                   title: 'Polityka',
-                  subtitle: contact.transportPolicy.name,
+                  subtitle: _policyLabel(contact.transportPolicy),
                 ),
               ],
             ),
@@ -657,19 +752,23 @@ class _ConversationInspector extends StatelessWidget {
             title: 'INFORMACJE',
             child: Column(
               children: [
-                InfoTile(title: 'Installation ID', subtitle: contact.id),
+                InfoTile(
+                  title: 'Installation ID',
+                  subtitle: _compactIdentifier(contact.id),
+                ),
                 InfoTile(
                   title: 'Ostatnie P2P',
-                  subtitle:
-                      contact.lastPeerConnectedAt?.trim().isNotEmpty == true
-                      ? contact.lastPeerConnectedAt!
-                      : 'Brak zapisanej sesji',
+                  subtitle: _relativeTimestamp(
+                    contact.lastPeerConnectedAt,
+                    empty: 'Brak zapisanej sesji',
+                  ),
                 ),
                 InfoTile(
                   title: 'Ostatnio widziany',
-                  subtitle: contact.lastSeenAt?.trim().isNotEmpty == true
-                      ? contact.lastSeenAt!
-                      : 'Brak danych',
+                  subtitle: _relativeTimestamp(
+                    contact.lastSeenAt,
+                    empty: 'Brak danych',
+                  ),
                 ),
               ],
             ),
@@ -677,8 +776,8 @@ class _ConversationInspector extends StatelessWidget {
           const SizedBox(height: 14),
           OutlinedButton.icon(
             onPressed: onBack,
-            icon: const ThemedIcon(Icons.close_fullscreen, size: 17),
-            label: const Text('Zamknij rozmowę'),
+            icon: const ThemedIcon(Icons.arrow_back, size: 17),
+            label: const Text('Wróć do listy rozmów'),
           ),
         ],
       ),
@@ -691,7 +790,65 @@ String _inspectorRouteLabel(ContactRecord contact) =>
       ContactTransportPolicy.relayOnly => 'Przez Tor relay',
       ContactTransportPolicy.peerWithRelayFallback =>
         contact.peerConnectionStatus == PeerConnectionStatus.connected
-            ? 'Bezposrednio przez Tor P2P'
+            ? 'Bezpośrednio przez Tor P2P'
             : 'P2P / awaryjny relay',
       ContactTransportPolicy.peerOnly => 'Przez Tor P2P / oczekiwanie na peer',
     };
+
+String _availabilityLabel(ContactAvailability value) => switch (value) {
+  ContactAvailability.active => 'Aktywny w aplikacji',
+  ContactAvailability.idle => 'Bezczynny',
+  ContactAvailability.checking => 'Sprawdzanie',
+  ContactAvailability.offline => 'Offline',
+  ContactAvailability.unknown => 'Status nieznany',
+};
+
+String _peerLinkLabel(ContactPeerLink value) => switch (value) {
+  ContactPeerLink.connected => 'Connected',
+  ContactPeerLink.connecting => 'Connecting',
+  ContactPeerLink.authenticating => 'Authenticating',
+  ContactPeerLink.backoff => 'Backoff',
+  ContactPeerLink.offline => 'Offline',
+  ContactPeerLink.unknown => 'Unknown',
+};
+
+String _endpointLabel(PeerEndpointStatus status) => switch (status) {
+  PeerEndpointStatus.verified => 'Zweryfikowany',
+  PeerEndpointStatus.pendingExchange => 'Oczekuje na wymianę',
+  PeerEndpointStatus.missing => 'Niedostępny',
+  PeerEndpointStatus.invalid => 'Nieprawidłowy',
+};
+
+String _policyLabel(ContactTransportPolicy policy) => switch (policy) {
+  ContactTransportPolicy.peerOnly => 'Tylko P2P',
+  ContactTransportPolicy.peerWithRelayFallback => 'P2P + awaryjny relay',
+  ContactTransportPolicy.relayOnly => 'Tylko relay',
+};
+
+String _compactIdentifier(String value) {
+  final clean = value.trim();
+  if (clean.length <= 20) return clean;
+  return '${clean.substring(0, 10)}…${clean.substring(clean.length - 8)}';
+}
+
+String _relativeTimestamp(String? value, {required String empty}) {
+  final clean = value?.trim() ?? '';
+  if (clean.isEmpty) return empty;
+  final numeric = int.tryParse(clean);
+  DateTime? parsed;
+  if (numeric != null) {
+    final milliseconds = numeric < 100000000000 ? numeric * 1000 : numeric;
+    parsed = DateTime.fromMillisecondsSinceEpoch(milliseconds).toLocal();
+  } else {
+    parsed = DateTime.tryParse(clean)?.toLocal();
+  }
+  if (parsed == null) return clean;
+  final difference = DateTime.now().difference(parsed);
+  if (difference.isNegative || difference.inMinutes < 1) return 'przed chwilą';
+  if (difference.inMinutes < 60) return '${difference.inMinutes} min temu';
+  if (difference.inHours < 24) return '${difference.inHours} godz. temu';
+  if (difference.inDays < 7) return '${difference.inDays} dni temu';
+  final day = parsed.day.toString().padLeft(2, '0');
+  final month = parsed.month.toString().padLeft(2, '0');
+  return '$day.$month.${parsed.year}';
+}

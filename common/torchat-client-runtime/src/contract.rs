@@ -13,6 +13,7 @@ pub enum RuntimeType {
     MessageStateChanged,
     ConversationReadChanged,
     TypingChanged,
+    ConversationFocusChanged,
     PresenceChanged,
     PeerEndpointChanged,
     PeerConnectionChanged,
@@ -102,12 +103,23 @@ pub enum RuntimeEvent {
         #[serde(rename = "expiresAt")]
         expires_at: i64,
     },
+    ConversationFocusChanged {
+        #[serde(rename = "conversationId")]
+        conversation_id: String,
+        focused: bool,
+        #[serde(rename = "expiresAt")]
+        expires_at: i64,
+    },
     PresenceChanged {
         #[serde(rename = "contactId")]
         contact_id: String,
         online: bool,
+        #[serde(default)]
+        idle: bool,
         #[serde(rename = "observedAt")]
         observed_at: i64,
+        #[serde(rename = "expiresAt")]
+        expires_at: i64,
     },
     PeerEndpointChanged {
         #[serde(rename = "contactId")]

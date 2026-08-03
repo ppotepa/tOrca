@@ -8,6 +8,8 @@ import '../client_runtime.dart';
 import '../core/runtime/generated/runtime_contract.g.dart';
 import '../core/runtime/runtime_repository.dart';
 import '../core/startup/sequential_startup_orchestrator.dart';
+import '../core/presence/contact_probe_coordinator.dart';
+import '../core/presence/contact_presence_store.dart';
 import '../shared/formatters/operation_status.dart';
 import 'app_controller_base.dart' as base;
 
@@ -15,6 +17,9 @@ class SequentialAppController extends base.AppController {
   final SequentialStartupOrchestrator _startup =
       SequentialStartupOrchestrator();
   final Map<String, Timer> _typingExpiry = {};
+  late ContactPresenceStore contactPresence;
+  late final ContactProbeCoordinator _presenceCoordinator =
+      ContactProbeCoordinator(contactPresence);
 
   late ClientRuntime _runtime;
   late RuntimeRepository _repository;
@@ -36,9 +41,11 @@ class SequentialAppController extends base.AppController {
     final initial = super.build();
     _runtime = ref.read(base.clientRuntimeProvider);
     _repository = ref.read(base.runtimeRepositoryProvider);
+    contactPresence = ref.read(contactPresenceStoreProvider);
     ref.onDispose(() {
       _startup.cancel();
       _events?.cancel();
+      _presenceCoordinator.dispose();
       for (final timer in _typingExpiry.values) {
         timer.cancel();
       }
@@ -60,6 +67,8 @@ class SequentialAppController extends base.AppController {
     _initializeInFlight = run;
     return run;
   }
+
+  void reattachPresence() => _presenceCoordinator.reattach();
 
   Future<void> _runSequentialWarmup() async {
     _events ??= _repository.events.listen(
@@ -90,7 +99,6 @@ class SequentialAppController extends base.AppController {
       isLoading: true,
       action: OperationAction.connect,
       error: '',
-      notice: '',
       peerServerStatus: PeerServerStatus.starting,
     );
 
@@ -205,14 +213,10 @@ class SequentialAppController extends base.AppController {
           // Events can arrive while the readiness gate is warming. Preserve
           // the strongest requested refresh so an invite is not hidden until
           // the next app restart.
-          final needsPairing = _refreshAfterWarmup ||
-              _eventRefreshNeedsPairing;
+          final needsPairing = _refreshAfterWarmup || _eventRefreshNeedsPairing;
           _refreshAfterWarmup = false;
           unawaited(
-            refreshData(
-              forcePairing: needsPairing,
-              allowAutoTorka: false,
-            ),
+            refreshData(forcePairing: needsPairing, allowAutoTorka: true),
           );
         } else if (_refreshAfterWarmup) {
           _refreshAfterWarmup = false;
@@ -288,6 +292,13 @@ class SequentialAppController extends base.AppController {
   }
 
   void _handleSequentialEvent(RuntimeEvent event) {
+    for (final conversation in state.conversations) {
+      _presenceCoordinator.bindConversation(
+        conversation.id,
+        conversation.contactId,
+      );
+    }
+    _presenceCoordinator.accept(event);
     switch (event) {
       case RuntimeReadyEvent():
         _startup.observeRuntimeReady();
@@ -328,21 +339,12 @@ class SequentialAppController extends base.AppController {
       case DataChangedEvent(:final type, :final payload):
         if (type == EngineContract.typingChanged) {
           _applyTyping(payload);
+        } else if (type == EngineContract.conversationFocusChanged) {
+          _applyConversationFocus(payload);
         } else if (type == EngineContract.presenceChanged) {
           final contactId = payload[EngineContract.contactId]?.toString();
-          if (contactId != null && contactId.isNotEmpty) {
-            final observedAt = (payload[EngineContract.observedAt] as num?)
-                ?.toInt();
-            state = state.copyWith(
-              onlineContacts: {
-                ...state.onlineContacts,
-                contactId: payload[EngineContract.online] == true,
-              },
-              lastSeenContacts: observedAt == null
-                  ? null
-                  : {...state.lastSeenContacts, contactId: observedAt},
-            );
-          }
+          // Presence state is owned by ContactProbeCoordinator.
+          if (contactId == null || contactId.isEmpty) break;
         } else {
           if (type == EngineContract.projectionChanged) {
             final incomingRevision =
@@ -504,6 +506,12 @@ class SequentialAppController extends base.AppController {
         _typingExpiry.remove(conversationId);
       });
     }
+  }
+
+  void _applyConversationFocus(Map<String, dynamic> payload) {
+    final conversationId = payload[EngineContract.conversationId]?.toString();
+    if (conversationId == null || conversationId.isEmpty) return;
+    // Focus expiry is owned by ContactProbeCoordinator.
   }
 
   String _message(Object error) => error

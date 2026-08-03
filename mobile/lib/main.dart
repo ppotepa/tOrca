@@ -12,6 +12,7 @@ import 'app/conversation_navigation_intent.dart';
 import 'app/desktop_navigation_intent.dart';
 import 'app/desktop_notification_service.dart';
 import 'app/desktop_window_lifecycle.dart';
+import 'app/notifications/ui_notification_center.dart';
 import 'client_runtime.dart';
 import 'core/connection/app_state_connection.dart';
 import 'core/connection/connection_gate.dart';
@@ -24,6 +25,7 @@ import 'features/onboarding/nickname_onboarding_screen.dart';
 import 'features/onboarding/onboarding_views.dart';
 import 'features/shell/main_shell.dart';
 import 'features/chats/composer_draft.dart';
+import 'shared/widgets/toast_host.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -72,6 +74,8 @@ class _TorChatAppView extends ConsumerWidget {
         TorChatBrightnessMode.light => ThemeMode.light,
         TorChatBrightnessMode.dark => ThemeMode.dark,
       },
+      builder: (context, child) =>
+          ToastHost(child: child ?? const SizedBox.shrink()),
       home: const ControllerHomePage(),
     );
   }
@@ -180,6 +184,7 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
     final request = inbox.firstOrNullWhere(
       (item) =>
           item.received &&
+          item.origin == PairingOrigin.inbox &&
           item.can(PairingAvailableAction.accept) &&
           !_resolvedIncomingPairingIds.contains(item.id) &&
           !_scheduledIncomingPairingIds.contains(item.id),
@@ -246,7 +251,7 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
     if (!mounted || previous == null) return;
     final previousById = {for (final item in previous) item.id: item};
     for (final item in current) {
-      if (item.received) continue;
+      if (item.origin != PairingOrigin.outbox || item.received) continue;
       final old = previousById[item.id];
       if (old == null || old.status != InviteState.pending) continue;
 
@@ -260,13 +265,18 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
         _ => null,
       };
       if (message == null) continue;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        final messenger = ScaffoldMessenger.maybeOf(context);
-        messenger
-          ?..hideCurrentSnackBar()
-          ..showSnackBar(SnackBar(content: Text(message)));
-      });
+      final key = 'pairing:${item.id}:${item.status.name}';
+      final notifications = ref.read(uiNotificationCenterProvider.notifier);
+      switch (item.status) {
+        case InviteState.accepted || InviteState.completed:
+          notifications.showSuccess(message, deduplicationKey: key);
+        case InviteState.rejected || InviteState.expired:
+          notifications.showWarning(message, deduplicationKey: key);
+        case InviteState.cancelled:
+          notifications.showInfo(message, deduplicationKey: key);
+        default:
+          break;
+      }
     }
   }
 
@@ -286,6 +296,7 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     switch (state) {
       case AppLifecycleState.resumed:
+        ref.read(appControllerProvider.notifier).reattachPresence();
         _backgroundDebounce?.cancel();
         _backgroundDebounce = null;
         unawaited(
@@ -640,6 +651,13 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
     final contacts = snapshot?.contacts ?? const <ContactRecord>[];
     final conversations =
         snapshot?.conversations ?? const <ConversationSummary>[];
+    final pendingPairings = <String, PairingItem>{};
+    for (final item in [...state.inbox, ...state.outbox]) {
+      if (item.status == InviteState.pending ||
+          item.status == InviteState.accepted) {
+        pendingPairings[item.id] = item;
+      }
+    }
     final selectedContact = state.selectedContact(contacts, conversations);
     final shell = MainShell(
       tab: switch (state.destination) {
@@ -658,6 +676,7 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
       readiness: connection,
       transportStatuses: state.transportStatuses,
       contacts: contacts,
+      pendingPairings: pendingPairings.values.toList(growable: false),
       conversations: conversations,
       messages: messageSnapshot?.messages ?? const <ChatMessage>[],
       selectedConversation: state.selectedConversationId,
@@ -665,7 +684,6 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
       search: _search,
       composer: _composer,
       error: state.error,
-      notice: state.notice,
       action: state.action,
       onTab: (tab) => controller.selectDestination(switch (tab) {
         MobileTab.contacts => MainDestination.contacts,
@@ -678,6 +696,7 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
       onShowInvite: _showInvite,
       onSend: _sendMessage,
       onTypingChanged: controller.setTyping,
+      onConversationFocusChanged: controller.setConversationFocus,
       onRetryMessage: controller.retryMessage,
       onDeleteMessage: controller.deleteMessageLocal,
       onLoadOlderMessages: controller.loadOlderMessages,
@@ -688,8 +707,10 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
       onOpenSettings: _openSettings,
       onRetryTor: _showTransportStatus,
       typingContacts: state.typingContacts,
-      onlineContacts: state.onlineContacts,
-      lastSeenContacts: state.lastSeenContacts,
+      onlineContacts: const {},
+      idleContacts: const {},
+      focusedConversations: const {},
+      lastSeenContacts: const {},
       lastSeenEnabled: state.lastSeenEnabled,
     );
     if (defaultTargetPlatform == TargetPlatform.android) {

@@ -6,76 +6,10 @@ import '../../client_runtime.dart';
 import '../application_state/application_snapshot.dart';
 import '../application_state/application_state_store.dart';
 import 'message_paging.dart';
+import 'message_projection.dart';
+import 'runtime_repository_models.dart';
 
-int _compareMessages(ChatMessage left, ChatMessage right) {
-  final leftAt = DateTime.tryParse(left.createdAt)?.millisecondsSinceEpoch ?? 0;
-  final rightAt =
-      DateTime.tryParse(right.createdAt)?.millisecondsSinceEpoch ?? 0;
-  final time = leftAt.compareTo(rightAt);
-  return time != 0 ? time : left.id.compareTo(right.id);
-}
-
-final class RuntimeLocalSnapshot {
-  const RuntimeLocalSnapshot({
-    required this.contacts,
-    required this.conversations,
-    required this.peerEndpointAvailable,
-    required this.generation,
-  });
-
-  final List<ContactRecord> contacts;
-  final List<ConversationSummary> conversations;
-  final bool peerEndpointAvailable;
-  final int generation;
-}
-
-final class RuntimePairingSnapshot {
-  const RuntimePairingSnapshot({
-    required this.inbox,
-    required this.outbox,
-    required this.generation,
-  });
-
-  final List<PairingItem> inbox;
-  final List<PairingItem> outbox;
-  final int generation;
-}
-
-final class RuntimeRefreshSnapshot {
-  const RuntimeRefreshSnapshot({
-    required this.application,
-    required this.local,
-    this.pairing,
-  });
-
-  final ApplicationSnapshot application;
-  final RuntimeLocalSnapshot local;
-  final RuntimePairingSnapshot? pairing;
-}
-
-final class ActivatedConversation {
-  const ActivatedConversation({
-    required this.conversation,
-    required this.messages,
-  });
-
-  final ConversationSummary conversation;
-  final List<ChatMessage> messages;
-}
-
-enum ConversationMessagesPhase { idle, loading, ready, failed }
-
-final class ConversationMessagesLoadState {
-  const ConversationMessagesLoadState({
-    required this.conversationId,
-    required this.phase,
-    this.error = '',
-  });
-
-  final String conversationId;
-  final ConversationMessagesPhase phase;
-  final String error;
-}
+export 'runtime_repository_models.dart';
 
 class RuntimeRepository {
   RuntimeRepository(this._runtime);
@@ -116,6 +50,13 @@ class RuntimeRepository {
   final Set<String> _messageTrailingRefreshRequested = <String>{};
   final Map<String, bool> _lastTyping = {};
   bool? _lastPresence;
+
+  Future<void> dispose() async {
+    await _messageLoadController.close();
+    if (_runtime case final RuntimeDisposable runtime) {
+      await runtime.disposeRuntime();
+    }
+  }
 
   // Runtime events have exactly one consumer-side coordinator. Cache
   // invalidation and projection refresh are owned by SequentialAppController;
@@ -200,7 +141,7 @@ class RuntimeRepository {
         .where((message) => knownIds.add(message.id))
         .toList(growable: false);
     if (added.isEmpty) return 0;
-    final merged = <ChatMessage>[...added, ...current]..sort(_compareMessages);
+    final merged = <ChatMessage>[...added, ...current]..sort(compareMessages);
     applicationState.mergeMessages(conversationId, merged);
     _messageCache[conversationId] = List<ChatMessage>.unmodifiable(merged);
     return added.length;
@@ -839,6 +780,21 @@ class RuntimeRepository {
         _lastTyping.remove(conversationId);
       }
       rethrow;
+    }
+  }
+
+  Future<void> setConversationFocus(String conversationId, bool focused) async {
+    try {
+      await (_runtime as dynamic).setConversationFocus(conversationId, focused);
+      if (focused && conversationId.isNotEmpty) {
+        // Marking the conversation attended is the read boundary. Send the
+        // receipt only after focus was accepted by the runtime so a transient
+        // navigation/engine failure cannot advertise a read that did not
+        // happen locally.
+        await _runtime.sendReadReceipts(conversationId);
+      }
+    } catch (_) {
+      // Focus is transient. The heartbeat will repair a dropped update.
     }
   }
 

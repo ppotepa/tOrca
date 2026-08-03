@@ -51,10 +51,7 @@ class AppState {
     this.isLoading = false,
     this.action = '',
     this.error = '',
-    this.notice = '',
     this.typingContacts = const {},
-    this.onlineContacts = const {},
-    this.lastSeenContacts = const {},
     this.lastSeenEnabled = true,
     this.applicationSnapshot,
     this.pairingInboxItems = const [],
@@ -91,10 +88,7 @@ class AppState {
   final bool isLoading;
   final String action;
   final String error;
-  final String notice;
   final Map<String, bool> typingContacts;
-  final Map<String, bool> onlineContacts;
-  final Map<String, int> lastSeenContacts;
   final bool lastSeenEnabled;
 
   int get activeInviteCount => inbox.pendingCount;
@@ -140,10 +134,7 @@ class AppState {
     bool? isLoading,
     String? action,
     String? error,
-    String? notice,
     Map<String, bool>? typingContacts,
-    Map<String, bool>? onlineContacts,
-    Map<String, int>? lastSeenContacts,
     bool? lastSeenEnabled,
     ApplicationSnapshot? applicationSnapshot,
     List<PairingItem>? pairingInboxItems,
@@ -162,10 +153,7 @@ class AppState {
     isLoading: isLoading ?? this.isLoading,
     action: action ?? this.action,
     error: error ?? this.error,
-    notice: notice ?? this.notice,
     typingContacts: typingContacts ?? this.typingContacts,
-    onlineContacts: onlineContacts ?? this.onlineContacts,
-    lastSeenContacts: lastSeenContacts ?? this.lastSeenContacts,
     lastSeenEnabled: lastSeenEnabled ?? this.lastSeenEnabled,
     applicationSnapshot: applicationSnapshot ?? this.applicationSnapshot,
     pairingInboxItems: pairingInboxItems ?? this.pairingInboxItems,
@@ -186,6 +174,7 @@ abstract class AppController extends Notifier<AppState> {
     _repository = ref.watch(runtimeRepositoryProvider);
     ref.onDispose(() {
       _torkaWatchdog?.cancel();
+      unawaited(_repository.dispose());
     });
     return const AppState();
   }
@@ -242,15 +231,12 @@ abstract class AppController extends Notifier<AppState> {
   }
 
   Future<void> retryTor() async {
-    state = state.copyWith(
-      error: '',
-      notice: 'Ponawianie połączenia transportowego…',
-    );
+    state = state.copyWith(error: '');
     try {
       await _repository.connect();
       await _repository.refresh(includePairing: true, bypassCooldown: true);
     } catch (error) {
-      state = state.copyWith(error: _message(error), notice: '');
+      state = state.copyWith(error: _message(error));
     }
   }
 
@@ -310,14 +296,12 @@ abstract class AppController extends Notifier<AppState> {
       destination: MainDestination.chats,
       action: OperationAction.startConversation,
       error: '',
-      notice: 'Oczekiwanie na handshake MLS…',
     );
     try {
       final activated = await _repository.activateConversation(contact.id);
       state = state.copyWith(
         selectedConversationId: activated.conversation.id,
         action: '',
-        notice: '',
       );
     } catch (error) {
       state = state.copyWith(action: '', error: _message(error));
@@ -339,7 +323,7 @@ abstract class AppController extends Notifier<AppState> {
         text.trim(),
         replyToMessageId: replyToMessageId,
       );
-      state = state.copyWith(action: '', notice: '');
+      state = state.copyWith(action: '');
     } catch (error) {
       state = state.copyWith(action: '', error: _message(error));
     }
@@ -384,8 +368,21 @@ abstract class AppController extends Notifier<AppState> {
     }
   }
 
+  Future<void> setConversationFocus(String conversationId, bool focused) =>
+      _repository.setConversationFocus(conversationId, focused);
+
   Future<void> updateVisibility(bool foreground) async {
+    final conversationId = state.selectedConversationId;
+    if (!foreground && conversationId != null) {
+      await _repository.setConversationFocus(conversationId, false);
+    }
     await _repository.updateAppVisibility(foreground);
+    if (foreground && conversationId != null) {
+      // The chat widget can remain mounted while Android/Windows backgrounds
+      // the application. Reassert local attention immediately on resume
+      // instead of waiting for the next focus heartbeat.
+      await _repository.setConversationFocus(conversationId, true);
+    }
     try {
       final preferences = await SharedPreferences.getInstance();
       final enabled = preferences.getBool('torchat.privacy.presence') ?? true;
@@ -400,14 +397,12 @@ abstract class AppController extends Notifier<AppState> {
     if (!state.transport.connected) {
       state = state.copyWith(
         error: 'Poczekaj na zielony pasek połączenia Tor.',
-        notice: '',
       );
       return;
     }
     if (state.profile.nickname.trim().length < 2) {
       state = state.copyWith(
         error: 'Najpierw ustaw nazwę użytkownika na tym urządzeniu.',
-        notice: '',
       );
       return;
     }
@@ -416,11 +411,7 @@ abstract class AppController extends Notifier<AppState> {
       state = state.copyWith(error: 'Kod musi zawierać dokładnie 8 cyfr.');
       return;
     }
-    state = state.copyWith(
-      action: OperationAction.submitPairing,
-      error: '',
-      notice: '',
-    );
+    state = state.copyWith(action: OperationAction.submitPairing, error: '');
     try {
       await _cancelBlockingTorkaOutboxIfNeeded(normalizedCode);
       final item = await _repository.submitPairingCode(normalizedCode);
@@ -431,10 +422,7 @@ abstract class AppController extends Notifier<AppState> {
       // Publish the concrete outbox returned by the refresh to AppState;
       // refreshing the repository alone leaves the UI with the old list.
       await refreshData(forcePairing: true, allowAutoTorka: false);
-      state = state.copyWith(
-        action: '',
-        notice: 'Zaproszenie wysłane. Oczekuje na akceptację.',
-      );
+      state = state.copyWith(action: '');
     } catch (error) {
       state = state.copyWith(action: '', error: _message(error));
     }
@@ -442,29 +430,19 @@ abstract class AppController extends Notifier<AppState> {
 
   Future<InviteCode?> refreshInviteCode() async {
     try {
-      state = state.copyWith(
-        action: OperationAction.refreshPairing,
-        error: '',
-        notice: 'Pobieranie kodu z relaya…',
-      );
+      state = state.copyWith(action: OperationAction.refreshPairing, error: '');
       final code = await _repository.refreshInviteCode();
       if (code != null) {
-        state = state.copyWith(
-          ownInvite: code,
-          action: '',
-          error: '',
-          notice: '',
-        );
+        state = state.copyWith(ownInvite: code, action: '', error: '');
       } else {
         state = state.copyWith(
           action: '',
-          notice: '',
           error: 'Relay nie zwrócił kodu zaproszenia. Spróbuj ponownie.',
         );
       }
       return code;
     } catch (error) {
-      state = state.copyWith(action: '', notice: '', error: _message(error));
+      state = state.copyWith(action: '', error: _message(error));
       return null;
     }
   }
@@ -527,11 +505,11 @@ abstract class AppController extends Notifier<AppState> {
     String action,
     Future<void> Function() operation,
   ) async {
-    state = state.copyWith(action: action, error: '', notice: '');
+    state = state.copyWith(action: action, error: '');
     try {
       await operation();
       await refreshData();
-      state = state.copyWith(action: '', notice: 'Gotowe.');
+      state = state.copyWith(action: '');
     } catch (error) {
       state = state.copyWith(action: '', error: _message(error));
     }
@@ -703,9 +681,7 @@ abstract class AppController extends Notifier<AppState> {
       if (!message.contains('zaproszenie do tego kontaktu już oczekuje') &&
           !message.contains('inne zaproszenie nadal oczekuje') &&
           !message.contains('kod parowania jest nieprawidłowy')) {
-        state = state.copyWith(
-          notice: 'Torka pairing deferred: ${_message(error)}',
-        );
+        debugPrint('Torka pairing deferred: ${_message(error)}');
       }
     } finally {
       _torkaPairingInFlight = false;
@@ -779,9 +755,8 @@ abstract class AppController extends Notifier<AppState> {
     _torkaWatchdogAttempts += 1;
     if (_torkaWatchdogAttempts > _torkaWatchdogMaxAttempts) {
       _stopTorkaWatchdog();
-      state = state.copyWith(
-        notice:
-            'Torka pairing timeout: kontakt nie potwierdził się jeszcze w runtime.',
+      debugPrint(
+        'Torka pairing timeout: kontakt nie potwierdził się jeszcze w runtime.',
       );
       return;
     }

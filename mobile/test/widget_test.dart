@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:torchat_mobile/client_runtime.dart';
-import 'package:torchat_mobile/core/application_state/application_snapshot_codec.dart';
+import 'package:torchat_mobile/core/application_state/application_snapshot.dart';
 import 'package:torchat_mobile/core/application_state/application_state_store.dart';
 import 'package:torchat_mobile/main.dart';
 
@@ -189,7 +189,19 @@ class _AttachedRuntime extends _SplashRuntime
       ],
       'peerEndpointAvailable': true,
     };
-    hydrateApplicationSnapshotMap(snapshot);
+    ApplicationStateStore.shared.hydrate(
+      const ApplicationSnapshot(
+        generation: 10,
+        createdAtMs: 10,
+        identity: identityValue,
+        profile: profileValue,
+        contacts: [contactValue],
+        conversations: [conversationValue],
+        pendingInbox: 0,
+        pendingOutbox: 0,
+        peerEndpointAvailable: true,
+      ),
+    );
     return snapshot;
   }
 

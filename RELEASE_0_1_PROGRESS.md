@@ -4,6 +4,9 @@ This is the single maintained tracker for finalizing TorChat 0.1. It records
 implemented work, remaining work, verification and release blockers. Do not
 create parallel status documents.
 
+The post-stabilization structural modularization is tracked separately in
+`REFACTOR_PROGRESS.md`; release correctness remains authoritative here.
+
 ## Current completion
 
 **Code cleanup: 100% | Manual release validation: pending**

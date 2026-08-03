@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/notifications/ui_notification_center.dart';
 import '../../core/models/domain.dart';
 import 'empty_state.dart';
 import 'feature_header.dart';
+import 'identity_avatar.dart';
 import 'list_items.dart';
 
-class ContactListSection extends StatelessWidget {
+class ContactListSection extends ConsumerWidget {
   const ContactListSection({
     super.key,
     required this.title,
@@ -21,6 +24,7 @@ class ContactListSection extends StatelessWidget {
     this.onDetails,
     this.onToggleMute,
     this.onRemove,
+    this.contactActivityBuilder,
   });
 
   final String title;
@@ -35,9 +39,11 @@ class ContactListSection extends StatelessWidget {
   final ValueChanged<ContactRecord>? onDetails;
   final Future<void> Function(ContactRecord contact)? onToggleMute;
   final Future<void> Function(ContactRecord contact)? onRemove;
+  final ContactActivityVisualState Function(ContactRecord contact)?
+  contactActivityBuilder;
 
   @override
-  Widget build(BuildContext context) => Column(
+  Widget build(BuildContext context, WidgetRef ref) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
       if (showHeader) ...[
@@ -61,11 +67,13 @@ class ContactListSection extends StatelessWidget {
                       behavior: HitTestBehavior.opaque,
                       onLongPressStart: (details) => _showContextMenu(
                         context,
+                        ref,
                         contact,
                         details.globalPosition,
                       ),
                       onSecondaryTapDown: (details) => _showContextMenu(
                         context,
+                        ref,
                         contact,
                         details.globalPosition,
                       ),
@@ -74,6 +82,9 @@ class ContactListSection extends StatelessWidget {
                         onTap: onSelect,
                         subtitle: contactSubtitleBuilder?.call(contact),
                         trailing: contactTrailingBuilder?.call(contact),
+                        activity:
+                            contactActivityBuilder?.call(contact) ??
+                            ContactActivityVisualState.unknown,
                         asCard: asCard,
                       ),
                     ),
@@ -86,6 +97,7 @@ class ContactListSection extends StatelessWidget {
 
   Future<void> _showContextMenu(
     BuildContext context,
+    WidgetRef ref,
     ContactRecord contact,
     Offset position,
   ) async {
@@ -136,9 +148,12 @@ class ContactListSection extends StatelessWidget {
       case 'copy':
         await Clipboard.setData(ClipboardData(text: contact.fingerprint));
         if (context.mounted) {
-          ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-            const SnackBar(content: Text('Fingerprint skopiowany.')),
-          );
+          ref
+              .read(uiNotificationCenterProvider.notifier)
+              .showSuccess(
+                'Fingerprint skopiowany.',
+                deduplicationKey: 'fingerprint-copied:${contact.id}',
+              );
         }
         return;
       case 'remove':

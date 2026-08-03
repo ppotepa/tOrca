@@ -12,7 +12,6 @@ import 'ui_operation_registry.dart';
 class PairingRecoveryAppController extends SequentialAppController {
   static const _watchdogInterval = Duration(seconds: 20);
   static const _minimumSyncInterval = Duration(seconds: 3);
-  static const _pairingNoticePrefix = 'Oczekujące zaproszenia:';
 
   Timer? _pairingWatchdog;
   Future<void>? _pairingSyncInFlight;
@@ -61,7 +60,6 @@ class PairingRecoveryAppController extends SequentialAppController {
       allowAutoTorka: allowAutoTorka,
     );
     if (effectiveForcePairing) _lastPairingSync = DateTime.now();
-    _updatePairingNotice();
   }
 
   @override
@@ -321,6 +319,7 @@ class PairingRecoveryAppController extends SequentialAppController {
     try {
       await refreshData(forcePairing: true, allowAutoTorka: false);
       _lastPairingSync = DateTime.now();
+      await _retryWelcomeProjectionIfNeeded(knownContactIds);
       final newContact = state.contacts.cast<ContactRecord?>().firstWhere(
         (contact) => contact != null && !knownContactIds.contains(contact.id),
         orElse: () => null,
@@ -329,6 +328,40 @@ class PairingRecoveryAppController extends SequentialAppController {
     } catch (_) {
       // Connection recovery and the watchdog will retry. A transport outage is
       // not a global user-facing pairing error.
+    }
+  }
+
+  /// Pairing acceptance and MLS Welcome are separate durable operations. The
+  /// acceptance response can therefore arrive before the Welcome consumer
+  /// commits the contact. A short, bounded trailing refresh makes the contact
+  /// list converge without forcing the user to restart or navigate away.
+  Future<void> _retryWelcomeProjectionIfNeeded(
+    Set<String> knownContactIds,
+  ) async {
+    final hasAcceptedPairing = <PairingItem>[...state.inbox, ...state.outbox]
+        .any(
+          (item) =>
+              item.status == InviteState.accepted ||
+              item.status == InviteState.completed,
+        );
+    if (!hasAcceptedPairing ||
+        state.contacts.any(
+          (contact) => !knownContactIds.contains(contact.id),
+        )) {
+      return;
+    }
+    for (final delay in const [
+      Duration(milliseconds: 250),
+      Duration(milliseconds: 750),
+      Duration(milliseconds: 1500),
+    ]) {
+      await Future<void>.delayed(delay);
+      await refreshData(forcePairing: true, allowAutoTorka: false);
+      if (state.contacts.any(
+        (contact) => !knownContactIds.contains(contact.id),
+      )) {
+        return;
+      }
     }
   }
 
@@ -377,24 +410,5 @@ class PairingRecoveryAppController extends SequentialAppController {
     await onPairingContactActivated(contact);
     _lastAutoOpenedContactId = openContactId;
     await super.openOrStartConversation(contact);
-  }
-
-  void _updatePairingNotice() {
-    final pending = state.inbox
-        .where((item) => item.status == InviteState.pending)
-        .length;
-    final current = state.notice;
-    if (pending > 0) {
-      final suffix = pending == 1
-          ? '1 nowe zaproszenie.'
-          : '$pending nowe zaproszenia.';
-      final notice = '$_pairingNoticePrefix $suffix';
-      if (current != notice &&
-          (current.isEmpty || current.startsWith(_pairingNoticePrefix))) {
-        state = state.copyWith(notice: notice);
-      }
-    } else if (current.startsWith(_pairingNoticePrefix)) {
-      state = state.copyWith(notice: '');
-    }
   }
 }

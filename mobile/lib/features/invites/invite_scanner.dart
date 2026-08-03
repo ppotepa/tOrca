@@ -121,6 +121,13 @@ class _ManualInviteCodePageState extends ConsumerState<ManualInviteCodePage> {
       setState(() => _error = 'Kod musi zawierać dokładnie 8 cyfr.');
       return;
     }
+    // Do not start a desktop sidecar request while the transport is still
+    // offline. The page can be opened from a cold shell; report the state
+    // locally and let the startup coordinator retry once relay is ready.
+    if (!ref.read(appControllerProvider).transport.connected) {
+      setState(() => _error = 'Poczekaj na gotowe połączenie Tor/relay.');
+      return;
+    }
     setState(() => _error = '');
     await ref.read(appControllerProvider.notifier).submitPairingCode(code);
     if (!mounted) return;

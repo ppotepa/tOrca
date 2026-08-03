@@ -155,6 +155,10 @@ pub enum EngineCommand {
         conversation_id: String,
         typing: bool,
     },
+    SetConversationFocus {
+        conversation_id: String,
+        focused: bool,
+    },
     SetPresence {
         online: bool,
     },
@@ -165,29 +169,6 @@ pub enum EngineCommand {
         fact: PlatformFact,
     },
     Shutdown,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum EngineQuery {
-    GetIdentity,
-    GetProfile,
-    GetStartupReadiness,
-    GetPairingInbox,
-    GetPairingOutbox,
-    ListContacts,
-    ListConversations,
-    ListMessages { conversation_id: String },
-    GetPeerEndpoint,
-    GetApplicationSnapshot,
-    GetDiagnostics,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", content = "request", rename_all = "snake_case")]
-pub enum EngineRequest {
-    Command(EngineCommand),
-    Query(EngineQuery),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

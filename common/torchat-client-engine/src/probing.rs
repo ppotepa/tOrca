@@ -7,6 +7,8 @@
 
 use std::collections::HashMap;
 
+use sha2::{Digest, Sha256};
+use tokio::sync::watch;
 use tokio::time::{Duration, Instant};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -15,12 +17,24 @@ pub enum ProbeKind {
     Relay,
     OnionService,
     ContactPeer,
+    ContactPresence,
+    ContactFocus,
+    PeerEndpoint,
+    Capability,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct ProbeKey {
     pub kind: ProbeKind,
     pub target_id: Option<String>,
+}
+
+pub fn pseudonymous_target_id(target_id: &str) -> String {
+    let digest = Sha256::digest(target_id.as_bytes());
+    digest[..6]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 /// Adapter implemented by a concrete probe (contact, relay, onion service or
@@ -57,11 +71,40 @@ impl Probe for ContactProbe {
 }
 
 impl ProbeKey {
+    pub fn new(kind: ProbeKind, target_id: Option<String>) -> Self {
+        Self { kind, target_id }
+    }
+
     pub fn contact(contact_id: impl Into<String>) -> Self {
-        Self {
-            kind: ProbeKind::ContactPeer,
-            target_id: Some(contact_id.into()),
-        }
+        Self::new(ProbeKind::ContactPeer, Some(contact_id.into()))
+    }
+
+    pub fn contact_presence(contact_id: impl Into<String>) -> Self {
+        Self::new(ProbeKind::ContactPresence, Some(contact_id.into()))
+    }
+
+    pub fn contact_focus(contact_id: impl Into<String>) -> Self {
+        Self::new(ProbeKind::ContactFocus, Some(contact_id.into()))
+    }
+
+    pub fn peer_endpoint(contact_id: impl Into<String>) -> Self {
+        Self::new(ProbeKind::PeerEndpoint, Some(contact_id.into()))
+    }
+
+    pub fn capability(contact_id: impl Into<String>) -> Self {
+        Self::new(ProbeKind::Capability, Some(contact_id.into()))
+    }
+
+    pub fn engine() -> Self {
+        Self::new(ProbeKind::Engine, None)
+    }
+
+    pub fn relay() -> Self {
+        Self::new(ProbeKind::Relay, None)
+    }
+
+    pub fn onion_service() -> Self {
+        Self::new(ProbeKind::OnionService, None)
     }
 }
 
@@ -82,6 +125,8 @@ pub struct ProbeState {
     pub next_check_at: Instant,
     pub consecutive_failures: u32,
     pub latency: Option<Duration>,
+    pub revision: u64,
+    pub in_flight_until: Option<Instant>,
 }
 
 impl ProbeState {
@@ -92,7 +137,52 @@ impl ProbeState {
             next_check_at: now,
             consecutive_failures: 0,
             latency: None,
+            revision: 0,
+            in_flight_until: None,
         }
+    }
+
+    fn snapshot(&self, key: &ProbeKey) -> ProbeSnapshot {
+        ProbeSnapshot {
+            key: key.clone(),
+            status: self.status,
+            last_checked_at: self.last_checked_at,
+            next_check_at: self.next_check_at,
+            consecutive_failures: self.consecutive_failures,
+            latency: self.latency,
+            revision: self.revision,
+            in_flight_until: self.in_flight_until,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProbeSnapshot {
+    pub key: ProbeKey,
+    pub status: ProbeStatus,
+    pub last_checked_at: Option<Instant>,
+    pub next_check_at: Instant,
+    pub consecutive_failures: u32,
+    pub latency: Option<Duration>,
+    pub revision: u64,
+    pub in_flight_until: Option<Instant>,
+}
+
+#[derive(Debug)]
+struct ProbeEntry {
+    state: ProbeState,
+    snapshot_tx: watch::Sender<ProbeSnapshot>,
+}
+
+impl ProbeEntry {
+    fn new(key: &ProbeKey, now: Instant) -> Self {
+        let state = ProbeState::new(now);
+        let (snapshot_tx, _) = watch::channel(state.snapshot(key));
+        Self { state, snapshot_tx }
+    }
+
+    fn publish(&self, key: &ProbeKey) {
+        self.snapshot_tx.send_replace(self.state.snapshot(key));
     }
 }
 
@@ -102,33 +192,46 @@ impl ProbeState {
 /// records the result, so every transport can use the same backoff semantics.
 #[derive(Debug)]
 pub struct ProbeCoordinator {
-    states: HashMap<ProbeKey, ProbeState>,
+    entries: HashMap<ProbeKey, ProbeEntry>,
     next_round_at: Instant,
 }
 
 impl ProbeCoordinator {
     pub fn new(now: Instant) -> Self {
         Self {
-            states: HashMap::new(),
+            entries: HashMap::new(),
             next_round_at: now,
         }
     }
 
     pub fn ensure(&mut self, key: ProbeKey, now: Instant) {
-        self.states
-            .entry(key)
-            .or_insert_with(|| ProbeState::new(now));
+        self.entries
+            .entry(key.clone())
+            .or_insert_with(|| ProbeEntry::new(&key, now));
     }
 
     pub fn remove(&mut self, key: &ProbeKey) {
-        self.states.remove(key);
+        self.entries.remove(key);
     }
 
     pub fn request_now(&mut self, key: ProbeKey, now: Instant) {
         self.ensure(key.clone(), now);
-        if let Some(state) = self.states.get_mut(&key) {
-            state.next_check_at = now;
+        if let Some(entry) = self.entries.get_mut(&key) {
+            entry.state.next_check_at = now;
+            entry.state.revision = entry.state.revision.saturating_add(1);
+            entry.publish(&key);
         }
+    }
+
+    /// Returns a retained stream for one probe. New subscribers immediately
+    /// receive the latest snapshot and never trigger duplicate network work.
+    pub fn subscribe(&mut self, key: ProbeKey, now: Instant) -> watch::Receiver<ProbeSnapshot> {
+        self.ensure(key.clone(), now);
+        self.entries
+            .get(&key)
+            .expect("probe entry exists after ensure")
+            .snapshot_tx
+            .subscribe()
     }
 
     pub fn next_round_at(&self) -> Instant {
@@ -142,13 +245,25 @@ impl ProbeCoordinator {
     /// Returns due probes and marks them as in progress.  A second caller
     /// cannot receive the same probe until `record_result` is called.
     pub fn begin_due(&mut self, now: Instant) -> Vec<ProbeKey> {
-        self.states
+        self.begin_due_with_timeout(now, Duration::from_secs(30))
+    }
+
+    pub fn begin_due_with_timeout(&mut self, now: Instant, timeout: Duration) -> Vec<ProbeKey> {
+        self.entries
             .iter_mut()
-            .filter_map(|(key, state)| {
-                if state.next_check_at > now || state.status == ProbeStatus::Checking {
+            .filter_map(|(key, entry)| {
+                let actively_checking = entry.state.status == ProbeStatus::Checking
+                    && entry
+                        .state
+                        .in_flight_until
+                        .is_some_and(|deadline| deadline > now);
+                if entry.state.next_check_at > now || actively_checking {
                     return None;
                 }
-                state.status = ProbeStatus::Checking;
+                entry.state.status = ProbeStatus::Checking;
+                entry.state.in_flight_until = Some(now + timeout);
+                entry.state.revision = entry.state.revision.saturating_add(1);
+                entry.publish(key);
                 Some(key.clone())
             })
             .collect()
@@ -162,12 +277,14 @@ impl ProbeCoordinator {
         latency: Option<Duration>,
         base_interval: Duration,
     ) {
-        let Some(state) = self.states.get_mut(key) else {
+        let Some(entry) = self.entries.get_mut(key) else {
             return;
         };
+        let state = &mut entry.state;
         state.status = status;
         state.last_checked_at = Some(now);
         state.latency = latency;
+        state.in_flight_until = None;
         if matches!(status, ProbeStatus::Online | ProbeStatus::Degraded) {
             state.consecutive_failures = 0;
         } else if matches!(status, ProbeStatus::Offline) {
@@ -176,10 +293,12 @@ impl ProbeCoordinator {
         let exponent = state.consecutive_failures.min(4);
         let multiplier = 1u32 << exponent;
         state.next_check_at = now + base_interval.saturating_mul(multiplier);
+        state.revision = state.revision.saturating_add(1);
+        entry.publish(key);
     }
 
     pub fn state(&self, key: &ProbeKey) -> Option<&ProbeState> {
-        self.states.get(key)
+        self.entries.get(key).map(|entry| &entry.state)
     }
 }
 
@@ -246,5 +365,69 @@ mod tests {
             Duration::from_secs(10),
         );
         assert_eq!(coordinator.state(&key).unwrap().consecutive_failures, 0);
+    }
+
+    #[test]
+    fn subscribers_share_one_retained_probe_snapshot() {
+        let now = Instant::now();
+        let key = ProbeKey::contact("peer-a");
+        let mut coordinator = ProbeCoordinator::new(now);
+        let mut list = coordinator.subscribe(key.clone(), now);
+        let mut header = coordinator.subscribe(key.clone(), now);
+
+        assert_eq!(list.borrow().status, ProbeStatus::Unknown);
+        assert_eq!(header.borrow().revision, 0);
+        assert_eq!(coordinator.begin_due(now), vec![key.clone()]);
+        assert!(list.has_changed().unwrap());
+        assert!(header.has_changed().unwrap());
+        assert_eq!(list.borrow_and_update().status, ProbeStatus::Checking);
+        assert_eq!(header.borrow_and_update().status, ProbeStatus::Checking);
+
+        coordinator.record_result(
+            &key,
+            now,
+            ProbeStatus::Online,
+            Some(Duration::from_millis(7)),
+            Duration::from_secs(30),
+        );
+        assert!(list.has_changed().unwrap());
+        assert!(header.has_changed().unwrap());
+        assert_eq!(list.borrow().latency, Some(Duration::from_millis(7)));
+        assert_eq!(header.borrow().status, ProbeStatus::Online);
+    }
+
+    #[test]
+    fn removing_probe_closes_its_subscriptions() {
+        let now = Instant::now();
+        let key = ProbeKey::contact("peer-a");
+        let mut coordinator = ProbeCoordinator::new(now);
+        let receiver = coordinator.subscribe(key.clone(), now);
+
+        coordinator.remove(&key);
+
+        assert!(receiver.has_changed().is_err());
+    }
+
+    #[test]
+    fn abandoned_in_flight_probe_can_be_claimed_after_timeout() {
+        let now = Instant::now();
+        let key = ProbeKey::contact("peer-a");
+        let mut coordinator = ProbeCoordinator::new(now);
+        coordinator.ensure(key.clone(), now);
+
+        assert_eq!(
+            coordinator.begin_due_with_timeout(now, Duration::from_secs(5)),
+            vec![key.clone()]
+        );
+        assert!(
+            coordinator
+                .begin_due_with_timeout(now + Duration::from_secs(4), Duration::from_secs(5))
+                .is_empty()
+        );
+        assert_eq!(
+            coordinator
+                .begin_due_with_timeout(now + Duration::from_secs(5), Duration::from_secs(5)),
+            vec![key]
+        );
     }
 }

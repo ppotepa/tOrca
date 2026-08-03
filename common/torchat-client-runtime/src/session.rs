@@ -3,6 +3,8 @@ use crate::RuntimeEvent;
 #[derive(Clone, Debug, Default)]
 pub struct RuntimeSession {
     selected_conversation_id: Option<String>,
+    focused_conversation_id: Option<String>,
+    app_foreground: bool,
     events: Vec<RuntimeEvent>,
     staged_events: Vec<RuntimeEvent>,
     bootstrap_emitted: bool,
@@ -13,7 +15,10 @@ pub struct RuntimeSession {
 
 impl RuntimeSession {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            app_foreground: true,
+            ..Self::default()
+        }
     }
 
     pub fn selected_conversation_id(&self) -> Option<&str> {
@@ -22,10 +27,34 @@ impl RuntimeSession {
 
     pub(crate) fn select_conversation(&mut self, conversation_id: String) {
         self.selected_conversation_id = Some(conversation_id);
+        self.focused_conversation_id = None;
     }
 
     pub(crate) fn clear_selected_conversation(&mut self) {
         self.selected_conversation_id = None;
+        self.focused_conversation_id = None;
+    }
+
+    pub(crate) fn set_app_foreground(&mut self, foreground: bool) {
+        self.app_foreground = foreground;
+        if !foreground {
+            self.focused_conversation_id = None;
+        }
+    }
+
+    pub(crate) fn set_conversation_focus(&mut self, conversation_id: &str, focused: bool) {
+        if focused {
+            self.selected_conversation_id = Some(conversation_id.to_owned());
+            self.focused_conversation_id = Some(conversation_id.to_owned());
+        } else if self.focused_conversation_id.as_deref() == Some(conversation_id) {
+            self.focused_conversation_id = None;
+        }
+    }
+
+    pub(crate) fn conversation_is_attended(&self, conversation_id: &str) -> bool {
+        self.app_foreground
+            && self.selected_conversation_id.as_deref() == Some(conversation_id)
+            && self.focused_conversation_id.as_deref() == Some(conversation_id)
     }
 
     pub fn begin_transaction(&mut self) {
@@ -153,6 +182,7 @@ impl RuntimeSession {
                 | RuntimeEvent::TorStatus { .. }
                 | RuntimeEvent::TransportStatusChanged { .. }
                 | RuntimeEvent::TypingChanged { .. }
+                | RuntimeEvent::ConversationFocusChanged { .. }
                 | RuntimeEvent::PresenceChanged { .. }
                 | RuntimeEvent::RuntimeError { .. }
                 | RuntimeEvent::RuntimeLog { .. }
@@ -172,6 +202,10 @@ mod tests {
         let mut session = RuntimeSession::new();
         session.select_conversation("peer-1".to_owned());
         assert_eq!(session.selected_conversation_id(), Some("peer-1"));
+        session.set_conversation_focus("peer-1", true);
+        assert!(session.conversation_is_attended("peer-1"));
+        session.set_app_foreground(false);
+        assert!(!session.conversation_is_attended("peer-1"));
         session.clear_selected_conversation();
         assert_eq!(session.selected_conversation_id(), None);
     }

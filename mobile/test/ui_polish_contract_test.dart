@@ -3,6 +3,20 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('production UI uses the shared toast host instead of SnackBars', () {
+    final files = Directory('lib')
+        .listSync(recursive: true)
+        .whereType<File>()
+        .where((file) => file.path.endsWith('.dart'));
+    final offenders = <String>[];
+    for (final file in files) {
+      if (file.readAsStringSync().contains('showSnackBar')) {
+        offenders.add(file.path);
+      }
+    }
+    expect(offenders, isEmpty);
+  });
+
   test('shell uses the unified transport dock without global busy strip', () {
     final shell = File('lib/features/shell/main_shell.dart').readAsStringSync();
 
@@ -37,17 +51,21 @@ void main() {
   );
 
   test('active chat UI has no voice or video controls', () {
-    final chat = File('lib/features/chats/chats_view.dart').readAsStringSync();
+    final chat = File(
+      'lib/features/chats/release_chat_view.dart',
+    ).readAsStringSync();
+    final bubble = File(
+      'lib/features/chats/message_bubble.dart',
+    ).readAsStringSync();
 
     expect(chat, isNot(contains('Icons.phone')));
     expect(chat, isNot(contains('Icons.videocam')));
     expect(chat, isNot(contains('Icons.video_call')));
-    expect(chat, contains('_BubbleHeader'));
-    expect(chat, contains('_BubbleFooter'));
-    expect(chat, contains('_ComposerDock'));
-    expect(chat, contains('BoxConstraints(maxWidth: 1080)'));
-    expect(chat, contains('BoxConstraints(maxWidth: 720)'));
-    expect(chat, contains("MessageState.read => Icons.done_all"));
+    expect(bubble, contains('_BubbleHeader'));
+    expect(bubble, contains('_BubbleFooter'));
+    expect(bubble, contains('IntrinsicWidth'));
+    expect(bubble, contains('BoxConstraints(minWidth: 120, maxWidth: 560)'));
+    expect(bubble, contains('MessageState.delivered || MessageState.read'));
   });
 
   test('new conversations use the canonical runtime projection', () {

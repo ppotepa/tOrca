@@ -40,7 +40,6 @@ void main() {
             search: search,
             composer: composer,
             error: '',
-            notice: '',
             action: '',
             onTab: (value) => tab = value,
             onSearch: () {},

@@ -22,6 +22,7 @@ class ConversationListTile extends StatelessWidget {
     this.asCard = false,
     this.pinned = false,
     this.muted = false,
+    this.activity = ContactActivityVisualState.unknown,
   });
 
   final String contactName;
@@ -37,6 +38,7 @@ class ConversationListTile extends StatelessWidget {
   final bool asCard;
   final bool pinned;
   final bool muted;
+  final ContactActivityVisualState activity;
 
   @override
   Widget build(BuildContext context) {
@@ -63,7 +65,7 @@ class ConversationListTile extends StatelessWidget {
             : BorderSide.none,
       ),
       onTap: onTap,
-      leading: IdentityAvatar(label: contactName),
+      leading: IdentityAvatar(label: contactName, activity: activity),
       title: Text(
         contactName,
         overflow: TextOverflow.ellipsis,
@@ -151,6 +153,7 @@ class ContactListTile extends StatelessWidget {
     this.subtitle,
     this.trailing,
     this.asCard = true,
+    this.activity = ContactActivityVisualState.unknown,
   });
 
   final ContactRecord contact;
@@ -158,13 +161,14 @@ class ContactListTile extends StatelessWidget {
   final String? subtitle;
   final Widget? trailing;
   final bool asCard;
+  final ContactActivityVisualState activity;
 
   @override
   Widget build(BuildContext context) {
     final tile = ListTile(
       contentPadding: EdgeInsets.zero,
       onTap: () => onTap(contact),
-      leading: IdentityAvatar(label: contact.displayName),
+      leading: IdentityAvatar(label: contact.displayName, activity: activity),
       title: Text(
         contact.displayName,
         maxLines: 1,
@@ -210,31 +214,33 @@ class PeerTransportIndicator extends StatelessWidget {
         'Tylko relay',
       ),
       (_, PeerEndpointStatus.missing || PeerEndpointStatus.invalid, _) => (
-        Icons.portable_wifi_off,
-        Colors.grey,
-        'Brak poprawnego endpointu P2P',
+        Icons.handshake_outlined,
+        endpointStatus == PeerEndpointStatus.invalid ? Colors.red : Colors.grey,
+        endpointStatus == PeerEndpointStatus.invalid
+            ? 'P2P zablokowane: nieprawidłowy endpoint'
+            : 'P2P niedostępne: brak endpointu',
       ),
       (_, _, PeerConnectionStatus.connected) => (
-        Icons.cell_tower,
+        Icons.handshake,
         Colors.green,
-        'P2P połączone',
+        'P2P realtime',
       ),
       (_, _, PeerConnectionStatus.connecting) => (
-        Icons.cell_tower,
+        Icons.handshake_outlined,
         Colors.orange,
         'P2P: łączenie',
       ),
       (_, _, PeerConnectionStatus.authenticating) => (
-        Icons.cell_tower,
+        Icons.handshake_outlined,
         Colors.orange,
         'P2P: uwierzytelnianie',
       ),
       (_, _, PeerConnectionStatus.backoff) => (
-        Icons.cell_tower,
+        Icons.handshake_outlined,
         Colors.orange,
         'P2P: ponowienie',
       ),
-      _ => (Icons.cell_tower, Colors.grey, 'P2P offline'),
+      _ => (Icons.handshake_outlined, Colors.orange, 'P2P gotowe · idle'),
     };
     return Tooltip(
       message: label,

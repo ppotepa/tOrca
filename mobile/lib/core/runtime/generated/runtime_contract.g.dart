@@ -85,6 +85,8 @@ abstract final class EngineContract {
   static const level = 'level';
   static const body = 'body';
   static const typing = 'typing';
+  static const focused = 'focused';
+  static const idle = 'idle';
   static const observedAt = 'observedAt';
   static const phase = 'phase';
   static const progress = 'progress';
@@ -150,6 +152,7 @@ abstract final class EngineContract {
   static const retryMessage = 'retryMessage';
   static const deleteMessageLocal = 'deleteMessageLocal';
   static const setTyping = 'setTyping';
+  static const setConversationFocus = 'setConversationFocus';
   static const setPresence = 'setPresence';
   static const sendReadReceipts = 'sendReadReceipts';
   static const platformFact = 'platformFact';
@@ -192,6 +195,7 @@ abstract final class EngineContract {
   static const commandRetryMessage = 'retry_message';
   static const commandDeleteMessageLocal = 'delete_message_local';
   static const commandSetTyping = 'set_typing';
+  static const commandSetConversationFocus = 'set_conversation_focus';
   static const commandSetPresence = 'set_presence';
   static const commandSendReadReceipts = 'send_read_receipts';
   static const commandPlatformFact = 'platform_fact';
@@ -237,6 +241,7 @@ abstract final class EngineContract {
   static const messageStateChanged = 'message_state_changed';
   static const conversationReadChanged = 'conversation_read_changed';
   static const typingChanged = 'typing_changed';
+  static const conversationFocusChanged = 'conversation_focus_changed';
   static const presenceChanged = 'presence_changed';
   static const peerEndpointChanged = 'peer_endpoint_changed';
   static const peerConnectionChanged = 'peer_connection_changed';

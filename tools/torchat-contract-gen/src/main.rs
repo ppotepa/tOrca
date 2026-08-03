@@ -746,6 +746,8 @@ fn wire_keys() -> &'static [(&'static str, &'static str)] {
         ("LEVEL", "level"),
         ("BODY", "body"),
         ("TYPING", "typing"),
+        ("FOCUSED", "focused"),
+        ("IDLE", "idle"),
         ("OBSERVED_AT", "observedAt"),
         ("PHASE", "phase"),
         ("PROGRESS", "progress"),

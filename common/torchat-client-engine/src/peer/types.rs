@@ -26,6 +26,7 @@ pub enum PeerDeliveryTag {
     EndpointUpdate,
     Presence { online: bool },
     Typing { typing: bool },
+    ConversationFocus { focused: bool },
 }
 
 impl PeerDeliveryTag {
@@ -37,7 +38,8 @@ impl PeerDeliveryTag {
             | Self::Probe
             | Self::EndpointUpdate
             | Self::Presence { .. }
-            | Self::Typing { .. } => None,
+            | Self::Typing { .. }
+            | Self::ConversationFocus { .. } => None,
         }
     }
 
@@ -84,11 +86,18 @@ pub enum PeerTransportEvent {
     PresenceChanged {
         installation_id: String,
         online: bool,
+        idle: bool,
         observed_at: i64,
+        expires_at: i64,
     },
     TypingChanged {
         installation_id: String,
         typing: bool,
+        expires_at: i64,
+    },
+    ConversationFocusChanged {
+        installation_id: String,
+        focused: bool,
         expires_at: i64,
     },
     IngressError {
@@ -125,6 +134,8 @@ impl Drop for PeerSessionLease {
 pub(super) struct AuthorizedPeer {
     pub(super) public_key: String,
     pub(super) endpoint: PeerEndpointBundle,
+    /// Exact local endpoint bundle advertised to this contact.
+    pub(super) local_endpoint: PeerEndpointBundle,
     /// Capability issued locally to this peer. Inbound handshakes must
     /// present this identifier and prove possession of this secret.
     pub(super) inbound_capability_id: String,

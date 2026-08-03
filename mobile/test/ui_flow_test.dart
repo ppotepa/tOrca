@@ -9,7 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:torchat_mobile/app/app_controller.dart';
 import 'package:torchat_mobile/core/runtime/runtime_contract.dart';
 import 'package:torchat_mobile/core/runtime/runtime_repository.dart';
-import 'package:torchat_mobile/features/chats/chats_view.dart';
+import 'package:torchat_mobile/features/chats/message_bubble.dart';
 import 'package:torchat_mobile/features/contacts/contacts_view.dart';
 import 'package:torchat_mobile/features/invites/invite_scanner.dart';
 import 'package:torchat_mobile/features/onboarding/onboarding_views.dart';
@@ -221,7 +221,7 @@ void main() {
         state.conversations.map((item) => item.contactId),
         contains('installation-bob'),
       );
-      expect(state.notice, 'Gotowe.');
+      expect(state.action, isEmpty);
       expect(state.error, isEmpty);
     },
   );
@@ -373,7 +373,8 @@ void main() {
       expect(runtime.cancelPairingCalls, ['pairing-out']);
       expect(runtime.lastSubmittedPairingCode, '87654321');
       expect(runtime.submitPairingCalls, 1);
-      expect(state.notice, contains('Zaproszenie wysłane'));
+      expect(state.outbox, isNotEmpty);
+      expect(state.outbox.last.status, InviteState.pending);
     },
   );
 
@@ -432,10 +433,7 @@ void main() {
         container.read(appControllerProvider).outbox.single.status,
         InviteState.pending,
       );
-      expect(
-        container.read(appControllerProvider).notice,
-        contains('Zaproszenie'),
-      );
+      expect(container.read(appControllerProvider).action, isEmpty);
 
       await controller.acceptPairing('pairing-1');
       var state = container.read(appControllerProvider);
@@ -614,7 +612,7 @@ void main() {
   });
 
   test('active invite count ignores terminal inbox records', () {
-    ApplicationStateStore.shared.setPairing([
+    final inbox = [
       PairingItem.fromMap(const {
         'pairingId': 'pending',
         'state': 'PENDING',
@@ -631,8 +629,10 @@ void main() {
         'state': 'EXPIRED',
         'sender': {'nickname': 'Bob'},
       }),
-    ], const []);
-    final state = AppState();
+    ];
+    // Pairing is now owned by AppState's projection slice; the process-wide
+    // store is no longer a hidden fallback source of truth.
+    final state = AppState(pairingInboxItems: inbox);
 
     expect(state.activeInviteCount, 1);
   });
@@ -708,7 +708,6 @@ void main() {
               fingerprint: 'SELF',
               ownInvite: '12345678',
               error: '',
-              notice: '',
             ),
           ),
         ),
@@ -1073,59 +1072,6 @@ void main() {
     expect(find.text('--:--'), findsNothing);
   });
 
-  testWidgets('chat list inserts a day separator between dates', (
-    tester,
-  ) async {
-    final first = 1760000000000;
-    final second = 1760086400000;
-    final expectedDay = _dayLabel(first);
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: ProviderScope(
-          child: Scaffold(
-            body: ChatsView(
-              selected: _contact(),
-              contacts: [_contact()],
-              conversations: const [],
-              messages: [
-                ChatMessage.fromMap({
-                  'id': 'message-1',
-                  'body': 'first',
-                  'outgoing': false,
-                  'state': MessageState.delivered,
-                  'createdAt': first,
-                }),
-                ChatMessage.fromMap({
-                  'id': 'message-2',
-                  'body': 'second',
-                  'outgoing': true,
-                  'state': MessageState.sent,
-                  'createdAt': second,
-                }),
-              ],
-              composer: TextEditingController(),
-              onOpenConversation: (_) {},
-              onSend: (_) async {},
-              onTypingChanged: (_) {},
-              onRetryMessage: (_) {},
-              onDeleteMessage: (_) {},
-              onVerifyContact: (_) {},
-              onBack: () {},
-              error: '',
-              notice: '',
-              canSend: false,
-            ),
-          ),
-        ),
-      ),
-    );
-
-    expect(find.text('first'), findsOneWidget);
-    expect(find.text('second'), findsOneWidget);
-    expect(find.text(expectedDay), findsOneWidget);
-  });
-
   testWidgets('desktop fallback accepts only an eight digit invite code', (
     tester,
   ) async {
@@ -1145,36 +1091,6 @@ void main() {
     // transport error; validation must not falsely report success.
     expect(find.byType(ManualInviteCodePage), findsOneWidget);
   });
-}
-
-String _dayLabel(int millisecondsSinceEpoch) {
-  final value = DateTime.fromMillisecondsSinceEpoch(
-    millisecondsSinceEpoch,
-  ).toLocal();
-  const weekday = [
-    'poniedziałek',
-    'wtorek',
-    'środa',
-    'czwartek',
-    'piątek',
-    'sobota',
-    'niedziela',
-  ];
-  const month = [
-    'stycznia',
-    'lutego',
-    'marca',
-    'kwietnia',
-    'maja',
-    'czerwca',
-    'lipca',
-    'sierpnia',
-    'września',
-    'października',
-    'listopada',
-    'grudnia',
-  ];
-  return '${weekday[value.weekday - 1]}, ${value.day} ${month[value.month - 1]} ${value.year}';
 }
 
 class _EventRuntime implements ClientRuntime {

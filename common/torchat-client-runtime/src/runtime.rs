@@ -5,6 +5,10 @@ use crate::{
     RuntimeIdentity, RuntimeProfile, RuntimeResult, RuntimeSendEffect, RuntimeSession,
     RuntimeStorage, RuntimeTransport, logic::fallback_contact_nickname,
 };
+
+mod helpers;
+mod lifecycle;
+use helpers::{pairing_send_effect, parse_uuid, transition_invite_state, validate_nickname};
 use uuid::Uuid;
 
 pub struct ClientRuntime<S, T, C> {
@@ -77,78 +81,6 @@ where
 
     pub fn emit_runtime_error(&mut self, message: impl Into<String>) {
         self.session.publish_runtime_error(message);
-    }
-
-    pub fn bootstrap_runtime(&mut self) -> RuntimeResult<bool> {
-        if !self.session.mark_bootstrap_emitted() {
-            return Ok(false);
-        }
-        self.session.push_event(RuntimeEvent::RuntimeReady {
-            protocol: torchat_core::PROTOCOL_VERSION,
-        });
-        if let Some(profile) = self.storage.profile()? {
-            self.session
-                .push_event(RuntimeEvent::ProfileReady { profile });
-        }
-        Ok(true)
-    }
-
-    pub fn report_tor_status(&mut self, status: crate::RuntimeTorStatus) {
-        self.session.publish_tor_status(status);
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn report_transport_status(
-        &mut self,
-        component: crate::TransportComponent,
-        state: crate::TransportProbeState,
-        detail: impl Into<String>,
-        progress: Option<i32>,
-        latency_ms: Option<u64>,
-        retry_attempt: u32,
-        retry_in_ms: Option<u64>,
-        generation: u64,
-        endpoint: Option<String>,
-        updated_at: i64,
-    ) {
-        self.session
-            .push_event(crate::RuntimeEvent::TransportStatusChanged {
-                component,
-                state,
-                detail: detail.into(),
-                progress,
-                latency_ms,
-                retry_attempt,
-                retry_in_ms,
-                generation,
-                endpoint,
-                updated_at,
-            });
-    }
-
-    pub fn apply_remote_profile(
-        &mut self,
-        profile: RuntimeProfile,
-    ) -> RuntimeResult<RuntimeProfile> {
-        self.storage.put_profile(profile.clone())?;
-        self.session.push_event(RuntimeEvent::ProfileReady {
-            profile: profile.clone(),
-        });
-        Ok(profile)
-    }
-
-    pub fn report_runtime_error(&mut self, message: String) {
-        self.session.publish_runtime_error(message);
-    }
-
-    pub fn report_runtime_log(&mut self, message: String) {
-        self.session.publish_runtime_log(message);
-    }
-
-    pub fn connect(&mut self) -> RuntimeResult<bool> {
-        let status = self.transport.connect()?;
-        self.emit_tor_status(status);
-        Ok(true)
     }
 
     pub fn identity(&self) -> RuntimeResult<Option<RuntimeIdentity>> {
@@ -894,18 +826,45 @@ where
     }
 
     pub fn open_conversation(&mut self, conversation_id: String) -> RuntimeResult<()> {
-        self.session.select_conversation(conversation_id.clone());
-        self.storage.mark_conversation_read(&conversation_id)?;
-        self.session
-            .push_event(RuntimeEvent::ConversationReadChanged {
-                conversation_id: Some(conversation_id),
-                unread_count: Some(0),
-            });
+        self.session.select_conversation(conversation_id);
         Ok(())
     }
 
     pub fn close_conversation(&mut self) {
         self.session.clear_selected_conversation();
+    }
+
+    pub fn set_app_foreground(&mut self, foreground: bool) {
+        self.session.set_app_foreground(foreground);
+    }
+
+    pub fn set_conversation_focus(
+        &mut self,
+        conversation_id: &str,
+        focused: bool,
+    ) -> RuntimeResult<()> {
+        self.session
+            .set_conversation_focus(conversation_id, focused);
+        if !focused || !self.session.conversation_is_attended(conversation_id) {
+            return Ok(());
+        }
+        let unread_count = self
+            .storage
+            .conversations()?
+            .into_iter()
+            .find(|conversation| conversation.id == conversation_id)
+            .map(|conversation| conversation.unread_count)
+            .unwrap_or(0);
+        if unread_count == 0 {
+            return Ok(());
+        }
+        self.storage.mark_conversation_read(conversation_id)?;
+        self.session
+            .push_event(RuntimeEvent::ConversationReadChanged {
+                conversation_id: Some(conversation_id.to_owned()),
+                unread_count: Some(0),
+            });
+        Ok(())
     }
 
     pub fn verify_contact(&mut self, installation_id: &str) -> RuntimeResult<()> {
@@ -1039,7 +998,6 @@ where
         self.storage.put_conversation(conversation.clone())?;
         if open_conversation {
             self.session.select_conversation(conversation.id.clone());
-            self.storage.mark_conversation_read(&conversation.id)?;
         }
         self.session.push_event(RuntimeEvent::Changed {
             kind: Some("contacts".to_owned()),
@@ -1431,7 +1389,7 @@ where
             .conversations()?
             .into_iter()
             .find(|conversation| conversation.id == conversation_id);
-        let selected = self.session.selected_conversation_id() == Some(conversation_id);
+        let selected = self.session.conversation_is_attended(conversation_id);
         let current_unread_count = existing
             .as_ref()
             .map(|conversation| conversation.unread_count);
@@ -1611,59 +1569,6 @@ where
             });
         }
         Ok(())
-    }
-}
-
-fn validate_nickname(nickname: String) -> RuntimeResult<String> {
-    let nickname = nickname.trim();
-    if nickname.len() < 2 || nickname.chars().count() > 32 {
-        return Err(RuntimeError::InvalidParams(
-            "nickname must contain 2-32 characters".to_owned(),
-        ));
-    }
-    Ok(nickname.to_owned())
-}
-
-fn transition_invite_state(
-    state: &InviteState,
-    action: PairingAction,
-) -> RuntimeResult<InviteState> {
-    use InviteState::*;
-    match (state, action) {
-        (Pending, PairingAction::Accept) => Ok(Accepted),
-        (Pending, PairingAction::Reject) => Ok(Rejected),
-        (Pending, PairingAction::Expire) => Ok(Expired),
-        (Pending, PairingAction::Cancel) => Ok(Cancelled),
-        (Accepted, PairingAction::Complete) => Ok(Completed),
-        (Accepted, PairingAction::Cancel) => Ok(Cancelled),
-        (Accepted | Rejected | Completed | Expired | Cancelled, PairingAction::Archive) => {
-            Ok(Archived)
-        }
-        _ => Err(RuntimeError::Conflict(
-            "pairing request cannot be transitioned from its current state".to_owned(),
-        )),
-    }
-}
-
-fn parse_uuid(value: &str) -> RuntimeResult<Uuid> {
-    Uuid::parse_str(value).map_err(|_| RuntimeError::InvalidParams("invalid messageId".to_owned()))
-}
-
-fn pairing_send_effect(
-    pairing_id: String,
-    recipient_installation_id: String,
-    kind: crate::PairingSendKind,
-    payload: Option<String>,
-) -> RuntimeSendEffect {
-    RuntimeSendEffect {
-        message: None,
-        receipt: None,
-        pairing: Some(crate::PairingSendEffect {
-            pairing_id,
-            recipient_installation_id,
-            kind,
-            payload,
-        }),
     }
 }
 
@@ -2274,7 +2179,7 @@ mod tests {
     }
 
     #[test]
-    fn open_conversation_marks_unread_as_read() {
+    fn focused_conversation_marks_unread_as_read() {
         let mut runtime = runtime();
         runtime
             .storage
@@ -2289,6 +2194,7 @@ mod tests {
             .unwrap();
 
         runtime.open_conversation("peer-1".to_owned()).unwrap();
+        runtime.set_conversation_focus("peer-1", true).unwrap();
 
         assert_eq!(runtime.conversations().unwrap()[0].unread_count, 0);
     }
@@ -2571,7 +2477,7 @@ mod tests {
         runtime
             .receive_message("peer-1", "hello".to_owned(), None)
             .unwrap();
-        assert_eq!(runtime.conversations().unwrap()[0].unread_count, 0);
+        assert_eq!(runtime.conversations().unwrap()[0].unread_count, 1);
     }
 
     #[test]
@@ -3001,6 +2907,7 @@ mod tests {
             })
             .unwrap();
         runtime.open_conversation("peer-1".to_owned()).unwrap();
+        runtime.set_conversation_focus("peer-1", true).unwrap();
         runtime.drain_events();
 
         runtime
@@ -3079,6 +2986,7 @@ mod tests {
             .unwrap();
 
         runtime.open_conversation("peer-1".to_owned()).unwrap();
+        runtime.set_conversation_focus("peer-1", true).unwrap();
         runtime.drain_events();
         let mut runtime = rebuild_with_existing_session(runtime);
 
@@ -3087,6 +2995,31 @@ mod tests {
             .unwrap();
 
         assert_eq!(runtime.conversations().unwrap()[0].unread_count, 0);
+    }
+
+    #[test]
+    fn open_conversation_in_background_accumulates_unread() {
+        let mut runtime = runtime();
+        runtime
+            .storage
+            .put_conversation(ConversationSummary {
+                id: "peer-1".to_owned(),
+                contact_installation_id: "peer-1".to_owned(),
+                status: crate::ConversationState::Active,
+                last_message_preview: "old".to_owned(),
+                last_message_at: 10,
+                unread_count: 0,
+            })
+            .unwrap();
+        runtime.open_conversation("peer-1".to_owned()).unwrap();
+        runtime.set_conversation_focus("peer-1", true).unwrap();
+        runtime.set_app_foreground(false);
+
+        runtime
+            .receive_message("peer-1", "hello".to_owned(), None)
+            .unwrap();
+
+        assert_eq!(runtime.conversations().unwrap()[0].unread_count, 1);
     }
 
     #[test]
@@ -3112,7 +3045,7 @@ mod tests {
             .receive_message("peer-1", "hello".to_owned(), None)
             .unwrap();
 
-        assert_eq!(runtime.conversations().unwrap()[0].unread_count, 1);
+        assert_eq!(runtime.conversations().unwrap()[0].unread_count, 5);
     }
 
     #[test]

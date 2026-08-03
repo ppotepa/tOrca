@@ -27,41 +27,18 @@ class MobileBridge extends Object
   @override
   Future<Map<String, dynamic>?> runtimeSnapshot() async {
     try {
-      final values = await Future.wait<Object?>([
-        _channel.invokeMethod<Object?>(EngineContract.getIdentity),
-        _channel.invokeMethod<Object?>(EngineContract.getProfile),
-        _channel.invokeMethod<Object?>(EngineContract.listContacts),
-        _channel.invokeMethod<Object?>(EngineContract.listConversations),
-      ]).timeout(_reattachBudget);
-      final identity = values[0];
-      final profile = values[1];
-      if (identity is! Map || profile is! Map) return null;
-
-      var peerEndpointAvailable = false;
-      try {
-        peerEndpointAvailable =
-            await _channel
-                .invokeMethod<Object?>(EngineContract.getPeerEndpoint)
-                .timeout(_reattachBudget) !=
-            null;
-      } on PlatformException {
-        // A missing endpoint is a normal warmup state, not attach failure.
-      } on TimeoutException {
-        // The shell snapshot remains useful while onion state catches up.
-      }
-
-      final now = DateTime.now();
-      return <String, dynamic>{
-        'serviceAlive': true,
-        'localDataReady': true,
-        'generation': now.microsecondsSinceEpoch,
-        'createdAtMs': now.millisecondsSinceEpoch,
-        'identity': Map<String, dynamic>.from(identity),
-        'profile': Map<String, dynamic>.from(profile),
-        'contacts': _mapItems(values[2]),
-        'conversations': _mapItems(values[3]),
-        'peerEndpointAvailable': peerEndpointAvailable,
-      };
+      // Reattach must consume the same atomic projection as the normal
+      // repository refresh. The previous four independent calls could mix a
+      // pre-pairing contact list with a post-pairing conversation list and
+      // produced restart-only UI updates.
+      final value = await _channel
+          .invokeMethod<Object?>(EngineContract.getApplicationSnapshot)
+          .timeout(_reattachBudget);
+      if (value is! Map) return null;
+      final snapshot = Map<String, dynamic>.from(value);
+      snapshot['serviceAlive'] = true;
+      snapshot['localDataReady'] = true;
+      return snapshot;
     } on PlatformException {
       return null;
     } on TimeoutException {
@@ -88,12 +65,4 @@ class MobileBridge extends Object
     String method, [
     RuntimeArguments params = RuntimeArguments.empty,
   ]) => _channel.invokeMethod(method, params.toMap());
-}
-
-List<Map<String, dynamic>> _mapItems(Object? value) {
-  final items = value is Map ? value[EngineContract.items] : value;
-  return (items as List? ?? const [])
-      .whereType<Map>()
-      .map((item) => Map<String, dynamic>.from(item))
-      .toList(growable: false);
 }

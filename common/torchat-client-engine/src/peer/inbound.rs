@@ -54,15 +54,8 @@ pub(super) async fn serve_inbound(
     .map_err(|_| "peer websocket handshake timed out".to_owned())?
     .map_err(|error| format!("accept peer websocket: {error}"))?;
     let identity = Identity::from_private_key_bytes(identity_private_key);
-    let local_endpoint = state
-        .local_endpoint
-        .read()
-        .map_err(|_| "peer endpoint lock poisoned".to_owned())?
-        .clone()
-        .ok_or_else(|| "local onion endpoint is unavailable".to_owned())?;
-
     let (websocket, peer_id, peer_key, mut peer_endpoint, session_id) =
-        authenticate_inbound(websocket, &identity, &local_endpoint, &state).await?;
+        authenticate_inbound(websocket, &identity, &state).await?;
     let _ = events
         .send(PeerTransportEvent::ConnectionChanged {
             installation_id: peer_id.clone(),
@@ -149,6 +142,10 @@ pub(super) async fn serve_inbound(
                         AuthorizedPeer {
                             public_key: peer_key.clone(),
                             endpoint: peer_endpoint.clone(),
+                            local_endpoint: previous_authorization
+                                .as_ref()
+                                .map(|value| value.local_endpoint.clone())
+                                .ok_or_else(|| "peer authorization disappeared".to_owned())?,
                             inbound_capability_id: previous_authorization
                                 .as_ref()
                                 .map(|value| value.inbound_capability_id.clone())
@@ -180,7 +177,9 @@ pub(super) async fn serve_inbound(
                         installation_id: peer_id.clone(),
                         online: !matches!(state, PeerPresenceState::Offline)
                             && expires_at >= unix_secs() * 1000,
+                        idle: matches!(state, PeerPresenceState::Away),
                         observed_at: unix_secs() * 1000,
+                        expires_at,
                     })
                     .await
                     .map_err(|_| "engine peer event queue is closed".to_owned())?;
@@ -192,6 +191,20 @@ pub(super) async fn serve_inbound(
                     .send(PeerTransportEvent::TypingChanged {
                         installation_id: peer_id.clone(),
                         typing: typing && expires_at >= unix_secs() * 1000,
+                        expires_at,
+                    })
+                    .await
+                    .map_err(|_| "engine peer event queue is closed".to_owned())?;
+            }
+            PeerFrame::ConversationFocus {
+                focused,
+                expires_at,
+                ..
+            } => {
+                events
+                    .send(PeerTransportEvent::ConversationFocusChanged {
+                        installation_id: peer_id.clone(),
+                        focused: focused && expires_at >= unix_secs() * 1000,
                         expires_at,
                     })
                     .await
@@ -212,7 +225,9 @@ pub(super) async fn serve_inbound(
                     .send(PeerTransportEvent::PresenceChanged {
                         installation_id: peer_id.clone(),
                         online: !matches!(presence, PeerPresenceState::Offline),
+                        idle: matches!(presence, PeerPresenceState::Away),
                         observed_at: unix_secs() * 1000,
+                        expires_at: unix_secs() * 1000 + 45_000,
                     })
                     .await
                     .map_err(|_| "engine peer event queue is closed".to_owned())?;
@@ -252,7 +267,6 @@ fn spawn_ack_forwarder(
 async fn authenticate_inbound(
     mut websocket: WebSocketStream<TcpStream>,
     identity: &Identity,
-    local_endpoint: &PeerEndpointBundle,
     state: &super::types::SharedPeerState,
 ) -> Result<
     (
@@ -284,6 +298,7 @@ async fn authenticate_inbound(
         .get(&hello.installation_id)
         .cloned()
         .ok_or_else(|| "peer is not an authorized contact".to_owned())?;
+    let local_endpoint = &authorized.local_endpoint;
     if hello.endpoint_sequence < authorized.endpoint.sequence {
         return Err("peer endpoint sequence is stale".into());
     }
@@ -341,4 +356,166 @@ async fn authenticate_inbound(
         authorized.endpoint,
         session_id,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use futures_util::{SinkExt, StreamExt};
+    use tokio::net::{TcpListener, TcpStream};
+    use tokio_tungstenite::{
+        client_async,
+        tungstenite::{Message, http::Request},
+    };
+    use torchat_core::peer_protocol::{
+        PeerClientHello, PeerClientProof, PeerEndpointBundle, PeerFrame, capability_proof,
+        decode_frame, encode_frame, handshake_transcript,
+    };
+
+    use super::*;
+    use crate::peer::types::{AuthorizedPeer, SharedPeerState};
+
+    fn endpoint(
+        identity: &Identity,
+        sequence: u64,
+        capability: Option<&str>,
+    ) -> PeerEndpointBundle {
+        let mut capabilities = vec!["peer_message_v1".to_owned()];
+        if let Some(capability) = capability {
+            capabilities.push(format!("contact_endpoint_v1:{capability}"));
+        }
+        let mut endpoint = PeerEndpointBundle {
+            protocol_version: PROTOCOL_VERSION,
+            installation_id: identity.installation_id(),
+            onion_address: format!("{}.onion", "a".repeat(56)),
+            virtual_port: 443,
+            identity_public_key: identity.public_key(),
+            capabilities,
+            sequence,
+            issued_at: 1,
+            expires_at: None,
+            signature: String::new(),
+        };
+        endpoint.signature = identity.sign(&endpoint.signing_bytes());
+        endpoint
+    }
+
+    #[tokio::test]
+    async fn challenge_uses_the_per_contact_endpoint_advertised_to_the_peer() {
+        let server_identity = Identity::generate();
+        let client_identity = Identity::generate();
+        let capability_id = "1234567890abcdef";
+        let capability_secret = b"per-contact-secret-material".to_vec();
+        let client_endpoint = endpoint(&client_identity, 7, None);
+        let base_server_endpoint = endpoint(&server_identity, 1, None);
+        let contact_server_endpoint = endpoint(&server_identity, 2, Some(capability_id));
+
+        let state = Arc::new(SharedPeerState::default());
+        *state.local_endpoint.write().unwrap() = Some(base_server_endpoint);
+        state.authorized.write().unwrap().insert(
+            client_identity.installation_id(),
+            AuthorizedPeer {
+                public_key: client_identity.public_key(),
+                endpoint: client_endpoint.clone(),
+                local_endpoint: contact_server_endpoint.clone(),
+                inbound_capability_id: capability_id.to_owned(),
+                capability_secret: capability_secret.clone(),
+            },
+        );
+
+        let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+            .await
+            .unwrap();
+        let address = listener.local_addr().unwrap();
+        let (event_tx, mut event_rx) = mpsc::channel(8);
+        let server_state = state.clone();
+        let server_key = server_identity.private_key_bytes();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            serve_inbound(stream, server_key, server_state, event_tx).await
+        });
+
+        let stream = TcpStream::connect(address).await.unwrap();
+        let request = Request::builder()
+            .method("GET")
+            .uri(format!("ws://{address}{PEER_PATH}"))
+            .header("Host", address.to_string())
+            .header("Connection", "Upgrade")
+            .header("Upgrade", "websocket")
+            .header("Sec-WebSocket-Version", "13")
+            .header(
+                "Sec-WebSocket-Key",
+                tokio_tungstenite::tungstenite::handshake::client::generate_key(),
+            )
+            .body(())
+            .unwrap();
+        let (mut websocket, _) = client_async(request, stream).await.unwrap();
+
+        let mut hello = PeerClientHello {
+            protocol_version: PROTOCOL_VERSION,
+            installation_id: client_identity.installation_id(),
+            endpoint_sequence: client_endpoint.sequence,
+            capability_id: capability_id.to_owned(),
+            capability_proof: String::new(),
+            nonce: random_nonce(),
+        };
+        hello.capability_proof = capability_proof(&capability_secret, &hello);
+        websocket
+            .send(Message::Binary(
+                encode_frame(&PeerFrame::ClientHello {
+                    hello: hello.clone(),
+                })
+                .unwrap()
+                .into(),
+            ))
+            .await
+            .unwrap();
+
+        let challenge =
+            match decode_frame(&websocket.next().await.unwrap().unwrap().into_data(), false)
+                .unwrap()
+            {
+                PeerFrame::ServerChallenge { challenge } => challenge,
+                frame => panic!("unexpected frame: {frame:?}"),
+            };
+        assert_eq!(
+            challenge.endpoint_sequence,
+            contact_server_endpoint.sequence
+        );
+        let transcript = handshake_transcript(
+            &hello,
+            &challenge.installation_id,
+            challenge.endpoint_sequence,
+            &challenge.nonce,
+            challenge.session_id,
+            &contact_server_endpoint.onion_address,
+        );
+        websocket
+            .send(Message::Binary(
+                encode_frame(&PeerFrame::ClientProof {
+                    proof: PeerClientProof {
+                        session_id: challenge.session_id,
+                        signature: client_identity.sign(&transcript),
+                    },
+                })
+                .unwrap()
+                .into(),
+            ))
+            .await
+            .unwrap();
+        let accepted =
+            decode_frame(&websocket.next().await.unwrap().unwrap().into_data(), false).unwrap();
+        assert!(matches!(accepted, PeerFrame::HandshakeAccepted { .. }));
+        assert!(matches!(
+            event_rx.recv().await,
+            Some(PeerTransportEvent::ConnectionChanged {
+                status: torchat_client_runtime::PeerConnectionStatus::Connected,
+                ..
+            })
+        ));
+
+        websocket.close(None).await.unwrap();
+        assert!(server.await.unwrap().is_ok());
+    }
 }

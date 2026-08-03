@@ -77,6 +77,12 @@ def contains_pong(engine, conversation_id):
     messages = list_value(
         engine, {"type": "list_messages", "conversation_id": conversation_id}
     )
+    return any(
+        isinstance(message, dict)
+        and message.get("outgoing") is False
+        and message.get("body") == "pong"
+        for message in messages
+    )
 
 
 def command_until(engine, command, deadline, label):
@@ -92,12 +98,6 @@ def command_until(engine, command, deadline, label):
             log(f"integration {label} deferred: {error}")
             time.sleep(3)
     raise RuntimeError(f"timed out waiting for {label}: {last_error}")
-    return any(
-        isinstance(message, dict)
-        and message.get("outgoing") is False
-        and message.get("body") == "pong"
-        for message in messages
-    )
 
 
 def main():
@@ -117,33 +117,40 @@ def main():
         code = os.environ.get("TORCHAT_TORKA_PAIRING_CODE", "42424242").strip()
         if not code:
             raise RuntimeError("TORCHAT_TORKA_PAIRING_CODE is required")
+        # A previous successful smoke can leave the integration identity
+        # paired with Torka. Reuse that verified contact so repeated runs do
+        # not create a second pending invitation or mutate the shared dev
+        # client. A clean identity still follows the normal pairing path.
+        contact = verified_contact(engine)
+        if contact is not None:
+            log("integration reusing existing verified Torka contact")
         # A just-recreated relay may accept Torka's health marker slightly
         # before its reserved-code registration becomes visible. Retrying this
         # one idempotent intent is safe: a conflict means the first request
         # already reached the control plane and we can move on to local state.
-        submitted = False
-        while time.monotonic() < deadline:
-            try:
-                command_until(
-                    engine,
-                    {"type": "submit_pairing_code", "code": code},
-                    min(deadline, time.monotonic() + 35),
-                    "pairing submission",
-                )
-                submitted = True
-                break
-            except Exception as error:
-                if "pending invitation" in str(error).lower():
+        if contact is None:
+            submitted = False
+            while time.monotonic() < deadline:
+                try:
+                    command_until(
+                        engine,
+                        {"type": "submit_pairing_code", "code": code},
+                        min(deadline, time.monotonic() + 35),
+                        "pairing submission",
+                    )
                     submitted = True
                     break
-                log(f"integration pairing submission deferred: {error}")
-                time.sleep(3)
-        if not submitted:
-            raise RuntimeError("could not submit the Torka pairing request")
-        log("integration pairing request submitted")
+                except Exception as error:
+                    if "pending invitation" in str(error).lower():
+                        submitted = True
+                        break
+                    log(f"integration pairing submission deferred: {error}")
+                    time.sleep(3)
+            if not submitted:
+                raise RuntimeError("could not submit the Torka pairing request")
+            log("integration pairing request submitted")
 
-        contact = None
-        while time.monotonic() < deadline:
+        while contact is None and time.monotonic() < deadline:
             # The engine's relay writer applies the incoming offer. The local
             # contact read is intentionally side-effect-free: it proves that
             # UI projection is driven by committed engine events, not by a

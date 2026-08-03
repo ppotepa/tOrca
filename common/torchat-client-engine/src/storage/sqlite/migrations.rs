@@ -1,0 +1,193 @@
+﻿use crate::storage::Migration;
+
+pub const MIGRATION_LOOKUP: &str = include_str!("../../../sql/queries/migration_lookup.sql");
+pub const TABLE_COLUMNS: &str = include_str!("../../../sql/queries/table_columns.sql");
+pub const CONNECTION_PRAGMAS: &str = include_str!("../../../sql/queries/connection_pragmas.sql");
+
+// Development/0.x databases are recreated by deploy-clean. Keep their
+// initial schema as one deterministic batch so a fresh Android or desktop
+// client cannot observe a partially applied migration chain. The historical
+// migration table is still populated with the same versions, which lets an
+// existing 0.x database remain readable until the first explicit reset.
+pub const BASELINE_SCHEMA: &str = concat!(
+    include_str!("../../../sql/migrations/000_schema_migrations.sql"),
+    "\n",
+    include_str!("../../../sql/migrations/001_canonical_client.sql"),
+    "\n",
+    include_str!("../../../sql/migrations/002_pairing_inbox_retry.sql"),
+    "\n",
+    include_str!("../../../sql/migrations/003_pairing_response_delivery.sql"),
+    "\n",
+    include_str!("../../../sql/migrations/004_retry_indexes.sql"),
+    "\n",
+    include_str!("../../../sql/migrations/005_message_replies.sql"),
+    "\n",
+    include_str!("../../../sql/migrations/006_contact_preferences.sql"),
+    "\n",
+    include_str!("../../../sql/migrations/007_peer_p2p.sql"),
+    "\n",
+    include_str!("../../../sql/migrations/008_contact_transport_policy.sql"),
+    "\n",
+    include_str!("../../../sql/migrations/009_peer_endpoint_bootstrap_outbox.sql"),
+    "\n",
+    include_str!("../../../sql/migrations/010_pending_contact_confirmations.sql"),
+    "\n",
+    include_str!("../../../sql/migrations/011_pending_pairing_acknowledgements.sql"),
+    "\n",
+    include_str!("../../../sql/migrations/012_pending_peer_endpoint_inbox.sql"),
+    "\n",
+    include_str!("../../../sql/migrations/013_default_peer_transport.sql"),
+    "\n",
+    include_str!("../../../sql/migrations/014_runtime_integrity.sql"),
+    "\n",
+    include_str!("../../../sql/migrations/015_pairing_mls_state.sql"),
+    "\n",
+    include_str!("../../../sql/migrations/016_projection_consistency.sql"),
+    "\n",
+    include_str!("../../../sql/migrations/017_contact_presence.sql"),
+    "\n",
+    include_str!("../../../sql/migrations/018_contact_endpoint_capabilities.sql"),
+    "\n",
+    include_str!("../../../sql/migrations/019_peer_endpoint_capabilities.sql"),
+    "\n",
+    include_str!("../../../sql/migrations/020_pending_application_envelopes.sql"),
+    "\n",
+    include_str!("../../../sql/migrations/021_capability_delivery_outbox.sql"),
+    "\n",
+    "INSERT OR IGNORE INTO schema_migrations (version, name) VALUES ",
+    "(0, '000_schema_migrations.sql'),",
+    "(1, '001_canonical_client.sql'),",
+    "(2, '002_pairing_inbox_retry.sql'),",
+    "(3, '003_pairing_response_delivery.sql'),",
+    "(4, '004_retry_indexes.sql'),",
+    "(5, '005_message_replies.sql'),",
+    "(6, '006_contact_preferences.sql'),",
+    "(7, '007_peer_p2p.sql'),",
+    "(8, '008_contact_transport_policy.sql'),",
+    "(9, '009_peer_endpoint_bootstrap_outbox.sql'),",
+    "(10, '010_pending_contact_confirmations.sql'),",
+    "(11, '011_pending_pairing_acknowledgements.sql'),",
+    "(12, '012_pending_peer_endpoint_inbox.sql'),",
+    "(13, '013_default_peer_transport.sql'),",
+    "(14, '014_runtime_integrity.sql'),",
+    "(15, '015_pairing_mls_state.sql'),",
+    "(16, '016_projection_consistency.sql'),",
+    "(17, '017_contact_presence.sql'),",
+    "(18, '018_contact_endpoint_capabilities.sql'),",
+    "(19, '019_peer_endpoint_capabilities.sql'),",
+    "(20, '020_pending_application_envelopes.sql'),",
+    "(21, '021_capability_delivery_outbox.sql');"
+);
+
+pub const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 0,
+        name: "000_schema_migrations.sql",
+        sql: include_str!("../../../sql/migrations/000_schema_migrations.sql"),
+    },
+    Migration {
+        version: 1,
+        name: "001_canonical_client.sql",
+        sql: include_str!("../../../sql/migrations/001_canonical_client.sql"),
+    },
+    Migration {
+        version: 2,
+        name: "002_pairing_inbox_retry.sql",
+        sql: include_str!("../../../sql/migrations/002_pairing_inbox_retry.sql"),
+    },
+    Migration {
+        version: 3,
+        name: "003_pairing_response_delivery.sql",
+        sql: include_str!("../../../sql/migrations/003_pairing_response_delivery.sql"),
+    },
+    Migration {
+        version: 4,
+        name: "004_retry_indexes.sql",
+        sql: include_str!("../../../sql/migrations/004_retry_indexes.sql"),
+    },
+    Migration {
+        version: 5,
+        name: "005_message_replies.sql",
+        sql: include_str!("../../../sql/migrations/005_message_replies.sql"),
+    },
+    Migration {
+        version: 6,
+        name: "006_contact_preferences.sql",
+        sql: include_str!("../../../sql/migrations/006_contact_preferences.sql"),
+    },
+    Migration {
+        version: 7,
+        name: "007_peer_p2p.sql",
+        sql: include_str!("../../../sql/migrations/007_peer_p2p.sql"),
+    },
+    Migration {
+        version: 8,
+        name: "008_contact_transport_policy.sql",
+        sql: include_str!("../../../sql/migrations/008_contact_transport_policy.sql"),
+    },
+    Migration {
+        version: 9,
+        name: "009_peer_endpoint_bootstrap_outbox.sql",
+        sql: include_str!("../../../sql/migrations/009_peer_endpoint_bootstrap_outbox.sql"),
+    },
+    Migration {
+        version: 10,
+        name: "010_pending_contact_confirmations.sql",
+        sql: include_str!("../../../sql/migrations/010_pending_contact_confirmations.sql"),
+    },
+    Migration {
+        version: 11,
+        name: "011_pending_pairing_acknowledgements.sql",
+        sql: include_str!("../../../sql/migrations/011_pending_pairing_acknowledgements.sql"),
+    },
+    Migration {
+        version: 12,
+        name: "012_pending_peer_endpoint_inbox.sql",
+        sql: include_str!("../../../sql/migrations/012_pending_peer_endpoint_inbox.sql"),
+    },
+    Migration {
+        version: 13,
+        name: "013_default_peer_transport.sql",
+        sql: include_str!("../../../sql/migrations/013_default_peer_transport.sql"),
+    },
+    Migration {
+        version: 14,
+        name: "014_runtime_integrity.sql",
+        sql: include_str!("../../../sql/migrations/014_runtime_integrity.sql"),
+    },
+    Migration {
+        version: 15,
+        name: "015_pairing_mls_state.sql",
+        sql: include_str!("../../../sql/migrations/015_pairing_mls_state.sql"),
+    },
+    Migration {
+        version: 16,
+        name: "016_projection_consistency.sql",
+        sql: include_str!("../../../sql/migrations/016_projection_consistency.sql"),
+    },
+    Migration {
+        version: 17,
+        name: "017_contact_presence.sql",
+        sql: include_str!("../../../sql/migrations/017_contact_presence.sql"),
+    },
+    Migration {
+        version: 18,
+        name: "018_contact_endpoint_capabilities.sql",
+        sql: include_str!("../../../sql/migrations/018_contact_endpoint_capabilities.sql"),
+    },
+    Migration {
+        version: 19,
+        name: "019_peer_endpoint_capabilities.sql",
+        sql: include_str!("../../../sql/migrations/019_peer_endpoint_capabilities.sql"),
+    },
+    Migration {
+        version: 20,
+        name: "020_pending_application_envelopes.sql",
+        sql: include_str!("../../../sql/migrations/020_pending_application_envelopes.sql"),
+    },
+    Migration {
+        version: 21,
+        name: "021_capability_delivery_outbox.sql",
+        sql: include_str!("../../../sql/migrations/021_capability_delivery_outbox.sql"),
+    },
+];

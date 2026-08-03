@@ -50,9 +50,10 @@ void main() {
     final bridge = File('lib/mobile_bridge.dart').readAsStringSync();
     final runtime = File('lib/client_runtime.dart').readAsStringSync();
 
-    expect(bridge, contains('EngineContract.listContacts'));
-    expect(bridge, contains('EngineContract.listConversations'));
-    expect(bridge, contains('peerEndpointAvailable'));
+    // Reattach uses the atomic application projection; independent contact
+    // and conversation calls would recreate mixed-revision state.
+    expect(bridge, contains('EngineContract.getApplicationSnapshot'));
+    expect(bridge, contains("snapshot['serviceAlive']"));
     expect(bridge, isNot(contains('EngineContract.listMessages')));
     expect(runtime, isNot(contains('ApplicationStateStore.shared.hydrate')));
     expect(runtime, contains('RuntimeRepository owns the'));

@@ -158,7 +158,7 @@ class _TransportStatusDockState extends State<TransportStatusDock>
                   SizedBox(
                     width: _showDetails
                         ? (widget.desktop ? 112 : 96)
-                        : (embedded ? 27 : 28),
+                        : (embedded ? 32 : 34),
                     child: _ConnectionSegment(
                       segment: segments[index],
                       desktop: widget.desktop,
@@ -198,9 +198,9 @@ class _TransportStatusDockState extends State<TransportStatusDock>
                 // The header indicator is deliberately a floating island,
                 // never a row that consumes the whole application width.
                 maxWidth: embedded
-                    ? (_showDetails ? 300 : 132)
+                    ? (_showDetails ? 300 : 144)
                     : (widget.desktop ? 360 : 300),
-                minWidth: _showDetails ? 220 : 96,
+                minWidth: _showDetails ? 220 : 108,
               ),
               child: dock,
             ),
@@ -313,7 +313,7 @@ class _ConnectionSegment extends StatelessWidget {
                           valueColor: AlwaysStoppedAnimation<Color>(tone),
                         ),
                       ),
-                    Icon(segment.icon, size: 16, color: tone),
+                    Icon(segment.icon, size: 18, color: tone),
                   ],
                 ),
                 if (showDetails) ...[

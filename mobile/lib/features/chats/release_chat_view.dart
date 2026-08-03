@@ -10,11 +10,14 @@ import '../../app/ui_operation_registry.dart';
 import '../../core/attachments/image_attachment_picker.dart';
 import '../../core/attachments/image_message_codec.dart';
 import '../../core/models/domain.dart';
+import '../../core/presence/contact_presence_snapshot.dart';
+import '../../core/presence/contact_presence_store.dart';
 import '../../core/runtime/message_paging.dart';
 import '../../shared/async/busy_surface.dart';
 import '../../shared/async/themed_activity_indicator.dart';
 import '../../shared/formatters/message_timestamps.dart';
 import '../../shared/widgets/identity_avatar.dart';
+import '../../shared/widgets/list_items.dart';
 import 'composer_draft.dart';
 import 'release_message_bubble.dart';
 
@@ -29,18 +32,21 @@ class ReleaseChatView extends ConsumerStatefulWidget {
     required this.onOpenConversation,
     required this.onSend,
     required this.onTypingChanged,
+    this.onConversationFocusChanged = _ignoreConversationFocus,
     required this.onRetryMessage,
     required this.onDeleteMessage,
     required this.onLoadOlderMessages,
     required this.onBack,
     required this.error,
-    required this.notice,
     this.showConversationListWhenEmpty = true,
     this.canSend = false,
     this.peerTyping = false,
     this.peerOnline = false,
+    this.peerIdle = false,
+    this.peerFocused = false,
     this.lastSeenAt,
     this.headerStatus,
+    this.onlineContacts = const {},
   });
 
   final ContactRecord? selected;
@@ -51,22 +57,28 @@ class ReleaseChatView extends ConsumerStatefulWidget {
   final ValueChanged<String> onOpenConversation;
   final Future<void> Function(ComposerDraft draft) onSend;
   final ValueChanged<bool> onTypingChanged;
+  final void Function(String conversationId, bool focused)
+  onConversationFocusChanged;
   final ValueChanged<String> onRetryMessage;
   final ValueChanged<String> onDeleteMessage;
   final Future<OlderMessagesResult> Function() onLoadOlderMessages;
   final VoidCallback onBack;
   final String error;
-  final String notice;
   final bool showConversationListWhenEmpty;
   final bool canSend;
   final bool peerTyping;
   final bool peerOnline;
+  final bool peerIdle;
+  final bool peerFocused;
   final int? lastSeenAt;
   final Widget? headerStatus;
+  final Map<String, bool> onlineContacts;
 
   @override
   ConsumerState<ReleaseChatView> createState() => _ReleaseChatViewState();
 }
+
+void _ignoreConversationFocus(String conversationId, bool focused) {}
 
 class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
   static const _nearBottomThreshold = 160.0;
@@ -75,6 +87,7 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
   final _scroll = ScrollController();
   final _search = TextEditingController();
   Timer? _typingTimer;
+  Timer? _focusHeartbeat;
   Timer? _scrollPersistTimer;
   ChatMessage? _replyingTo;
   String? _activeConversationId;
@@ -95,6 +108,9 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
     super.initState();
     _scroll.addListener(_handleScroll);
     widget.composer.addListener(_composerChanged);
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _syncFocus(null, _conversationId),
+    );
   }
 
   @override
@@ -108,6 +124,7 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
     final conversationId = _conversationId;
     if (_activeConversationId != conversationId) {
       final previousConversationId = _activeConversationId;
+      _syncFocus(previousConversationId, conversationId);
       if (previousConversationId != null) {
         unawaited(_persistScrollPosition(previousConversationId));
       }
@@ -171,9 +188,25 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
     _scroll.dispose();
     _search.dispose();
     _typingTimer?.cancel();
+    _focusHeartbeat?.cancel();
+    if (conversationId != null) {
+      widget.onConversationFocusChanged(conversationId, false);
+    }
     _scrollPersistTimer?.cancel();
     widget.onTypingChanged(false);
     super.dispose();
+  }
+
+  void _syncFocus(String? previous, String current) {
+    _focusHeartbeat?.cancel();
+    if (previous != null && previous.isNotEmpty && previous != current) {
+      widget.onConversationFocusChanged(previous, false);
+    }
+    if (current.isEmpty) return;
+    widget.onConversationFocusChanged(current, true);
+    _focusHeartbeat = Timer.periodic(const Duration(seconds: 10), (_) {
+      widget.onConversationFocusChanged(current, true);
+    });
   }
 
   String get _conversationId {
@@ -421,7 +454,7 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
       child: Scaffold(
         backgroundColor: Colors.transparent,
         appBar: AppBar(
-          toolbarHeight: 68,
+          toolbarHeight: 64,
           leading: widget.showConversationListWhenEmpty
               ? IconButton(
                   tooltip: 'Wróć',
@@ -442,7 +475,16 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
                 )
               : Row(
                   children: [
-                    IdentityAvatar(label: contact.displayName),
+                    IdentityAvatar(
+                      label: contact.displayName,
+                      activity: widget.peerTyping
+                          ? ContactActivityVisualState.typing
+                          : widget.peerIdle
+                          ? ContactActivityVisualState.away
+                          : widget.peerOnline
+                          ? ContactActivityVisualState.online
+                          : ContactActivityVisualState.offline,
+                    ),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Column(
@@ -456,13 +498,13 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
                             style: Theme.of(context).textTheme.titleSmall,
                           ),
                           Text(
-                            widget.peerTyping
-                                ? 'pisze…'
+                            '${contactActivityLabel(widget.peerTyping
+                                ? ContactActivityVisualState.typing
+                                : widget.peerIdle
+                                ? ContactActivityVisualState.away
                                 : widget.peerOnline
-                                ? 'online · ${_routeLabel(contact)}'
-                                : widget.lastSeenAt == null
-                                ? 'offline · ${_routeLabel(contact)}'
-                                : 'ostatnio widziany ${_lastSeenLabel(widget.lastSeenAt!)} · ${_routeLabel(contact)}',
+                                ? ContactActivityVisualState.online
+                                : ContactActivityVisualState.offline, lastSeenAt: widget.lastSeenAt)} · ${_routeLabel(contact)}',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: Theme.of(context).textTheme.labelSmall
@@ -478,59 +520,72 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
                   ],
                 ),
           actions: [
+            if (widget.peerFocused)
+              const _ConversationHeaderAction(
+                tooltip: 'Kontakt ma otwartą tę rozmowę',
+                child: ThemedIcon(Icons.visibility_outlined, size: 19),
+              ),
+            _ConversationHeaderAction(
+              tooltip: 'Stan bezpośredniego połączenia P2P',
+              child: PeerTransportIndicator(
+                connectionStatus: contact.peerConnectionStatus,
+                transportPolicy: contact.transportPolicy,
+                endpointStatus: contact.peerEndpointStatus,
+              ),
+            ),
             if (widget.headerStatus != null)
               Padding(
-                padding: const EdgeInsets.only(right: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 3),
                 child: Center(child: widget.headerStatus!),
               ),
             if (!compactHeader)
-              Padding(
-                padding: const EdgeInsets.only(right: 2),
-                child: IconButton(
-                  visualDensity: VisualDensity.compact,
-                  tooltip: _searching ? 'Zamknij wyszukiwanie' : 'Szukaj',
-                  onPressed: _toggleSearch,
-                  icon: ThemedIcon(_searching ? Icons.close : Icons.search),
+              _ConversationHeaderAction(
+                tooltip: _searching ? 'Zamknij wyszukiwanie' : 'Szukaj',
+                onPressed: _toggleSearch,
+                child: ThemedIcon(
+                  _searching ? Icons.close : Icons.search,
+                  size: 19,
                 ),
               ),
             Padding(
-              padding: const EdgeInsets.only(right: 4),
-              child: PopupMenuButton<String>(
-                tooltip: 'Opcje rozmowy',
-                icon: const ThemedIcon(Icons.more_vert),
-                padding: EdgeInsets.zero,
-                onSelected: (value) async {
-                  if (value == 'search') {
-                    _toggleSearch();
-                    return;
-                  }
-                  if (value == 'fingerprint') {
-                    await Clipboard.setData(
-                      ClipboardData(text: contact.fingerprint),
-                    );
-                  }
-                },
-                itemBuilder: (_) => [
-                  if (compactHeader)
-                    PopupMenuItem(
-                      value: 'search',
-                      child: Text(
-                        _searching ? 'Zamknij wyszukiwanie' : 'Szukaj',
+              padding: const EdgeInsets.only(left: 3, right: 8),
+              child: SizedBox.square(
+                dimension: 40,
+                child: PopupMenuButton<String>(
+                  tooltip: 'Opcje rozmowy',
+                  icon: const ThemedIcon(Icons.more_vert, size: 19),
+                  padding: EdgeInsets.zero,
+                  onSelected: (value) async {
+                    if (value == 'search') {
+                      _toggleSearch();
+                      return;
+                    }
+                    if (value == 'fingerprint') {
+                      await Clipboard.setData(
+                        ClipboardData(text: contact.fingerprint),
+                      );
+                    }
+                  },
+                  itemBuilder: (_) => [
+                    if (compactHeader)
+                      PopupMenuItem(
+                        value: 'search',
+                        child: Text(
+                          _searching ? 'Zamknij wyszukiwanie' : 'Szukaj',
+                        ),
                       ),
+                    const PopupMenuItem(
+                      value: 'fingerprint',
+                      child: Text('Kopiuj fingerprint'),
                     ),
-                  const PopupMenuItem(
-                    value: 'fingerprint',
-                    child: Text('Kopiuj fingerprint'),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ],
         ),
         body: Column(
           children: [
-            if (widget.notice.trim().isNotEmpty)
-              _InlineStatus(message: widget.notice),
             if (widget.error.trim().isNotEmpty)
               _InlineStatus(message: widget.error, error: true),
             if (_attachmentError.isNotEmpty)
@@ -625,6 +680,7 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
   });
 
   Widget _buildConversationHome(BuildContext context) {
+    final presence = ref.watch(contactPresenceStoreProvider);
     final recent = widget.conversations.take(4).toList(growable: false);
     return Center(
       child: SingleChildScrollView(
@@ -669,7 +725,26 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
                   Material(
                     type: MaterialType.transparency,
                     child: ListTile(
-                      leading: const ThemedIcon(Icons.chat_bubble_outline),
+                      leading: IdentityAvatar(
+                        label: _contactName(
+                          conversation.contactId,
+                          widget.contacts,
+                        ),
+                        activity: switch (presence
+                            .snapshot(conversation.contactId)
+                            .availability) {
+                          ContactAvailability.active =>
+                            ContactActivityVisualState.online,
+                          ContactAvailability.idle =>
+                            ContactActivityVisualState.away,
+                          ContactAvailability.checking =>
+                            ContactActivityVisualState.typing,
+                          ContactAvailability.offline =>
+                            ContactActivityVisualState.offline,
+                          ContactAvailability.unknown =>
+                            ContactActivityVisualState.unknown,
+                        },
+                      ),
                       title: Text(
                         _contactName(conversation.contactId, widget.contacts),
                       ),
@@ -678,7 +753,20 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      trailing: const ThemedIcon(Icons.chevron_right),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (_contact(conversation.contactId, widget.contacts)
+                              case final contact?)
+                            PeerTransportIndicator(
+                              connectionStatus: contact.peerConnectionStatus,
+                              transportPolicy: contact.transportPolicy,
+                              endpointStatus: contact.peerEndpointStatus,
+                            ),
+                          const SizedBox(width: 6),
+                          const ThemedIcon(Icons.chevron_right),
+                        ],
+                      ),
                       onTap: () => widget.onOpenConversation(conversation.id),
                     ),
                   ),
@@ -716,12 +804,30 @@ class _MessageTimeline extends StatelessWidget {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
-          child: Text(
-            canSend
-                ? 'To początek rozmowy z ${contact.displayName}.'
-                : 'Rozmowa oczekuje na bezpieczne połączenie.',
-            textAlign: TextAlign.center,
-          ),
+          child: canSend
+              ? Text(
+                  canSend
+                      ? 'To początek rozmowy z ${contact.displayName}.'
+                      : 'Rozmowa oczekuje na bezpieczne połączenie.',
+                  textAlign: TextAlign.center,
+                )
+              : Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Semantics(
+                      label: 'Nawiązywanie bezpiecznego połączenia',
+                      child: SizedBox.square(
+                        dimension: 28,
+                        child: CircularProgressIndicator(strokeWidth: 2.5),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    const Text(
+                      'Rozmowa oczekuje na bezpieczne poÅ‚Ä…czenie.',
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
         ),
       );
     }
@@ -899,16 +1005,22 @@ class _Composer extends StatelessWidget {
                     ),
                   ),
                 Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    IconButton.filledTonal(
-                      tooltip: preparingImage
-                          ? 'Kompresowanie obrazu…'
-                          : 'Wyślij obraz (maks. 50 KiB)',
-                      onPressed: enabled && !preparingImage ? onAttach : null,
-                      icon: preparingImage
-                          ? const ThemedActivityIndicator(compact: true)
-                          : const ThemedIcon(Icons.image_outlined, size: 19),
+                    SizedBox.square(
+                      dimension: 44,
+                      child: IconButton.filledTonal(
+                        tooltip: preparingImage
+                            ? 'Przygotowywanie obrazów…'
+                            : 'Dodaj obrazy do wiadomości',
+                        onPressed: enabled && !preparingImage ? onAttach : null,
+                        icon: preparingImage
+                            ? const ThemedActivityIndicator(compact: true)
+                            : const ThemedIcon(
+                                Icons.add_photo_alternate_outlined,
+                                size: 19,
+                              ),
+                      ),
                     ),
                     const SizedBox(width: 8),
                     Expanded(
@@ -941,20 +1053,29 @@ class _Composer extends StatelessWidget {
                             hintText: enabled
                                 ? 'Napisz wiadomość…'
                                 : 'Rozmowa nie jest jeszcze gotowa',
-                            suffixIcon: FilledButton(
-                              onPressed:
-                                  enabled &&
-                                      !sending &&
-                                      (controller.text.trim().isNotEmpty ||
-                                          attachments.isNotEmpty)
-                                  ? () => unawaited(onSend())
-                                  : null,
-                              child: sending
-                                  ? const ThemedActivityIndicator(compact: true)
-                                  : const ThemedIcon(Icons.send, size: 19),
-                            ),
+                            constraints: const BoxConstraints(minHeight: 44),
                           ),
                         ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    SizedBox.square(
+                      dimension: 44,
+                      child: FilledButton(
+                        style: FilledButton.styleFrom(
+                          padding: EdgeInsets.zero,
+                          minimumSize: const Size.square(44),
+                        ),
+                        onPressed:
+                            enabled &&
+                                !sending &&
+                                (controller.text.trim().isNotEmpty ||
+                                    attachments.isNotEmpty)
+                            ? () => unawaited(onSend())
+                            : null,
+                        child: sending
+                            ? const ThemedActivityIndicator(compact: true)
+                            : const ThemedIcon(Icons.send_rounded, size: 19),
                       ),
                     ),
                   ],
@@ -966,6 +1087,46 @@ class _Composer extends StatelessWidget {
       ),
     );
   }
+}
+
+class _ConversationHeaderAction extends StatelessWidget {
+  const _ConversationHeaderAction({
+    required this.tooltip,
+    required this.child,
+    this.onPressed,
+  });
+
+  final String tooltip;
+  final Widget child;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 3),
+    child: Tooltip(
+      message: tooltip,
+      child: SizedBox.square(
+        dimension: 40,
+        child: onPressed == null
+            ? DecoratedBox(
+                decoration: BoxDecoration(
+                  border: Border.all(color: context.shellTheme.border),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Center(child: child),
+              )
+            : IconButton(
+                onPressed: onPressed,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints.tightFor(
+                  width: 40,
+                  height: 40,
+                ),
+                icon: child,
+              ),
+      ),
+    ),
+  );
 }
 
 class _InlineStatus extends StatelessWidget {
@@ -1024,20 +1185,18 @@ String _routeLabel(ContactRecord contact) => switch (contact.transportPolicy) {
   ContactTransportPolicy.peerOnly => 'Tor P2P',
 };
 
-String _lastSeenLabel(int epochMillis) {
-  final seen = DateTime.fromMillisecondsSinceEpoch(epochMillis);
-  final difference = DateTime.now().difference(seen);
-  if (difference.inSeconds < 60) return 'przed chwilą';
-  if (difference.inMinutes < 60) return '${difference.inMinutes} min temu';
-  if (difference.inHours < 24) return '${difference.inHours} godz. temu';
-  return '${difference.inDays} dni temu';
-}
-
 String _contactName(String id, List<ContactRecord> contacts) {
   for (final contact in contacts) {
     if (contact.id == id) return contact.displayName;
   }
   return 'Kontakt';
+}
+
+ContactRecord? _contact(String id, List<ContactRecord> contacts) {
+  for (final contact in contacts) {
+    if (contact.id == id) return contact;
+  }
+  return null;
 }
 
 String _previewLabel(String preview) {

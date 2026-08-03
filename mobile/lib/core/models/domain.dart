@@ -818,6 +818,8 @@ int _int(Map<String, dynamic> map, String key) {
   return (value as num?)?.toInt() ?? int.tryParse(value?.toString() ?? '') ?? 0;
 }
 
+enum PairingOrigin { inbox, outbox, unknown }
+
 class PairingItem {
   const PairingItem({
     required this.id,
@@ -826,6 +828,7 @@ class PairingItem {
     this.peer,
     this.expiresAt = 0,
     this.received = true,
+    this.origin = PairingOrigin.unknown,
   });
   final String id;
   final InviteState status;
@@ -834,7 +837,15 @@ class PairingItem {
   final int expiresAt;
   final bool received;
 
-  factory PairingItem.fromMap(Map<String, dynamic> map) => PairingItem(
+  /// The collection from which this item was read. This is deliberately
+  /// separate from the wire-level `received` flag: old/partial payloads must
+  /// never be able to turn an inbox item into an outbox toast.
+  final PairingOrigin origin;
+
+  factory PairingItem.fromMap(
+    Map<String, dynamic> map, {
+    PairingOrigin origin = PairingOrigin.unknown,
+  }) => PairingItem(
     id: _string(map, EngineContract.pairingId),
     status: InviteState.fromValue(_string(map, EngineContract.state)),
     availableActions: _availableActions(map),
@@ -845,6 +856,7 @@ class PairingItem {
         : null,
     expiresAt: _int(map, EngineContract.expiresAt),
     received: map[EngineContract.received] as bool? ?? false,
+    origin: origin,
   );
 
   ContactRequest asContactRequest() => ContactRequest(
@@ -940,10 +952,6 @@ class RuntimeFixture {
     pairingOutboxItem: PairingItem.fromMap(_map(map, 'pairingOutboxItem')),
     events: _listOfMaps(map['events']),
   );
-}
-
-extension ConversationListMetrics on Iterable<ConversationSummary> {
-  int get totalUnread => fold<int>(0, (sum, item) => sum + item.unread);
 }
 
 extension InviteListMetrics on Iterable<PairingItem> {
