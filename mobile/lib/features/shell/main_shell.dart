@@ -57,11 +57,7 @@ class MainShell extends ConsumerWidget {
     required this.onOpenSettings,
     required this.onRetryTor,
     required this.typingContacts,
-    required this.onlineContacts,
-    this.idleContacts = const {},
     this.pendingPairings = const [],
-    this.focusedConversations = const {},
-    this.lastSeenContacts = const {},
     this.lastSeenEnabled = true,
     this.onOpenConnectionCenter,
   });
@@ -114,11 +110,7 @@ class MainShell extends ConsumerWidget {
   final VoidCallback onRetryTor;
   final VoidCallback? onOpenConnectionCenter;
   final Map<String, bool> typingContacts;
-  final Map<String, bool> onlineContacts;
-  final Map<String, bool> idleContacts;
   final List<PairingItem> pendingPairings;
-  final Map<String, bool> focusedConversations;
-  final Map<String, int> lastSeenContacts;
   final bool lastSeenEnabled;
 
   VoidCallback get _openConnectionCenter =>
@@ -178,9 +170,7 @@ class MainShell extends ConsumerWidget {
             peerTyping:
                 selectedConversation != null &&
                 (typingContacts[selectedConversation] ?? false),
-            peerOnline:
-                selectedPresence.availability == ContactAvailability.active,
-            peerIdle: selectedPresence.availability == ContactAvailability.idle,
+            availability: selectedPresence.availability,
             peerFocused: selectedPresence.isViewingConversation,
             lastSeenAt: selectedContact == null || !lastSeenEnabled
                 ? null
@@ -197,13 +187,10 @@ class MainShell extends ConsumerWidget {
                     latencyMs: latencyMs,
                     onOpenConnectionCenter: _openConnectionCenter,
                   ),
-            onlineContacts: onlineContacts,
           )
         : ContactsView(
             saved: contacts,
             pendingPairings: pendingPairings,
-            onlineContacts: onlineContacts,
-            idleContacts: idleContacts,
             search: search,
             onSearch: onSearch,
             onSelect: onStartConversation,
@@ -250,7 +237,6 @@ class MainShell extends ConsumerWidget {
                         conversations: conversations,
                         selectedConversation: selectedConversation,
                         selectedContact: selectedContact,
-                        onlineContacts: onlineContacts,
                         presenceStore: ref.watch(contactPresenceStoreProvider),
                         content: _content(context, ref, desktop: true),
                         onTab: onTab,

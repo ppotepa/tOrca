@@ -53,7 +53,7 @@ impl ClientEngineActor {
                 let result = ciphertext.and_then(|wire_payload| {
                     let ciphertext = PeerCiphertextPayload::decode(&wire_payload)
                         .map_err(EngineError::InvalidCommand)?;
-                    self.handle_application_envelope(
+                    self.handle_application_envelope_result(
                         RelayEnvelope {
                             version: torchat_core::PROTOCOL_VERSION,
                             message_id: envelope.message_id,
@@ -65,13 +65,21 @@ impl ClientEngineActor {
                     )
                 });
                 match result {
-                    Ok(runtime_events) => {
+                    Ok(result) if result.committed => {
                         self.database.complete_inbound_peer_envelope(
                             &envelope.sender_installation_id,
                             &envelope.message_id.to_string(),
                         )?;
                         let _ = delivered.send(Ok(ack(PeerAckKind::Delivered)));
-                        Ok(runtime_events)
+                        Ok(result.runtime_events)
+                    }
+                    Ok(_) => {
+                        self.database.reject_inbound_peer_envelope(
+                            &envelope.sender_installation_id,
+                            &envelope.message_id.to_string(),
+                        )?;
+                        let _ = delivered.send(Ok(ack(PeerAckKind::Rejected)));
+                        Ok(Vec::new())
                     }
                     Err(error) => {
                         self.database.reject_inbound_peer_envelope(
@@ -79,8 +87,10 @@ impl ClientEngineActor {
                             &envelope.message_id.to_string(),
                         )?;
                         let _ = delivered.send(Ok(ack(PeerAckKind::Rejected)));
-                        self.crypto_blocked_peers
-                            .insert(envelope.sender_installation_id.clone());
+                        if is_cryptographic_inbound_error(&error) {
+                            self.crypto_blocked_peers
+                                .insert(envelope.sender_installation_id.clone());
+                        }
                         self.pending_engine_events.push(EngineEvent::Log {
                             log: EngineLogEvent {
                                 level: "error".to_owned(),
@@ -109,6 +119,7 @@ impl ClientEngineActor {
                 let delivery_id = match &delivery {
                     PeerDeliveryTag::Message { message_id }
                     | PeerDeliveryTag::Receipt { message_id } => message_id.as_str(),
+                    PeerDeliveryTag::ReadReceipt { receipt_id } => receipt_id.as_str(),
                     PeerDeliveryTag::Ephemeral => "ephemeral",
                     PeerDeliveryTag::Probe => "probe",
                     PeerDeliveryTag::EndpointUpdate => "endpoint-update",
@@ -191,6 +202,15 @@ impl ClientEngineActor {
                             PeerAckKind::Persisted | PeerAckKind::Delivered | PeerAckKind::Rejected
                         ) {
                             self.database.complete_delivery_receipt(&message_id)?;
+                        }
+                        Ok(Vec::new())
+                    }
+                    PeerDeliveryTag::ReadReceipt { receipt_id } => {
+                        if matches!(
+                            kind,
+                            PeerAckKind::Persisted | PeerAckKind::Delivered | PeerAckKind::Rejected
+                        ) {
+                            self.database.complete_read_receipt(&receipt_id)?;
                         }
                         Ok(Vec::new())
                     }
@@ -451,6 +471,39 @@ impl ClientEngineActor {
                 );
                 Ok(runtime_events)
             }
+        }
+    }
+}
+
+fn is_cryptographic_inbound_error(error: &EngineError) -> bool {
+    matches!(error, EngineError::InvalidCommand(message)
+        if ["decrypt", "MLS", "ciphertext", "authentication", "hash"]
+            .iter()
+            .any(|marker| message.contains(marker)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_cryptographic_inbound_error;
+    use crate::EngineError;
+
+    #[test]
+    fn only_cryptographic_inbound_errors_are_blocking() {
+        for message in [
+            "MLS decrypt failed",
+            "ciphertext authentication failed",
+            "application hash mismatch",
+        ] {
+            assert!(is_cryptographic_inbound_error(
+                &EngineError::InvalidCommand(message.to_owned(),)
+            ));
+        }
+        for error in [
+            EngineError::Storage("receipt retry unavailable".to_owned()),
+            EngineError::Transport("relay timeout".to_owned()),
+            EngineError::InvalidCommand("receipt effect failed".to_owned()),
+        ] {
+            assert!(!is_cryptographic_inbound_error(&error));
         }
     }
 }

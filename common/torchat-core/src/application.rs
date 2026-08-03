@@ -90,6 +90,14 @@ pub enum ApplicationPayloadV1 {
 
         #[serde(rename = "preserveHistory")]
         preserve_history: bool,
+
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(rename = "relationshipEpoch")]
+        relationship_epoch: Option<i64>,
+
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(rename = "removalId")]
+        removal_id: Option<Uuid>,
     },
 
     CapabilityOffer {
@@ -181,6 +189,8 @@ mod tests {
                 message_id: Uuid::from_u128(10),
                 removed_at: 48,
                 preserve_history: false,
+                relationship_epoch: None,
+                removal_id: None,
             },
         ] {
             let encoded = payload.encode().unwrap();
@@ -198,5 +208,18 @@ mod tests {
         };
         let encoded = payload.encode().unwrap();
         assert_eq!(ContactRemovedPayloadV1::decode(&encoded).unwrap(), payload);
+    }
+
+    #[test]
+    fn application_decoder_rejects_bounded_malformed_corpus_without_panic() {
+        let mut seed = 0x1234_5678_u32;
+        for length in 0..=512_usize {
+            let mut bytes = vec![0_u8; length];
+            for byte in &mut bytes {
+                seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                *byte = (seed >> 24) as u8;
+            }
+            let _ = ApplicationPayloadV1::decode(&bytes);
+        }
     }
 }

@@ -445,6 +445,8 @@ class _SnapshotRuntime implements ClientRuntime {
   @override
   Future<void> retryMessage(String messageId) async {}
   @override
+  Future<void> retryDeadLetter(String kind, String id) async {}
+  @override
   Future<void> deleteMessageLocal(String messageId) async {}
   @override
   Future<void> setTyping(String conversationId, bool typing) async {}

@@ -29,6 +29,9 @@ impl ClientEngineActor {
             RetryKind::PairingAcknowledgement => self
                 .retry_pending_pairing_acknowledgements()
                 .map(|_| "pairing acknowledgement flush"),
+            RetryKind::ReadReceipt => self
+                .flush_pending_read_receipts()
+                .map(|_| "read receipt flush"),
         };
         if let Err(error) = result {
             let _ = events
@@ -47,7 +50,7 @@ impl ClientEngineActor {
 
     pub(super) fn next_retry_deadline(&self) -> EngineResult<Option<RetryDeadline>> {
         self.database
-            .next_retry_deadline(unix_ms(), self.clock.now_secs())
+            .next_retry_deadline(self.clock.now_ms(), self.clock.now_secs())
     }
 
     pub(super) fn next_retry_wakeup_at(
@@ -69,8 +72,15 @@ impl ClientEngineActor {
             };
             return Ok(Some(Instant::now() + delay));
         }
-        let retry_delay_ms = retry_deadline.at_ms.saturating_sub(unix_ms()) as u64;
-        Ok(Some(Instant::now() + Duration::from_millis(retry_delay_ms)))
+        // Durable retry records use wall-clock milliseconds so they survive a
+        // restart. Convert that timestamp once into a process-local monotonic
+        // deadline; sleeping must not be affected by a wall-clock jump after
+        // this point.
+        Ok(Some(monotonic_wakeup_at(
+            retry_deadline.at_ms,
+            self.clock.now_ms(),
+            Instant::now(),
+        )))
     }
 
     fn retry_is_runnable(&self, kind: RetryKind) -> bool {
@@ -97,5 +107,34 @@ impl ClientEngineActor {
             )?;
         }
         Ok(())
+    }
+}
+
+fn monotonic_wakeup_at(deadline_at_ms: i64, wall_now_ms: i64, monotonic_now: Instant) -> Instant {
+    let delay_ms = deadline_at_ms
+        .checked_sub(wall_now_ms)
+        .filter(|delay| *delay > 0)
+        .unwrap_or_default() as u64;
+    monotonic_now + Duration::from_millis(delay_ms)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::monotonic_wakeup_at;
+    use tokio::time::{Duration, Instant};
+
+    #[test]
+    fn durable_wall_deadline_is_converted_to_monotonic_deadline_once() {
+        let now = Instant::now();
+        let wakeup = monotonic_wakeup_at(10_500, 10_000, now);
+        assert!(wakeup >= now + Duration::from_millis(500));
+        assert!(wakeup <= now + Duration::from_millis(501));
+    }
+
+    #[test]
+    fn wall_clock_rollback_cannot_create_a_negative_duration() {
+        let now = Instant::now();
+        let wakeup = monotonic_wakeup_at(9_000, 10_000, now);
+        assert_eq!(wakeup, now);
     }
 }

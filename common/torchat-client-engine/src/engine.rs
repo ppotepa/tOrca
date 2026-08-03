@@ -4,8 +4,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     ClientEngineActor, EngineCommand, EngineCommandEnvelope, EngineConfig, EngineError,
-    EngineEvent, EngineFatalError, EngineResult, PlatformFact, event::EngineEventReceiver,
-    logging::StartupJournal,
+    EngineEvent, EngineFatalError, EngineResult, PlatformFact, anti_rollback::MlsEpochAnchor,
+    event::EngineEventReceiver, logging::StartupJournal,
 };
 
 pub const COMMAND_CHANNEL_CAPACITY: usize = 256;
@@ -19,12 +19,30 @@ pub struct ClientEngine {
 
 impl ClientEngine {
     pub fn new(config: EngineConfig) -> EngineResult<Self> {
+        Self::new_with_optional_anchor(config, None)
+    }
+
+    pub fn new_with_anchor(
+        config: EngineConfig,
+        anchor: &mut dyn MlsEpochAnchor<Error = EngineError>,
+    ) -> EngineResult<Self> {
+        Self::new_with_optional_anchor(config, Some(anchor))
+    }
+
+    fn new_with_optional_anchor(
+        config: EngineConfig,
+        mut anchor: Option<&mut dyn MlsEpochAnchor<Error = EngineError>>,
+    ) -> EngineResult<Self> {
         let (command_tx, command_rx) = mpsc::channel(COMMAND_CHANNEL_CAPACITY);
         let (actor_event_tx, mut actor_event_rx) = mpsc::channel(WORKER_OUTCOME_CHANNEL_CAPACITY);
         let (event_tx, event_rx) = mpsc::channel(WORKER_OUTCOME_CHANNEL_CAPACITY);
         let shutdown = CancellationToken::new();
         let mut journal = StartupJournal::open(config.log_directory.as_deref(), &config.platform);
-        let actor = match ClientEngineActor::new(config) {
+        let actor_result = match anchor.as_deref_mut() {
+            Some(anchor) => ClientEngineActor::new_with_anchor(config, anchor),
+            None => ClientEngineActor::new(config),
+        };
+        let actor = match actor_result {
             Ok(actor) => actor,
             Err(error) => {
                 journal.record_engine_creation_failure(&error.to_string());

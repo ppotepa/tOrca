@@ -707,10 +707,6 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
       onOpenSettings: _openSettings,
       onRetryTor: _showTransportStatus,
       typingContacts: state.typingContacts,
-      onlineContacts: const {},
-      idleContacts: const {},
-      focusedConversations: const {},
-      lastSeenContacts: const {},
       lastSeenEnabled: state.lastSeenEnabled,
     );
     if (defaultTargetPlatform == TargetPlatform.android) {

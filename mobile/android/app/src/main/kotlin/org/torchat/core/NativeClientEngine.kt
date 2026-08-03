@@ -2,18 +2,33 @@ package org.torchat.core
 
 import com.sun.jna.Library
 import com.sun.jna.Native
+import com.sun.jna.Callback
 import com.sun.jna.Pointer
 
 private interface ClientEngineLibrary : Library {
     fun torchat_client_engine_last_error(): Pointer?
     fun torchat_client_engine_free_string(value: Pointer?)
     fun torchat_client_engine_new(configJson: ByteArray, configLen: Long): Pointer?
+    fun torchat_client_engine_new_with_mls_epoch_anchor(
+        configJson: ByteArray,
+        configLen: Long,
+        getEpoch: MlsEpochGetCallback?,
+        setEpoch: MlsEpochSetCallback?,
+    ): Pointer?
     fun torchat_client_engine_start(value: Pointer?): Int
     fun torchat_client_engine_submit_json(value: Pointer?, requestJson: ByteArray, requestLen: Long): Int
     fun torchat_client_engine_poll_json(value: Pointer?, timeoutMs: Long): Pointer?
     fun torchat_client_engine_platform_fact_json(value: Pointer?, factJson: ByteArray, factLen: Long): Int
     fun torchat_client_engine_shutdown(value: Pointer?)
     fun torchat_client_engine_free(value: Pointer?)
+}
+
+fun interface MlsEpochGetCallback : Callback {
+    fun invoke(conversationId: Pointer, conversationIdLen: Long, epochOut: Pointer): Int
+}
+
+fun interface MlsEpochSetCallback : Callback {
+    fun invoke(conversationId: Pointer, conversationIdLen: Long, epoch: Long): Int
 }
 
 private object ClientEngineNative {
@@ -33,7 +48,11 @@ private object ClientEngineNative {
     }
 }
 
-class NativeClientEngine private constructor(private var handle: Pointer?) : AutoCloseable {
+class NativeClientEngine private constructor(
+    private var handle: Pointer?,
+    @Suppress("UNUSED_PARAMETER") private val getEpochCallback: MlsEpochGetCallback? = null,
+    @Suppress("UNUSED_PARAMETER") private val setEpochCallback: MlsEpochSetCallback? = null,
+) : AutoCloseable {
     fun start() {
         requireStatus(
             ClientEngineNative.api.torchat_client_engine_start(requireHandle()),
@@ -100,6 +119,24 @@ class NativeClientEngine private constructor(private var handle: Pointer?) : Aut
                     config,
                     config.size.toLong(),
                 ) ?: error(ClientEngineNative.error()),
+            )
+        }
+
+        fun createWithMlsEpochAnchor(
+            configJson: String,
+            getEpoch: MlsEpochGetCallback,
+            setEpoch: MlsEpochSetCallback,
+        ): NativeClientEngine {
+            val config = configJson.toByteArray(Charsets.UTF_8)
+            return NativeClientEngine(
+                ClientEngineNative.api.torchat_client_engine_new_with_mls_epoch_anchor(
+                    config,
+                    config.size.toLong(),
+                    getEpoch,
+                    setEpoch,
+                ) ?: error(ClientEngineNative.error()),
+                getEpoch,
+                setEpoch,
             )
         }
     }

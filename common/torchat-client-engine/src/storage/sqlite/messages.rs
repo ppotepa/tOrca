@@ -171,6 +171,12 @@ impl ClientDatabase {
                 params![message_id, next_attempt_at, error],
             )
             .map_err(sqlite_error)?;
+        self.connection
+            .execute(
+                "UPDATE outbound_deliveries SET claimed_until = NULL, last_error_code = NULL WHERE message_id = ?1;",
+                [message_id],
+            )
+            .map_err(sqlite_error)?;
         Ok(())
     }
 
@@ -221,6 +227,7 @@ impl ClientDatabase {
             .execute(
                 "UPDATE outbound_deliveries
                  SET state = 'QUEUED', next_attempt_at = ?1, ack_deadline = NULL,
+                     claimed_until = NULL,
                      updated_at = unixepoch()
                  WHERE UPPER(state) = 'IN_FLIGHT';",
                 [now_ms],
@@ -231,7 +238,8 @@ impl ClientDatabase {
                 "UPDATE messages
                  SET state = 'QUEUED',
                      next_attempt_at = ?1,
-                     ack_deadline = NULL
+                     ack_deadline = NULL,
+                     claimed_until = NULL
                  WHERE outgoing = 1
                    AND UPPER(state) = 'SENDING'
                    AND id IN (

@@ -1,8 +1,11 @@
 use std::mem;
 
-use torchat_client_runtime::{ClientRuntime, SystemRuntimeClock};
+use torchat_client_runtime::ClientRuntime;
 
-use super::{ClientEngineActor, EngineRuntimeTransport, IdempotencyCommitContext, runtime_error};
+use super::{
+    ClientEngineActor, EngineRuntimeTransport, IdempotencyCommitContext, SharedRuntimeClock,
+    runtime_error,
+};
 use crate::{EngineResult, event::ResponsePayload, storage::SqliteRuntimeStorage};
 
 impl ClientEngineActor {
@@ -12,7 +15,7 @@ impl ClientEngineActor {
             &mut ClientRuntime<
                 SqliteRuntimeStorage<'_>,
                 EngineRuntimeTransport<'_>,
-                SystemRuntimeClock,
+                SharedRuntimeClock,
             >,
         ) -> torchat_client_runtime::RuntimeResult<R>,
     ) -> EngineResult<(R, Vec<torchat_client_runtime::RuntimeEvent>)> {
@@ -26,7 +29,7 @@ impl ClientEngineActor {
             &mut ClientRuntime<
                 SqliteRuntimeStorage<'_>,
                 EngineRuntimeTransport<'_>,
-                SystemRuntimeClock,
+                SharedRuntimeClock,
             >,
         ) -> torchat_client_runtime::RuntimeResult<R>,
         response: impl FnOnce(&R) -> EngineResult<ResponsePayload>,
@@ -40,7 +43,7 @@ impl ClientEngineActor {
             &mut ClientRuntime<
                 SqliteRuntimeStorage<'_>,
                 EngineRuntimeTransport<'_>,
-                SystemRuntimeClock,
+                SharedRuntimeClock,
             >,
         ) -> torchat_client_runtime::RuntimeResult<R>,
         idempotency: Option<&IdempotencyCommitContext>,
@@ -52,7 +55,8 @@ impl ClientEngineActor {
             _actor: std::marker::PhantomData,
         };
         let session = mem::take(&mut self.session);
-        let mut runtime = ClientRuntime::with_session(storage, transport, self.clock, session);
+        let mut runtime =
+            ClientRuntime::with_session(storage, transport, self.clock.clone(), session);
         let session_before = runtime.session().clone();
         runtime.session_mut().begin_transaction();
 

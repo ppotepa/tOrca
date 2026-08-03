@@ -13,6 +13,7 @@ pub mod retry;
 pub mod runtime;
 pub mod session;
 pub mod storage;
+pub mod testing;
 pub mod transport;
 
 pub use application_snapshot::{
@@ -61,7 +62,7 @@ pub use pairing_rules::{
 pub use pairing_rules::{expire_pairing_state, pairing_can_archive, pairing_is_active};
 pub use runtime::ClientRuntime;
 pub use session::RuntimeSession;
-pub use storage::RuntimeStorage;
+pub use storage::{RelationshipTransition, RuntimeStorage};
 pub use transport::RuntimeTransport;
 
 #[cfg(test)]

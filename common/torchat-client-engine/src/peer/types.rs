@@ -21,6 +21,7 @@ use uuid::Uuid;
 pub enum PeerDeliveryTag {
     Message { message_id: String },
     Receipt { message_id: String },
+    ReadReceipt { receipt_id: String },
     Ephemeral,
     Probe,
     EndpointUpdate,
@@ -34,6 +35,7 @@ impl PeerDeliveryTag {
         match self {
             Self::Message { message_id } => Some(format!("message:{message_id}")),
             Self::Receipt { message_id } => Some(format!("receipt:{message_id}")),
+            Self::ReadReceipt { receipt_id } => Some(format!("read-receipt:{receipt_id}")),
             Self::Ephemeral
             | Self::Probe
             | Self::EndpointUpdate
@@ -46,7 +48,10 @@ impl PeerDeliveryTag {
     pub(super) fn is_durable(&self) -> bool {
         matches!(
             self,
-            Self::Message { .. } | Self::Receipt { .. } | Self::EndpointUpdate
+            Self::Message { .. }
+                | Self::Receipt { .. }
+                | Self::ReadReceipt { .. }
+                | Self::EndpointUpdate
         )
     }
 }

@@ -3,6 +3,21 @@ use crate::{
     RuntimeIdentity, RuntimeProfile, RuntimeResult,
 };
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RelationshipTransition {
+    BeginVerified {
+        installation_id: String,
+        boundary_at: i64,
+    },
+    Remove {
+        installation_id: String,
+        removed_at: i64,
+        preserve_history: bool,
+        removal_id: String,
+        relationship_epoch: i64,
+    },
+}
+
 pub trait RuntimeStorage {
     fn identity(&self) -> RuntimeResult<Option<RuntimeIdentity>>;
     fn profile(&self) -> RuntimeResult<Option<RuntimeProfile>>;
@@ -19,6 +34,45 @@ pub trait RuntimeStorage {
 
     fn contacts(&self) -> RuntimeResult<Vec<ContactRecord>>;
     fn put_contact(&mut self, contact: ContactRecord) -> RuntimeResult<()>;
+
+    fn current_relationship_epoch(&mut self, _installation_id: &str) -> RuntimeResult<i64> {
+        Ok(0)
+    }
+
+    fn apply_relationship_transition(
+        &mut self,
+        transition: RelationshipTransition,
+    ) -> RuntimeResult<()> {
+        match transition {
+            RelationshipTransition::BeginVerified {
+                installation_id,
+                boundary_at,
+            } => self.begin_verified_relationship(&installation_id, boundary_at),
+            RelationshipTransition::Remove {
+                installation_id,
+                removed_at,
+                preserve_history,
+                removal_id,
+                relationship_epoch,
+            } => self.remove_relationship_with_id(
+                &installation_id,
+                removed_at,
+                preserve_history,
+                &removal_id,
+                relationship_epoch,
+            ),
+        }
+    }
+
+    fn begin_verified_relationship(
+        &mut self,
+        _installation_id: &str,
+        _boundary_at: i64,
+    ) -> RuntimeResult<()> {
+        Err(crate::RuntimeError::Unavailable(
+            "verified relationship creation is not supported by this storage".to_owned(),
+        ))
+    }
 
     fn conversations(&self) -> RuntimeResult<Vec<ConversationSummary>>;
     fn put_conversation(&mut self, conversation: ConversationSummary) -> RuntimeResult<()>;
@@ -37,6 +91,17 @@ pub trait RuntimeStorage {
         Err(crate::RuntimeError::Unavailable(
             "relationship removal is not supported by this storage".to_owned(),
         ))
+    }
+    fn remove_relationship_with_id(
+        &mut self,
+        installation_id: &str,
+        removed_at: i64,
+        preserve_history: bool,
+        removal_id: &str,
+        relationship_epoch: i64,
+    ) -> RuntimeResult<()> {
+        let _ = (removal_id, relationship_epoch);
+        self.remove_relationship(installation_id, removed_at, preserve_history)
     }
     fn pending_messages(&self) -> RuntimeResult<Vec<ChatMessage>>;
     fn pending_receipts(&self) -> RuntimeResult<Vec<ReceiptSendEffect>> {

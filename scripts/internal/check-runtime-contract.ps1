@@ -104,7 +104,7 @@ Assert-ExactContractList 'Engine command types' $contract.commandTypes @(
     'cancel_pairing',
     'verify_contact',
     'update_contact_settings',
-    'remove_relationship',
+    'request_relationship_removal',
     'start_conversation',
     'open_conversation',
     'close_conversation',

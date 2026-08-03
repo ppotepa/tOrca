@@ -42,6 +42,21 @@ pub struct DeliveryReceiptRecord {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReadReceiptOutboxRecord {
+    pub receipt_id: String,
+    pub contact_installation_id: String,
+    pub conversation_id: String,
+    pub message_ids_json: String,
+    pub read_at: i64,
+    pub wire_ciphertext: Option<Vec<u8>>,
+    pub state: String,
+    pub attempt_count: u32,
+    pub next_attempt_at: i64,
+    pub last_error: Option<String>,
+    pub created_at: i64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StoredMessageRecord {
     pub id: String,
     pub conversation_id: String,
@@ -140,6 +155,16 @@ pub struct CapabilityDeliveryRecord {
     pub created_at: i64,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeadLetterRecord {
+    pub kind: String,
+    pub id: String,
+    pub attempt_count: u32,
+    pub dead_lettered_at: i64,
+    pub last_error: Option<String>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PendingContactConfirmationRecord {
     pub pairing_id: String,
@@ -160,6 +185,7 @@ pub enum RetryKind {
     PeerEndpointBootstrap,
     ContactConfirmation,
     PairingAcknowledgement,
+    ReadReceipt,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -167,3 +193,4 @@ pub struct RetryDeadline {
     pub kind: RetryKind,
     pub at_ms: i64,
 }
+use serde::Serialize;

@@ -127,7 +127,7 @@ pub enum EngineCommand {
         #[serde(default)]
         transport_policy: Option<torchat_client_runtime::ContactTransportPolicy>,
     },
-    RemoveRelationship {
+    RequestRelationshipRemoval {
         installation_id: String,
         #[serde(default = "default_true")]
         preserve_history: bool,
@@ -148,6 +148,11 @@ pub enum EngineCommand {
     RetryMessage {
         message_id: String,
     },
+    RetryDeadLetter {
+        kind: String,
+        id: String,
+    },
+    ListDeadLetters,
     DeleteMessageLocal {
         message_id: String,
     },

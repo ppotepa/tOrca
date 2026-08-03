@@ -8,6 +8,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../client_runtime.dart';
 import '../core/application_state/application_snapshot.dart';
 import '../core/application_state/application_state_store.dart';
+import '../core/connection/app_state_connection.dart';
+import '../core/connection/connection_readiness.dart';
 import '../core/runtime/runtime_repository.dart';
 import '../shared/formatters/invite_code.dart';
 import '../shared/formatters/operation_status.dart';
@@ -282,10 +284,9 @@ abstract class AppController extends Notifier<AppState> {
         destination: MainDestination.chats,
         error: '',
       );
-      // Read receipts deliberately remain unavailable in 0.1: the current
-      // MLS transport advances the ratchet, so a lossy ephemeral receipt could
-      // desynchronize the next durable message. Do not invoke a command that
-      // the engine intentionally reports as unsupported.
+      // Read receipts are durable MLS effects. They are queued by the engine
+      // after focus is accepted and therefore survive a transient transport
+      // failure or engine reattach.
     } catch (error) {
       state = state.copyWith(error: _message(error));
     }
@@ -368,8 +369,18 @@ abstract class AppController extends Notifier<AppState> {
     }
   }
 
-  Future<void> setConversationFocus(String conversationId, bool focused) =>
-      _repository.setConversationFocus(conversationId, focused);
+  Future<void> setConversationFocus(String conversationId, bool focused) async {
+    final result = await _repository.setConversationFocus(
+      conversationId,
+      focused,
+    );
+    if (result?.status == ReadReceiptQueueStatus.error) {
+      state = state.copyWith(
+        error:
+            'Nie udało się zakolejkować potwierdzenia odczytu: ${result!.error}',
+      );
+    }
+  }
 
   Future<void> updateVisibility(bool foreground) async {
     final conversationId = state.selectedConversationId;
@@ -394,9 +405,11 @@ abstract class AppController extends Notifier<AppState> {
   }
 
   Future<void> submitPairingCode(String code) async {
-    if (!state.transport.connected) {
+    if (!state.transport.connected ||
+        !state.connectionReadiness.canPerform(ConnectionOperation.pair)) {
       state = state.copyWith(
-        error: 'Poczekaj na zielony pasek połączenia Tor.',
+        error:
+            'Pairing wymaga dostępnego relay; dane lokalne pozostają dostępne offline.',
       );
       return;
     }
@@ -875,13 +888,7 @@ abstract class AppController extends Notifier<AppState> {
     List<StartupStep>? startupSteps,
     PeerServerStatus? peerServerStatus,
   }) {
-    final steps = startupSteps ?? state.startupSteps;
-    final localPeerServerStatus = peerServerStatus ?? state.peerServerStatus;
-    final startupReady =
-        transport.connected &&
-        localPeerServerStatus == PeerServerStatus.ready &&
-        steps.length == StartupStepKind.values.length &&
-        steps.every((step) => step.state == StartupStepState.ready);
+    final startupReady = state.connectionReadiness.localCoreReady;
 
     // The application is usable only after both its local onion service and
     // the control-plane relay are ready.  This keeps a half-started client on

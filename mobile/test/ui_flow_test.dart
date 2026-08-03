@@ -323,7 +323,7 @@ void main() {
   );
 
   test(
-    'startup stays on boot screen until the local P2P endpoint is ready',
+    'startup opens the local shell before the local P2P endpoint is ready',
     () async {
       final runtime = _StatefulRuntime(emitPeerReady: false);
       final container = ProviderContainer(
@@ -336,7 +336,7 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 100));
 
       final state = container.read(appControllerProvider);
-      expect(state.screen, ControllerScreen.boot);
+      expect(state.screen, ControllerScreen.main);
       expect(state.transport.phase, TransportPhase.connected);
       expect(state.peerServerStatus, PeerServerStatus.starting);
       expect(
@@ -474,7 +474,7 @@ void main() {
       final state = container.read(appControllerProvider);
       expect(runtime.submitPairingCalls, 0);
       expect(state.outbox, isEmpty);
-      expect(state.error, contains('Poczekaj na zielony pasek'));
+      expect(state.error, contains('Pairing wymaga dostępnego relay'));
     },
   );
 
@@ -1191,6 +1191,9 @@ class _EventRuntime implements ClientRuntime {
   Future<void> deleteMessageLocal(String messageId) async {}
 
   @override
+  Future<void> retryDeadLetter(String kind, String id) async {}
+
+  @override
   Future<void> setTyping(String conversationId, bool typing) async {}
 
   @override
@@ -1624,6 +1627,9 @@ class _StatefulRuntime implements ClientRuntime {
 
   @override
   Future<void> deleteMessageLocal(String messageId) async {}
+
+  @override
+  Future<void> retryDeadLetter(String kind, String id) async {}
 
   @override
   Future<void> setTyping(String conversationId, bool typing) async {}

@@ -217,12 +217,9 @@ class RuntimeRepository {
   Future<ApplicationSnapshot> _buildApplicationSnapshot({
     bool includePairing = false,
   }) async {
-    // Production bridges implement the atomic typed projection. Keep a
-    // narrow compatibility path for test/developer runtimes that predate the
-    // method; it is never used by Android or Windows production bridges.
     final snapshot = _runtime is RuntimeProjectionProvider
         ? await (_runtime as RuntimeProjectionProvider).applicationSnapshot()
-        : await _legacyApplicationSnapshotForUnsupportedRuntime();
+        : null;
     if (snapshot == null) {
       throw StateError('Runtime returned no application projection');
     }
@@ -238,33 +235,6 @@ class RuntimeRepository {
     );
     applicationState.hydrate(enriched);
     return enriched;
-  }
-
-  Future<ApplicationSnapshot?>
-  _legacyApplicationSnapshotForUnsupportedRuntime() async {
-    final values = await Future.wait<Object?>([
-      _runtime.identity(),
-      _runtime.profile(),
-      _runtime.contacts(),
-      _runtime.conversations(),
-      _runtime.peerEndpointAvailable(),
-      _runtime.startupReadiness(),
-    ]);
-    final identity = values[0] as RuntimeIdentity? ?? const RuntimeIdentity();
-    final profile = values[1] as RuntimeProfile? ?? const RuntimeProfile();
-    final contacts = values[2] as List<ContactRecord>;
-    final conversations = values[3] as List<ConversationSummary>;
-    final peerEndpointAvailable = values[4] as bool;
-    final generation = (values[5] as StartupReadinessSnapshot).generation;
-    return ApplicationSnapshot(
-      generation: generation,
-      createdAtMs: DateTime.now().millisecondsSinceEpoch,
-      identity: identity,
-      profile: profile,
-      contacts: contacts,
-      conversations: conversations,
-      peerEndpointAvailable: peerEndpointAvailable,
-    );
   }
 
   int _nextGeneration([int minimum = 0]) {
@@ -758,6 +728,15 @@ class RuntimeRepository {
     invalidateLocalCache();
   }
 
+  Future<void> retryDeadLetter(String kind, String id) async {
+    await _runtime.retryDeadLetter(kind, id);
+    invalidateLocalCache();
+  }
+
+  Future<List<Map<String, dynamic>>> listDeadLetters() async =>
+      await (_runtime as dynamic).listDeadLetters()
+          as List<Map<String, dynamic>>;
+
   Future<void> deleteMessageLocal(String messageId) async {
     await _runtime.deleteMessageLocal(messageId);
     final conversationId = applicationState.removeMessage(messageId);
@@ -783,7 +762,10 @@ class RuntimeRepository {
     }
   }
 
-  Future<void> setConversationFocus(String conversationId, bool focused) async {
+  Future<ReadReceiptQueueResult?> setConversationFocus(
+    String conversationId,
+    bool focused,
+  ) async {
     try {
       await (_runtime as dynamic).setConversationFocus(conversationId, focused);
       if (focused && conversationId.isNotEmpty) {
@@ -791,11 +773,12 @@ class RuntimeRepository {
         // receipt only after focus was accepted by the runtime so a transient
         // navigation/engine failure cannot advertise a read that did not
         // happen locally.
-        await _runtime.sendReadReceipts(conversationId);
+        return queueReadReceipts(conversationId);
       }
     } catch (_) {
       // Focus is transient. The heartbeat will repair a dropped update.
     }
+    return null;
   }
 
   Future<void> setPresence(bool online) async {
@@ -811,6 +794,22 @@ class RuntimeRepository {
 
   Future<void> sendReadReceipts(String conversationId) =>
       _runtime.sendReadReceipts(conversationId);
+
+  Future<ReadReceiptQueueResult> queueReadReceipts(
+    String conversationId,
+  ) async {
+    try {
+      await _runtime.sendReadReceipts(conversationId);
+      return const ReadReceiptQueueResult(ReadReceiptQueueStatus.queued);
+    } on UnsupportedError {
+      return const ReadReceiptQueueResult(ReadReceiptQueueStatus.disabled);
+    } catch (error) {
+      return ReadReceiptQueueResult(
+        ReadReceiptQueueStatus.error,
+        error: error.toString(),
+      );
+    }
+  }
 
   Future<void> updateAppVisibility(bool foreground) =>
       _runtime.updateAppVisibility(foreground);

@@ -84,6 +84,20 @@ impl ClientDatabase {
     }
 
     pub fn put_contact_peer_endpoint(&self, endpoint: &PeerEndpointBundle) -> EngineResult<()> {
+        let removed: bool = self
+            .connection
+            .query_row(
+                "SELECT EXISTS(
+                    SELECT 1 FROM relationship_tombstones
+                    WHERE contact_installation_id = ?1
+                );",
+                [&endpoint.installation_id],
+                |row| row.get(0),
+            )
+            .map_err(sqlite_error)?;
+        if removed {
+            return Ok(());
+        }
         let json = serde_json::to_vec(endpoint).map_err(|error| {
             EngineError::Storage(format!("encode contact peer endpoint: {error}"))
         })?;
@@ -383,7 +397,7 @@ impl ClientDatabase {
                 "SELECT contact_installation_id, payload, endpoint_sequence, attempt_count,
                         next_attempt_at, last_error
                  FROM peer_endpoint_bootstrap_outbox
-                 WHERE next_attempt_at <= ?1
+                 WHERE next_attempt_at <= ?1 AND dead_lettered_at IS NULL
                  ORDER BY next_attempt_at ASC, contact_installation_id ASC;",
             )
             .map_err(sqlite_error)?;
@@ -468,6 +482,7 @@ impl ClientDatabase {
             .execute(
                 "UPDATE peer_endpoint_bootstrap_outbox
                  SET last_error = ?1,
+                     dead_lettered_at = CASE WHEN ?1 LIKE 'permanent:%' OR ?1 LIKE 'protocol:%' THEN unixepoch() ELSE dead_lettered_at END,
                      updated_at = unixepoch()
                  WHERE contact_installation_id = ?2
                    AND endpoint_sequence = ?3;",

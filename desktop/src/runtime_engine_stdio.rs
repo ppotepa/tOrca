@@ -3,12 +3,65 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::io::{BufRead, Write};
 use torchat_client_engine::{
-    ClientEngine, EngineCommand, EngineCommandEnvelope, EngineConfig, EngineEvent,
-    EngineFatalError, PlatformAction, PlatformFact, PlatformKind, config::SecretBytes,
+    ClientEngine, EngineCommand, EngineCommandEnvelope, EngineConfig, EngineError, EngineEvent,
+    EngineFatalError, PlatformAction, PlatformFact, PlatformKind, anti_rollback::MlsEpochAnchor,
+    config::SecretBytes,
 };
 use url::Url;
 
 use crate::{cli::Cli, identity_store, tor_runtime::TorRuntime};
+
+struct DesktopMlsEpochAnchor {
+    namespace: String,
+}
+
+impl DesktopMlsEpochAnchor {
+    fn new(database_path: &std::path::Path) -> Self {
+        let digest = Sha256::digest(database_path.to_string_lossy().as_bytes());
+        Self {
+            namespace: digest.iter().map(|byte| format!("{byte:02x}")).collect(),
+        }
+    }
+
+    fn entry(&self, conversation_id: &str) -> Result<keyring::Entry, EngineError> {
+        let digest = Sha256::digest(conversation_id.as_bytes());
+        let account = format!(
+            "mls-epoch-{}-{}",
+            self.namespace,
+            digest
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        );
+        keyring::Entry::new("org.torchat.desktop", &account)
+            .map_err(|error| EngineError::Storage(format!("create MLS epoch vault entry: {error}")))
+    }
+}
+
+impl MlsEpochAnchor for DesktopMlsEpochAnchor {
+    type Error = EngineError;
+
+    fn highest_epoch(&self, conversation_id: &str) -> Result<Option<u64>, Self::Error> {
+        match self.entry(conversation_id)?.get_secret() {
+            Ok(value) => {
+                let bytes: [u8; 8] = value.try_into().map_err(|_| {
+                    EngineError::Storage("MLS epoch vault value has invalid length".to_owned())
+                })?;
+                Ok(Some(u64::from_be_bytes(bytes)))
+            }
+            Err(error) if matches!(&error, keyring::Error::NoEntry) => Ok(None),
+            Err(error) => Err(EngineError::Storage(format!(
+                "read MLS epoch vault value: {error}"
+            ))),
+        }
+    }
+
+    fn record_epoch(&mut self, conversation_id: &str, epoch: u64) -> Result<(), Self::Error> {
+        self.entry(conversation_id)?
+            .set_secret(&epoch.to_be_bytes())
+            .map_err(|error| EngineError::Storage(format!("write MLS epoch vault value: {error}")))
+    }
+}
 
 fn write_json_line(value: impl Serialize) -> Result<()> {
     let mut stdout = std::io::stdout().lock();
@@ -33,13 +86,6 @@ pub(crate) fn platform_kind() -> PlatformKind {
     }
     #[allow(unreachable_code)]
     PlatformKind::Linux
-}
-
-pub(crate) fn database_key(identity: &torchat_core::Identity) -> Vec<u8> {
-    let mut hash = Sha256::new();
-    hash.update(b"torchat-client-engine-database-key-v1");
-    hash.update(identity.private_key_bytes());
-    hash.finalize().to_vec()
 }
 
 pub(crate) fn relay_url(cli: &Cli) -> Result<Url> {
@@ -75,19 +121,22 @@ pub fn run_stdio_engine(cli: Cli) -> Result<()> {
     runtime.block_on(async move {
         let identity = identity_store::load_or_create(cli.identity_file.as_deref())?;
         let database_path = identity_store::state_path(cli.identity_file.as_deref())?;
+        let database_key_path = identity_store::database_key_path(cli.identity_file.as_deref())?;
+        let database_key = identity_store::load_or_create_database_key(&database_key_path)?;
         let log_directory = database_path
             .parent()
             .map(|parent| parent.join("engine-logs"));
         let config = EngineConfig {
             database_path,
-            database_key: SecretBytes(database_key(&identity)),
+            database_key: SecretBytes(database_key),
             identity_private_key: SecretBytes(identity.private_key_bytes().to_vec()),
             relay_onion_url: relay_url(&cli)?,
             initial_socks5_url: None,
             log_directory,
             platform: platform_kind(),
         };
-        let mut engine = ClientEngine::new(config)?;
+        let mut mls_anchor = DesktopMlsEpochAnchor::new(&database_path);
+        let mut engine = ClientEngine::new_with_anchor(config, &mut mls_anchor)?;
         engine.start().await?;
         let (tor_runtime, status_rx) = start_tor(&cli)?;
 
@@ -136,7 +185,7 @@ pub fn run_stdio_engine(cli: Cli) -> Result<()> {
             };
             let request_id = envelope.request_id.clone();
             let shutdown = matches!(&envelope.command, EngineCommand::Shutdown);
-            if let Err(error) = engine.submit(request_id.clone(), envelope.command).await {
+            if let Err(error) = engine.submit_envelope(envelope).await {
                 write_json_line(EngineEvent::Fatal {
                     error: EngineFatalError {
                         code: "engine_submit_failed".to_owned(),

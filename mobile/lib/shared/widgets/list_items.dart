@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../../core/models/domain.dart';
 import '../../app/app_theme.dart';
 import '../formatters/message_timestamps.dart';
 import 'counter_badge.dart';
@@ -16,9 +15,6 @@ class ConversationListTile extends StatelessWidget {
     required this.unread,
     required this.selected,
     required this.onTap,
-    this.peerConnectionStatus = PeerConnectionStatus.offline,
-    this.transportPolicy = ContactTransportPolicy.peerOnly,
-    this.peerEndpointStatus = PeerEndpointStatus.missing,
     this.asCard = false,
     this.pinned = false,
     this.muted = false,
@@ -32,9 +28,6 @@ class ConversationListTile extends StatelessWidget {
   final int unread;
   final bool selected;
   final VoidCallback onTap;
-  final PeerConnectionStatus peerConnectionStatus;
-  final ContactTransportPolicy transportPolicy;
-  final PeerEndpointStatus peerEndpointStatus;
   final bool asCard;
   final bool pinned;
   final bool muted;
@@ -97,16 +90,11 @@ class ConversationListTile extends StatelessWidget {
         ],
       ),
       trailing: SizedBox(
-        width: 72,
+        width: 56,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            PeerTransportIndicator(
-              connectionStatus: peerConnectionStatus,
-              transportPolicy: transportPolicy,
-              endpointStatus: peerEndpointStatus,
-            ),
             Text(
               formatMessageTime(lastMessageAt),
               maxLines: 1,
@@ -186,65 +174,5 @@ class ContactListTile extends StatelessWidget {
       titleAlignment: ListTileTitleAlignment.center,
     );
     return asCard ? Card(child: tile) : tile;
-  }
-}
-
-class PeerTransportIndicator extends StatelessWidget {
-  const PeerTransportIndicator({
-    super.key,
-    required this.connectionStatus,
-    required this.transportPolicy,
-    this.endpointStatus = PeerEndpointStatus.verified,
-  });
-
-  final PeerConnectionStatus connectionStatus;
-  final ContactTransportPolicy transportPolicy;
-  final PeerEndpointStatus endpointStatus;
-
-  @override
-  Widget build(BuildContext context) {
-    final (icon, color, label) = switch ((
-      transportPolicy,
-      endpointStatus,
-      connectionStatus,
-    )) {
-      (ContactTransportPolicy.relayOnly, _, _) => (
-        Icons.shield_outlined,
-        Colors.blueGrey,
-        'Tylko relay',
-      ),
-      (_, PeerEndpointStatus.missing || PeerEndpointStatus.invalid, _) => (
-        Icons.handshake_outlined,
-        endpointStatus == PeerEndpointStatus.invalid ? Colors.red : Colors.grey,
-        endpointStatus == PeerEndpointStatus.invalid
-            ? 'P2P zablokowane: nieprawidłowy endpoint'
-            : 'P2P niedostępne: brak endpointu',
-      ),
-      (_, _, PeerConnectionStatus.connected) => (
-        Icons.handshake,
-        Colors.green,
-        'P2P realtime',
-      ),
-      (_, _, PeerConnectionStatus.connecting) => (
-        Icons.handshake_outlined,
-        Colors.orange,
-        'P2P: łączenie',
-      ),
-      (_, _, PeerConnectionStatus.authenticating) => (
-        Icons.handshake_outlined,
-        Colors.orange,
-        'P2P: uwierzytelnianie',
-      ),
-      (_, _, PeerConnectionStatus.backoff) => (
-        Icons.handshake_outlined,
-        Colors.orange,
-        'P2P: ponowienie',
-      ),
-      _ => (Icons.handshake_outlined, Colors.orange, 'P2P gotowe · idle'),
-    };
-    return Tooltip(
-      message: label,
-      child: Icon(icon, size: 17, color: color),
-    );
   }
 }

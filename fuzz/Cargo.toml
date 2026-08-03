@@ -1,0 +1,41 @@
+[package]
+name = "torchat-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+base64 = "0.22"
+torchat-core = { path = "../common/torchat-core" }
+
+[[bin]]
+name = "application_payload"
+path = "fuzz_targets/application_payload.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "peer_frame"
+path = "fuzz_targets/peer_frame.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "relay_payload"
+path = "fuzz_targets/relay_payload.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mls_snapshot"
+path = "fuzz_targets/mls_snapshot.rs"
+test = false
+doc = false
+bench = false

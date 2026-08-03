@@ -1,6 +1,134 @@
 use super::*;
 
 impl ClientEngineActor {
+    pub(super) fn queue_read_receipts(
+        &mut self,
+        conversation_id: &str,
+        mut message_ids: Vec<uuid::Uuid>,
+    ) -> EngineResult<()> {
+        message_ids.sort_unstable();
+        message_ids.dedup();
+        if message_ids.is_empty() {
+            return Ok(());
+        }
+        let message_ids_json = serde_json::to_string(&message_ids)
+            .map_err(|error| EngineError::InvalidCommand(error.to_string()))?;
+        self.database.enqueue_read_receipt(
+            conversation_id,
+            conversation_id,
+            &message_ids_json,
+            unix_ms(),
+            unix_ms(),
+        )?;
+        self.flush_pending_read_receipts()
+    }
+
+    pub(super) fn flush_pending_read_receipts(&mut self) -> EngineResult<()> {
+        for record in self.database.due_read_receipts(unix_ms())? {
+            let payload = if let Some(payload) = record.wire_ciphertext.clone() {
+                payload
+            } else {
+                let ids: Vec<uuid::Uuid> = serde_json::from_str(&record.message_ids_json)
+                    .map_err(|error| EngineError::InvalidCommand(error.to_string()))?;
+                let mut conversation = self
+                    .conversations
+                    .remove(&record.conversation_id)
+                    .ok_or_else(|| {
+                        EngineError::InvalidCommand(
+                            "contact requires MLS welcome before sending read receipt".to_owned(),
+                        )
+                    })?;
+                let before = conversation
+                    .snapshot()
+                    .map_err(|error| EngineError::Storage(error.to_string()))?;
+                let encrypted: EngineResult<String> = (|| {
+                    let plaintext = ApplicationPayloadV1::ReadReceipt {
+                        version: torchat_core::PROTOCOL_VERSION,
+                        message_ids: ids,
+                        read_at: record.read_at,
+                    }
+                    .encode()
+                    .map_err(EngineError::InvalidCommand)?;
+                    let ciphertext = conversation
+                        .encrypt(&plaintext)
+                        .map_err(EngineError::InvalidCommand)?;
+                    let payload = PeerCiphertextPayload::new(&ciphertext)
+                        .encode()
+                        .map_err(EngineError::InvalidCommand)?;
+                    let after = conversation
+                        .snapshot()
+                        .map_err(|error| EngineError::Storage(error.to_string()))?;
+                    self.database.persist_read_receipt_encryption(
+                        &record.receipt_id,
+                        payload.as_bytes(),
+                        &record.conversation_id,
+                        &after,
+                        self.clock.now_ms() + retry_backoff_ms(record.attempt_count),
+                    )?;
+                    Ok(payload)
+                })();
+                match encrypted {
+                    Ok(payload) => {
+                        self.conversations
+                            .insert(record.conversation_id.clone(), conversation);
+                        payload.into_bytes()
+                    }
+                    Err(error) => {
+                        let restored = DirectConversation::restore(&before)
+                            .map_err(|restore| EngineError::Storage(restore.to_string()))?;
+                        self.conversations
+                            .insert(record.conversation_id.clone(), restored);
+                        self.database.requeue_read_receipt(
+                            &record.receipt_id,
+                            self.clock.now_ms() + retry_backoff_ms(record.attempt_count),
+                            &format!("{}: {error}", super::retry_error_code(&error.to_string())),
+                        )?;
+                        continue;
+                    }
+                }
+            };
+            let envelope_id = uuid::Uuid::parse_str(&record.receipt_id)
+                .map_err(|error| EngineError::InvalidCommand(error.to_string()))?;
+            if let Err(error) = self.queue_peer_payload(
+                envelope_id,
+                &record.contact_installation_id,
+                &record.conversation_id,
+                stable_message_sequence(envelope_id),
+                payload.clone(),
+                PeerDeliveryTag::ReadReceipt {
+                    receipt_id: record.receipt_id.clone(),
+                },
+            ) {
+                let policy = self.contact_transport_policy(&record.contact_installation_id)?;
+                if matches!(
+                    policy,
+                    ContactTransportPolicy::PeerWithRelayFallback
+                        | ContactTransportPolicy::RelayOnly
+                ) && self
+                    .queue_relay_envelope(
+                        envelope_id,
+                        &record.contact_installation_id,
+                        &String::from_utf8_lossy(&payload),
+                        PendingRelayDelivery::ReadReceipt {
+                            receipt_id: record.receipt_id.clone(),
+                        },
+                    )
+                    .is_ok()
+                {
+                    continue;
+                }
+                self.database.requeue_read_receipt(
+                    &record.receipt_id,
+                    self.clock.now_ms() + retry_backoff_ms(record.attempt_count),
+                    &format!("{}: {error}", super::retry_error_code(&error.to_string())),
+                )?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl ClientEngineActor {
     pub(super) fn dispatch_outbound_receipt(
         &mut self,
         receipt: &torchat_client_runtime::ReceiptSendEffect,
@@ -72,16 +200,41 @@ impl ClientEngineActor {
         {
             return Ok(());
         }
-        let attempt = self
-            .database
-            .delivery_receipt(message_id)?
+        let receipt = self.database.delivery_receipt(message_id)?;
+        let attempt = receipt
+            .as_ref()
             .map(|record| record.attempt_count)
             .unwrap_or(0);
-        self.database.requeue_delivery_receipt(
-            message_id,
-            unix_ms() + retry_backoff_ms(attempt),
-            error,
-        )?;
+        let age_exhausted = receipt.as_ref().is_some_and(|record| {
+            super::RetryPolicy::DELIVERY
+                .age_exhausted(record.created_at.saturating_mul(1_000), unix_ms())
+        });
+        let exhausted = super::RetryPolicy::DELIVERY.exhausted(attempt) || age_exhausted;
+        let retry_at = if exhausted {
+            // Keep the durable receipt record for diagnostics/reconciliation,
+            // but stop scheduling an unbounded retry loop.
+            i64::MAX
+        } else {
+            self.clock.now_ms() + retry_backoff_ms(attempt)
+        };
+        if exhausted {
+            self.database
+                .connection()
+                .execute(
+                    "UPDATE delivery_receipts SET dead_lettered_at = unixepoch(), last_error_code = 'retry_exhausted' WHERE message_id = ?1;",
+                    [message_id],
+                )
+                .map_err(|error| EngineError::Storage(error.to_string()))?;
+            self.database.record_delivery_dead_letter(
+                "receipt",
+                message_id,
+                Some(installation_id),
+                attempt,
+                error,
+            )?;
+        }
+        self.database
+            .requeue_delivery_receipt(message_id, retry_at, error)?;
         Ok(())
     }
 

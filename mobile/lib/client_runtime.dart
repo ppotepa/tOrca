@@ -63,10 +63,13 @@ abstract class ClientRuntime {
   Future<void> startConversation(String contactId);
   Future<void> sendMessage(String id, String text, {String? replyToMessageId});
   Future<void> retryMessage(String messageId) async {}
+  Future<void> retryDeadLetter(String kind, String id) async {}
   Future<void> deleteMessageLocal(String messageId) async {}
   Future<void> setTyping(String conversationId, bool typing) async {}
   Future<void> setPresence(bool online) async {}
-  Future<void> sendReadReceipts(String conversationId) async {}
+  Future<void> sendReadReceipts(String conversationId) async {
+    throw UnsupportedError('read receipts disabled by runtime');
+  }
   Future<void> acceptPairing(String pairingId);
   Future<void> rejectPairing(String pairingId);
   Future<void> cancelPairing(String pairingId);
@@ -196,6 +199,11 @@ final class _SessionAwareClientRuntime
   @override
   Future<void> retryMessage(String messageId) =>
       _delegate.retryMessage(messageId);
+  @override
+  Future<void> retryDeadLetter(String kind, String id) =>
+      _delegate.retryDeadLetter(kind, id);
+  Future<List<Map<String, dynamic>>> listDeadLetters() =>
+      (_delegate as dynamic).listDeadLetters();
   @override
   Future<void> deleteMessageLocal(String messageId) =>
       _delegate.deleteMessageLocal(messageId);
@@ -361,6 +369,11 @@ final class _SerializedClientRuntime
   @override
   Future<void> retryMessage(String messageId) =>
       _run(() => _delegate.retryMessage(messageId));
+  @override
+  Future<void> retryDeadLetter(String kind, String id) =>
+      _run(() => _delegate.retryDeadLetter(kind, id));
+  Future<List<Map<String, dynamic>>> listDeadLetters() =>
+      _run(() => (_delegate as dynamic).listDeadLetters());
   @override
   Future<void> deleteMessageLocal(String messageId) =>
       _run(() => _delegate.deleteMessageLocal(messageId));

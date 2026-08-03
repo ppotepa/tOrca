@@ -72,6 +72,19 @@ async fn replayed_bootstrap_command_uses_the_durable_result_without_a_second_mut
         ));
     }
 
+    engine
+        .submit_envelope(EngineCommandEnvelope {
+            request_id: "bootstrap-conflict".to_owned(),
+            command_id: Some("bootstrap-command-id".to_owned()),
+            command: EngineCommand::SetPresence { online: true },
+        })
+        .await
+        .expect("conflicting command should be accepted for validation");
+    assert!(matches!(
+        response_for(&mut engine, "bootstrap-conflict").await,
+        ResponseResult::Error { code, .. } if code == "idempotency_conflict"
+    ));
+
     engine.shutdown();
     drop(engine);
     tokio::time::sleep(Duration::from_millis(100)).await;

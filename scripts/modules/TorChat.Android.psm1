@@ -265,17 +265,31 @@ function Install-TorChatAndroidClient {
         throw "Android APK is invalid or incomplete: $Artifact. Rebuild with -BuildPolicy rebuild before installing. $($_.Exception.Message)"
     }
 
-    $output = @(& adb -s $Device install -r --no-streaming $Artifact 2>&1)
-    $exitCode = $LASTEXITCODE
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = @(& adb -s $Device install -r --no-streaming $Artifact 2>&1)
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
     ($output | Out-String) | Set-Content -LiteralPath (Join-Path $Context.LogDirectory 'adb-install.log') -Encoding UTF8
     if ($exitCode -ne 0) {
         $details = ($output -join ' ').Trim()
         if ($details -match 'INSTALL_FAILED_USER_RESTRICTED') {
             $remote = "/data/local/tmp/torchat-$($Context.Configuration)-$($Context.RunId).apk"
-            $push = @(& adb -s $Device push $Artifact $remote 2>&1)
+            $pushErrorPath = Join-Path $Context.LogDirectory 'adb-push.stderr.log'
+            $push = @(& adb -s $Device push $Artifact $remote 2>$pushErrorPath)
+            if (Test-Path -LiteralPath $pushErrorPath) {
+                $push += @(Get-Content -LiteralPath $pushErrorPath -ErrorAction SilentlyContinue)
+            }
             if ($LASTEXITCODE -eq 0) {
-                $install = @(& adb -s $Device shell pm install -r $remote 2>&1)
+                $pmErrorPath = Join-Path $Context.LogDirectory 'adb-pm-install.stderr.log'
+                $install = @(& adb -s $Device shell pm install -r $remote 2>$pmErrorPath)
                 $pmExit = $LASTEXITCODE
+                if (Test-Path -LiteralPath $pmErrorPath) {
+                    $install += @(Get-Content -LiteralPath $pmErrorPath -ErrorAction SilentlyContinue)
+                }
                 & adb -s $Device shell rm -f $remote *> $null
                 if ($pmExit -eq 0) { $exitCode = 0 } else { $details = (($output + $push + $install) -join ' ').Trim() }
             }
@@ -300,8 +314,14 @@ function Start-TorChatAndroidClient {
 
     $args = @('-s',$resolvedDevice,'shell','am','start','-W','-n','org.torchat.mobile/.MainActivity','--es','deploy_run_id',$Context.RunId)
     if ($ClientDataPolicy -eq 'reset') { $args += @('--ez','clean_state','true') }
-    $launch = @(& adb @args 2>&1)
-    $exitCode = $LASTEXITCODE
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $launch = @(& adb @args 2>&1)
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
     ($launch | Out-String) | Set-Content -LiteralPath (Join-Path $Context.LogDirectory 'adb-start.log') -Encoding UTF8
     if ($exitCode -ne 0) { throw "Could not start Android client: $(($launch -join ' ').Trim())" }
     $launchText = $launch -join "`n"

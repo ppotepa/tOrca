@@ -1,13 +1,21 @@
 services:
   server:
+    deploy:
+      replicas: 1
     build:
       context: ../..
       dockerfile: infra/docker/Dockerfile.server
     environment:
       TORCHAT_BIND: 0.0.0.0:8080
       TORCHAT_DATABASE_URL_FILE: /run/secrets/database_url
+      TORCHAT_PAIRING_SECRET_FILE: /run/secrets/pairing_secret
       RUST_LOG: ${RUST_LOG:-info}
       TORCHAT_ONION_URL: ${TORCHAT_ONION_URL:?TORCHAT_ONION_URL is required}
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "7"
     depends_on:
       postgres:
         condition: service_healthy
@@ -16,6 +24,7 @@ services:
       - /tmp:size=64m,noexec,nosuid,nodev
     secrets:
       - database_url
+      - pairing_secret
 
   postgres:
     image: postgres:17-alpine
@@ -27,6 +36,11 @@ services:
       - type: bind
         source: ${TORCHAT_SECURE_ROOT:?TORCHAT_SECURE_ROOT is required}/postgres
         target: /var/lib/postgresql/data
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "7"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U torchat -d torchat"]
       interval: 5s
@@ -46,6 +60,11 @@ services:
       - type: bind
         source: ${TORCHAT_SECURE_ROOT:?TORCHAT_SECURE_ROOT is required}/onion
         target: /var/lib/tor
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "7"
     healthcheck:
       test: ["CMD-SHELL", "test -s /var/lib/tor/hidden_service/hostname"]
       interval: 5s
@@ -57,3 +76,5 @@ secrets:
     file: ${TORCHAT_SECURE_ROOT}/secrets/database_url
   postgres_password:
     file: ${TORCHAT_SECURE_ROOT}/secrets/postgres_password
+  pairing_secret:
+    file: ${TORCHAT_SECURE_ROOT}/secrets/pairing_secret

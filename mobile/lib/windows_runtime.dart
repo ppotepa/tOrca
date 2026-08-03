@@ -2,11 +2,14 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:shared_preferences/shared_preferences.dart';
+
 import 'client_runtime.dart';
 import 'core/runtime/runtime_arguments.dart';
 import 'core/runtime/runtime_bridge_base.dart';
 import 'core/runtime/runtime_contract.dart';
 import 'core/runtime/runtime_line.dart';
+import 'core/runtime/operation_journal.dart';
 import 'mobile_bridge.dart';
 
 /// JSON-lines bridge to the Rust runtime on Windows/Linux desktop.
@@ -23,6 +26,7 @@ class WindowsRuntime extends Object
   bool _stopping = false;
   int _processGeneration = 0;
   int? _stoppingGeneration;
+  Future<OperationJournal>? _operationJournal;
   final _events = StreamController<RuntimeEvent>.broadcast();
   final _pending = <String, Completer<Object?>>{};
   int _nextId = 0;
@@ -477,7 +481,7 @@ class WindowsRuntime extends Object
           EngineContract.transportPolicy: text(EngineContract.transportPolicy),
       },
       EngineContract.removeRelationship => {
-        EngineContract.type: EngineContract.commandRemoveRelationship,
+        EngineContract.type: EngineContract.commandRequestRelationshipRemoval,
         EngineContract.commandInstallationId: text(
           EngineContract.argInstallationId,
         ),
@@ -506,6 +510,14 @@ class WindowsRuntime extends Object
       EngineContract.retryMessage => {
         EngineContract.type: EngineContract.commandRetryMessage,
         EngineContract.messageId: text(EngineContract.messageId),
+      },
+      EngineContract.retryDeadLetter => {
+        EngineContract.type: EngineContract.commandRetryDeadLetter,
+        EngineContract.kind: text(EngineContract.kind),
+        EngineContract.id: text(EngineContract.id),
+      },
+      EngineContract.listDeadLetters => {
+        EngineContract.type: EngineContract.commandListDeadLetters,
       },
       EngineContract.deleteMessageLocal => {
         EngineContract.type: EngineContract.commandDeleteMessageLocal,
@@ -549,7 +561,7 @@ class WindowsRuntime extends Object
     RuntimeArguments params, {
     required Process process,
     required int generation,
-  }) {
+  }) async {
     if (!_owns(process, generation)) {
       return Future<Object?>.error(
         StateError('Desktop runtime generation changed before command send'),
@@ -559,9 +571,16 @@ class WindowsRuntime extends Object
     final completer = Completer<Object?>();
     _pending[id] = completer;
     final command = _engineCommand(method, params);
+    final stableArgumentId = params.toMap()[EngineContract.argId]?.toString();
+    final journal = _operationJournal ??= SharedPreferences.getInstance().then(
+      OperationJournal.new,
+    );
+    final commandId = await journal.then(
+      (value) => value.commandId(operation: method, stableId: stableArgumentId),
+    );
     final request = {
       EngineContract.requestId: id,
-      EngineContract.commandId: id,
+      EngineContract.commandId: commandId,
       EngineContract.command: command,
     };
     if (method == EngineContract.shutdown) {

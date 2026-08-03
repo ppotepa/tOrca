@@ -1,4 +1,8 @@
-use std::{collections::HashSet, path::Path, time::Duration};
+use std::{
+    collections::HashSet,
+    path::Path,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 use rusqlite::{Connection, OptionalExtension, params};
 use sha2::Digest;
@@ -12,6 +16,16 @@ use super::{MigrationRunner, transaction::SqliteTransaction};
 
 pub type ContactEndpointCapability = (String, Vec<u8>, u64, CapabilityStatus);
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RelationshipRemovalOutboxRecord {
+    pub removal_id: String,
+    pub contact_installation_id: String,
+    pub removed_at: i64,
+    pub relationship_epoch: i64,
+    pub preserve_history: bool,
+    pub attempt_count: u32,
+}
+
 pub struct ClientDatabase {
     connection: Connection,
     migration_runner: MigrationRunner,
@@ -22,6 +36,7 @@ mod migrations;
 mod pairing;
 mod peer_endpoints;
 mod projection;
+mod read_receipts;
 mod receipts;
 mod records;
 use migrations::{BASELINE_SCHEMA, CONNECTION_PRAGMAS};
@@ -29,6 +44,30 @@ pub use migrations::{MIGRATION_LOOKUP, MIGRATIONS, TABLE_COLUMNS};
 pub use records::*;
 
 impl ClientDatabase {
+    pub fn record_delivery_dead_letter(
+        &self,
+        kind: &str,
+        item_id: &str,
+        contact_installation_id: Option<&str>,
+        attempt_count: u32,
+        error: &str,
+    ) -> EngineResult<()> {
+        self.connection
+            .execute(
+                "INSERT INTO delivery_dead_letters
+                 (kind, item_id, contact_installation_id, attempt_count, last_error, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, unixepoch(), unixepoch())
+                 ON CONFLICT(kind, item_id) DO UPDATE SET
+                    contact_installation_id = excluded.contact_installation_id,
+                    attempt_count = excluded.attempt_count,
+                    last_error = excluded.last_error,
+                    updated_at = unixepoch();",
+                rusqlite::params![kind, item_id, contact_installation_id, attempt_count, error],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
     pub fn record_contact_seen(&self, contact_id: &str, observed_at: i64) -> EngineResult<()> {
         self.connection
             .execute(
@@ -105,10 +144,19 @@ impl ClientDatabase {
         } else {
             migration_runner.run(&connection)?;
         }
-        Ok(Self {
+        let database = Self {
             connection,
             migration_runner,
-        })
+        };
+        database.prune_processed_commands(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_secs() as i64)
+                .unwrap_or_default(),
+            Self::PROCESSED_COMMAND_RETENTION_SECS,
+            Self::MAX_PROCESSED_COMMANDS,
+        )?;
+        Ok(database)
     }
 
     pub fn connection(&self) -> &Connection {
@@ -119,6 +167,29 @@ impl ClientDatabase {
         &mut self.connection
     }
 
+    /// Rotate the SQLCipher key while the database is open under its current
+    /// key. Callers must persist the new key only after this returns success.
+    pub fn rekey(&mut self, new_key: &SecretBytes) -> EngineResult<()> {
+        if new_key.expose().len() != 32 {
+            return Err(EngineError::InvalidConfig(
+                "databaseKey must contain exactly 32 bytes".to_owned(),
+            ));
+        }
+        self.connection
+            .execute_batch(&sqlcipher_rekey_pragma(new_key.expose()))
+            .map_err(sqlite_error)?;
+        let integrity: String = self
+            .connection
+            .query_row("PRAGMA integrity_check;", [], |row| row.get(0))
+            .map_err(sqlite_error)?;
+        if integrity != "ok" {
+            return Err(EngineError::Storage(format!(
+                "sqlcipher rekey integrity check failed: {integrity}"
+            )));
+        }
+        Ok(())
+    }
+
     pub fn migration_runner(&self) -> &MigrationRunner {
         &self.migration_runner
     }
@@ -126,6 +197,69 @@ impl ClientDatabase {
     pub fn transaction(&mut self) -> EngineResult<SqliteTransaction<'_>> {
         let transaction = self.connection.transaction().map_err(sqlite_error)?;
         Ok(SqliteTransaction::new(transaction))
+    }
+
+    pub fn due_relationship_removals(
+        &self,
+        now_ms: i64,
+    ) -> EngineResult<Vec<RelationshipRemovalOutboxRecord>> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT o.removal_id, o.contact_installation_id, t.removed_at,
+                    o.relationship_epoch, o.preserve_history, o.attempt_count
+             FROM relationship_removal_outbox o
+             JOIN relationship_tombstones t
+               ON t.contact_installation_id = o.contact_installation_id
+              AND t.removal_id = o.removal_id
+             WHERE o.state = 'PENDING' AND o.next_attempt_at <= ?1
+             ORDER BY o.next_attempt_at ASC, o.removal_id ASC;",
+            )
+            .map_err(sqlite_error)?;
+        let rows = statement
+            .query_map([now_ms], |row| {
+                Ok(RelationshipRemovalOutboxRecord {
+                    removal_id: row.get(0)?,
+                    contact_installation_id: row.get(1)?,
+                    removed_at: row.get(2)?,
+                    relationship_epoch: row.get(3)?,
+                    preserve_history: row.get::<_, i64>(4)? != 0,
+                    attempt_count: row.get::<_, i64>(5)?.max(0) as u32,
+                })
+            })
+            .map_err(sqlite_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(sqlite_error)?;
+        Ok(rows)
+    }
+
+    pub fn mark_relationship_removal_dispatched(
+        &self,
+        removal_id: &str,
+        next_attempt_at: i64,
+    ) -> EngineResult<()> {
+        self.connection
+            .execute(
+                "UPDATE relationship_removal_outbox
+             SET state = 'DISPATCHED', attempt_count = attempt_count + 1,
+                 next_attempt_at = ?2, updated_at = unixepoch()
+             WHERE removal_id = ?1 AND state = 'PENDING';",
+                rusqlite::params![removal_id, next_attempt_at],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
+    pub fn complete_relationship_removal_ack(&self, removal_id: &str) -> EngineResult<()> {
+        self.connection
+            .execute(
+                "UPDATE relationship_removal_outbox
+                 SET state = 'ACKED', updated_at = unixepoch()
+                 WHERE removal_id = ?1;",
+                [removal_id],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
     }
 
     pub fn conversation_mls_snapshots(&self) -> EngineResult<Vec<(String, Vec<u8>)>> {
@@ -298,7 +432,7 @@ impl ClientDatabase {
                 "SELECT delivery_id, contact_installation_id, payload,
                         attempt_count, next_attempt_at, last_error, created_at
                  FROM capability_delivery_outbox
-                 WHERE next_attempt_at <= ?1
+                 WHERE next_attempt_at <= ?1 AND dead_lettered_at IS NULL
                  ORDER BY next_attempt_at ASC, created_at ASC;",
             )
             .map_err(sqlite_error)?;
@@ -379,6 +513,76 @@ impl ClientDatabase {
         Ok(())
     }
 
+    /// Re-enable one terminal retry record after an explicit operator/user
+    /// action. The last error is retained for diagnostics; only scheduling
+    /// state is reset.
+    pub fn retry_dead_letter(&self, kind: &str, id: &str) -> EngineResult<bool> {
+        let changed = match kind {
+            "capability" => self.connection.execute(
+                "UPDATE capability_delivery_outbox
+                 SET dead_lettered_at = NULL, next_attempt_at = 0
+                 WHERE delivery_id = ?1 AND dead_lettered_at IS NOT NULL;",
+                [id],
+            ),
+            "endpoint_bootstrap" => self.connection.execute(
+                "UPDATE peer_endpoint_bootstrap_outbox
+                 SET dead_lettered_at = NULL, next_attempt_at = 0
+                 WHERE contact_installation_id = ?1 AND dead_lettered_at IS NOT NULL;",
+                [id],
+            ),
+            "contact_confirmation" => self.connection.execute(
+                "UPDATE pending_contact_confirmations
+                 SET dead_lettered_at = NULL, next_attempt_at = 0
+                 WHERE pairing_id = ?1 AND dead_lettered_at IS NOT NULL;",
+                [id],
+            ),
+            "welcome" => self.connection.execute(
+                "UPDATE pending_welcomes
+                 SET dead_lettered_at = NULL, next_attempt_at = 0
+                 WHERE invite_id = ?1 AND dead_lettered_at IS NOT NULL;",
+                [id],
+            ),
+            _ => {
+                return Err(EngineError::InvalidCommand(
+                    "unknown retry dead-letter kind".to_owned(),
+                ));
+            }
+        }
+        .map_err(sqlite_error)?;
+        Ok(changed == 1)
+    }
+
+    pub fn dead_letters(&self) -> EngineResult<Vec<DeadLetterRecord>> {
+        let mut statement = self.connection.prepare(
+            "SELECT kind, id, attempt_count, dead_lettered_at, last_error
+             FROM (
+                SELECT 'capability' AS kind, delivery_id AS id, attempt_count, dead_lettered_at, last_error
+                FROM capability_delivery_outbox WHERE dead_lettered_at IS NOT NULL
+                UNION ALL
+                SELECT 'endpoint_bootstrap', contact_installation_id, attempt_count, dead_lettered_at, last_error
+                FROM peer_endpoint_bootstrap_outbox WHERE dead_lettered_at IS NOT NULL
+                UNION ALL
+                SELECT 'contact_confirmation', pairing_id, attempt_count, dead_lettered_at, last_error
+                FROM pending_contact_confirmations WHERE dead_lettered_at IS NOT NULL
+                UNION ALL
+                SELECT 'welcome', invite_id, attempt_count, dead_lettered_at, last_error
+                FROM pending_welcomes WHERE dead_lettered_at IS NOT NULL
+             ) ORDER BY dead_lettered_at DESC, kind ASC, id ASC;",
+        ).map_err(sqlite_error)?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok(DeadLetterRecord {
+                    kind: row.get("kind")?,
+                    id: row.get("id")?,
+                    attempt_count: row.get::<_, i64>("attempt_count")? as u32,
+                    dead_lettered_at: row.get("dead_lettered_at")?,
+                    last_error: row.get("last_error")?,
+                })
+            })
+            .map_err(sqlite_error)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)
+    }
+
     pub fn record_capability_delivery_error(
         &self,
         delivery_id: &str,
@@ -388,7 +592,8 @@ impl ClientDatabase {
         self.connection
             .execute(
                 "UPDATE capability_delivery_outbox
-                 SET next_attempt_at = ?1, last_error = ?2
+                 SET next_attempt_at = ?1, last_error = ?2,
+                     dead_lettered_at = CASE WHEN ?2 LIKE 'permanent:%' OR ?2 LIKE 'protocol:%' THEN unixepoch() ELSE dead_lettered_at END
                  WHERE delivery_id = ?3;",
                 params![next_attempt_at, error, delivery_id],
             )
@@ -482,6 +687,12 @@ impl ClientDatabase {
         }
         transaction
             .execute(
+                "UPDATE messages SET claimed_until = ?1, last_error_code = NULL WHERE id = ?2;",
+                params![ack_deadline, message_id],
+            )
+            .map_err(sqlite_error)?;
+        transaction
+            .execute(
                 "INSERT INTO conversation_mls (conversation_id, snapshot, updated_at)\n                 VALUES (?1, ?2, unixepoch())\n                 ON CONFLICT(conversation_id) DO UPDATE SET\n                    snapshot = excluded.snapshot,\n                    updated_at = unixepoch();",
                 params![conversation_id, snapshot],
             )
@@ -520,6 +731,14 @@ impl ClientDatabase {
                 ],
             )
             .map_err(sqlite_error)?;
+        if changed > 0 {
+            self.connection
+                .execute(
+                    "UPDATE messages SET claimed_until = ?1, last_error_code = NULL WHERE id = ?2;",
+                    params![ack_deadline, message_id],
+                )
+                .map_err(sqlite_error)?;
+        }
         Ok(changed > 0)
     }
 
@@ -570,6 +789,7 @@ impl ClientDatabase {
                  FROM pending_welcomes
                  WHERE next_attempt_at <= ?1
                    AND expires_at >= ?2
+                   AND dead_lettered_at IS NULL
                  ORDER BY next_attempt_at ASC, invite_id ASC;",
             )
             .map_err(sqlite_error)?;
@@ -597,7 +817,8 @@ impl ClientDatabase {
         self.connection
             .execute(
                 "UPDATE pending_welcomes
-                 SET last_error = ?1
+                 SET last_error = ?1,
+                     dead_lettered_at = CASE WHEN ?1 LIKE 'permanent:%' OR ?1 LIKE 'protocol:%' THEN unixepoch() ELSE dead_lettered_at END
                  WHERE invite_id = ?2;",
                 params![last_error, invite_id],
             )
@@ -662,6 +883,12 @@ impl ClientDatabase {
         if let Some(deadline) = self.next_pairing_response_retry_deadline_ms(now_secs)? {
             deadlines.push(RetryDeadline {
                 kind: RetryKind::PairingResponse,
+                at_ms: deadline,
+            });
+        }
+        if let Some(deadline) = self.next_read_receipt_retry_deadline(now_ms)? {
+            deadlines.push(RetryDeadline {
+                kind: RetryKind::ReadReceipt,
                 at_ms: deadline,
             });
         }
@@ -887,6 +1114,15 @@ fn sqlcipher_key_pragma(database_key: &[u8]) -> String {
     format!("PRAGMA key = \"x'{hex}'\";")
 }
 
+fn sqlcipher_rekey_pragma(database_key: &[u8]) -> String {
+    let mut hex = String::with_capacity(database_key.len() * 2);
+    for byte in database_key {
+        use std::fmt::Write as _;
+        let _ = write!(&mut hex, "{byte:02x}");
+    }
+    format!("PRAGMA rekey = \"x'{hex}'\";")
+}
+
 fn unix_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -932,6 +1168,37 @@ mod tests {
     }
 
     #[test]
+    fn rekey_rotates_sqlcipher_key_and_old_key_no_longer_opens() {
+        let path = temp_database_path("rekey");
+        let old_key = key(41);
+        let new_key = key(42);
+        let mut database = ClientDatabase::open(&path, &old_key).expect("database opens");
+        database
+            .connection()
+            .execute(
+                "INSERT INTO settings (key, value) VALUES ('rekey-test', 'true');",
+                [],
+            )
+            .expect("fixture should be written");
+        database.rekey(&new_key).expect("rekey should verify");
+        drop(database);
+
+        assert!(ClientDatabase::open(&path, &old_key).is_err());
+        let reopened = ClientDatabase::open(&path, &new_key).expect("new key opens database");
+        let value: String = reopened
+            .connection()
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'rekey-test';",
+                [],
+                |row| row.get(0),
+            )
+            .expect("rekeyed data remains readable");
+        assert_eq!(value, "true");
+        drop(reopened);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn open_runs_all_migrations_with_correct_sqlcipher_key() {
         let path = temp_database_path("migrations");
         let database = ClientDatabase::open(&path, &key(7)).expect("database opens");
@@ -943,10 +1210,186 @@ mod tests {
             })
             .expect("schema_migrations version is readable");
 
-        assert_eq!(latest_version, 21);
+        assert_eq!(latest_version, 29);
         assert_eq!(database.migration_runner().checksum().len(), 64);
 
         drop(database);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn relationship_lifecycle_triggers_are_absent_after_current_migration() {
+        let path = temp_database_path("relationship-trigger-removal");
+        let database = ClientDatabase::open(&path, &key(71)).expect("database opens");
+        let remaining: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*)
+                 FROM sqlite_master
+                 WHERE type = 'trigger'
+                   AND name IN (
+                     'record_inserted_relationship_boundary',
+                     'record_reactivated_relationship_boundary',
+                     'ignore_stale_relationship_removal',
+                     'apply_incoming_relationship_removal',
+                     'suppress_removed_relationship_mls_insert',
+                     'suppress_removed_relationship_mls_update',
+                     'suppress_removed_contact_endpoint_insert',
+                     'suppress_removed_contact_endpoint_update'
+                   );",
+                [],
+                |row| row.get(0),
+            )
+            .expect("trigger inventory is readable");
+        assert_eq!(remaining, 0);
+        drop(database);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn processed_command_prune_keeps_fresh_rows_and_enforces_limit() {
+        let path = temp_database_path("processed-command-prune");
+        let database = ClientDatabase::open(&path, &key(8)).expect("database opens");
+        for index in 0..5 {
+            database
+                .connection()
+                .execute(
+                    "INSERT INTO processed_commands
+                     (command_id, command_type, result_json, committed_revision, created_at)
+                     VALUES (?1, 'test', '{}', ?2, ?3);",
+                    params![
+                        format!("command-{index}"),
+                        index as i64,
+                        if index == 0 { 900 } else { 959 + index as i64 }
+                    ],
+                )
+                .expect("processed command inserts");
+        }
+
+        assert!(
+            database
+                .load_processed_command("command-1")
+                .expect("replay lookup succeeds")
+                .is_some()
+        );
+
+        let removed = database
+            .prune_processed_commands(1_000, 50, 3)
+            .expect("prune succeeds");
+
+        assert_eq!(removed, 2);
+        let count: i64 = database
+            .connection()
+            .query_row("SELECT COUNT(*) FROM processed_commands;", [], |row| {
+                row.get(0)
+            })
+            .expect("count is readable");
+        assert_eq!(count, 3);
+        let newest: String = database
+            .connection()
+            .query_row(
+                "SELECT command_id FROM processed_commands ORDER BY created_at ASC LIMIT 1;",
+                [],
+                |row| row.get(0),
+            )
+            .expect("freshest retained command is readable");
+        assert_eq!(newest, "command-2");
+        assert!(
+            database
+                .load_processed_command("command-0")
+                .expect("expired replay lookup succeeds")
+                .is_none()
+        );
+
+        drop(database);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn read_receipt_outbox_is_idempotent_and_survives_reopen() {
+        let path = temp_database_path("read-receipt-outbox");
+        let database = ClientDatabase::open(&path, &key(10)).expect("database opens");
+        database
+            .connection()
+            .execute_batch(
+                "INSERT INTO contacts
+                 (installation_id, nickname, public_key, fingerprint, verification, source)
+                 VALUES ('peer-read', 'Peer', 'pk', 'fp', 'UNVERIFIED', 'test');
+                 INSERT INTO conversations (id, contact_installation_id, state)
+                 VALUES ('peer-read', 'peer-read', 'ESTABLISHED');",
+            )
+            .expect("contact and conversation exist");
+
+        let first = database
+            .enqueue_read_receipt(
+                "peer-read",
+                "peer-read",
+                "[\"00000000-0000-0000-0000-000000000002\",\"00000000-0000-0000-0000-000000000001\"]",
+                100,
+                1_000,
+            )
+            .expect("first receipt is queued");
+        let second = database
+            .enqueue_read_receipt(
+                "peer-read",
+                "peer-read",
+                "[\"00000000-0000-0000-0000-000000000001\",\"00000000-0000-0000-0000-000000000002\"]",
+                200,
+                1_001,
+            )
+            .expect("duplicate receipt is coalesced");
+        assert_eq!(first, second);
+        let reordered = database
+            .enqueue_read_receipt(
+                "peer-read",
+                "peer-read",
+                "[\"00000000-0000-0000-0000-000000000001\",\"00000000-0000-0000-0000-000000000002\"]",
+                300,
+                1_002,
+            )
+            .expect("same canonical batch remains coalesced");
+        assert_eq!(first, reordered);
+        assert_eq!(
+            database
+                .due_read_receipts(1_001)
+                .expect("due receipts")
+                .len(),
+            1
+        );
+
+        database
+            .persist_read_receipt_encryption(&first, b"wire", "peer-read", b"snapshot", 2_000)
+            .expect("encrypted receipt is persisted");
+        drop(database);
+
+        let reopened = ClientDatabase::open(&path, &key(10)).expect("database reopens");
+        let stored = reopened
+            .due_read_receipts(2_000)
+            .expect("receipt survives reopen")
+            .pop()
+            .expect("stored receipt exists");
+        assert_eq!(stored.receipt_id, first);
+        assert_eq!(stored.wire_ciphertext.as_deref(), Some(b"wire".as_slice()));
+        assert_eq!(stored.read_at, 300);
+        let looked_up = reopened
+            .read_receipt(&first)
+            .expect("direct receipt lookup succeeds")
+            .expect("receipt remains addressable after reopen");
+        assert_eq!(looked_up.attempt_count, stored.attempt_count);
+        reopened
+            .requeue_read_receipt(&first, 3_000, "relay retry")
+            .expect("receipt can be requeued by id");
+        assert_eq!(
+            reopened
+                .read_receipt(&first)
+                .expect("requeued receipt lookup succeeds")
+                .expect("requeued receipt exists")
+                .last_error
+                .as_deref(),
+            Some("relay retry")
+        );
+
+        drop(reopened);
         let _ = std::fs::remove_file(path);
     }
 
@@ -1032,7 +1475,7 @@ mod tests {
             .expect("latest migration is readable");
 
         assert_eq!(policy, "PEER_ONLY");
-        assert_eq!(latest_version, 21);
+        assert_eq!(latest_version, 29);
         drop(database);
         let _ = std::fs::remove_file(path);
     }
@@ -1158,17 +1601,34 @@ mod tests {
             .put_peer_endpoint_bootstrap("contact-1", b"payload-a", 1)
             .expect("bootstrap inserts");
         database
-            .record_peer_endpoint_bootstrap_error("contact-1", 1, "relay unavailable")
+            .record_peer_endpoint_bootstrap_error("contact-1", 1, "protocol: malformed payload")
             .expect("error persists");
 
+        assert!(
+            database
+                .due_peer_endpoint_bootstraps(0)
+                .expect("bootstrap rows are readable")
+                .is_empty()
+        );
+        let dead_letters = database.dead_letters().expect("dead letters are listed");
+        assert_eq!(dead_letters.len(), 1);
+        assert_eq!(dead_letters[0].kind, "endpoint_bootstrap");
+
+        assert!(
+            database
+                .retry_dead_letter("endpoint_bootstrap", "contact-1")
+                .expect("dead letter retry succeeds")
+        );
         let record = database
             .due_peer_endpoint_bootstraps(0)
-            .expect("bootstrap rows are readable")
+            .expect("retried bootstrap is readable")
             .into_iter()
             .find(|row| row.contact_installation_id == "contact-1")
-            .expect("bootstrap row exists");
-
-        assert_eq!(record.last_error.as_deref(), Some("relay unavailable"));
+            .expect("retried bootstrap row exists");
+        assert_eq!(
+            record.last_error.as_deref(),
+            Some("protocol: malformed payload")
+        );
 
         drop(database);
         let _ = std::fs::remove_file(path);

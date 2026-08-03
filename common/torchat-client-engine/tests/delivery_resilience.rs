@@ -2,7 +2,9 @@ use std::{fs, path::PathBuf};
 
 use rusqlite::params;
 use torchat_client_engine::{
-    ClientDatabase, config::SecretBytes, storage::InboundEnvelopeStoreResult,
+    ClientDatabase,
+    config::SecretBytes,
+    storage::{DeliveryReceiptRecord, InboundEnvelopeStoreResult},
 };
 use torchat_core::{Identity, peer_protocol::PeerMessageEnvelope};
 use uuid::Uuid;
@@ -144,6 +146,59 @@ fn in_flight_outbound_delivery_requeues_after_database_restart_without_duplicati
 }
 
 #[test]
+fn relay_offline_then_restart_and_forwarded_is_exactly_once() {
+    let path = temporary_database_path("relay-offline-restart");
+    let key = database_key();
+
+    {
+        let database = ClientDatabase::open(&path, &key).expect("encrypted database should open");
+        insert_outbound_fixture(&database);
+        database
+            .enqueue_outbound_delivery("outbound-message", "peer-delivery", 7, 100)
+            .expect("relay delivery should be durable");
+        database
+            .requeue_outbound_delivery("outbound-message", 2_000, "recipient offline")
+            .expect("recipient offline should keep delivery queued");
+        let queued = database
+            .outbound_delivery("outbound-message")
+            .expect("queued delivery should be readable")
+            .expect("queued delivery should exist");
+        assert_eq!(queued.state, "QUEUED");
+        assert_eq!(queued.next_attempt_at, 2_000);
+    }
+
+    {
+        let database = ClientDatabase::open(&path, &key).expect("database should reopen");
+        assert_eq!(
+            database
+                .due_outbound_deliveries(2_000, 10)
+                .expect("delivery should be due after restart")
+                .len(),
+            1
+        );
+        assert!(
+            database
+                .claim_outbound_delivery("outbound-message", 2_100, 3_000)
+                .expect("forwarded retry should claim once")
+        );
+        database
+            .complete_outbound_delivery("outbound-message")
+            .expect("forwarded delivery should complete");
+        assert!(
+            database
+                .outbound_delivery("outbound-message")
+                .expect("delivery lookup should succeed")
+                .is_none()
+        );
+        database
+            .complete_outbound_delivery("outbound-message")
+            .expect("duplicate forwarded event should remain idempotent");
+    }
+
+    remove_database(&path);
+}
+
+#[test]
 fn inbound_peer_envelope_is_idempotent_across_restart_and_rejects_mutation() {
     let path = temporary_database_path("inbound-idempotency");
     let key = database_key();
@@ -204,5 +259,38 @@ fn inbound_peer_envelope_is_idempotent_across_restart_and_rejects_mutation() {
         );
     }
 
+    remove_database(&path);
+}
+
+#[test]
+fn inbound_delivery_receipt_survives_restart_after_message_commit() {
+    let path = temporary_database_path("delivery-receipt-restart");
+    let key = database_key();
+    let message_id = Uuid::new_v4().to_string();
+    let receipt = DeliveryReceiptRecord {
+        envelope_id: Uuid::new_v4().to_string(),
+        message_id: message_id.clone(),
+        conversation_id: "peer-receipt".to_owned(),
+        original_sender: "peer-receipt".to_owned(),
+        received_at: 300,
+        relay_payload: None,
+        state: "PENDING".to_owned(),
+        attempt_count: 0,
+        next_attempt_at: 0,
+        last_error: None,
+        created_at: 300,
+    };
+    {
+        let database = ClientDatabase::open(&path, &key).expect("database should open");
+        database
+            .put_delivery_receipt(&receipt)
+            .expect("receipt should commit with inbound message");
+    }
+    let reopened = ClientDatabase::open(&path, &key).expect("database should reopen");
+    let stored = reopened
+        .delivery_receipt(&message_id)
+        .expect("receipt lookup should work")
+        .expect("pending receipt should survive restart");
+    assert_eq!(stored, receipt);
     remove_database(&path);
 }

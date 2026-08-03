@@ -9,17 +9,14 @@ AppLaunchPhase resolveLaunchPhase({
 }) {
   final hasNickname = profile.nickname.trim().length >= 2;
 
-  // Startup is a hard communication gate for returning users too. A retained
-  // nickname must never bypass Tor, relay, peer listener or local onion
-  // publication during a new runtime generation.
-  if (hasNickname && connection.communicationReady) {
+  // Local data is sufficient to open the shell. Network capabilities are
+  // represented separately by ConnectionReadiness and can recover in the
+  // background without blocking history/settings.
+  if (hasNickname && connection.localCoreReady) {
     return AppLaunchPhase.running;
   }
 
-  // A new user reaches onboarding only after the local onion endpoint and the
-  // relay are both ready. Contact-level P2P sessions are intentionally not
-  // part of this gate.
-  if (!hasNickname && connection.onboardingReady) {
+  if (!hasNickname && connection.localCoreReady) {
     return AppLaunchPhase.onboarding;
   }
 

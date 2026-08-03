@@ -1,14 +1,18 @@
-use crate::pairing_rules::{PairingAction, merge_pairing_item, normalize_pairing_item};
+use crate::pairing_rules::{PairingAction, normalize_pairing_item};
 use crate::{
     ChatMessage, ContactRecord, ConversationSummary, InviteState, MessageSendEffect,
-    MessageTransportOutcome, PairingItem, RuntimeClock, RuntimeError, RuntimeEvent,
-    RuntimeIdentity, RuntimeProfile, RuntimeResult, RuntimeSendEffect, RuntimeSession,
-    RuntimeStorage, RuntimeTransport, logic::fallback_contact_nickname,
+    MessageTransportOutcome, PairingItem, RelationshipTransition, RuntimeClock, RuntimeError,
+    RuntimeEvent, RuntimeIdentity, RuntimeProfile, RuntimeResult, RuntimeSendEffect,
+    RuntimeSession, RuntimeStorage, RuntimeTransport, logic::fallback_contact_nickname,
 };
 
 mod helpers;
 mod lifecycle;
-use helpers::{pairing_send_effect, parse_uuid, transition_invite_state, validate_nickname};
+mod message_delivery;
+mod pairing_process;
+mod relationship_process;
+use helpers::{parse_uuid, validate_nickname};
+use pairing_process::{send_effect as pairing_send_effect, transition_invite_state};
 use uuid::Uuid;
 
 pub struct ClientRuntime<S, T, C> {
@@ -134,24 +138,11 @@ where
     }
 
     pub fn prepare_submit_pairing_code(&mut self, code: String) -> RuntimeResult<String> {
-        let normalized = code
-            .chars()
-            .filter(|value| value.is_ascii_digit())
-            .collect::<String>();
-        if normalized.len() != 8 {
-            return Err(RuntimeError::InvalidParams(
-                "pairing code must contain exactly eight digits".to_owned(),
-            ));
-        }
+        let normalized = pairing_process::normalize_pairing_code(&code)?;
         let mut outbox = self.storage.pairing_outbox()?;
         self.expire_pairing_items(&mut outbox, false)?;
         self.complete_outbox_pairings_for_existing_contacts()?;
-        if self
-            .storage
-            .pairing_outbox()?
-            .iter()
-            .any(|item| item.state.is_outstanding())
-        {
+        if pairing_process::has_outstanding_request(&self.storage.pairing_outbox()?) {
             return Err(RuntimeError::Conflict(
                 "an active pairing request already exists".to_owned(),
             ));
@@ -170,16 +161,11 @@ where
             .into_iter()
             .map(|contact| contact.installation_id)
             .collect::<std::collections::BTreeSet<_>>();
-        for mut item in self.storage.pairing_outbox()? {
-            let target_is_contact = item
-                .sender
-                .as_ref()
-                .is_some_and(|target| contact_ids.contains(&target.installation_id));
-            if !item.state.is_outstanding() || !target_is_contact {
+        for item in self.storage.pairing_outbox()? {
+            let Some(item) = pairing_process::complete_for_existing_contact(item, &contact_ids)
+            else {
                 continue;
-            }
-            item.state = crate::InviteState::Completed;
-            item = normalize_pairing_item(item);
+            };
             self.storage.put_pairing_outbox(item.clone())?;
             self.session.push_event(RuntimeEvent::InviteStateChanged {
                 pairing_id: Some(item.pairing_id),
@@ -196,35 +182,11 @@ where
             .into_iter()
             .find(|contact| contact.installation_id == installation_id)
             .ok_or_else(|| RuntimeError::NotFound("contact does not exist".to_owned()))?;
-        let outstanding = self
-            .storage
-            .pairing_outbox()?
-            .into_iter()
-            .filter(|item| item.state.is_outstanding())
-            .collect::<Vec<_>>();
-        if outstanding.is_empty() {
-            return Ok(());
-        }
-        let explicit_matches = outstanding
-            .iter()
-            .filter(|item| {
-                item.sender
-                    .as_ref()
-                    .is_some_and(|sender| sender.installation_id == installation_id)
-            })
-            .count();
-        let allow_single_unbound_repair = explicit_matches == 0 && outstanding.len() == 1;
-        for mut item in outstanding {
-            let matches_contact = item
-                .sender
-                .as_ref()
-                .is_some_and(|sender| sender.installation_id == installation_id);
-            if !matches_contact && !allow_single_unbound_repair {
-                continue;
-            }
-            item.sender = Some(contact.clone());
-            item.state = InviteState::Completed;
-            item = normalize_pairing_item(item);
+        for item in pairing_process::reconcile_outbox_items(
+            self.storage.pairing_outbox()?,
+            &contact,
+            installation_id,
+        ) {
             self.storage.put_pairing_outbox(item.clone())?;
             self.session.push_event(RuntimeEvent::InviteStateChanged {
                 pairing_id: Some(item.pairing_id),
@@ -251,16 +213,7 @@ where
     }
 
     fn require_pairing_profile_ready(&self) -> RuntimeResult<()> {
-        let profile = self
-            .storage
-            .profile()?
-            .ok_or_else(|| RuntimeError::Unavailable("runtime profile is not ready".to_owned()))?;
-        if profile.nickname.trim().chars().count() < 2 {
-            return Err(RuntimeError::Conflict(
-                "set nickname before generating a pairing code".to_owned(),
-            ));
-        }
-        Ok(())
+        pairing_process::require_profile_ready(self.storage.profile()?.as_ref())
     }
 
     pub fn pairing_inbox(&mut self) -> RuntimeResult<crate::PairingSyncResult> {
@@ -286,13 +239,8 @@ where
         let mut local = self.storage.pairing_inbox()?;
         self.expire_pairing_items(&mut local, true)?;
         let mut acknowledgements = Vec::new();
-        for remote_item in remote {
-            let pairing_id = remote_item.pairing_id.clone();
-            let local_item = local
-                .iter()
-                .position(|item| item.pairing_id == remote_item.pairing_id)
-                .map(|index| local.remove(index));
-            let merge = merge_pairing_item(local_item, remote_item.clone());
+        for merge in pairing_process::merge_remote_items(&mut local, remote) {
+            let pairing_id = merge.item.pairing_id.clone();
             acknowledgements.push(crate::PairingAcknowledgeEffect { pairing_id });
             if merge.inserted {
                 self.session.push_event(RuntimeEvent::InviteReceived {
@@ -305,20 +253,13 @@ where
                 });
                 let item = merge.item.clone();
                 self.storage.put_pairing_inbox(item.clone())?;
-                local.push(item);
                 continue;
             }
             if merge.changed || merge.inserted {
                 self.storage.put_pairing_inbox(merge.item.clone())?;
             }
-            local.push(merge.item);
         }
-        local.retain(|item| item.state != InviteState::Archived);
-        local.sort_by(|a, b| {
-            b.expires_at
-                .cmp(&a.expires_at)
-                .then(a.pairing_id.cmp(&b.pairing_id))
-        });
+        local = pairing_process::visible_items(local);
         Ok(crate::PairingSyncResult {
             items: local,
             acknowledgements,
@@ -335,37 +276,7 @@ where
             .into_iter()
             .find(|item| item.pairing_id == pairing_id)
             .ok_or_else(|| RuntimeError::NotFound("pairing request does not exist".to_owned()))?;
-        let sender = item
-            .sender
-            .ok_or_else(|| RuntimeError::Conflict("pairing sender does not exist".to_owned()))?;
-        if self
-            .storage
-            .contacts()?
-            .iter()
-            .any(|contact| contact.installation_id == sender.installation_id && !contact.blocked)
-        {
-            return Err(RuntimeError::Conflict(
-                "contact already exists; remove it before pairing again".to_owned(),
-            ));
-        }
-        let capability = item.capability.ok_or_else(|| {
-            RuntimeError::Conflict("pairing capability does not exist".to_owned())
-        })?;
-        if item.expires_at < self.clock.now_secs() {
-            return Err(RuntimeError::Conflict(
-                "pairing request is expired".to_owned(),
-            ));
-        }
-        if !item.state.is_pending() {
-            return Err(RuntimeError::Conflict(
-                "pairing request cannot be prepared from its current state".to_owned(),
-            ));
-        }
-        Ok(crate::PairingPreparation {
-            pairing_id: item.pairing_id,
-            recipient_installation_id: sender.installation_id,
-            capability,
-        })
+        pairing_process::prepare_accept(item, &self.storage.contacts()?, self.clock.now_secs())
     }
 
     pub fn commit_accept_pairing(
@@ -374,63 +285,27 @@ where
         offer_invite_id: String,
         offer_payload: String,
     ) -> RuntimeResult<RuntimeSendEffect> {
-        if offer_invite_id.trim().is_empty() {
-            return Err(RuntimeError::InvalidParams(
-                "offerInviteId must not be empty".to_owned(),
-            ));
-        }
-        if offer_payload.trim().is_empty() {
-            return Err(RuntimeError::InvalidParams(
-                "offerPayload must not be empty".to_owned(),
-            ));
-        }
-        let mut item = self
+        let item = self
             .storage
             .pairing_inbox()?
             .into_iter()
             .find(|item| item.pairing_id == pairing_id)
             .ok_or_else(|| RuntimeError::NotFound("pairing request does not exist".to_owned()))?;
-        let sender = item
-            .sender
-            .as_ref()
-            .ok_or_else(|| RuntimeError::Conflict("pairing sender does not exist".to_owned()))?;
-        if item.state == InviteState::Accepted {
-            if item.offer_invite_id.as_deref() == Some(offer_invite_id.as_str())
-                && item.offer_payload.as_deref() == Some(offer_payload.as_str())
-            {
-                return Ok(pairing_send_effect(
-                    item.pairing_id,
-                    sender.installation_id.clone(),
-                    crate::PairingSendKind::Offer,
-                    item.offer_payload,
-                ));
-            }
-            return Err(RuntimeError::Conflict(
-                "accepted pairing has different offer artifacts".to_owned(),
-            ));
-        }
-        if item.expires_at < self.clock.now_secs() {
-            return Err(RuntimeError::Conflict(
-                "pairing request is expired".to_owned(),
-            ));
-        }
-        let state = transition_invite_state(&item.state, PairingAction::Accept)?;
-        let recipient_installation_id = sender.installation_id.clone();
-        item.state = state;
-        item.offer_invite_id = Some(offer_invite_id);
-        item.offer_payload = Some(offer_payload);
-        item = normalize_pairing_item(item);
+        let previous_state = item.state;
+        let (item, effect) = pairing_process::commit_accept(
+            item,
+            offer_invite_id,
+            offer_payload,
+            self.clock.now_secs(),
+        )?;
         self.storage.put_pairing_inbox(item.clone())?;
-        self.session.push_event(RuntimeEvent::InviteStateChanged {
-            pairing_id: Some(pairing_id.to_owned()),
-            state: Some(state),
-        });
-        Ok(pairing_send_effect(
-            item.pairing_id,
-            recipient_installation_id,
-            crate::PairingSendKind::Offer,
-            item.offer_payload,
-        ))
+        if item.state != previous_state {
+            self.session.push_event(RuntimeEvent::InviteStateChanged {
+                pairing_id: Some(pairing_id.to_owned()),
+                state: Some(item.state),
+            });
+        }
+        Ok(effect)
     }
 
     pub fn prepare_reject_pairing(
@@ -443,50 +318,35 @@ where
             .into_iter()
             .find(|item| item.pairing_id == pairing_id)
             .ok_or_else(|| RuntimeError::NotFound("pairing request does not exist".to_owned()))?;
-        let sender = item
-            .sender
-            .ok_or_else(|| RuntimeError::Conflict("pairing sender does not exist".to_owned()))?;
-        let capability = item.capability.ok_or_else(|| {
+        let capability = item.capability.clone().ok_or_else(|| {
             RuntimeError::Conflict("pairing capability does not exist".to_owned())
         })?;
-        if item.expires_at < self.clock.now_secs() {
-            return Err(RuntimeError::Conflict(
-                "pairing request is expired".to_owned(),
-            ));
-        }
         if !item.state.is_pending() {
             return Err(RuntimeError::Conflict(
                 "pairing request cannot be prepared from its current state".to_owned(),
             ));
         }
+        let (_, recipient_installation_id) =
+            pairing_process::prepare_reject(item, self.clock.now_secs())?;
         Ok(crate::PairingPreparation {
-            pairing_id: item.pairing_id,
-            recipient_installation_id: sender.installation_id,
+            pairing_id: pairing_id.to_owned(),
+            recipient_installation_id,
             capability,
         })
     }
 
     pub fn commit_reject_pairing(&mut self, pairing_id: &str) -> RuntimeResult<RuntimeSendEffect> {
-        let mut item = self
+        let item = self
             .storage
             .pairing_inbox()?
             .into_iter()
             .find(|item| item.pairing_id == pairing_id)
             .ok_or_else(|| RuntimeError::NotFound("pairing request does not exist".to_owned()))?;
-        let recipient_installation_id = item
-            .sender
-            .as_ref()
-            .ok_or_else(|| RuntimeError::Conflict("pairing sender does not exist".to_owned()))?
-            .installation_id
-            .clone();
-        if item.state != InviteState::Rejected {
-            if item.expires_at < self.clock.now_secs() {
-                return Err(RuntimeError::Conflict(
-                    "pairing request is expired".to_owned(),
-                ));
-            }
-            item.state = transition_invite_state(&item.state, PairingAction::Reject)?;
-            item = normalize_pairing_item(item);
+        let already_rejected = item.state == InviteState::Rejected;
+        let (updated_item, recipient_installation_id) =
+            pairing_process::prepare_reject(item, self.clock.now_secs())?;
+        if !already_rejected {
+            let item = updated_item;
             self.storage.put_pairing_inbox(item.clone())?;
             self.session.push_event(RuntimeEvent::InviteStateChanged {
                 pairing_id: Some(pairing_id.to_owned()),
@@ -511,33 +371,19 @@ where
             .into_iter()
             .find(|item| item.pairing_id == pairing_id)
             .ok_or_else(|| RuntimeError::NotFound("pairing request does not exist".to_owned()))?;
-        if !matches!(item.state, InviteState::Pending | InviteState::Accepted) {
-            return Err(RuntimeError::Conflict(
-                "pairing request cannot be cancelled from its current state".to_owned(),
-            ));
-        }
-        Ok(crate::PairingCancelEffect {
-            pairing_id: pairing_id.to_owned(),
-        })
+        pairing_process::prepare_cancel(&item)
     }
 
     pub fn confirm_pairing_cancelled(&mut self, pairing_id: &str) -> RuntimeResult<()> {
-        let mut item = self
+        let item = self
             .storage
             .pairing_outbox()?
             .into_iter()
             .find(|item| item.pairing_id == pairing_id)
             .ok_or_else(|| RuntimeError::NotFound("pairing request does not exist".to_owned()))?;
-        if item.state == InviteState::Cancelled {
+        let Some(item) = pairing_process::confirm_cancel(item)? else {
             return Ok(());
-        }
-        if !matches!(item.state, InviteState::Pending | InviteState::Accepted) {
-            return Err(RuntimeError::Conflict(
-                "pairing request cannot be cancelled from its current state".to_owned(),
-            ));
-        }
-        item.state = InviteState::Cancelled;
-        item = normalize_pairing_item(item);
+        };
         self.storage.put_pairing_outbox(item)?;
         self.session.push_event(RuntimeEvent::InviteStateChanged {
             pairing_id: Some(pairing_id.to_owned()),
@@ -557,36 +403,7 @@ where
             .into_iter()
             .find(|item| item.pairing_id == pairing_id)
             .ok_or_else(|| RuntimeError::NotFound("pairing request does not exist".to_owned()))?;
-        let next_state = match outcome {
-            crate::PairingPeerOutcome::OfferReceived => match item.state {
-                InviteState::Pending | InviteState::Accepted => InviteState::Accepted,
-                InviteState::Completed => InviteState::Completed,
-                _ => {
-                    return Err(RuntimeError::Conflict(
-                        "pairing peer outcome is invalid for the current state".to_owned(),
-                    ));
-                }
-            },
-            crate::PairingPeerOutcome::RejectionReceived => match item.state {
-                InviteState::Pending | InviteState::Accepted | InviteState::Rejected => {
-                    InviteState::Rejected
-                }
-                InviteState::Completed => InviteState::Completed,
-                _ => {
-                    return Err(RuntimeError::Conflict(
-                        "pairing peer outcome is invalid for the current state".to_owned(),
-                    ));
-                }
-            },
-            crate::PairingPeerOutcome::WelcomePrepared => match item.state {
-                InviteState::Accepted | InviteState::Completed => InviteState::Completed,
-                _ => {
-                    return Err(RuntimeError::Conflict(
-                        "pairing peer outcome is invalid for the current state".to_owned(),
-                    ));
-                }
-            },
-        };
+        let next_state = pairing_process::next_state_for_peer_outcome(item.state, outcome)?;
         if item.state == next_state {
             return Ok(());
         }
@@ -604,12 +421,7 @@ where
         self.complete_outbox_pairings_for_existing_contacts()?;
         let mut items = self.storage.pairing_outbox()?;
         self.expire_pairing_items(&mut items, false)?;
-        items.retain(|item| item.state != InviteState::Archived);
-        items.sort_by(|a, b| {
-            b.expires_at
-                .cmp(&a.expires_at)
-                .then(a.pairing_id.cmp(&b.pairing_id))
-        });
+        items = pairing_process::visible_items(items);
         Ok(crate::PairingSyncResult {
             items,
             acknowledgements: Vec::new(),
@@ -625,7 +437,7 @@ where
         let mut confirm_contact = None;
 
         if let Some(invite_id) = invite_id {
-            let mut item = self
+            let item = self
                 .storage
                 .pairing_inbox()?
                 .into_iter()
@@ -633,41 +445,17 @@ where
                 .ok_or_else(|| {
                     RuntimeError::NotFound("pairing request does not exist".to_owned())
                 })?;
-            match item.state {
-                InviteState::Accepted => {
-                    let capability = item.capability.clone().ok_or_else(|| {
-                        RuntimeError::Conflict("pairing capability does not exist".to_owned())
-                    })?;
-                    item.state = InviteState::Completed;
-                    item = normalize_pairing_item(item);
-                    self.storage.put_pairing_inbox(item.clone())?;
-                    self.session.push_event(RuntimeEvent::InviteStateChanged {
-                        pairing_id: Some(item.pairing_id.clone()),
-                        state: Some(InviteState::Completed),
-                    });
-                    confirm_contact = Some(crate::PairingConfirmContactEffect {
-                        pairing_id: item.pairing_id.clone(),
-                        capability,
-                        peer_installation_id: contact.installation_id.clone(),
-                    });
-                }
-                InviteState::Completed => {}
-                _ => {
-                    return Err(RuntimeError::Conflict(
-                        "welcome cannot complete pairing from its current state".to_owned(),
-                    ));
-                }
-            }
-            if matches!(item.state, InviteState::Completed) && confirm_contact.is_none() {
-                let capability = item.capability.clone().ok_or_else(|| {
-                    RuntimeError::Conflict("pairing capability does not exist".to_owned())
-                })?;
-                confirm_contact = Some(crate::PairingConfirmContactEffect {
-                    pairing_id: item.pairing_id.clone(),
-                    capability,
-                    peer_installation_id: contact.installation_id.clone(),
+            let was_completed = item.state == InviteState::Completed;
+            let (updated_item, effect) =
+                pairing_process::complete_welcome(item, contact.installation_id.clone())?;
+            if !was_completed {
+                self.storage.put_pairing_inbox(updated_item.clone())?;
+                self.session.push_event(RuntimeEvent::InviteStateChanged {
+                    pairing_id: Some(updated_item.pairing_id.clone()),
+                    state: Some(updated_item.state),
                 });
             }
+            confirm_contact = Some(effect);
         }
 
         let conversation = self.promote_contact_with_status(
@@ -688,12 +476,7 @@ where
     ) -> RuntimeResult<crate::PairingSyncResult> {
         let mut local = self.storage.pairing_outbox()?;
         self.expire_pairing_items(&mut local, false)?;
-        for remote_item in remote {
-            let local_item = local
-                .iter()
-                .position(|item| item.pairing_id == remote_item.pairing_id)
-                .map(|index| local.remove(index));
-            let merge = merge_pairing_item(local_item, remote_item.clone());
+        for merge in pairing_process::merge_remote_items(&mut local, remote) {
             if merge.changed || merge.inserted {
                 let state = merge.item.state;
                 self.storage.put_pairing_outbox(merge.item.clone())?;
@@ -702,14 +485,8 @@ where
                     state: Some(state),
                 });
             }
-            local.push(merge.item);
         }
-        local.retain(|item| item.state != InviteState::Archived);
-        local.sort_by(|a, b| {
-            b.expires_at
-                .cmp(&a.expires_at)
-                .then(a.pairing_id.cmp(&b.pairing_id))
-        });
+        local = pairing_process::visible_items(local);
         Ok(crate::PairingSyncResult {
             items: local,
             acknowledgements: Vec::new(),
@@ -778,14 +555,49 @@ where
         installation_id: &str,
         preserve_history: bool,
     ) -> RuntimeResult<()> {
-        if installation_id.trim().is_empty() {
-            return Err(RuntimeError::InvalidParams(
-                "contact installation id must not be empty".to_owned(),
-            ));
-        }
+        relationship_process::validate_removal_identifiers(installation_id, None)?;
         let removed_at = self.clock.now_ms();
+        let removal_id = uuid::Uuid::new_v4().to_string();
+        let relationship_epoch = self
+            .storage
+            .current_relationship_epoch(installation_id)?
+            .saturating_add(1);
+        self.storage.remove_relationship_with_id(
+            installation_id,
+            removed_at,
+            preserve_history,
+            &removal_id,
+            relationship_epoch,
+        )?;
+        self.session.push_event(RuntimeEvent::Changed {
+            kind: Some("contacts".to_owned()),
+        });
+        self.session.push_event(RuntimeEvent::Changed {
+            kind: Some("conversations".to_owned()),
+        });
+        self.session.push_event(RuntimeEvent::Changed {
+            kind: Some("messages".to_owned()),
+        });
+        Ok(())
+    }
+
+    pub fn remove_relationship_with_id(
+        &mut self,
+        installation_id: &str,
+        removed_at: i64,
+        preserve_history: bool,
+        removal_id: &str,
+        relationship_epoch: i64,
+    ) -> RuntimeResult<()> {
+        relationship_process::validate_removal_identifiers(installation_id, Some(removal_id))?;
         self.storage
-            .remove_relationship(installation_id, removed_at, preserve_history)?;
+            .apply_relationship_transition(RelationshipTransition::Remove {
+                installation_id: installation_id.to_owned(),
+                removed_at,
+                preserve_history,
+                removal_id: removal_id.to_owned(),
+                relationship_epoch,
+            })?;
         self.session.push_event(RuntimeEvent::Changed {
             kind: Some("contacts".to_owned()),
         });
@@ -1141,12 +953,7 @@ where
         text: String,
         reply_to: Option<crate::MessageReply>,
     ) -> RuntimeResult<ChatMessage> {
-        let text = text.trim();
-        if text.is_empty() {
-            return Err(RuntimeError::InvalidParams(
-                "message text must not be empty".to_owned(),
-            ));
-        }
+        let text = message_delivery::validate_message_text(&text)?;
         let existing = self
             .storage
             .conversations()?
@@ -1296,52 +1103,21 @@ where
                 .into_iter()
                 .map(RuntimeSendEffect::from),
         );
-        for item in self.storage.pairing_inbox()? {
-            let Some(sender) = item.sender.as_ref() else {
-                if matches!(item.state, InviteState::Accepted | InviteState::Rejected) {
-                    return Err(RuntimeError::Conflict(
-                        "pairing sender does not exist".to_owned(),
-                    ));
-                }
-                continue;
-            };
-            let recipient_installation_id = sender.installation_id.clone();
-            match item.state {
-                InviteState::Accepted => {
-                    if item.expires_at < self.clock.now_secs() {
-                        continue;
-                    }
-                    if item.offer_payload.is_none() {
-                        return Err(RuntimeError::Conflict(
-                            "accepted pairing offer payload does not exist".to_owned(),
-                        ));
-                    }
-                    effects.push(pairing_send_effect(
-                        item.pairing_id,
-                        recipient_installation_id,
-                        crate::PairingSendKind::Offer,
-                        item.offer_payload,
-                    ));
-                }
-                InviteState::Rejected => {
-                    effects.push(pairing_send_effect(
-                        item.pairing_id,
-                        recipient_installation_id,
-                        crate::PairingSendKind::Rejection,
-                        None,
-                    ));
-                }
-                _ => {}
-            }
-        }
-        effects.sort_by_key(|effect| effect.recipient_installation_id().to_owned());
+        effects.extend(pairing_process::pending_send_effects(
+            self.storage.pairing_inbox()?,
+            self.clock.now_secs(),
+        )?);
         Ok(effects)
     }
 
     pub fn prepare_pending_receipt_effects(
         &mut self,
     ) -> RuntimeResult<Vec<crate::ReceiptSendEffect>> {
-        self.storage.pending_receipts()
+        self.storage
+            .pending_receipts()?
+            .into_iter()
+            .map(message_delivery::validate_receipt_effect)
+            .collect()
     }
 
     pub fn expedite_retry_after_ready(&mut self) -> RuntimeResult<()> {
@@ -1513,9 +1289,8 @@ where
         let mut next_state = None;
         for mut item in self.storage.pairing_inbox()? {
             if item.pairing_id == pairing_id {
-                let state = transition_invite_state(&item.state, action)?;
-                item.state = state;
-                item = normalize_pairing_item(item);
+                let state = pairing_process::transition_invite_state(&item.state, action)?;
+                item = pairing_process::transition_item(item, action)?;
                 self.storage.put_pairing_inbox(item)?;
                 next_state = Some(state);
                 changed = true;
@@ -1523,9 +1298,8 @@ where
         }
         for mut item in self.storage.pairing_outbox()? {
             if item.pairing_id == pairing_id {
-                let state = transition_invite_state(&item.state, action)?;
-                item.state = state;
-                item = normalize_pairing_item(item);
+                let state = pairing_process::transition_invite_state(&item.state, action)?;
+                item = pairing_process::transition_item(item, action)?;
                 self.storage.put_pairing_outbox(item)?;
                 next_state = Some(state);
                 changed = true;
@@ -1548,16 +1322,8 @@ where
         items: &mut [PairingItem],
         inbox: bool,
     ) -> RuntimeResult<()> {
-        let mut changed = Vec::new();
-        for item in items.iter_mut() {
-            if item.state != InviteState::Pending || item.expires_at >= self.clock.now_secs() {
-                continue;
-            }
-            item.state = InviteState::Expired;
-            *item = normalize_pairing_item(item.clone());
-            changed.push(item.clone());
-        }
-        for item in changed {
+        let now_secs = self.clock.now_secs();
+        for item in pairing_process::expire_items(items, now_secs) {
             if inbox {
                 self.storage.put_pairing_inbox(item.clone())?;
             } else {
@@ -2696,6 +2462,30 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_read_receipt_is_idempotent() {
+        let mut runtime = runtime_with_sending_message();
+        runtime.storage.messages[0].state = MessageState::Delivered;
+
+        let first = runtime.apply_message_read(Uuid::from_u128(1)).unwrap();
+        let second = runtime.apply_message_read(Uuid::from_u128(1)).unwrap();
+
+        assert_eq!(first.state, MessageState::Read);
+        assert_eq!(second.state, MessageState::Read);
+        assert_eq!(
+            runtime
+                .drain_events()
+                .iter()
+                .filter(|event| matches!(
+                    event,
+                    RuntimeEvent::MessageStateChanged { state, .. }
+                        if *state == Some(MessageState::Read)
+                ))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
     fn blocked_contact_rejects_new_and_retried_messages() {
         let mut runtime = runtime_with_sending_message();
         let updated = runtime
@@ -2947,6 +2737,29 @@ mod tests {
             .unwrap();
 
         assert_eq!(message.state, MessageState::Queued);
+    }
+
+    #[test]
+    fn live_relay_retry_advances_queued_message_after_recipient_returns() {
+        let mut runtime = runtime_with_sending_message();
+        runtime
+            .apply_message_transport_outcome(
+                Uuid::from_u128(1),
+                MessageTransportOutcome::RecipientOffline,
+            )
+            .unwrap();
+
+        let effects = runtime.prepare_pending_message_sends().unwrap();
+        assert_eq!(effects.len(), 1);
+        assert_eq!(
+            runtime.messages("peer-1").unwrap()[0].state,
+            MessageState::Sending
+        );
+
+        let forwarded = runtime
+            .apply_message_transport_outcome(Uuid::from_u128(1), MessageTransportOutcome::Forwarded)
+            .unwrap();
+        assert_eq!(forwarded.state, MessageState::Sent);
     }
 
     #[test]

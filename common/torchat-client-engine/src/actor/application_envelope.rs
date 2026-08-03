@@ -1,6 +1,27 @@
-﻿use super::*;
+use super::*;
+
+pub(super) struct InboundApplyResult {
+    pub(super) committed: bool,
+    pub(super) receipt_due: bool,
+    pub(super) runtime_events: Vec<torchat_client_runtime::RuntimeEvent>,
+}
 
 impl ClientEngineActor {
+    pub(super) fn handle_application_envelope_result(
+        &mut self,
+        envelope: RelayEnvelope,
+        ciphertext: PeerCiphertextPayload,
+    ) -> EngineResult<InboundApplyResult> {
+        let message_id = envelope.message_id.to_string();
+        let runtime_events = self.handle_application_envelope(envelope, ciphertext)?;
+        let receipt_due = self.database.delivery_receipt(&message_id)?.is_some();
+        Ok(InboundApplyResult {
+            committed: true,
+            receipt_due,
+            runtime_events,
+        })
+    }
+
     pub(super) fn handle_application_envelope(
         &mut self,
         envelope: RelayEnvelope,
@@ -100,8 +121,7 @@ impl ClientEngineActor {
                     };
                     let notification = NotificationRequest {
                         id: message_id.to_string(),
-                        title: "Nowa wiadomoÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂºÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¾ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡"
-                            .to_owned(),
+                        title: "Nowa wiadomoÅ›Ä‡".to_owned(),
                         body: body.clone(),
                         conversation_id: Some(peer.clone()),
                     };
@@ -203,6 +223,8 @@ impl ClientEngineActor {
                     message_id: removal_message_id,
                     removed_at,
                     preserve_history,
+                    relationship_epoch,
+                    removal_id,
                     ..
                 } => {
                     if removal_message_id != message_id {
@@ -214,14 +236,22 @@ impl ClientEngineActor {
                         // The shared runtime owns the relationship transition;
                         // the transport only delivers the typed application
                         // payload and persists the resulting MLS snapshot.
-                        runtime.remove_relationship(&peer, preserve_history)?;
+                        let removal_id = removal_id
+                            .map(|value| value.to_string())
+                            .unwrap_or_else(|| removal_message_id.to_string());
+                        runtime.remove_relationship_with_id(
+                            &peer,
+                            removed_at,
+                            preserve_history,
+                            &removal_id,
+                            relationship_epoch.unwrap_or(removed_at),
+                        )?;
                         runtime
                             .storage_mut()
                             .put_conversation_mls_snapshot(&peer, &snapshot_after)?;
                         runtime
                             .storage_mut()
                             .put_received_envelope(&envelope_record)?;
-                        let _ = removed_at;
                         Ok(())
                     })?;
                     Ok((events, None))
@@ -374,7 +404,23 @@ impl ClientEngineActor {
         match result {
             Ok((runtime_events, notification)) => {
                 self.conversations.insert(peer, conversation);
-                self.flush_pending_receipt_effects()?;
+                // The inbound transaction is already committed at this point.
+                // Receipt transport is a separate durable effect and must not
+                // turn a successful inbound message into a rejected/crypto
+                // failure when its first send attempt fails.
+                if let Err(error) = self.flush_pending_receipt_effects() {
+                    self.receipt_queue_failed_after_commit =
+                        self.receipt_queue_failed_after_commit.saturating_add(1);
+                    self.pending_engine_events.push(EngineEvent::Log {
+                        log: EngineLogEvent {
+                            level: "warn".to_owned(),
+                            message: format!(
+                                "receipt_queue_failed_after_commit: deferred durable receipt effect ({error_kind})",
+                                error_kind = super::error_kind(&error),
+                            ),
+                        },
+                    });
+                }
                 if let Some(notification) = notification {
                     self.queue_notification(notification);
                 }

@@ -317,15 +317,27 @@ function Build-TorChatAndroidClient {
     Import-TorChatEnvironmentState -EnvironmentState $EnvironmentState -RequireOnion
     $variant = $Context.Configuration
     $artifact = Join-Path $Context.RepositoryRoot "mobile\build\app\outputs\flutter-apk\app-$variant.apk"
+    $engineArtifacts = @(
+        (Join-Path $Context.RepositoryRoot 'mobile\build\app\generated\jniLibs\arm64-v8a\libtorchat_client_engine.so'),
+        (Join-Path $Context.RepositoryRoot 'mobile\build\app\generated\jniLibs\x86_64\libtorchat_client_engine.so')
+    )
+    foreach ($engineArtifact in $engineArtifacts) {
+        if (-not (Test-Path -LiteralPath $engineArtifact)) {
+            throw "Android engine ABI artifact missing before APK build: $engineArtifact"
+        }
+    }
+    $engineFingerprints = @($engineArtifacts | ForEach-Object {
+        "engine=$([IO.Path]::GetFileName((Split-Path -Parent $_))):$(Get-TorChatFileSha256 -Path $_)"
+    })
     $hash = Get-TorChatInputHash -RepositoryRoot $Context.RepositoryRoot -Roots @(
         'common\client-engine-contract.json','mobile\pubspec.yaml','mobile\pubspec.lock',
         'mobile\lib','mobile\assets','mobile\android'
-    ) -ExtraValues @(
+    ) -ExtraValues (@(
         "environment=$($Context.Environment)",
         "onion=$($EnvironmentState.Values['TORCHAT_ONION_URL'])",
         "variant=$variant",
         "torkaPairingCode=$($EnvironmentState.Values['TORCHAT_TORKA_PAIRING_CODE'])"
-    )
+    ) + $engineFingerprints)
     if ($Policy -eq 'smart' -and (Test-TorChatBuildFresh -RepositoryRoot $Context.RepositoryRoot -Key "flutter-android-$variant" -Hash $hash -Artifacts @($artifact))) {
         return [pscustomobject]@{ State = 'Skipped'; Code = 'ANDROID_APK_FRESH'; Message = 'Android APK unchanged'; Artifact = $artifact }
     }

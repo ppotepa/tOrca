@@ -10,6 +10,7 @@ use crate::{Identity, PROTOCOL_VERSION, is_valid_onion_address, verify_signature
 
 pub const PEER_VIRTUAL_PORT: u16 = 443;
 pub const PEER_PATH: &str = "/v1/peer";
+pub const MAX_ENDPOINT_CLOCK_SKEW_SECS: i64 = 10 * 60;
 /// Maximum serialized ciphertext accepted by every message transport. Keeping
 /// this below the relay limit prevents a P2P-accepted message from becoming a
 /// permanently retrying relay-fallback payload.
@@ -133,11 +134,19 @@ impl PeerEndpointBundle {
         if self.virtual_port != PEER_VIRTUAL_PORT {
             return Err("unsupported peer endpoint virtual port".into());
         }
+        if self.issued_at.saturating_sub(now) > MAX_ENDPOINT_CLOCK_SKEW_SECS {
+            return Err("peer endpoint issued-at exceeds clock skew bound".into());
+        }
         if !is_valid_onion_address(&self.onion_address) {
             return Err("invalid Tor v3 peer endpoint".into());
         }
-        if self.expires_at.is_some_and(|expires_at| expires_at < now) {
-            return Err("peer endpoint has expired".into());
+        if let Some(expires_at) = self.expires_at {
+            if expires_at < now {
+                return Err("peer endpoint has expired".into());
+            }
+            if expires_at.saturating_sub(now) > MAX_ENDPOINT_CLOCK_SKEW_SECS {
+                return Err("peer endpoint expiry exceeds clock skew bound".into());
+            }
         }
         if self.capabilities.is_empty()
             || self
@@ -547,6 +556,42 @@ mod tests {
     }
 
     #[test]
+    fn signed_endpoint_rejects_excessive_future_clock_skew() {
+        let identity = Identity::generate();
+        let endpoint = PeerEndpointBundle::new(
+            &identity,
+            onion('a'),
+            1,
+            10,
+            Some(10 + MAX_ENDPOINT_CLOCK_SKEW_SECS + 1),
+        );
+        assert_eq!(
+            endpoint.validate(10).unwrap_err(),
+            "peer endpoint expiry exceeds clock skew bound"
+        );
+    }
+
+    #[test]
+    fn endpoint_issued_at_accepts_ten_minutes_and_rejects_twenty_four_hours() {
+        let identity = Identity::generate();
+        let one_minute = PeerEndpointBundle::new(&identity, onion('a'), 1, 10 + 60, None);
+        assert!(one_minute.validate(10).is_ok());
+        let ten_minutes = PeerEndpointBundle::new(
+            &identity,
+            onion('a'),
+            2,
+            10 + MAX_ENDPOINT_CLOCK_SKEW_SECS,
+            None,
+        );
+        assert!(ten_minutes.validate(10).is_ok());
+        let day = PeerEndpointBundle::new(&identity, onion('a'), 3, 10 + 24 * 60 * 60, None);
+        assert_eq!(
+            day.validate(10).unwrap_err(),
+            "peer endpoint issued-at exceeds clock skew bound"
+        );
+    }
+
+    #[test]
     fn handshake_transcript_binds_onion_and_both_identities() {
         let client = Identity::generate();
         let server = Identity::generate();
@@ -661,5 +706,18 @@ mod tests {
         let encoded = encode_frame(&PeerFrame::Ack { ack: ack.clone() }).unwrap();
         let decoded = decode_frame(&encoded, true).unwrap();
         assert_eq!(decoded, PeerFrame::Ack { ack });
+    }
+
+    #[test]
+    fn peer_frame_decoder_rejects_bounded_malformed_corpus_without_panic() {
+        let mut seed = 0x8765_4321_u32;
+        for length in 0..=512_usize {
+            let mut bytes = vec![0_u8; length];
+            for byte in &mut bytes {
+                seed = seed.rotate_left(7) ^ 0xa5a5_5a5a;
+                *byte = seed as u8;
+            }
+            let _ = decode_frame(&bytes, true);
+        }
     }
 }

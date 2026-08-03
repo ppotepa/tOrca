@@ -28,7 +28,8 @@ poszczególnych plików pomocniczych: jedynym publicznym wejściem jest
 # Uruchom emulator osobno i pozostaw go działającego
 .\scripts\start-android-emulator.ps1
 
-# Uruchom konkretny AVD i od razu aplikację bez restartowania stacka
+# Uruchom konkretny AVD, zbuduj i zainstaluj APK, a następnie uruchom aplikację
+# bez restartowania istniejącego stacka
 .\scripts\start-android-emulator.ps1 -Avd Pixel_7_API_35 -RunApp -SkipStack
 
 # Tylko Windows

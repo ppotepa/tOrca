@@ -93,6 +93,7 @@ class SequentialAppController extends base.AppController {
         _repository.applicationState.current?.identity.installationId ?? '';
     _warming = true;
     _startupComplete = false;
+    var localShellReady = false;
     _applyPhase(SequentialStartupPhase.engine);
     state = state.copyWith(
       screen: base.ControllerScreen.boot,
@@ -157,10 +158,15 @@ class SequentialAppController extends base.AppController {
             ? PeerServerStatus.ready
             : PeerServerStatus.starting,
         isLoading: false,
-        // Warmup is a hard gate. A retained nickname must not bypass Tor,
-        // relay, peer-listener or onion-service readiness.
-        screen: base.ControllerScreen.boot,
+        // Local data is the shell gate. Tor, relay, onion and per-contact
+        // reachability remain capability/transport states and may recover in
+        // the background without hiding history and settings.
+        screen: snapshot.profile.nickname.trim().isNotEmpty
+            ? base.ControllerScreen.main
+            : base.ControllerScreen.nickname,
       );
+      localShellReady = true;
+      _startupComplete = true;
       _startup.observePeerEndpoint(snapshot.peerEndpointAvailable);
 
       _applyPhase(SequentialStartupPhase.tor);
@@ -204,7 +210,11 @@ class SequentialAppController extends base.AppController {
         action: '',
         error: _message(error),
         startupSteps: _startup.stepsFor(_phase, error: _message(error)),
-        screen: base.ControllerScreen.boot,
+        screen: localShellReady
+            ? (state.profile.nickname.trim().isNotEmpty
+                  ? base.ControllerScreen.main
+                  : base.ControllerScreen.nickname)
+            : base.ControllerScreen.boot,
       );
     } finally {
       if (_startup.generation == generation) {
@@ -377,7 +387,7 @@ class SequentialAppController extends base.AppController {
               _repository.invalidateMessages(conversationId);
               _eventMessageRefreshes.add(conversationId);
             } else {
-              // A malformed/legacy event cannot be safely routed. Recover by
+              // A malformed or obsolete event cannot be safely routed. Recover by
               // refreshing the application projection, without assigning it
               // to the active conversation. Do not clear a pending pairing
               // refresh here: unrelated events must never suppress an invite.

@@ -20,6 +20,7 @@ class ContactPresenceSnapshot {
     this.observedAt,
     this.expiresAt,
     this.latencyMs,
+    this.retryInMs,
     this.revision = 0,
   });
 
@@ -32,6 +33,7 @@ class ContactPresenceSnapshot {
   final int? observedAt;
   final int? expiresAt;
   final int? latencyMs;
+  final int? retryInMs;
   final int revision;
 
   ContactPresenceSnapshot copyWith({
@@ -43,7 +45,10 @@ class ContactPresenceSnapshot {
     int? observedAt,
     int? expiresAt,
     int? latencyMs,
+    int? retryInMs,
     int? revision,
+    bool clearExpiry = false,
+    bool clearRetryInMs = false,
   }) => ContactPresenceSnapshot(
     contactId: contactId,
     availability: availability ?? this.availability,
@@ -52,8 +57,9 @@ class ContactPresenceSnapshot {
     lastSeenAt: lastSeenAt ?? this.lastSeenAt,
     lastPeerConnectedAt: lastPeerConnectedAt ?? this.lastPeerConnectedAt,
     observedAt: observedAt ?? this.observedAt,
-    expiresAt: expiresAt ?? this.expiresAt,
+    expiresAt: clearExpiry ? null : (expiresAt ?? this.expiresAt),
     latencyMs: latencyMs ?? this.latencyMs,
+    retryInMs: clearRetryInMs ? null : (retryInMs ?? this.retryInMs),
     revision: revision ?? this.revision,
   );
 }

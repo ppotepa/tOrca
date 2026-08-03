@@ -1,5 +1,24 @@
 Set-StrictMode -Version Latest
 
+function Get-TorChatFileSha256 {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    if (Get-Command Get-FileHash -ErrorAction SilentlyContinue) {
+        return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+    $stream = [System.IO.File]::OpenRead((Resolve-Path -LiteralPath $Path).Path)
+    try {
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            $digest = $sha.ComputeHash($stream)
+        } finally {
+            $sha.Dispose()
+        }
+        return ([System.BitConverter]::ToString($digest) -replace '-', '').ToLowerInvariant()
+    } finally {
+        $stream.Dispose()
+    }
+}
+
 function Get-TorChatSafeStateKey {
     param([Parameter(Mandatory = $true)][string]$Value)
     return ($Value -replace '[^A-Za-z0-9_.-]', '_')
@@ -25,7 +44,7 @@ function Test-TorChatArtifactDeploymentRequired {
         [Parameter(Mandatory = $true)][string]$Artifact
     )
     if (-not (Test-Path -LiteralPath $Artifact)) { return $true }
-    $hash = (Get-FileHash -LiteralPath $Artifact -Algorithm SHA256).Hash.ToLowerInvariant()
+    $hash = Get-TorChatFileSha256 -Path $Artifact
     $path = Get-TorChatDeploymentStatePath -RepositoryRoot $RepositoryRoot -Platform $Platform -Target $Target
     if (-not (Test-Path -LiteralPath $path)) { return $true }
     try {
@@ -47,7 +66,7 @@ function Set-TorChatArtifactDeployed {
         platform = $Platform
         target = $Target
         artifact = [IO.Path]::GetFullPath($Artifact)
-        artifactHash = (Get-FileHash -LiteralPath $Artifact -Algorithm SHA256).Hash.ToLowerInvariant()
+        artifactHash = Get-TorChatFileSha256 -Path $Artifact
         runId = $RunId
         deployedAt = [DateTimeOffset]::UtcNow.ToString('o')
     } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $path -Encoding UTF8

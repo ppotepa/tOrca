@@ -9,6 +9,7 @@ use std::{
 use tokio::time::Duration;
 use torchat_client_engine::{
     ClientEngine, EngineCommand, EngineCommandEnvelope, EngineConfig, EngineError, PlatformFact,
+    anti_rollback::MlsEpochAnchor,
 };
 
 use crate::{
@@ -19,6 +20,47 @@ use crate::{
 #[repr(C)]
 pub struct OpaqueEngineHandle {
     _private: [u8; 0],
+}
+
+pub type MlsEpochGetCallback = unsafe extern "C" fn(
+    conversation_id: *const u8,
+    conversation_id_len: usize,
+    epoch_out: *mut u64,
+) -> i32;
+pub type MlsEpochSetCallback =
+    unsafe extern "C" fn(conversation_id: *const u8, conversation_id_len: usize, epoch: u64) -> i32;
+
+struct FfiMlsEpochAnchor {
+    get: MlsEpochGetCallback,
+    set: MlsEpochSetCallback,
+}
+
+impl MlsEpochAnchor for FfiMlsEpochAnchor {
+    type Error = EngineError;
+
+    fn highest_epoch(&self, conversation_id: &str) -> Result<Option<u64>, Self::Error> {
+        let mut epoch = 0_u64;
+        let result =
+            unsafe { (self.get)(conversation_id.as_ptr(), conversation_id.len(), &mut epoch) };
+        match result {
+            0 => Ok(Some(epoch)),
+            1 => Ok(None),
+            code => Err(EngineError::Storage(format!(
+                "MLS epoch get callback failed: {code}"
+            ))),
+        }
+    }
+
+    fn record_epoch(&mut self, conversation_id: &str, epoch: u64) -> Result<(), Self::Error> {
+        let result = unsafe { (self.set)(conversation_id.as_ptr(), conversation_id.len(), epoch) };
+        if result == 0 {
+            Ok(())
+        } else {
+            Err(EngineError::Storage(format!(
+                "MLS epoch set callback failed: {result}"
+            )))
+        }
+    }
 }
 
 thread_local! {
@@ -128,6 +170,44 @@ pub unsafe extern "C" fn torchat_client_engine_new(
         let runtime = tokio::runtime::Runtime::new()
             .map_err(|error| EngineError::InvalidConfig(error.to_string()))?;
         let engine = runtime.block_on(async { ClientEngine::new(config) })?;
+        let (commands, events, shutdown_token) = engine.into_parts();
+        Ok(into_opaque(Box::new(EngineHandle {
+            runtime,
+            command_state: std::sync::Mutex::new(EngineHandleCommandState {
+                commands,
+                shutdown_token,
+                started: false,
+                shutdown: false,
+            }),
+            events: std::sync::Mutex::new(events),
+        })))
+    })
+    .unwrap_or(std::ptr::null_mut())
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn torchat_client_engine_new_with_mls_epoch_anchor(
+    config_json: *const u8,
+    config_len: usize,
+    get_epoch: Option<MlsEpochGetCallback>,
+    set_epoch: Option<MlsEpochSetCallback>,
+) -> *mut OpaqueEngineHandle {
+    protected(|| {
+        let config: EngineConfig = json::decode(input(config_json, config_len)?)?;
+        let get_epoch = get_epoch.ok_or_else(|| {
+            EngineError::InvalidConfig("MLS epoch get callback is missing".to_owned())
+        })?;
+        let set_epoch = set_epoch.ok_or_else(|| {
+            EngineError::InvalidConfig("MLS epoch set callback is missing".to_owned())
+        })?;
+        let runtime = tokio::runtime::Runtime::new()
+            .map_err(|error| EngineError::InvalidConfig(error.to_string()))?;
+        let mut anchor = FfiMlsEpochAnchor {
+            get: get_epoch,
+            set: set_epoch,
+        };
+        let engine =
+            runtime.block_on(async { ClientEngine::new_with_anchor(config, &mut anchor) })?;
         let (commands, events, shutdown_token) = engine.into_parts();
         Ok(into_opaque(Box::new(EngineHandle {
             runtime,
