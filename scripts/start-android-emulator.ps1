@@ -9,6 +9,22 @@ param(
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 
+$sdkRoot = $env:ANDROID_SDK_ROOT
+if ([string]::IsNullOrWhiteSpace($sdkRoot)) { $sdkRoot = $env:ANDROID_HOME }
+$emulatorPath = if (-not [string]::IsNullOrWhiteSpace($sdkRoot)) {
+    Join-Path $sdkRoot 'emulator\emulator.exe'
+} else { $null }
+if (-not $emulatorPath -or -not (Test-Path -LiteralPath $emulatorPath)) {
+    $emulatorPath = (Get-Command emulator.exe -ErrorAction SilentlyContinue).Source
+}
+if (-not $emulatorPath -or -not (Test-Path -LiteralPath $emulatorPath)) {
+    throw 'Nie znaleziono emulator.exe. Ustaw ANDROID_SDK_ROOT albo dodaj Android SDK emulator do PATH.'
+}
+
+$avdManagerPath = if (-not [string]::IsNullOrWhiteSpace($sdkRoot)) {
+    Join-Path $sdkRoot 'cmdline-tools\latest\bin\avdmanager.bat'
+} else { $null }
+
 function Require-Command([string]$Name) {
     if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
         throw "Nie znaleziono '$Name'. Dodaj Android SDK/platform-tools i emulator do PATH."
@@ -16,10 +32,9 @@ function Require-Command([string]$Name) {
 }
 
 Require-Command 'adb'
-Require-Command 'emulator'
 
 if ([string]::IsNullOrWhiteSpace($Avd)) {
-    $avds = @(& emulator -list-avds | Where-Object { $_.Trim() })
+    $avds = @(& $emulatorPath -list-avds | Where-Object { $_.Trim() })
     if ($avds.Count -eq 0) {
         throw 'Brak skonfigurowanych AVD. Utworz emulator w Android Studio -> Device Manager.'
     }
@@ -43,7 +58,7 @@ if ([string]::IsNullOrWhiteSpace($Avd)) {
 $running = @(adb devices | Select-String '^emulator-\d+\s+device$')
 if ($running.Count -eq 0) {
     Write-Host "Uruchamiam emulator '$Avd'..."
-    Start-Process emulator -ArgumentList "-avd", $Avd
+    Start-Process -FilePath $emulatorPath -ArgumentList @('-avd', $Avd)
 } else {
     Write-Host 'Emulator AVD juz dziala. Fizyczne telefony ADB sa ignorowane.'
 }
