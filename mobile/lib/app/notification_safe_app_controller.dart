@@ -6,6 +6,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../client_runtime.dart';
 import '../core/models/domain.dart';
 import '../core/runtime/message_paging.dart';
+import '../locales/domain/user_problem.dart';
+import '../locales/domain/user_problem_code.dart';
 import 'app_controller_base.dart' as base;
 import 'conversation_navigation_intent.dart';
 import 'desktop_notification_service.dart';
@@ -80,6 +82,18 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
     _hideRemovedRelationships();
   }
 
+  @override
+  Future<void> setConversationFocus(String conversationId, bool focused) async {
+    final result = await ref
+        .read(base.runtimeRepositoryProvider)
+        .setConversationFocus(conversationId, focused);
+    if (result?.status != ReadReceiptQueueStatus.error) return;
+    state = state.copyWith(
+      error: '',
+      problem: const UserProblem(code: UserProblemCode.operationFailed),
+    );
+  }
+
   Future<OlderMessagesResult> loadOlderMessages(String conversationId) async {
     if (conversationId.isEmpty ||
         state.selectedConversationId != conversationId) {
@@ -132,7 +146,6 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
           'torchat.relationship.preserveHistory.${contact.id}';
       preserveHistory = preferences.getBool(preferenceKey) ?? true;
       await preferences.remove(preferenceKey);
-
     }
 
     await super.updateContactSettings(
@@ -149,7 +162,6 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
     }
     await super.refreshData(forcePairing: false, allowAutoTorka: false);
     _hideRemovedRelationships();
-
   }
 
   Future<void> _persistActiveConversation(String? conversationId) async {
