@@ -747,6 +747,15 @@ int _int(Map<String, dynamic> map, String key) {
 
 enum PairingOrigin { inbox, outbox, unknown }
 
+enum PairingRelationshipState {
+  candidate,
+  awaitingLocalApproval,
+  awaitingRemoteApproval,
+  finalizing,
+  active,
+  terminal,
+}
+
 class PairingItem {
   const PairingItem({
     required this.id,
@@ -799,6 +808,15 @@ class PairingItem {
       origin == PairingOrigin.inbox &&
       status == InviteState.pending &&
       can(PairingAvailableAction.accept);
+
+  PairingRelationshipState get relationshipState => switch (status) {
+    InviteState.pending when origin == PairingOrigin.inbox =>
+      PairingRelationshipState.awaitingLocalApproval,
+    InviteState.pending => PairingRelationshipState.awaitingRemoteApproval,
+    InviteState.accepted => PairingRelationshipState.finalizing,
+    InviteState.completed => PairingRelationshipState.active,
+    _ => PairingRelationshipState.terminal,
+  };
 }
 
 class ContactRequest {

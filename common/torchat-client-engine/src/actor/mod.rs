@@ -1463,7 +1463,7 @@ fn transport_status_event(
 mod tests {
     use super::{
         idempotency_descriptor, is_expected_peer_shutdown, peer_endpoint_requires_update,
-        protocol_nickname, runtime_phase_for_tor_ready,
+        pairing_pair_key, protocol_nickname, runtime_phase_for_tor_ready,
     };
     use crate::EngineCommand;
     use crate::event::ConnectionState;
@@ -1552,5 +1552,14 @@ mod tests {
         let connect = idempotency_descriptor(&EngineCommand::Connect, "connect");
         assert_ne!(bootstrap, connect);
         assert!(bootstrap.starts_with("bootstrap:"));
+    }
+
+    #[test]
+    fn pairing_pair_key_is_symmetric_and_stable() {
+        let left = pairing_pair_key("installation-a", "installation-b");
+        let right = pairing_pair_key("installation-b", "installation-a");
+        assert_eq!(left, right);
+        assert_eq!(left, pairing_pair_key("installation-a", "installation-b"));
+        assert_ne!(left, pairing_pair_key("installation-a", "installation-c"));
     }
 }

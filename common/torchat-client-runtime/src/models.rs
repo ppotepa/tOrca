@@ -542,6 +542,33 @@ pub struct PairingItem {
     pub offer_payload: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PairingRelationshipState {
+    Candidate,
+    AwaitingLocalApproval,
+    AwaitingRemoteApproval,
+    Finalizing,
+    Active,
+    Terminal,
+}
+
+impl PairingItem {
+    pub fn relationship_state(&self) -> PairingRelationshipState {
+        match self.state {
+            InviteState::Pending if self.received => {
+                PairingRelationshipState::AwaitingLocalApproval
+            }
+            InviteState::Pending => PairingRelationshipState::AwaitingRemoteApproval,
+            InviteState::Accepted => PairingRelationshipState::Finalizing,
+            InviteState::Completed => PairingRelationshipState::Active,
+            InviteState::Rejected
+            | InviteState::Expired
+            | InviteState::Archived
+            | InviteState::Cancelled => PairingRelationshipState::Terminal,
+        }
+    }
+}
+
 pub fn pairing_available_actions(
     state: InviteState,
     received: bool,
@@ -685,4 +712,40 @@ pub struct RuntimeEnvelope {
     pub sender: String,
     pub recipient: String,
     pub ciphertext: String,
+}
+
+#[cfg(test)]
+mod pairing_relationship_tests {
+    use super::{InviteState, PairingItem, PairingRelationshipState};
+
+    fn item(state: InviteState, received: bool) -> PairingItem {
+        PairingItem {
+            pairing_id: "pairing-test".to_owned(),
+            pair_key: None,
+            sender: None,
+            capability: None,
+            expires_at: 0,
+            state,
+            received,
+            available_actions: Vec::new(),
+            offer_invite_id: None,
+            offer_payload: None,
+        }
+    }
+
+    #[test]
+    fn relationship_state_is_active_only_after_completion() {
+        assert_eq!(
+            item(InviteState::Pending, true).relationship_state(),
+            PairingRelationshipState::AwaitingLocalApproval
+        );
+        assert_eq!(
+            item(InviteState::Accepted, true).relationship_state(),
+            PairingRelationshipState::Finalizing
+        );
+        assert_eq!(
+            item(InviteState::Completed, true).relationship_state(),
+            PairingRelationshipState::Active
+        );
+    }
 }

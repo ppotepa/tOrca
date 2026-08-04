@@ -44,7 +44,7 @@ pub use models::{
     CapabilityStatus, ChatMessage, ContactRecord, ContactTransportPolicy, ConversationState,
     ConversationSummary, InviteCode, InviteState, MessageReply, MessageSendEffect, MessageState,
     MessageTransportOutcome, PairingAcknowledgeEffect, PairingAvailableAction, PairingCancelEffect,
-    PairingItem, PairingPeerOutcome, PairingPreparation,
+    PairingItem, PairingPeerOutcome, PairingPreparation, PairingRelationshipState,
     PairingSendEffect, PairingSendKind, PairingSyncResult, PeerConnectionStatus,
     PeerEndpointStatus, ReceiptSendEffect, RuntimeBootstrap, RuntimeEnvelope, RuntimeFixture,
     RuntimeIdentity, RuntimeProfile, RuntimeSendEffect, RuntimeTorStatus, VerificationState,
