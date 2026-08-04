@@ -96,7 +96,7 @@ class RelayStatusProbe implements StatusProbe {
       detail:
           reported?.detail ??
           (source.latencyMs == null
-              ? source.phase.label
+              ? source.phase.name
               : '${source.latencyMs} ms'),
       icon: Icons.auto_awesome_rounded,
       state: reported == null

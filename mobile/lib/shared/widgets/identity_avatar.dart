@@ -1,29 +1,36 @@
 import 'package:flutter/material.dart';
 import '../../app/app_theme.dart';
+import '../../locales/generated/app_localizations.dart';
+import '../../locales/presentation/app_localizations_x.dart';
 
 enum ContactActivityVisualState { unknown, offline, away, online, typing }
 
 String contactActivityLabel(
+  AppLocalizations l10n,
   ContactActivityVisualState state, {
   int? lastSeenAt,
 }) => switch (state) {
-  ContactActivityVisualState.typing => 'pisze…',
-  ContactActivityVisualState.online => 'aktywny w aplikacji',
-  ContactActivityVisualState.away => 'idle',
+  ContactActivityVisualState.typing => l10n.contactActivityTyping,
+  ContactActivityVisualState.online => l10n.contactActivityOnline,
+  ContactActivityVisualState.away => l10n.contactActivityAway,
   ContactActivityVisualState.offline when lastSeenAt != null =>
-    'ostatnio widziany ${_lastSeenLabel(lastSeenAt)}',
-  ContactActivityVisualState.offline => 'offline',
-  ContactActivityVisualState.unknown => 'status nieznany',
+    l10n.contactActivityLastSeen(_lastSeenLabel(l10n, lastSeenAt)),
+  ContactActivityVisualState.offline => l10n.contactStatusOffline,
+  ContactActivityVisualState.unknown => l10n.contactActivityUnknown,
 };
 
-String _lastSeenLabel(int epochMillis) {
+String _lastSeenLabel(AppLocalizations l10n, int epochMillis) {
   final difference = DateTime.now().difference(
     DateTime.fromMillisecondsSinceEpoch(epochMillis),
   );
-  if (difference.inSeconds < 60) return 'przed chwilą';
-  if (difference.inMinutes < 60) return '${difference.inMinutes} min temu';
-  if (difference.inHours < 24) return '${difference.inHours} godz. temu';
-  return '${difference.inDays} dni temu';
+  if (difference.inSeconds < 60) return l10n.contactActivityJustNow;
+  if (difference.inMinutes < 60) {
+    return l10n.contactActivityMinutesAgo(difference.inMinutes);
+  }
+  if (difference.inHours < 24) {
+    return l10n.contactActivityHoursAgo(difference.inHours);
+  }
+  return l10n.contactActivityDaysAgo(difference.inDays);
 }
 
 String identityInitial(String value) {
@@ -62,7 +69,7 @@ class IdentityAvatar extends StatelessWidget {
       ContactActivityVisualState.unknown => Theme.of(context).disabledColor,
     };
     return Tooltip(
-      message: contactActivityLabel(activity),
+      message: contactActivityLabel(context.l10n, activity),
       child: Stack(
         clipBehavior: Clip.none,
         children: [

@@ -19,6 +19,8 @@ import '../../shared/widgets/feature_header.dart';
 import '../../shared/widgets/identity_avatar.dart';
 import '../../shared/widgets/status_banner.dart';
 import '../../shared/widgets/themed_switch_list_tile.dart';
+import '../../locales/presentation/app_localizations_x.dart';
+import '../../locales/presentation/status_localizer.dart';
 
 class ContactsView extends ConsumerWidget {
   const ContactsView({
@@ -61,6 +63,7 @@ class ContactsView extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l10n = context.l10n;
     final presenceStore = ref.watch(contactPresenceStoreProvider);
     final contactsLoad = ref.watch(
       uiOperationProvider(UiOperationKey.contactsLoad),
@@ -82,19 +85,19 @@ class ContactsView extends ConsumerWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         FeatureHeader(
-          title: 'Dodaj kontakt',
-          subtitle: 'Wpisz kod parowania albo zeskanuj QR',
+          title: l10n.contactsAddTitle,
+          subtitle: l10n.contactsAddDescription,
           actions: [
             BusyIconButton(
               busy: submit.busy,
               onPressed: submit.busy ? null : onScanInvite,
-              tooltip: 'Dodaj kontakt',
+              tooltip: l10n.contactsAddTitle,
               icon: const ThemedIcon(Icons.person_add_alt_1),
             ),
             BusyIconButton(
               busy: inviteCode.busy,
               onPressed: inviteCode.busy ? null : onShowInvite,
-              tooltip: 'Mój kod parowania',
+              tooltip: l10n.myPairingCode,
               icon: const ThemedIcon(Icons.qr_code_2),
             ),
           ],
@@ -104,8 +107,8 @@ class ContactsView extends ConsumerWidget {
           StatusBanner(message: error, color: context.statusTheme.danger),
         Semantics(
           textField: true,
-          label: 'Kod parowania',
-          hint: 'Wpisz ośmiocyfrowy kod kontaktu',
+          label: l10n.pairingCodeLabel,
+          hint: l10n.pairingCodeHint,
           child: TextField(
             controller: search,
             enabled: !submit.busy,
@@ -118,22 +121,22 @@ class ContactsView extends ConsumerWidget {
             decoration: InputDecoration(
               counterText: '',
               hintText: submit.busy
-                  ? 'Przetwarzanie kodu…'
-                  : 'Wpisz 8-cyfrowy kod parowania',
+                  ? l10n.processingPairingCode
+                  : l10n.pairingCodeInputHint,
               prefixIcon: const ThemedIcon(Icons.password),
               suffixIcon: BusyIconButton(
                 busy: submit.busy,
                 onPressed: submit.busy ? null : onSearch,
-                tooltip: 'Wyślij kod',
+                tooltip: l10n.sendCode,
                 icon: const ThemedIcon(Icons.arrow_forward),
               ),
             ),
           ),
         ),
         const SizedBox(height: 8),
-        Text('Twój fingerprint', style: Theme.of(context).textTheme.labelLarge),
+        Text(l10n.yourFingerprint, style: Theme.of(context).textTheme.labelLarge),
         Semantics(
-          label: 'Twój fingerprint: $fingerprint',
+          label: l10n.yourFingerprintSemantics(fingerprint),
           child: ExcludeSemantics(
             child: Text(
               fingerprint,
@@ -153,9 +156,9 @@ class ContactsView extends ConsumerWidget {
               presentation: visible.isEmpty
                   ? BusyPresentation.replace
                   : BusyPresentation.overlay,
-              label: 'Ładowanie kontaktów…',
+              label: l10n.loadingContacts,
               child: ContactListSection(
-                title: 'Kontakty',
+                title: l10n.contactsTitle,
                 contacts: visible,
                 onSelect: onSelect,
                 onDetails: (contact) =>
@@ -181,17 +184,17 @@ class ContactsView extends ConsumerWidget {
                 contactSubtitleBuilder: (contact) {
                   final snapshot = presenceStore.snapshot(contact.id);
                   final status = switch (snapshot.availability) {
-                    ContactAvailability.active => 'aktywny w aplikacji',
-                    ContactAvailability.idle => 'bezczynny',
-                    ContactAvailability.offline => 'offline',
-                    ContactAvailability.unknown => 'status nieznany',
-                    ContactAvailability.checking => 'sprawdzanie',
+                    ContactAvailability.active => l10n.contactStatusActive,
+                    ContactAvailability.idle => l10n.contactStatusIdle,
+                    ContactAvailability.offline => l10n.contactStatusOffline,
+                    ContactAvailability.unknown => l10n.contactStatusUnknown,
+                    ContactAvailability.checking => l10n.contactStatusChecking,
                   };
                   final route = switch (contact.transportPolicy) {
-                    ContactTransportPolicy.peerOnly => 'P2P',
+                    ContactTransportPolicy.peerOnly => l10n.routeP2P,
                     ContactTransportPolicy.peerWithRelayFallback =>
-                      'P2P + relay fallback',
-                    ContactTransportPolicy.relayOnly => 'relay',
+                      l10n.routeP2PFallback,
+                    ContactTransportPolicy.relayOnly => l10n.routeRelay,
                   };
                   return '$status · $route';
                 },
@@ -214,7 +217,7 @@ class ContactsView extends ConsumerWidget {
                     if (contact.devFixture != null)
                       const Chip(label: Text('DEV')),
                     IconButton(
-                      tooltip: 'Szczegóły kontaktu',
+                      tooltip: l10n.contactDetails,
                       onPressed: () =>
                           _showContactDetails(context, ref, contact),
                       icon: const ThemedIcon(Icons.info_outline),
@@ -257,38 +260,44 @@ class ContactsView extends ConsumerWidget {
               title: Text(contact.displayName),
               content: BusySurface(
                 state: saveState,
-                label: 'Zapisywanie ustawień…',
+                label: context.l10n.contactsSavingSettings,
                 child: SingleChildScrollView(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Relacja ustanowiona przez zaakceptowany kod'),
+                      Text(context.l10n.contactsEstablishedByPairingCode),
                       const SizedBox(height: 6),
                       Text(
-                        'P2P przez Tor: '
-                        '${_peerEndpointLabel(contact.peerEndpointStatus)}',
+                        '${context.l10n.contactsP2pThroughTor}: '
+                        '${localizePeerEndpointStatus(context.l10n, contact.peerEndpointStatus)}',
                       ),
                       Text(
-                        'Połączenie bezpośrednie: '
-                        '${_peerConnectionLabel(contact.peerConnectionStatus)}',
-                      ),
-                      Text('Aktualna trasa: ${_effectiveRouteLabel(contact)}'),
-                      Text(
-                        'Obecność: ${_availabilityLabel(presence.availability)}',
+                        '${context.l10n.contactsDirectConnection}: '
+                        '${localizePeerConnectionStatus(context.l10n, contact.peerConnectionStatus)}',
                       ),
                       Text(
-                        'Ogląda rozmowę: ${presence.isViewingConversation ? 'tak' : 'nie'}',
+                        '${context.l10n.contactsCurrentRoute}: '
+                        '${localizeContactRoute(context.l10n, contact)}',
                       ),
                       Text(
-                        'Ostatni probe: ${presence.observedAt ?? 'brak danych'}',
+                        '${context.l10n.contactsPresence}: '
+                        '${localizeContactAvailability(context.l10n, presence.availability)}',
+                      ),
+                      Text(
+                        '${context.l10n.contactsViewingConversation}: '
+                        '${presence.isViewingConversation ? context.l10n.commonYes : context.l10n.commonNo}',
+                      ),
+                      Text(
+                        '${context.l10n.contactsLastProbe}: '
+                        '${presence.observedAt ?? context.l10n.contactsNoData}',
                       ),
                       if (presence.latencyMs != null)
-                        Text('Latency probe: ${presence.latencyMs} ms'),
+                        Text('${context.l10n.contactsProbeLatency}: ${presence.latencyMs} ms'),
                       const SizedBox(height: 12),
                       const Divider(),
                       Text(
-                        'Capability endpointu P2P',
+                        context.l10n.contactsP2pCapability,
                         style: Theme.of(context).textTheme.titleSmall,
                       ),
                       const SizedBox(height: 4),
@@ -300,7 +309,7 @@ class ContactsView extends ConsumerWidget {
                             return const LinearProgressIndicator();
                           }
                           if (snapshot.hasError || !snapshot.hasData) {
-                            return const Text('Status capability niedostępny');
+                            return Text(context.l10n.contactsCapabilityUnavailable);
                           }
                           final capability = snapshot.data!;
                           return Column(
@@ -342,7 +351,7 @@ class ContactsView extends ConsumerWidget {
                                             }
                                           },
                                     icon: const ThemedIcon(Icons.refresh),
-                                    label: const Text('Rotuj'),
+                                    label: Text(context.l10n.contactsRotate),
                                   ),
                                   OutlinedButton.icon(
                                     onPressed:
@@ -374,7 +383,7 @@ class ContactsView extends ConsumerWidget {
                                             }
                                           },
                                     icon: const ThemedIcon(Icons.block),
-                                    label: const Text('Unieważnij'),
+                                    label: Text(context.l10n.contactsRevoke),
                                   ),
                                 ],
                               ),
@@ -392,19 +401,20 @@ class ContactsView extends ConsumerWidget {
                         const SizedBox(height: 6),
                         _DiagnosticLine(
                           label: 'Polityka',
-                          value: _transportPolicyLabel(contact.transportPolicy),
+                          value: localizeTransportPolicy(context.l10n, contact.transportPolicy),
                         ),
                         _DiagnosticLine(
                           label: 'Efektywna trasa',
-                          value: _effectiveRouteLabel(contact),
+                          value: localizeContactRoute(context.l10n, contact),
                         ),
                         _DiagnosticLine(
                           label: 'Stan endpointu',
-                          value: _peerEndpointLabel(contact.peerEndpointStatus),
+                          value: localizePeerEndpointStatus(context.l10n, contact.peerEndpointStatus),
                         ),
                         _DiagnosticLine(
                           label: 'Stan sesji P2P',
-                          value: _peerConnectionLabel(
+                          value: localizePeerConnectionStatus(
+                            context.l10n,
                             contact.peerConnectionStatus,
                           ),
                         ),
@@ -437,12 +447,12 @@ class ContactsView extends ConsumerWidget {
                             }
                             final records = snapshot.data ?? const [];
                             if (records.isEmpty) {
-                              return const Text('Brak dead-letterów');
+                              return Text(context.l10n.contactsNoDeadLetters);
                             }
                             return Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text('Dead-letter retry'),
+                                Text(context.l10n.contactsDeadLetterRetry),
                                 for (final record in records)
                                   ListTile(
                                     dense: true,
@@ -452,10 +462,10 @@ class ContactsView extends ConsumerWidget {
                                     ),
                                     subtitle: Text(
                                       record['lastError']?.toString() ??
-                                          'brak błędu',
+                                          context.l10n.contactsNoError,
                                     ),
                                     trailing: IconButton(
-                                      tooltip: 'Ponów',
+                                      tooltip: context.l10n.commonRetry,
                                       icon: const ThemedIcon(Icons.refresh),
                                       onPressed: () async {
                                         await dialogRef
@@ -478,14 +488,14 @@ class ContactsView extends ConsumerWidget {
                       const SizedBox(height: 12),
                       DropdownButtonFormField<ContactTransportPolicy>(
                         initialValue: transportPolicy,
-                        decoration: const InputDecoration(
-                          labelText: 'Polityka transportu',
+                        decoration: InputDecoration(
+                          labelText: context.l10n.contactsTransportPolicy,
                         ),
                         items: [
                           for (final policy in ContactTransportPolicy.values)
                             DropdownMenuItem(
                               value: policy,
-                              child: Text(_transportPolicyLabel(policy)),
+                              child: Text(localizeTransportPolicy(context.l10n, policy)),
                             ),
                         ],
                         onChanged: saveState.busy
@@ -501,13 +511,13 @@ class ContactsView extends ConsumerWidget {
                         controller: alias,
                         enabled: !saveState.busy,
                         maxLength: 32,
-                        decoration: const InputDecoration(
-                          labelText: 'Lokalny alias',
+                        decoration: InputDecoration(
+                          labelText: context.l10n.contactsLocalAlias,
                         ),
                       ),
                       ThemedSwitchListTile(
                         contentPadding: EdgeInsets.zero,
-                        title: const Text('Wycisz powiadomienia'),
+                        title: Text(context.l10n.contactEnableNotifications),
                         value: muted,
                         onChanged: saveState.busy
                             ? null
@@ -554,7 +564,7 @@ class ContactsView extends ConsumerWidget {
                           Icons.person_remove_outlined,
                           size: 18,
                         ),
-                        label: const Text('Zakończ relację'),
+                        label: Text(context.l10n.contactEndRelationship),
                       ),
                     ],
                   ),
@@ -563,8 +573,8 @@ class ContactsView extends ConsumerWidget {
               actions: [
                 BusyActionButton(
                   busy: saveState.busy,
-                  label: 'Zapisz',
-                  busyLabel: 'Zapisywanie…',
+                  label: context.l10n.commonSave,
+                  busyLabel: context.l10n.contactsSaving,
                   onPressed: () async {
                     await onUpdateContactSettings(
                       contact,
@@ -587,7 +597,7 @@ class ContactsView extends ConsumerWidget {
                   onPressed: saveState.busy
                       ? null
                       : () => Navigator.pop(context),
-                  child: const Text('Zamknij'),
+                  child: Text(context.l10n.commonClose),
                 ),
               ],
             ),
@@ -611,22 +621,19 @@ class ContactsView extends ConsumerWidget {
       context: context,
       builder: (confirmContext) => StatefulBuilder(
         builder: (context, setState) => AlertDialog(
-          title: const Text('Zakończyć relację?'),
+          title: Text(context.l10n.relationshipEndTitle),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Kontakt ${contact.displayName} utraci możliwość wysyłania '
-                'wiadomości. Ponowne dodanie będzie wymagało nowego kodu.',
+                context.l10n.relationshipEndDescription(contact.displayName),
               ),
               const SizedBox(height: 12),
               CheckboxListTile(
                 contentPadding: EdgeInsets.zero,
-                title: const Text('Zachowaj historię na tym urządzeniu'),
-                subtitle: const Text(
-                  'Historia pozostanie lokalna i nie przywróci relacji.',
-                ),
+                title: Text(context.l10n.relationshipKeepHistory),
+                subtitle: Text(context.l10n.relationshipKeepHistoryDescription),
                 value: preserveHistory,
                 onChanged: (value) =>
                     setState(() => preserveHistory = value ?? true),
@@ -636,14 +643,14 @@ class ContactsView extends ConsumerWidget {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(confirmContext, false),
-              child: const Text('Anuluj'),
+              child: Text(context.l10n.commonCancel),
             ),
             FilledButton(
               style: FilledButton.styleFrom(
                 backgroundColor: Theme.of(context).colorScheme.error,
               ),
               onPressed: () => Navigator.pop(confirmContext, true),
-              child: const Text('Zakończ relację'),
+              child: Text(context.l10n.contactEndRelationship),
             ),
           ],
         ),
@@ -702,10 +709,8 @@ class _PendingPairingSection extends StatelessWidget {
             child: ListTile(
               dense: true,
               leading: const ThemedIcon(Icons.hourglass_top),
-              title: Text(item.peer?.displayName ?? 'Nowy kontakt'),
-              subtitle: const Text(
-                'Oczekiwanie na ustanowienie szyfrowanej rozmowy',
-              ),
+              title: Text(item.peer?.displayName ?? context.l10n.contactsNewContact),
+              subtitle: Text(context.l10n.contactsWaitingForSecureConversation),
             ),
           ),
         ),
@@ -736,44 +741,3 @@ class _DiagnosticLine extends StatelessWidget {
   );
 }
 
-String _effectiveRouteLabel(ContactRecord contact) {
-  if (contact.transportPolicy == ContactTransportPolicy.relayOnly) {
-    return 'relay';
-  }
-  if (contact.peerConnectionStatus == PeerConnectionStatus.connected) {
-    return 'P2P onion';
-  }
-  if (contact.transportPolicy == ContactTransportPolicy.peerWithRelayFallback) {
-    return 'live relay fallback (P2P nieaktywne)';
-  }
-  return 'P2P oczekuje / offline';
-}
-
-String _peerEndpointLabel(PeerEndpointStatus status) => switch (status) {
-  PeerEndpointStatus.verified => 'endpoint zweryfikowany',
-  PeerEndpointStatus.pendingExchange => 'oczekuje na wymianę endpointu',
-  PeerEndpointStatus.invalid => 'endpoint nieprawidłowy',
-  PeerEndpointStatus.missing => 'endpoint niedostępny',
-};
-
-String _availabilityLabel(ContactAvailability value) => switch (value) {
-  ContactAvailability.active => 'aktywny w aplikacji',
-  ContactAvailability.idle => 'bezczynny',
-  ContactAvailability.checking => 'sprawdzanie',
-  ContactAvailability.offline => 'offline',
-  ContactAvailability.unknown => 'status nieznany',
-};
-
-String _peerConnectionLabel(PeerConnectionStatus status) => switch (status) {
-  PeerConnectionStatus.connected => 'połączono',
-  PeerConnectionStatus.connecting => 'łączenie',
-  PeerConnectionStatus.authenticating => 'uwierzytelnianie',
-  PeerConnectionStatus.backoff => 'oczekiwanie na ponowienie',
-  PeerConnectionStatus.offline => 'offline',
-};
-
-String _transportPolicyLabel(ContactTransportPolicy policy) => switch (policy) {
-  ContactTransportPolicy.peerOnly => 'Tylko P2P',
-  ContactTransportPolicy.peerWithRelayFallback => 'P2P + live relay fallback',
-  ContactTransportPolicy.relayOnly => 'Tylko relay',
-};

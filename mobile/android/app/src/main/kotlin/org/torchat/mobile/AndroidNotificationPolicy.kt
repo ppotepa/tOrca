@@ -16,12 +16,11 @@ internal object AndroidNotificationPolicy {
             return true
         }
         val notification = event.optJSONObject(EngineContract.NOTIFICATION) ?: return false
-        val title = notification.optString(EngineContract.TITLE).trim()
-        val body = notification.optString(EngineContract.BODY).trim()
+        val kind = notification.optString(EngineContract.KIND).trim()
 
         // This PairingOffer alert is a protocol finalization event, not
         // a newly committed incoming request. Reconnects can replay it.
-        if (title == "Nowe zaproszenie" && body == "Masz nową prośbę o rozmowę.") {
+        if (kind == "pairing_completed") {
             return false
         }
 
@@ -34,12 +33,12 @@ internal object AndroidNotificationPolicy {
             return false
         }
 
-        return when {
-            title == "Nowa wiadomość" -> preferences.getBoolean(
+        return when (kind) {
+            "message_received" -> preferences.getBoolean(
                 "flutter.torchat.notifications.messages",
                 true,
             )
-            title.contains("zaproszenie", ignoreCase = true) -> preferences.getBoolean(
+            "pairing_request" -> preferences.getBoolean(
                 "flutter.torchat.notifications.pairing",
                 true,
             )

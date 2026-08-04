@@ -13,6 +13,8 @@ import '../../core/models/domain.dart';
 import '../../core/presence/contact_presence_snapshot.dart';
 import '../../core/presence/contact_presence_store.dart';
 import '../../core/runtime/message_paging.dart';
+import '../../locales/presentation/app_localizations_x.dart';
+import '../../locales/generated/app_localizations.dart';
 import '../../shared/async/busy_surface.dart';
 import '../../shared/async/themed_activity_indicator.dart';
 import '../../shared/formatters/message_timestamps.dart';
@@ -446,14 +448,16 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
       presentation: widget.messages.isEmpty
           ? BusyPresentation.replace
           : BusyPresentation.overlay,
-      label: startState.busy ? 'Uruchamianie rozmowy…' : 'Ładowanie rozmowy…',
+      label: startState.busy
+          ? context.l10n.chatStarting
+          : context.l10n.chatLoading,
       child: Scaffold(
         backgroundColor: Colors.transparent,
         appBar: AppBar(
           toolbarHeight: 64,
           leading: widget.showConversationListWhenEmpty
               ? IconButton(
-                  tooltip: 'Wróć',
+                  tooltip: context.l10n.chatBack,
                   onPressed: widget.onBack,
                   icon: const ThemedIcon(Icons.chevron_left),
                 )
@@ -464,8 +468,8 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
                   controller: _search,
                   autofocus: true,
                   onChanged: (_) => setState(() {}),
-                  decoration: const InputDecoration(
-                    hintText: 'Szukaj lokalnie w rozmowie…',
+                  decoration: InputDecoration(
+                    hintText: context.l10n.chatSearchHint,
                     border: InputBorder.none,
                   ),
                 )
@@ -491,6 +495,7 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
                           ),
                           Text(
                             contactActivityLabel(
+                              context.l10n,
                               widget.peerTyping
                                   ? ContactActivityVisualState.typing
                                   : _availabilityVisual(widget.availability),
@@ -515,8 +520,8 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
                 ),
           actions: [
             if (widget.peerFocused)
-              const ConversationHeaderAction(
-                tooltip: 'Kontakt ma otwartą tę rozmowę',
+              ConversationHeaderAction(
+                tooltip: context.l10n.chatContactViewing,
                 child: ThemedIcon(Icons.visibility_outlined, size: 19),
               ),
             if (widget.headerStatus != null)
@@ -526,7 +531,9 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
               ),
             if (!compactHeader)
               ConversationHeaderAction(
-                tooltip: _searching ? 'Zamknij wyszukiwanie' : 'Szukaj',
+                tooltip: _searching
+                    ? context.l10n.chatCloseSearch
+                    : context.l10n.chatSearch,
                 onPressed: _toggleSearch,
                 child: ThemedIcon(
                   _searching ? Icons.close : Icons.search,
@@ -538,7 +545,7 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
               child: SizedBox.square(
                 dimension: 40,
                 child: PopupMenuButton<String>(
-                  tooltip: 'Opcje rozmowy',
+                  tooltip: context.l10n.chatOptions,
                   icon: const ThemedIcon(Icons.more_vert, size: 19),
                   padding: EdgeInsets.zero,
                   onSelected: (value) async {
@@ -557,12 +564,14 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
                       PopupMenuItem(
                         value: 'search',
                         child: Text(
-                          _searching ? 'Zamknij wyszukiwanie' : 'Szukaj',
+                          _searching
+                              ? context.l10n.chatCloseSearch
+                              : context.l10n.chatSearch,
                         ),
                       ),
-                    const PopupMenuItem(
+                    PopupMenuItem(
                       value: 'fingerprint',
-                      child: Text('Kopiuj fingerprint'),
+                      child: Text(context.l10n.chatCopyFingerprint),
                     ),
                   ],
                 ),
@@ -592,13 +601,13 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
                     ),
                   ),
                   if (_loadingOlder)
-                    const Positioned(
+                    Positioned(
                       top: 6,
                       left: 0,
                       right: 0,
                       child: Center(
                         child: ThemedActivityIndicator(
-                          label: 'Ładowanie starszych wiadomości…',
+                          label: context.l10n.chatLoadingOlder,
                           compact: true,
                         ),
                       ),
@@ -609,8 +618,10 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
                       bottom: 14,
                       child: Tooltip(
                         message: _unseenMessageCount > 0
-                            ? '$_unseenMessageCount nowych wiadomości'
-                            : 'Przewiń na dół',
+                            ? context.l10n.chatUnseenMessages(
+                                _unseenMessageCount,
+                              )
+                            : context.l10n.chatScrollToBottom,
                         child: Badge(
                           isLabelVisible: _unseenMessageCount > 0,
                           label: Text('$_unseenMessageCount'),
@@ -683,14 +694,16 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
               ),
               const SizedBox(height: 14),
               Text(
-                'Prywatna komunikacja przez Tor',
+                context.l10n.chatPrivateCommunication,
                 style: Theme.of(context).textTheme.headlineSmall,
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 8),
               Text(
-                '${widget.contacts.length} kontaktów · '
-                '${widget.conversations.length} rozmów',
+                context.l10n.chatCounts(
+                  widget.contacts.length,
+                  widget.conversations.length,
+                ),
               ),
               // The compact/mobile shell renders the conversation home in
               // this widget instead of mounting the desktop sidebar.  Keep
@@ -702,7 +715,7 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
                 Align(
                   alignment: Alignment.centerLeft,
                   child: Text(
-                    'Ostatnie rozmowy',
+                    context.l10n.chatRecentConversations,
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                 ),
@@ -713,6 +726,7 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
                     child: ListTile(
                       leading: IdentityAvatar(
                         label: _contactName(
+                          context.l10n,
                           conversation.contactId,
                           widget.contacts,
                         ),
@@ -732,10 +746,14 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
                         },
                       ),
                       title: Text(
-                        _contactName(conversation.contactId, widget.contacts),
+                        _contactName(
+                          context.l10n,
+                          conversation.contactId,
+                          widget.contacts,
+                        ),
                       ),
                       subtitle: Text(
-                        _previewLabel(conversation.preview),
+                        _previewLabel(context.l10n, conversation.preview),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -782,7 +800,7 @@ class _MessageTimeline extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.all(24),
             child: Text(
-              'Zweryfikuj tożsamość kontaktu w szczegółach, aby rozpocząć rozmowę.',
+              context.l10n.chatVerifyContact,
               textAlign: TextAlign.center,
             ),
           ),
@@ -793,22 +811,22 @@ class _MessageTimeline extends StatelessWidget {
           padding: const EdgeInsets.all(24),
           child: canSend
               ? Text(
-                  'To początek rozmowy z ${contact.displayName}.',
+                  context.l10n.chatConversationStarted(contact.displayName),
                   textAlign: TextAlign.center,
                 )
               : Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Semantics(
-                      label: 'Nawiązywanie bezpiecznego połączenia',
+                      label: context.l10n.chatSecureConnectionStarting,
                       child: SizedBox.square(
                         dimension: 28,
                         child: CircularProgressIndicator(strokeWidth: 2.5),
                       ),
                     ),
                     const SizedBox(height: 14),
-                    const Text(
-                      'Rozmowa oczekuje na bezpieczne połączenie.',
+                    Text(
+                      context.l10n.chatWaitingForSecureConnection,
                       textAlign: TextAlign.center,
                     ),
                   ],
@@ -941,7 +959,7 @@ class _Composer extends StatelessWidget {
                               top: -5,
                               right: -5,
                               child: IconButton.filledTonal(
-                                tooltip: 'Usuń załącznik',
+                                tooltip: context.l10n.chatRemoveAttachment,
                                 onPressed: () => onRemoveAttachment(index),
                                 padding: EdgeInsets.zero,
                                 constraints: const BoxConstraints.tightFor(
@@ -982,7 +1000,7 @@ class _Composer extends StatelessWidget {
                           ),
                         ),
                         IconButton(
-                          tooltip: 'Anuluj odpowiedź',
+                          tooltip: context.l10n.chatCancelReply,
                           onPressed: onCancelReply,
                           icon: const ThemedIcon(Icons.close, size: 18),
                         ),
@@ -996,8 +1014,8 @@ class _Composer extends StatelessWidget {
                       dimension: 44,
                       child: IconButton.filledTonal(
                         tooltip: preparingImage
-                            ? 'Przygotowywanie obrazów…'
-                            : 'Dodaj obrazy do wiadomości',
+                            ? context.l10n.chatPreparingImages
+                            : context.l10n.chatAddImages,
                         onPressed: enabled && !preparingImage ? onAttach : null,
                         icon: preparingImage
                             ? const ThemedActivityIndicator(compact: true)
@@ -1036,8 +1054,8 @@ class _Composer extends StatelessWidget {
                           },
                           decoration: InputDecoration(
                             hintText: enabled
-                                ? 'Napisz wiadomość…'
-                                : 'Rozmowa nie jest jeszcze gotowa',
+                                ? context.l10n.chatComposeHint
+                                : context.l10n.chatNotReady,
                             constraints: const BoxConstraints(minHeight: 44),
                           ),
                         ),
@@ -1083,14 +1101,18 @@ ContactActivityVisualState _availabilityVisual(ContactAvailability value) =>
       ContactAvailability.unknown => ContactActivityVisualState.unknown,
     };
 
-String _contactName(String id, List<ContactRecord> contacts) {
+String _contactName(
+  AppLocalizations l10n,
+  String id,
+  List<ContactRecord> contacts,
+) {
   for (final contact in contacts) {
     if (contact.id == id) return contact.displayName;
   }
-  return 'Kontakt';
+  return l10n.commonContact;
 }
 
-String _previewLabel(String preview) {
-  if (preview.isEmpty) return 'Oczekiwanie na wiadomość';
-  return isImageMessageBody(preview) ? 'Obraz' : preview;
+String _previewLabel(AppLocalizations l10n, String preview) {
+  if (preview.isEmpty) return l10n.chatWaitingForMessage;
+  return isImageMessageBody(preview) ? l10n.commonImage : preview;
 }

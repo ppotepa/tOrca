@@ -53,7 +53,7 @@ class ConnectionSummary {
         (item) => item.state == ConnectionComponentState.failed,
       );
       return ConnectionSummary(
-        status: 'Wymagana uwaga: ${failed.component.title}',
+        status: 'Attention required: ${failed.component.name}',
         detail: failed.detail,
         phase: TransportPhase.error,
         peerServerStatus: readiness.peerServerStatus,
@@ -66,7 +66,7 @@ class ConnectionSummary {
       orElse: () => readiness.relay,
     );
     return ConnectionSummary(
-      status: 'Rozgrzewanie: ${active.component.title}',
+      status: 'Warming up: ${active.component.name}',
       detail: active.detail,
       phase: transport.phase.isError
           ? TransportPhase.connecting

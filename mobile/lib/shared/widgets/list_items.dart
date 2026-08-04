@@ -97,7 +97,10 @@ class ConversationListTile extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             Text(
-              formatMessageTime(lastMessageAt),
+              formatMessageTime(
+                lastMessageAt,
+                locale: Localizations.localeOf(context).toLanguageTag(),
+              ),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: Theme.of(context).textTheme.labelSmall,

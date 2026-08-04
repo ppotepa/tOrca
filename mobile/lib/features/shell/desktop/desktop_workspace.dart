@@ -13,6 +13,8 @@ import '../../../shared/widgets/identity_section.dart';
 import '../../../shared/widgets/info_tile.dart';
 import '../../../shared/widgets/identity_avatar.dart';
 import '../../../shared/widgets/section_card.dart';
+import '../../../shared/formatters/message_timestamps.dart';
+import '../../../locales/presentation/app_localizations_x.dart';
 import 'resizable_split_pane.dart';
 
 class DesktopWorkspace extends StatefulWidget {
@@ -417,15 +419,17 @@ class _ConversationSidebarState extends State<_ConversationSidebar> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           FeatureHeader(
-            title: 'Czaty',
-            subtitle: '${widget.conversations.length} rozmów',
+            title: context.l10n.desktopChats,
+            subtitle: context.l10n.desktopConversationCount(
+              widget.conversations.length,
+            ),
           ),
           const SizedBox(height: 12),
           TextField(
             controller: _search,
             onChanged: (_) => setState(() {}),
-            decoration: const InputDecoration(
-              hintText: 'Szukaj…',
+            decoration: InputDecoration(
+              hintText: context.l10n.desktopSearch,
               prefixIcon: ThemedIcon(Icons.search, size: 18),
               isDense: true,
             ),
@@ -434,7 +438,7 @@ class _ConversationSidebarState extends State<_ConversationSidebar> {
           Expanded(
             child: ConversationListSection(
               key: const ValueKey('chat-list'),
-              title: 'Czaty',
+              title: context.l10n.desktopChats,
               conversations: _filtered,
               contacts: widget.contacts,
               selectedConversation: widget.selectedConversation,
@@ -442,8 +446,8 @@ class _ConversationSidebarState extends State<_ConversationSidebar> {
               asCard: false,
               showHeader: false,
               emptyMessage: _search.text.trim().isEmpty
-                  ? 'Nie masz jeszcze rozmów.'
-                  : 'Brak rozmów pasujących do wyszukiwania.',
+                  ? context.l10n.desktopNoConversations
+                  : context.l10n.desktopNoConversationMatches,
             ),
           ),
         ],
@@ -513,15 +517,15 @@ class _ContactSidebarState extends State<_ContactSidebar> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           FeatureHeader(
-            title: 'Kontakty',
-            subtitle: '${widget.contacts.length} zapisanych',
+            title: context.l10n.desktopContacts,
+            subtitle: context.l10n.desktopContactCount(widget.contacts.length),
           ),
           const SizedBox(height: 12),
           TextField(
             controller: _search,
             onChanged: (_) => setState(() {}),
-            decoration: const InputDecoration(
-              hintText: 'Szukaj kontaktów…',
+            decoration: InputDecoration(
+              hintText: context.l10n.desktopSearchContacts,
               prefixIcon: ThemedIcon(Icons.search, size: 18),
               isDense: true,
             ),
@@ -532,12 +536,12 @@ class _ContactSidebarState extends State<_ContactSidebar> {
             runSpacing: 7,
             children: [
               _FilterChip(
-                label: 'Wszyscy',
+                label: context.l10n.desktopAll,
                 selected: _filter == _ContactFilter.all,
                 onSelected: () => setState(() => _filter = _ContactFilter.all),
               ),
               _FilterChip(
-                label: 'Online',
+                label: context.l10n.desktopOnline,
                 selected: _filter == _ContactFilter.online,
                 onSelected: () =>
                     setState(() => _filter = _ContactFilter.online),
@@ -552,12 +556,12 @@ class _ContactSidebarState extends State<_ContactSidebar> {
           const SizedBox(height: 12),
           Expanded(
             child: ContactListSection(
-              title: 'Kontakty',
+              title: context.l10n.desktopContacts,
               contacts: _filtered,
               onSelect: widget.onSelect,
               asCard: false,
               showHeader: false,
-              emptyMessage: 'Brak kontaktów dla wybranego filtra.',
+              emptyMessage: context.l10n.desktopFilteredContactsEmpty,
               contactSubtitleBuilder: (contact) {
                 final availability = widget.presenceStore
                     .snapshot(contact.id)
@@ -647,14 +651,14 @@ class _ConversationInspector extends StatelessWidget {
             children: [
               Expanded(
                 child: Text(
-                  'Szczegóły kontaktu',
+                  context.l10n.desktopContactDetails,
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
               ),
               SizedBox.square(
                 dimension: 40,
                 child: IconButton(
-                  tooltip: 'Zamknij szczegóły',
+                  tooltip: context.l10n.desktopCloseDetails,
                   onPressed: onClose,
                   icon: const ThemedIcon(Icons.close, size: 19),
                 ),
@@ -663,11 +667,11 @@ class _ConversationInspector extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           IdentitySection(
-            title: 'KONTAKT',
+            title: context.l10n.desktopContactSection,
             name: contact.displayName,
             subtitle: contact.verified
-                ? 'Tożsamość zweryfikowana'
-                : 'Tożsamość niezweryfikowana',
+                ? context.l10n.desktopIdentityVerified
+                : context.l10n.desktopIdentityUnverified,
             fingerprint: contact.fingerprint,
           ),
           const SizedBox(height: 14),
@@ -675,75 +679,81 @@ class _ConversationInspector extends StatelessWidget {
             FilledButton.icon(
               onPressed: () => onVerify(contact.id),
               icon: const ThemedIcon(Icons.verified_user_outlined, size: 17),
-              label: const Text('Zweryfikuj tożsamość'),
+              label: Text(context.l10n.desktopVerifyIdentity),
             ),
           const SizedBox(height: 12),
           SectionCard(
-            title: 'OBECNOŚĆ',
+            title: context.l10n.desktopPresenceSection,
             child: Column(
               children: [
                 InfoTile(
-                  title: 'Status',
+                  title: context.l10n.desktopStatus,
                   subtitle: _availabilityLabel(presence.availability),
                 ),
                 InfoTile(
-                  title: 'Ostatnio widziany',
-                  subtitle: _relativeTimestamp(
+                  title: context.l10n.desktopLastSeen,
+                  subtitle: formatRelativeTimestamp(
                     presence.lastSeenAt?.toString(),
+                    context.l10n,
                     empty: 'Brak danych',
                   ),
                 ),
                 InfoTile(
-                  title: 'Obserwowany',
-                  subtitle: _relativeTimestamp(
+                  title: context.l10n.desktopObserved,
+                  subtitle: formatRelativeTimestamp(
                     presence.observedAt?.toString(),
+                    context.l10n,
                     empty: 'Brak danych',
                   ),
                 ),
                 InfoTile(
-                  title: 'Ważność obserwacji',
-                  subtitle: _relativeTimestamp(
+                  title: context.l10n.desktopObservationExpiry,
+                  subtitle: formatRelativeTimestamp(
                     presence.expiresAt?.toString(),
+                    context.l10n,
                     empty: 'Brak expiry',
                   ),
                 ),
                 InfoTile(
-                  title: 'Fokus rozmowy',
-                  subtitle: presence.isViewingConversation ? 'Tak' : 'Nie',
+                  title: context.l10n.desktopConversationFocus,
+                  subtitle: presence.isViewingConversation
+                      ? context.l10n.commonYes
+                      : context.l10n.commonNo,
                 ),
               ],
             ),
           ),
           const SizedBox(height: 12),
           SectionCard(
-            title: 'POŁĄCZENIE',
+            title: context.l10n.desktopConnectionSection,
             child: Column(
               children: [
                 InfoTile(
-                  title: 'Połączenie P2P',
+                  title: context.l10n.desktopP2pConnection,
                   subtitle: _peerLinkLabel(presence.peerLink),
                 ),
                 InfoTile(
-                  title: 'Opóźnienie probe',
+                  title: context.l10n.desktopProbeLatency,
                   subtitle: presence.latencyMs == null
                       ? 'Brak danych'
                       : '${presence.latencyMs} ms',
                 ),
                 InfoTile(
-                  title: 'Następny probe',
+                  title: context.l10n.desktopNextProbe,
                   subtitle: presence.retryInMs == null
                       ? 'Brak zaplanowanego retry'
                       : 'Za ${presence.retryInMs} ms',
                 ),
                 InfoTile(
-                  title: 'Ostatnie połączenie P2P',
-                  subtitle: _relativeTimestamp(
+                  title: context.l10n.desktopLastP2pConnection,
+                  subtitle: formatRelativeTimestamp(
                     presence.lastPeerConnectedAt?.toString(),
+                    context.l10n,
                     empty: 'Brak danych',
                   ),
                 ),
                 InfoTile(
-                  title: 'Trasa',
+                  title: context.l10n.desktopRoute,
                   subtitle: _inspectorRouteLabel(contact),
                   /*
                       contact.peerConnectionStatus ==
@@ -754,11 +764,11 @@ class _ConversationInspector extends StatelessWidget {
                   */
                 ),
                 InfoTile(
-                  title: 'Endpoint',
+                  title: context.l10n.desktopEndpoint,
                   subtitle: _endpointLabel(contact.peerEndpointStatus),
                 ),
                 InfoTile(
-                  title: 'Polityka',
+                  title: context.l10n.desktopPolicy,
                   subtitle: _policyLabel(contact.transportPolicy),
                 ),
               ],
@@ -766,24 +776,26 @@ class _ConversationInspector extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           SectionCard(
-            title: 'INFORMACJE',
+            title: context.l10n.desktopInformationSection,
             child: Column(
               children: [
                 InfoTile(
-                  title: 'Installation ID',
+                  title: context.l10n.desktopInstallationId,
                   subtitle: _compactIdentifier(contact.id),
                 ),
                 InfoTile(
-                  title: 'Ostatnie P2P',
-                  subtitle: _relativeTimestamp(
+                  title: context.l10n.desktopLastP2p,
+                  subtitle: formatRelativeTimestamp(
                     contact.lastPeerConnectedAt,
+                    context.l10n,
                     empty: 'Brak zapisanej sesji',
                   ),
                 ),
                 InfoTile(
-                  title: 'Ostatnio widziany',
-                  subtitle: _relativeTimestamp(
+                  title: context.l10n.desktopLastSeen,
+                  subtitle: formatRelativeTimestamp(
                     contact.lastSeenAt,
+                    context.l10n,
                     empty: 'Brak danych',
                   ),
                 ),
@@ -794,7 +806,7 @@ class _ConversationInspector extends StatelessWidget {
           OutlinedButton.icon(
             onPressed: onBack,
             icon: const ThemedIcon(Icons.arrow_back, size: 17),
-            label: const Text('Wróć do listy rozmów'),
+            label: Text(context.l10n.desktopBackToConversations),
           ),
         ],
       ),
@@ -848,24 +860,3 @@ String _compactIdentifier(String value) {
   return '${clean.substring(0, 10)}…${clean.substring(clean.length - 8)}';
 }
 
-String _relativeTimestamp(String? value, {required String empty}) {
-  final clean = value?.trim() ?? '';
-  if (clean.isEmpty) return empty;
-  final numeric = int.tryParse(clean);
-  DateTime? parsed;
-  if (numeric != null) {
-    final milliseconds = numeric < 100000000000 ? numeric * 1000 : numeric;
-    parsed = DateTime.fromMillisecondsSinceEpoch(milliseconds).toLocal();
-  } else {
-    parsed = DateTime.tryParse(clean)?.toLocal();
-  }
-  if (parsed == null) return clean;
-  final difference = DateTime.now().difference(parsed);
-  if (difference.isNegative || difference.inMinutes < 1) return 'przed chwilą';
-  if (difference.inMinutes < 60) return '${difference.inMinutes} min temu';
-  if (difference.inHours < 24) return '${difference.inHours} godz. temu';
-  if (difference.inDays < 7) return '${difference.inDays} dni temu';
-  final day = parsed.day.toString().padLeft(2, '0');
-  final month = parsed.month.toString().padLeft(2, '0');
-  return '$day.$month.${parsed.year}';
-}

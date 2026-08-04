@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
+import 'package:intl/date_symbol_data_local.dart';
 
 import 'app/app_controller.dart';
 import 'app/app_theme.dart';
@@ -25,10 +26,14 @@ import 'features/onboarding/nickname_onboarding_screen.dart';
 import 'features/onboarding/onboarding_views.dart';
 import 'features/shell/main_shell.dart';
 import 'features/chats/composer_draft.dart';
+import 'locales/application/locale_controller.dart';
+import 'locales/application/locale_setup_gate.dart';
+import 'locales/generated/app_localizations.dart';
 import 'shared/widgets/toast_host.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await initializeDateFormatting();
   if (!await DesktopWindowLifecycle.initialize()) return;
   runApp(const TorChatMobileApp());
 }
@@ -57,9 +62,16 @@ class _TorChatAppView extends ConsumerWidget {
     final themeState = ref.watch(themeControllerProvider);
     final preferences =
         themeState.valueOrNull ?? const TorChatThemePreferences();
+    final localePreference = ref
+        .watch(localeControllerProvider)
+        .valueOrNull
+        ?.preference;
 
     return MaterialApp(
-      title: 'TorChat',
+      locale: localePreference?.locale,
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      onGenerateTitle: (context) => AppLocalizations.of(context)!.appTitle,
       debugShowCheckedModeBanner: false,
       theme: TorChatThemeRegistry.light(
         preferences.family,
@@ -76,7 +88,7 @@ class _TorChatAppView extends ConsumerWidget {
       },
       builder: (context, child) =>
           ToastHost(child: child ?? const SizedBox.shrink()),
-      home: const ControllerHomePage(),
+      home: const LocaleSetupGate(child: ControllerHomePage()),
     );
   }
 }
@@ -684,6 +696,7 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
       search: _search,
       composer: _composer,
       error: state.error,
+      problem: state.problem,
       action: state.action,
       onTab: (tab) => controller.selectDestination(switch (tab) {
         MobileTab.contacts => MainDestination.contacts,

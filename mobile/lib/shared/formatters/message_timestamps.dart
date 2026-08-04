@@ -1,38 +1,23 @@
-String formatMessageTime(String raw) {
+import 'package:intl/intl.dart';
+
+import '../../locales/generated/app_localizations.dart';
+
+String formatMessageTime(String raw, {String locale = 'pl'}) {
   final value = DateTime.tryParse(raw)?.toLocal();
   if (value == null) return '--:--';
-  final h = value.hour.toString().padLeft(2, '0');
-  final m = value.minute.toString().padLeft(2, '0');
-  return '$h:$m';
+  return DateFormat.Hm().format(value);
 }
 
-String formatMessageDay(String raw) {
+String formatMessageDay(String raw, {String locale = 'pl'}) {
   final value = DateTime.tryParse(raw)?.toLocal();
   if (value == null) return 'Nieznana data';
-  const weekday = [
-    'poniedziałek',
-    'wtorek',
-    'środa',
-    'czwartek',
-    'piątek',
-    'sobota',
-    'niedziela',
-  ];
-  const month = [
-    'stycznia',
-    'lutego',
-    'marca',
-    'kwietnia',
-    'maja',
-    'czerwca',
-    'lipca',
-    'sierpnia',
-    'września',
-    'października',
-    'listopada',
-    'grudnia',
-  ];
-  return '${weekday[value.weekday - 1]}, ${value.day} ${month[value.month - 1]} ${value.year}';
+  try {
+    return DateFormat('EEEE, d MMMM y', locale).format(value);
+  } catch (_) {
+    // Widget tests and lightweight hosts may not have loaded optional locale
+    // data yet; keep the formatter usable until the app bootstrap completes.
+    return DateFormat('yyyy-MM-dd').format(value);
+  }
 }
 
 bool isSameMessageDay(String left, String right) {
@@ -42,7 +27,7 @@ bool isSameMessageDay(String left, String right) {
   return a.year == b.year && a.month == b.month && a.day == b.day;
 }
 
-String formatMessageDayOrTime(String raw) {
+String formatMessageDayOrTime(String raw, {String locale = 'pl'}) {
   final value = DateTime.tryParse(raw)?.toLocal();
   if (value == null) return '';
   final now = DateTime.now();
@@ -53,11 +38,37 @@ String formatMessageDayOrTime(String raw) {
   if (value.day == now.day &&
       value.month == now.month &&
       value.year == now.year) {
-    final h = value.hour.toString().padLeft(2, '0');
-    final m = value.minute.toString().padLeft(2, '0');
-    return '$h:$m';
+    return DateFormat.Hm().format(value);
   }
-  final day = value.day.toString().padLeft(2, '0');
-  final month = value.month.toString().padLeft(2, '0');
-  return '$day.$month.${value.year}';
+  return DateFormat('dd.MM.yyyy').format(value);
+}
+
+String formatRelativeTimestamp(
+  String? raw,
+  AppLocalizations l10n, {
+  required String empty,
+}) {
+  final clean = raw?.trim() ?? '';
+  if (clean.isEmpty) return empty;
+  final numeric = int.tryParse(clean);
+  final parsed = numeric == null
+      ? DateTime.tryParse(clean)?.toLocal()
+      : DateTime.fromMillisecondsSinceEpoch(
+          numeric < 100000000000 ? numeric * 1000 : numeric,
+        ).toLocal();
+  if (parsed == null) return clean;
+  final difference = DateTime.now().difference(parsed);
+  if (difference.isNegative || difference.inMinutes < 1) {
+    return l10n.timeJustNow;
+  }
+  if (difference.inMinutes < 60) {
+    return l10n.timeMinutesAgo(difference.inMinutes);
+  }
+  if (difference.inHours < 24) {
+    return l10n.timeHoursAgo(difference.inHours);
+  }
+  if (difference.inDays < 7) {
+    return l10n.timeDaysAgo(difference.inDays);
+  }
+  return DateFormat('dd.MM.yyyy').format(parsed);
 }

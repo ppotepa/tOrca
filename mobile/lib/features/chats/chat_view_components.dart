@@ -84,7 +84,10 @@ class DayDivider extends StatelessWidget {
             : BorderRadius.circular(999),
       ),
       child: Text(
-        formatMessageDay(date),
+        formatMessageDay(
+          date,
+          locale: Localizations.localeOf(context).toLanguageTag(),
+        ),
         style: Theme.of(context).textTheme.labelSmall,
       ),
     ),

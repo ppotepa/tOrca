@@ -5,14 +5,27 @@ enum RuntimeProblemDisposition {
   diagnosticOnly,
 }
 
+enum RuntimeProblemCode {
+  empty('empty'),
+  pairingStaleWelcome('pairing_stale_welcome'),
+  automationDeferred('automation_deferred'),
+  connectionRecovering('connection_recovering'),
+  runtimeFatal('runtime_fatal'),
+  operationFailed('operation_failed');
+
+  const RuntimeProblemCode(this.wireValue);
+  final String wireValue;
+}
+
 final class RuntimeProblemClassification {
   const RuntimeProblemClassification({
     required this.disposition,
-    required this.code,
+    required this.problemCode,
   });
 
   final RuntimeProblemDisposition disposition;
-  final String code;
+  final RuntimeProblemCode problemCode;
+  String get code => problemCode.wireValue;
 
   bool get userVisible => switch (disposition) {
     RuntimeProblemDisposition.fatal ||
@@ -28,7 +41,7 @@ RuntimeProblemClassification classifyRuntimeProblem(String message) {
   if (normalized.isEmpty) {
     return const RuntimeProblemClassification(
       disposition: RuntimeProblemDisposition.diagnosticOnly,
-      code: 'empty',
+      problemCode: RuntimeProblemCode.empty,
     );
   }
 
@@ -39,7 +52,7 @@ RuntimeProblemClassification classifyRuntimeProblem(String message) {
       normalized.contains('duplicate invite has no pending welcome')) {
     return const RuntimeProblemClassification(
       disposition: RuntimeProblemDisposition.diagnosticOnly,
-      code: 'pairing_stale_welcome',
+      problemCode: RuntimeProblemCode.pairingStaleWelcome,
     );
   }
 
@@ -48,7 +61,7 @@ RuntimeProblemClassification classifyRuntimeProblem(String message) {
       normalized.contains('bootstrap deferred until contact exists')) {
     return const RuntimeProblemClassification(
       disposition: RuntimeProblemDisposition.diagnosticOnly,
-      code: 'automation_deferred',
+      problemCode: RuntimeProblemCode.automationDeferred,
     );
   }
 
@@ -65,7 +78,7 @@ RuntimeProblemClassification classifyRuntimeProblem(String message) {
       normalized.contains('network is offline')) {
     return const RuntimeProblemClassification(
       disposition: RuntimeProblemDisposition.connectionStatus,
-      code: 'connection_recovering',
+      problemCode: RuntimeProblemCode.connectionRecovering,
     );
   }
 
@@ -77,12 +90,12 @@ RuntimeProblemClassification classifyRuntimeProblem(String message) {
       normalized.contains('engine_fatal')) {
     return const RuntimeProblemClassification(
       disposition: RuntimeProblemDisposition.fatal,
-      code: 'runtime_fatal',
+      problemCode: RuntimeProblemCode.runtimeFatal,
     );
   }
 
   return const RuntimeProblemClassification(
     disposition: RuntimeProblemDisposition.localOperation,
-    code: 'operation_failed',
+    problemCode: RuntimeProblemCode.operationFailed,
   );
 }

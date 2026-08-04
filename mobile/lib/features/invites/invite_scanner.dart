@@ -10,6 +10,7 @@ import '../../app/ui_operation_registry.dart';
 import '../../shared/async/busy_action_button.dart';
 import '../../shared/async/busy_surface.dart';
 import '../../shared/formatters/invite_code.dart';
+import '../../locales/presentation/app_localizations_x.dart';
 
 class InviteScannerPage extends ConsumerStatefulWidget {
   const InviteScannerPage({super.key});
@@ -53,14 +54,15 @@ class _InviteScannerPageState extends ConsumerState<InviteScannerPage> {
     if (!(Platform.isAndroid || Platform.isIOS)) {
       return const ManualInviteCodePage();
     }
+    final l10n = context.l10n;
     final operation = ref.watch(
       uiOperationProvider(UiOperationKey.pairingSubmit),
     );
     return Scaffold(
-      appBar: AppBar(title: const Text('Zeskanuj kod parowania')),
+      appBar: AppBar(title: Text(l10n.inviteScanTitle)),
       body: BusySurface(
         state: operation,
-        label: 'Przetwarzanie kodu…',
+        label: l10n.processingCode,
         child: Stack(
           children: [
             MobileScanner(
@@ -141,11 +143,12 @@ class _ManualInviteCodePageState extends ConsumerState<ManualInviteCodePage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final operation = ref.watch(
       uiOperationProvider(UiOperationKey.pairingSubmit),
     );
     return Scaffold(
-      appBar: AppBar(title: const Text('Dodaj kontakt')),
+      appBar: AppBar(title: Text(l10n.addContactTitle)),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 420),
@@ -153,14 +156,14 @@ class _ManualInviteCodePageState extends ConsumerState<ManualInviteCodePage> {
             padding: const EdgeInsets.all(24),
             child: BusySurface(
               state: operation,
-              label: 'Przetwarzanie kodu…',
+              label: l10n.processingCode,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   const ThemedIcon(Icons.qr_code_2, size: 56),
                   const SizedBox(height: 16),
-                  const Text(
-                    'Desktop nie używa kamery. Wpisz 8-cyfrowy kod wyświetlony na drugim urządzeniu.',
+                  Text(
+                    l10n.desktopCodeInstructions,
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 20),
@@ -176,7 +179,7 @@ class _ManualInviteCodePageState extends ConsumerState<ManualInviteCodePage> {
                       if (!operation.busy) _submit();
                     },
                     decoration: InputDecoration(
-                      labelText: 'Kod parowania',
+                      labelText: l10n.pairingCodeLabel,
                       errorText: _error.isEmpty ? null : _error,
                       prefixIcon: const ThemedIcon(Icons.password),
                     ),
@@ -184,8 +187,8 @@ class _ManualInviteCodePageState extends ConsumerState<ManualInviteCodePage> {
                   const SizedBox(height: 12),
                   BusyActionButton(
                     busy: operation.busy,
-                    label: 'Dodaj kontakt',
-                    busyLabel: 'Przetwarzanie…',
+                    label: l10n.addContactTitle,
+                    busyLabel: l10n.processingCode,
                     icon: const ThemedIcon(Icons.arrow_forward),
                     onPressed: _submit,
                   ),

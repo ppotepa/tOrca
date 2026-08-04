@@ -6,6 +6,7 @@ import '../../app/ui_operation_registry.dart';
 import '../../shared/widgets/action_section.dart';
 import '../../shared/widgets/action_tile.dart';
 import '../../shared/widgets/identity_section.dart';
+import '../../locales/presentation/app_localizations_x.dart';
 
 class AccountView extends ConsumerWidget {
   const AccountView({
@@ -25,40 +26,41 @@ class AccountView extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l10n = context.l10n;
     final inviteLoad = ref.watch(
       uiOperationProvider(UiOperationKey.inviteCodeLoad),
     );
     return Scaffold(
-      appBar: AppBar(title: const Text('Konto')),
+      appBar: AppBar(title: Text(l10n.accountTitle)),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
           IdentitySection(
-            title: 'TOŻSAMOŚĆ',
+            title: l10n.accountIdentitySection,
             name: nickname,
             subtitle: installationId.isEmpty
-                ? 'Lokalny profil urządzenia'
-                : 'ID instalacji: $installationId',
+                ? l10n.accountLocalProfile
+                : l10n.accountInstallationId(installationId),
             fingerprint: fingerprint,
             selectableFingerprint: true,
           ),
           const SizedBox(height: 12),
           ActionSection(
-            title: 'AKCJE',
+            title: l10n.accountActionsSection,
             child: Column(
               children: [
                 ActionTile(
                   leading: const ThemedIcon(Icons.qr_code_2),
-                  title: 'Mój kod zaproszenia',
+                  title: l10n.accountInviteCode,
                   busy: inviteLoad.busy,
-                  busyLabel: 'Pobieranie kodu…',
-                  subtitle: 'Kod jest widoczny tylko w osobnym oknie',
+                  busyLabel: l10n.accountInviteLoading,
+                  subtitle: l10n.accountInviteSubtitle,
                   onTap: onShowInvite,
                 ),
                 ActionTile(
                   leading: const ThemedIcon(Icons.settings_outlined),
-                  title: 'Ustawienia',
-                  subtitle: 'Otwórz ustawienia aplikacji',
+                  title: l10n.accountSettings,
+                  subtitle: l10n.accountSettingsSubtitle,
                   onTap: onOpenSettings,
                 ),
               ],

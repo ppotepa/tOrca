@@ -662,12 +662,23 @@ class TorChatForegroundService : Service() {
             }
             EngineContract.EVENT_NOTIFICATION_REQUESTED -> {
                 val request = event.optJSONObject(EngineContract.NOTIFICATION) ?: return
+                val kind = request.optString(EngineContract.KIND)
+                val title = when (kind) {
+                    "message_received" -> getString(R.string.notification_new_message_title)
+                    "pairing_request" -> getString(R.string.notification_pairing_request_title)
+                    else -> getString(R.string.app_name)
+                }
+                val text = when (kind) {
+                    "message_received" -> getString(R.string.notification_private_message_body)
+                    "pairing_request" -> getString(R.string.notification_pairing_request_body)
+                    else -> getString(R.string.app_name)
+                }
                 postAlert(
-                    title = request.optString(EngineContract.TITLE).ifBlank { "TorChat" },
-                    text = request.optString(EngineContract.BODY).ifBlank { "Nowe zdarzenie" },
+                    title = title,
+                    text = text,
                     stableId = request.optString(EngineContract.ID),
                     conversationId = request.optString(EngineContract.CONVERSATION_ID),
-                    kind = request.optString(EngineContract.KIND),
+                    kind = kind,
                 )
             }
         }

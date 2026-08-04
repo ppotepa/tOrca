@@ -11,6 +11,8 @@ import '../core/application_state/application_state_store.dart';
 import '../core/connection/app_state_connection.dart';
 import '../core/connection/connection_readiness.dart';
 import '../core/runtime/runtime_repository.dart';
+import '../locales/domain/user_problem.dart';
+import '../locales/domain/user_problem_code.dart';
 import '../shared/formatters/invite_code.dart';
 import '../shared/formatters/operation_status.dart';
 
@@ -53,6 +55,7 @@ class AppState {
     this.isLoading = false,
     this.action = '',
     this.error = '',
+    this.problem,
     this.typingContacts = const {},
     this.lastSeenEnabled = true,
     this.applicationSnapshot,
@@ -90,6 +93,7 @@ class AppState {
   final bool isLoading;
   final String action;
   final String error;
+  final UserProblem? problem;
   final Map<String, bool> typingContacts;
   final bool lastSeenEnabled;
 
@@ -136,6 +140,8 @@ class AppState {
     bool? isLoading,
     String? action,
     String? error,
+    UserProblem? problem,
+    bool clearProblem = false,
     Map<String, bool>? typingContacts,
     bool? lastSeenEnabled,
     ApplicationSnapshot? applicationSnapshot,
@@ -155,6 +161,10 @@ class AppState {
     isLoading: isLoading ?? this.isLoading,
     action: action ?? this.action,
     error: error ?? this.error,
+    problem: problem ??
+        (clearProblem || (error != null && error.isEmpty)
+            ? null
+            : this.problem),
     typingContacts: typingContacts ?? this.typingContacts,
     lastSeenEnabled: lastSeenEnabled ?? this.lastSeenEnabled,
     applicationSnapshot: applicationSnapshot ?? this.applicationSnapshot,
@@ -238,7 +248,10 @@ abstract class AppController extends Notifier<AppState> {
       await _repository.connect();
       await _repository.refresh(includePairing: true, bypassCooldown: true);
     } catch (error) {
-      state = state.copyWith(error: _message(error));
+      state = state.copyWith(
+        error: _message(error),
+        problem: problemForError(error),
+      );
     }
   }
 
@@ -256,7 +269,10 @@ abstract class AppController extends Notifier<AppState> {
       );
       unawaited(_maybeAutoPairTorka());
     } catch (error) {
-      state = state.copyWith(error: _message(error));
+      state = state.copyWith(
+        error: _message(error),
+        problem: problemForError(error),
+      );
     }
   }
 
@@ -288,7 +304,10 @@ abstract class AppController extends Notifier<AppState> {
       // after focus is accepted and therefore survive a transient transport
       // failure or engine reattach.
     } catch (error) {
-      state = state.copyWith(error: _message(error));
+      state = state.copyWith(
+        error: _message(error),
+        problem: problemForError(error),
+      );
     }
   }
 
@@ -305,7 +324,11 @@ abstract class AppController extends Notifier<AppState> {
         action: '',
       );
     } catch (error) {
-      state = state.copyWith(action: '', error: _message(error));
+      state = state.copyWith(
+        action: '',
+        error: _message(error),
+        problem: problemForError(error),
+      );
     }
   }
 
@@ -326,7 +349,11 @@ abstract class AppController extends Notifier<AppState> {
       );
       state = state.copyWith(action: '');
     } catch (error) {
-      state = state.copyWith(action: '', error: _message(error));
+      state = state.copyWith(
+        action: '',
+        error: _message(error),
+        problem: problemForError(error),
+      );
     }
   }
 
@@ -339,7 +366,10 @@ abstract class AppController extends Notifier<AppState> {
         state = state.copyWith(error: '');
       }
     } catch (error) {
-      state = state.copyWith(error: _message(error));
+      state = state.copyWith(
+        error: _message(error),
+        problem: problemForError(error),
+      );
     }
   }
 
@@ -352,7 +382,10 @@ abstract class AppController extends Notifier<AppState> {
         state = state.copyWith(error: '');
       }
     } catch (error) {
-      state = state.copyWith(error: _message(error));
+      state = state.copyWith(
+        error: _message(error),
+        problem: problemForError(error),
+      );
     }
   }
 
@@ -408,20 +441,24 @@ abstract class AppController extends Notifier<AppState> {
     if (!state.transport.connected ||
         !state.connectionReadiness.canPerform(ConnectionOperation.pair)) {
       state = state.copyWith(
-        error:
-            'Pairing wymaga dostępnego relay; dane lokalne pozostają dostępne offline.',
+        error: '',
+        problem: const UserProblem(code: UserProblemCode.pairingRequiresRelay),
       );
       return;
     }
     if (state.profile.nickname.trim().length < 2) {
       state = state.copyWith(
-        error: 'Najpierw ustaw nazwę użytkownika na tym urządzeniu.',
+        error: '',
+        problem: const UserProblem(code: UserProblemCode.nicknameRequired),
       );
       return;
     }
     final normalizedCode = pairingCodeDigits(code);
     if (normalizedCode == null) {
-      state = state.copyWith(error: 'Kod musi zawierać dokładnie 8 cyfr.');
+      state = state.copyWith(
+        error: '',
+        problem: const UserProblem(code: UserProblemCode.pairingCodeInvalid),
+      );
       return;
     }
     state = state.copyWith(action: OperationAction.submitPairing, error: '');
@@ -437,7 +474,11 @@ abstract class AppController extends Notifier<AppState> {
       await refreshData(forcePairing: true, allowAutoTorka: false);
       state = state.copyWith(action: '');
     } catch (error) {
-      state = state.copyWith(action: '', error: _message(error));
+      state = state.copyWith(
+        action: '',
+        error: _message(error),
+        problem: problemForError(error),
+      );
     }
   }
 
@@ -450,12 +491,19 @@ abstract class AppController extends Notifier<AppState> {
       } else {
         state = state.copyWith(
           action: '',
-          error: 'Relay nie zwrócił kodu zaproszenia. Spróbuj ponownie.',
+          error: '',
+          problem: const UserProblem(
+            code: UserProblemCode.inviteCodeUnavailable,
+          ),
         );
       }
       return code;
     } catch (error) {
-      state = state.copyWith(action: '', error: _message(error));
+      state = state.copyWith(
+        action: '',
+        error: _message(error),
+        problem: problemForError(error),
+      );
       return null;
     }
   }
@@ -511,7 +559,10 @@ abstract class AppController extends Notifier<AppState> {
       await _repository.contacts();
       state = state.copyWith(error: '');
     } catch (error) {
-      state = state.copyWith(error: _message(error));
+      state = state.copyWith(
+        error: _message(error),
+        problem: problemForError(error),
+      );
     }
   }
 
@@ -526,7 +577,11 @@ abstract class AppController extends Notifier<AppState> {
       await refreshData(forcePairing: refreshPairing);
       state = state.copyWith(action: '');
     } catch (error) {
-      state = state.copyWith(action: '', error: _message(error));
+      state = state.copyWith(
+        action: '',
+        error: _message(error),
+        problem: problemForError(error),
+      );
     }
   }
 
@@ -548,6 +603,22 @@ abstract class AppController extends Notifier<AppState> {
           .replaceFirst('Exception: ', '')
           .replaceFirst('Bad state: ', ''),
     );
+  }
+
+  UserProblem problemForError(Object error) {
+    final normalized = error.toString().toLowerCase();
+    final code = normalized.contains('pairing code expired')
+        ? UserProblemCode.pairingCodeInvalid
+        : normalized.contains('stale welcome') ||
+              normalized.contains('old invitation')
+        ? UserProblemCode.pairingWelcomeStale
+        : normalized.contains('relay transport error') ||
+              normalized.contains('gateway')
+        ? UserProblemCode.pairingGatewayUnavailable
+        : normalized.contains('connection') || normalized.contains('tor')
+        ? UserProblemCode.connectionUnavailable
+        : UserProblemCode.operationFailed;
+    return UserProblem(code: code, arguments: {'raw': error.toString()});
   }
 
   String _localizedRuntimeError(String message) {

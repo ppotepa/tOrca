@@ -14,6 +14,9 @@ import '../../shared/widgets/action_tile.dart';
 import '../../shared/widgets/callout_card.dart';
 import '../../shared/widgets/info_tile.dart';
 import '../../shared/widgets/themed_switch_list_tile.dart';
+import '../../locales/presentation/app_localizations_x.dart';
+import '../../locales/presentation/language_picker.dart';
+import '../../locales/presentation/theme_localizer.dart';
 import 'image_storage_settings_section.dart';
 
 class SettingsView extends ConsumerStatefulWidget {
@@ -186,40 +189,41 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     phase: _saving.contains(key)
         ? AsyncOperationPhase.running
         : AsyncOperationPhase.idle,
-    label: 'Zapisywanie ustawienia',
+    label: context.l10n.settingsSaving,
     targetId: key,
   );
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final nicknameSave = ref.watch(
       uiOperationProvider(UiOperationKey.nicknameSave),
     );
     return Scaffold(
-      appBar: AppBar(title: const Text('Ustawienia')),
+      appBar: AppBar(title: Text(l10n.settingsTitle)),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
           ActionSection(
-            title: 'APLIKACJA',
+            title: l10n.settingsApplicationSection,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const InfoTile(
+                InfoTile(
                   leading: ThemedIcon(Icons.palette_outlined),
-                  title: 'Family',
-                  subtitle: 'Classic: klasyczny, Retro: styl retro',
+                  title: l10n.settingsFamilyTitle,
+                  subtitle: l10n.settingsFamilyDescription,
                 ),
                 const SizedBox(height: 8),
                 SegmentedButton<TorChatThemeFamily>(
-                  segments: const [
+                  segments: [
                     ButtonSegment(
                       value: TorChatThemeFamily.current,
-                      label: Text('Classic'),
+                      label: Text(l10n.settingsClassic),
                     ),
                     ButtonSegment(
                       value: TorChatThemeFamily.retro,
-                      label: Text('Retro'),
+                      label: Text(l10n.settingsRetro),
                     ),
                   ],
                   selected: {_themePreferences.family},
@@ -238,8 +242,11 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                   const SizedBox(height: 12),
                   InfoTile(
                     leading: const ThemedIcon(Icons.terminal_outlined),
-                    title: 'Paleta terminalowa',
-                    subtitle: _themePreferences.retroPalette.label,
+                  title: l10n.settingsTerminalPalette,
+                    subtitle: localizeRetroPalette(
+                      l10n,
+                      _themePreferences.retroPalette,
+                    ),
                   ),
                   const SizedBox(height: 6),
                   SizedBox(
@@ -249,7 +256,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                         for (final palette in TorChatRetroPalette.values)
                           ButtonSegment(
                             value: palette,
-                            label: Text(palette.label),
+                            label: Text(localizeRetroPalette(l10n, palette)),
                           ),
                       ],
                       selected: {_themePreferences.retroPalette},
@@ -269,28 +276,36 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                 ],
                 const SizedBox(height: 12),
                 InfoTile(
+                  leading: const ThemedIcon(Icons.language_outlined),
+                  title: l10n.languageSettingsTitle,
+                  subtitle: l10n.languageSettingsDescription,
+                ),
+                const SizedBox(height: 6),
+                const LanguagePicker(),
+                const SizedBox(height: 12),
+                InfoTile(
                   leading: const ThemedIcon(Icons.brightness_auto_outlined),
-                  title: 'Tryb jasności',
+                  title: l10n.settingsBrightness,
                   subtitle: switch (_themePreferences.brightness) {
-                    TorChatBrightnessMode.system => 'System',
-                    TorChatBrightnessMode.light => 'Jasny',
-                    TorChatBrightnessMode.dark => 'Ciemny',
+                    TorChatBrightnessMode.system => l10n.settingsSystem,
+                    TorChatBrightnessMode.light => l10n.settingsLight,
+                    TorChatBrightnessMode.dark => l10n.settingsDark,
                   },
                 ),
                 const SizedBox(height: 6),
                 SegmentedButton<TorChatBrightnessMode>(
-                  segments: const [
+                  segments: [
                     ButtonSegment(
                       value: TorChatBrightnessMode.system,
-                      label: Text('System'),
+                      label: Text(l10n.settingsSystem),
                     ),
                     ButtonSegment(
                       value: TorChatBrightnessMode.light,
-                      label: Text('Jasny'),
+                      label: Text(l10n.settingsLight),
                     ),
                     ButtonSegment(
                       value: TorChatBrightnessMode.dark,
-                      label: Text('Ciemny'),
+                      label: Text(l10n.settingsDark),
                     ),
                   ],
                   selected: {_themePreferences.brightness},
@@ -308,13 +323,11 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                 const SizedBox(height: 8),
                 BusySurface(
                   state: _preferenceState(_reducedMotionKey),
-                  label: 'Zapisywanie…',
+                  label: l10n.settingsSaving,
                   child: ThemedSwitchListTile(
                     contentPadding: EdgeInsets.zero,
-                    title: const Text('Ogranicz animacje'),
-                    subtitle: const Text(
-                      'Wyłącza animacje i płynne przejścia w całej aplikacji',
-                    ),
+                    title: Text(l10n.settingsReduceMotion),
+                    subtitle: Text(l10n.settingsReduceMotionDescription),
                     value: _themePreferences.reducedMotion,
                     onChanged: _saving.contains(_reducedMotionKey)
                         ? null
@@ -324,13 +337,11 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                 if (Platform.isWindows)
                   BusySurface(
                     state: _preferenceState(_autostartOperationKey),
-                    label: 'Zapisywanie…',
+                    label: l10n.settingsSaving,
                     child: ThemedSwitchListTile(
                       contentPadding: EdgeInsets.zero,
-                      title: const Text('Uruchamiaj z systemem Windows'),
-                      subtitle: const Text(
-                        'Uruchamia TorChat automatycznie po zalogowaniu',
-                      ),
+                      title: Text(l10n.settingsWindowsAutostart),
+                      subtitle: Text(l10n.settingsWindowsAutostartDescription),
                       value: _autostart,
                       onChanged: _saving.contains(_autostartOperationKey)
                           ? null
@@ -341,51 +352,51 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
             ),
           ),
           ActionSection(
-            title: 'POWIADOMIENIA',
+            title: l10n.settingsNotificationsSection,
             child: Column(
               children: [
                 _toggle(
-                  'Powiadomienia',
-                  'Nadrzędny przełącznik wszystkich alertów',
+                  l10n.settingsNotifications,
+                  l10n.settingsNotificationsDescription,
                   _notifications,
                   'torchat.notifications.enabled',
                   (value) => _notifications = value,
                 ),
                 _toggle(
-                  'Nowe wiadomości',
-                  'Powiadamiaj o wiadomościach poza otwartą rozmową',
+                  l10n.settingsNewMessages,
+                  l10n.settingsNewMessagesDescription,
                   _messageAlerts,
                   'torchat.notifications.messages',
                   (value) => _messageAlerts = value,
                   enabled: _notifications,
                 ),
                 _toggle(
-                  'Zaproszenia do kontaktów',
-                  'Powiadamiaj wyłącznie o nowych prośbach pairing',
+                  l10n.settingsContactInvitations,
+                  l10n.settingsContactInvitationsDescription,
                   _pairingAlerts,
                   'torchat.notifications.pairing',
                   (value) => _pairingAlerts = value,
                   enabled: _notifications,
                 ),
                 _toggle(
-                  'Dźwięk',
-                  'Systemowy dźwięk powiadomienia TorChat',
+                  l10n.settingsNotificationSound,
+                  l10n.settingsNotificationSoundDescription,
                   _sound,
                   'torchat.notifications.sound',
                   (value) => _sound = value,
                   enabled: _notifications,
                 ),
                 _toggle(
-                  'Wibracja',
-                  'Wibracja dla zdarzeń przychodzących',
+                  l10n.settingsNotificationVibration,
+                  l10n.settingsNotificationVibrationDescription,
                   _vibration,
                   'torchat.notifications.vibration',
                   (value) => _vibration = value,
                   enabled: _notifications,
                 ),
                 _toggle(
-                  'Podgląd treści',
-                  'Wyłączone domyślnie dla prywatności',
+                  l10n.settingsMessagePreview,
+                  l10n.settingsMessagePreviewDescription,
                   _preview,
                   'torchat.notifications.preview',
                   (value) => _preview = value,
@@ -396,33 +407,33 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
           ),
           const Divider(),
           ActionSection(
-            title: 'PRYWATNOŚĆ CZATU',
+            title: l10n.settingsChatPrivacySection,
             child: Column(
               children: [
                 _toggle(
-                  'Potwierdzenia odczytu',
-                  'Informuj kontakt, że wiadomość została odczytana',
+                  l10n.settingsReadReceipts,
+                  l10n.settingsReadReceiptsDescription,
                   _readReceipts,
                   'torchat.privacy.readReceipts',
                   (value) => _readReceipts = value,
                 ),
                 _toggle(
-                  'Informacja „pisze…”',
-                  'Udostępnia chwilową aktywność podczas pisania',
+                  l10n.settingsTypingIndicator,
+                  l10n.settingsTypingIndicatorDescription,
                   _typing,
                   'torchat.privacy.typing',
                   (value) => _typing = value,
                 ),
                 _toggle(
-                  'Status online',
-                  'Udostępnia tylko bieżącą obecność bez historii',
+                  l10n.settingsOnlineStatus,
+                  l10n.settingsOnlineStatusDescription,
                   _presence,
                   'torchat.privacy.presence',
                   (value) => _presence = value,
                 ),
                 _toggle(
-                  'Ostatnio widziany',
-                  'Udostępnia czas ostatniej aktywności kontaktom',
+                  l10n.settingsLastSeen,
+                  l10n.settingsLastSeenDescription,
                   _lastSeen,
                   'torchat.privacy.lastSeen',
                   (value) => _lastSeen = value,
@@ -433,7 +444,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
           ),
           ActionTile(
             leading: const ThemedIcon(Icons.eco_outlined),
-            title: 'Połączenie Tor',
+            title: l10n.settingsTorConnection,
             subtitle: widget.torStatus,
             onTap: widget.onOpenTor,
           ),
@@ -441,33 +452,33 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
           const ImageStorageSettingsSection(),
           const Divider(),
           ActionSection(
-            title: 'TOŻSAMOŚĆ',
+            title: l10n.settingsIdentitySection,
             child: ActionTile(
               leading: const ThemedIcon(Icons.person_outline),
-              title: 'Profil użytkownika',
+              title: l10n.settingsUserProfile,
               busy: nicknameSave.busy,
-              busyLabel: 'Zapisywanie profilu…',
+              busyLabel: l10n.settingsSavingProfile,
               subtitle: '@${widget.nickname}',
               onTap: widget.onEditProfile,
             ),
           ),
           const Divider(),
           ActionSection(
-            title: 'DANE LOKALNE',
+            title: l10n.settingsLocalDataSection,
             child: CalloutCard(
               leading: ThemedIcon(
                 Icons.delete_outline,
                 color: Theme.of(context).colorScheme.error,
               ),
-              title: 'Reset danych demo',
-              subtitle: 'Wymaga potwierdzenia',
+              title: l10n.settingsResetDemoData,
+              subtitle: l10n.settingsRequiresConfirmation,
               borderColor: Theme.of(
                 context,
               ).colorScheme.error.withValues(alpha: .60),
               backgroundColor: Theme.of(context).colorScheme.errorContainer,
               child: ActionTile(
-                title: 'Wyczyść lokalny stan',
-                subtitle: 'Usuwa wszystkie dane testowe i lokalne wpisy',
+                title: l10n.settingsClearLocalState,
+                subtitle: l10n.settingsClearLocalStateDescription,
                 onTap: widget.onReset,
               ),
             ),

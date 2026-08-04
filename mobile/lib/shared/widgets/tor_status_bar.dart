@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import '../../app/app_theme.dart';
 import '../../core/connection/connection_readiness.dart';
 import '../../core/models/domain.dart';
+import '../../locales/presentation/app_localizations_x.dart';
+import '../../locales/presentation/status_localizer.dart';
+import '../../locales/generated/app_localizations.dart';
 import 'status_probe.dart';
 
 /// One compact, transport-agnostic connection rail.
@@ -123,7 +126,7 @@ class _TransportStatusDockState extends State<TransportStatusDock>
     final phase = animationsDisabled ? 0.0 : _breathing.value;
     final segments = widget.probeRegistry
         .read(_diagnostics)
-        .map(_segmentFromProbe)
+        .map((probe) => _segmentFromProbe(probe, context.l10n))
         .toList(growable: false);
 
     final theme = Theme.of(context);
@@ -210,8 +213,11 @@ class _TransportStatusDockState extends State<TransportStatusDock>
     );
   }
 
-  _SegmentState _segmentFromProbe(StatusProbeSnapshot probe) => _SegmentState(
-    label: probe.label,
+  _SegmentState _segmentFromProbe(
+    StatusProbeSnapshot probe,
+    AppLocalizations l10n,
+  ) => _SegmentState(
+    label: localizeProbeLabel(l10n, probe.id),
     detail: probe.latencyMs == null
         ? probe.detail
         : '${probe.detail} · ${probe.latencyMs} ms',

@@ -58,24 +58,3 @@ class ConnectionComponentStatus {
   );
 }
 
-extension ConnectionComponentDisplay on ConnectionComponent {
-  String get title => switch (this) {
-    ConnectionComponent.engine => 'Silnik aplikacji',
-    ConnectionComponent.localData => 'Dane lokalne',
-    ConnectionComponent.tor => 'Sieć Tor',
-    ConnectionComponent.relay => 'Relay TorChat',
-    ConnectionComponent.peerListener => 'Lokalny listener P2P',
-    ConnectionComponent.onionService => 'Onion tego urządzenia',
-  };
-
-  String get description => switch (this) {
-    ConnectionComponent.engine => 'Wspólny silnik komunikatora',
-    ConnectionComponent.localData => 'Tożsamość i zaszyfrowana baza lokalna',
-    ConnectionComponent.tor => 'Proces Tor i lokalny endpoint SOCKS',
-    ConnectionComponent.relay => 'Połączenie sterujące z relayem onion',
-    ConnectionComponent.peerListener =>
-      'Lokalny serwer przyjmujący połączenia peer',
-    ConnectionComponent.onionService =>
-      'Adres onion publikowany dla tego urządzenia',
-  };
-}

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'info_tile.dart';
+import '../../locales/presentation/app_localizations_x.dart';
 
 class CopyableInfoTile extends StatelessWidget {
   const CopyableInfoTile({
@@ -30,7 +31,7 @@ class CopyableInfoTile extends StatelessWidget {
     subtitle: subtitle ?? value,
     subtitleSelectable: subtitleSelectable,
     trailing: IconButton(
-      tooltip: 'Skopiuj',
+      tooltip: context.l10n.commonCopy,
       onPressed: value.isEmpty ? null : _copyValue,
       icon: const Icon(Icons.copy_outlined, size: 18),
     ),

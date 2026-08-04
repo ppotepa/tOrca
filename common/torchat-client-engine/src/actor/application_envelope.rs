@@ -1,4 +1,5 @@
 use super::*;
+use crate::event::NotificationKind;
 
 pub(super) struct InboundApplyResult {
     pub(super) committed: bool,
@@ -121,9 +122,9 @@ impl ClientEngineActor {
                     };
                     let notification = NotificationRequest {
                         id: message_id.to_string(),
-                        title: "Nowa wiadomoÅ›Ä‡".to_owned(),
-                        body: body.clone(),
+                        kind: NotificationKind::MessageReceived,
                         conversation_id: Some(peer.clone()),
+                        preview_text: Some(body.clone()),
                     };
                     let (notify, runtime_events) = self.with_runtime(|runtime| {
                         let accepts = runtime.contact_accepts_messages(&peer)?;

@@ -330,10 +330,10 @@ class WindowsRuntime extends Object
         _events.add(
           NotificationRequestedEvent(
             id: notification[EngineContract.id]?.toString() ?? '',
-            title: notification[EngineContract.title]?.toString() ?? 'TorChat',
-            body: notification[EngineContract.body]?.toString() ?? '',
+            kind: NotificationKind.fromWire(notification[EngineContract.kind]),
             conversationId: notification[EngineContract.conversationId]
                 ?.toString(),
+            previewText: notification[EngineContract.previewText]?.toString(),
           ),
         );
       case EngineLogLine(:final log):

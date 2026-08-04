@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">TorChat</string>
+    <string name="notification_new_message_title">Nowa wiadomość</string>
+    <string name="notification_pairing_request_title">Nowa prośba kontaktu</string>
+    <string name="notification_private_message_body">Nowa zaszyfrowana wiadomość</string>
+    <string name="notification_pairing_request_body">Masz nową prośbę o rozmowę.</string>
+</resources>

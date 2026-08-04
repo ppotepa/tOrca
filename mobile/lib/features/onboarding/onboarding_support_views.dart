@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../../app/app_theme.dart';
 import '../../core/models/domain.dart';
 import '../../shared/widgets/tor_status_bar.dart';
+import '../../locales/presentation/app_localizations_x.dart';
+import '../../locales/presentation/status_localizer.dart';
 
 class SplashScreen extends StatelessWidget {
   const SplashScreen({super.key});
@@ -23,7 +25,7 @@ class SplashScreen extends StatelessWidget {
             style: TextStyle(fontSize: 30, fontWeight: FontWeight.bold),
           ),
           SizedBox(height: 8),
-          Text('Prywatne wiadomości przez Tor'),
+          Text(context.l10n.appTagline),
         ],
       ),
     ),
@@ -72,7 +74,7 @@ class BootScreen extends StatelessWidget {
                       style: Theme.of(context).textTheme.headlineMedium,
                     ),
                     const SizedBox(height: 8),
-                    const Text('Prywatne wiadomości przez Tor'),
+                      Text(context.l10n.appTagline),
                     const SizedBox(height: 30),
                     Text(
                       switch (phase) {
@@ -109,7 +111,7 @@ class BootScreen extends StatelessWidget {
                       FilledButton.icon(
                         onPressed: retry,
                         icon: const ThemedIcon(Icons.refresh),
-                        label: const Text('Spróbuj ponownie'),
+                        label: Text(context.l10n.commonRetry),
                       ),
                     ],
                   ],
@@ -280,7 +282,7 @@ class _StartupTimelineRowState extends State<_StartupTimelineRow>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      step.title,
+                      localizeStartupStepTitle(context.l10n, step.kind),
                       style: TextStyle(
                         color: color,
                         fontWeight: FontWeight.w600,
@@ -288,7 +290,13 @@ class _StartupTimelineRowState extends State<_StartupTimelineRow>
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      step.detail.isEmpty ? step.description : step.detail,
+                      step.state == StartupStepState.error &&
+                              step.detail.isNotEmpty
+                          ? step.detail
+                          : localizeStartupStepDescription(
+                              context.l10n,
+                              step.kind,
+                            ),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.bodySmall,
@@ -358,7 +366,7 @@ class TorScreen extends StatelessWidget {
                 const SizedBox(height: 12),
                 FilledButton(
                   onPressed: retry,
-                  child: const Text('Spróbuj ponownie'),
+                  child: Text(context.l10n.commonRetry),
                 ),
               ],
               if (error.isEmpty && connecting)
@@ -394,7 +402,7 @@ class NicknameScreen extends StatelessWidget {
       child: Column(
         children: [
           TransportStatusDock(
-            status: transport.label,
+            status: localizeTransportPhase(context.l10n, transport.phase),
             phase: transport.phase,
             latencyMs: transport.latencyMs,
             desktop: true,
@@ -429,8 +437,8 @@ class NicknameScreen extends StatelessWidget {
                     onSubmitted: (_) {
                       if (ready) onSave();
                     },
-                    decoration: const InputDecoration(
-                      labelText: 'Nick',
+                    decoration: InputDecoration(
+                      labelText: context.l10n.onboardingNicknameLabel,
                       border: OutlineInputBorder(),
                     ),
                   ),
@@ -445,7 +453,7 @@ class NicknameScreen extends StatelessWidget {
                   const SizedBox(height: 18),
                   FilledButton(
                     onPressed: ready ? onSave : null,
-                    child: const Text('Zapisz nick'),
+                    child: Text(context.l10n.onboardingSaveNickname),
                   ),
                 ],
               ),

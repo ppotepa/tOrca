@@ -24,12 +24,20 @@ pub struct ConnectionSnapshot {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NotificationKind {
+    MessageReceived,
+    PairingRequest,
+    PairingCompleted,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NotificationRequest {
     pub id: String,
-    pub title: String,
-    pub body: String,
+    pub kind: NotificationKind,
     pub conversation_id: Option<String>,
+    pub preview_text: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

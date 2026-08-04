@@ -9,6 +9,7 @@ import '../../app/ui_operation_registry.dart';
 import '../../core/models/domain.dart';
 import '../../shared/async/themed_activity_indicator.dart';
 import '../../shared/formatters/invite_code.dart';
+import '../../locales/presentation/app_localizations_x.dart';
 
 export 'onboarding_support_views.dart';
 
@@ -227,8 +228,10 @@ class PairingCodeDialogState extends ConsumerState<PairingCodeDialog> {
   }
 
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Twój kod parowania'),
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    return AlertDialog(
+    title: Text(l10n.pairingDialogTitle),
     content: SingleChildScrollView(
       child: SizedBox(
         width: 300,
@@ -251,10 +254,10 @@ class PairingCodeDialogState extends ConsumerState<PairingCodeDialog> {
               const SizedBox(height: 10),
               Text(
                 _refreshing
-                    ? 'Odświeżanie kodu…'
+                    ? l10n.pairingRefreshing
                     : _remaining == 0
-                    ? 'Kod wygasł · odświeżanie…'
-                    : 'Ważny jeszcze ${formatCountdown(_remaining)}',
+                    ? l10n.pairingExpiredRefreshing
+                    : l10n.pairingValidFor(formatCountdown(_remaining)),
                 style: Theme.of(context).textTheme.labelMedium,
               ),
               const SizedBox(height: 6),
@@ -289,7 +292,11 @@ class PairingCodeDialogState extends ConsumerState<PairingCodeDialog> {
                 icon: _refreshing
                     ? const ThemedActivityIndicator(compact: true)
                     : const ThemedIcon(Icons.refresh),
-                label: Text(_refreshing ? 'Odświeżanie…' : 'Odśwież kod'),
+                label: Text(
+                  _refreshing
+                      ? l10n.pairingRefreshingAction
+                      : l10n.pairingRefreshCode,
+                ),
               ),
           ],
         ),
@@ -298,10 +305,11 @@ class PairingCodeDialogState extends ConsumerState<PairingCodeDialog> {
     actions: [
       TextButton(
         onPressed: _processing ? null : () => Navigator.pop(context),
-        child: const Text('Zamknij'),
+        child: Text(l10n.close),
       ),
     ],
   );
+  }
 }
 
 /// A recipient-side pairing prompt. Unlike [PairingCodeDialog], this dialog is
@@ -351,7 +359,7 @@ class _IncomingPairingDialogState extends State<IncomingPairingDialog> {
     return PopScope(
       canPop: !_busy,
       child: AlertDialog(
-        title: const Text('Nowe zaproszenie do kontaktów'),
+        title: Text(context.l10n.incomingPairingTitle),
         content: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 420),
           child: _PendingPairingDecision(
@@ -381,13 +389,13 @@ class _CompletedPairing extends StatelessWidget {
       ),
       const SizedBox(height: 12),
       Text(
-        'Kontakt został dodany',
+        context.l10n.pairingCompletedTitle,
         style: Theme.of(context).textTheme.titleLarge,
         textAlign: TextAlign.center,
       ),
       const SizedBox(height: 6),
-      const Text(
-        'Bezpieczne połączenie zostało potwierdzone po obu stronach.',
+      Text(
+        context.l10n.pairingCompletedDescription,
         textAlign: TextAlign.center,
       ),
     ],
@@ -413,6 +421,7 @@ class _PendingPairingDecision extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final name = request.peer?.nickname.trim();
     return Column(
       children: [
@@ -423,17 +432,17 @@ class _PendingPairingDecision extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         Text(
-          name?.isNotEmpty == true ? name! : 'Nowy kontakt',
+          name?.isNotEmpty == true ? name! : l10n.newContact,
           style: Theme.of(context).textTheme.headlineSmall,
           textAlign: TextAlign.center,
         ),
         const SizedBox(height: 8),
         Text(
           processing
-              ? 'Zapisywanie decyzji…'
+              ? l10n.pairingSavingDecision
               : awaitingContact
-              ? 'Zaproszenie zaakceptowane. Finalizacja kontaktu przebiega w tle.'
-              : 'Zaproszenie oczekuje na Twoją decyzję. Nie zostanie automatycznie odrzucone przez licznik interfejsu.',
+              ? l10n.pairingAcceptedDescription
+              : l10n.pairingWaitingDecision,
           textAlign: TextAlign.center,
         ),
         if (request.peer?.fingerprint.isNotEmpty == true) ...[
@@ -441,8 +450,8 @@ class _PendingPairingDecision extends StatelessWidget {
           ExpansionTile(
             tilePadding: EdgeInsets.zero,
             childrenPadding: const EdgeInsets.only(bottom: 8),
-            title: const Text('Szczegóły bezpieczeństwa'),
-            subtitle: const Text('Fingerprint klucza kontaktu'),
+            title: Text(l10n.securityDetails),
+            subtitle: Text(l10n.contactFingerprint),
             children: [
               SelectableText(
                 request.peer!.fingerprint,
@@ -464,7 +473,7 @@ class _PendingPairingDecision extends StatelessWidget {
         ],
         const SizedBox(height: 18),
         if (processing)
-          const ThemedActivityIndicator(label: 'Akceptowanie…')
+          ThemedActivityIndicator(label: l10n.accepting)
         else if (!awaitingContact)
           Row(
             children: [
@@ -472,7 +481,7 @@ class _PendingPairingDecision extends StatelessWidget {
                 child: OutlinedButton.icon(
                   onPressed: onReject,
                   icon: const ThemedIcon(Icons.close, size: 16),
-                  label: const Text('Odrzuć'),
+                  label: Text(l10n.reject),
                 ),
               ),
               const SizedBox(width: 10),
@@ -480,7 +489,7 @@ class _PendingPairingDecision extends StatelessWidget {
                 child: FilledButton.icon(
                   onPressed: onAccept,
                   icon: const ThemedIcon(Icons.check, size: 16),
-                  label: const Text('Akceptuj'),
+                  label: Text(l10n.accept),
                 ),
               ),
             ],
@@ -525,8 +534,8 @@ class _PairingCode extends StatelessWidget {
       const SizedBox(height: 10),
       Text(
         checkingRequest
-            ? 'Sprawdzanie nowych zaproszeń…'
-            : 'Oczekiwanie na użycie kodu…',
+            ? context.l10n.checkingInvitations
+            : context.l10n.waitingForCode,
         textAlign: TextAlign.center,
         style: Theme.of(context).textTheme.bodySmall,
       ),

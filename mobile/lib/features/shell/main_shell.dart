@@ -15,6 +15,9 @@ import '../chats/composer_draft.dart';
 import '../contacts/contacts_view.dart';
 import 'desktop/desktop_workspace.dart';
 import '../../shared/widgets/tor_status_bar.dart';
+import '../../locales/presentation/app_localizations_x.dart';
+import '../../locales/domain/user_problem.dart';
+import '../../locales/presentation/problem_localizer.dart';
 
 class MainShell extends ConsumerWidget {
   const MainShell({
@@ -37,6 +40,7 @@ class MainShell extends ConsumerWidget {
     required this.search,
     required this.composer,
     required this.error,
+    this.problem,
     required this.action,
     required this.onTab,
     required this.onSearch,
@@ -68,6 +72,7 @@ class MainShell extends ConsumerWidget {
   final String ownInvite;
   final String status;
   final String error;
+  final UserProblem? problem;
   final String action;
   final TransportPhase phase;
   final PeerServerStatus peerServerStatus;
@@ -157,7 +162,9 @@ class MainShell extends ConsumerWidget {
             onLoadOlderMessages: () =>
                 onLoadOlderMessages(selectedConversation ?? ''),
             onBack: onBack,
-            error: error,
+            error: problem == null
+                ? error
+                : localizeProblem(context.l10n, problem!),
             showConversationListWhenEmpty: !desktop,
             canSend:
                 selectedConversation != null &&
@@ -200,7 +207,9 @@ class MainShell extends ConsumerWidget {
             onUpdateContactSettings: onUpdateContactSettings,
             fingerprint: fingerprint,
             ownInvite: ownInvite,
-            error: error,
+            error: problem == null
+                ? error
+                : localizeProblem(context.l10n, problem!),
             showContactList: !desktop,
           );
   }
@@ -289,12 +298,12 @@ class MainShell extends ConsumerWidget {
                     ),
                     actions: [
                       IconButton(
-                        tooltip: 'Konto',
+                        tooltip: context.l10n.shellAccount,
                         onPressed: onOpenAccount,
                         icon: const ThemedIcon(Icons.person_outline, size: 18),
                       ),
                       IconButton(
-                        tooltip: 'Ustawienia',
+                        tooltip: context.l10n.shellSettings,
                         onPressed: onOpenSettings,
                         icon: const ThemedIcon(
                           Icons.settings_outlined,

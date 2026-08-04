@@ -1,4 +1,5 @@
 use super::*;
+use crate::event::NotificationKind;
 
 impl ClientEngineActor {
     pub(super) fn handle_relay_envelope(
@@ -51,9 +52,9 @@ impl ClientEngineActor {
                 }
                 self.queue_notification(NotificationRequest {
                     id: pairing_id.clone(),
-                    title: "Nowe zaproszenie".to_owned(),
-                    body: "Masz nowÄ… proÅ›bÄ™ o rozmowÄ™.".to_owned(),
+                    kind: NotificationKind::PairingRequest,
                     conversation_id: None,
+                    preview_text: None,
                 });
                 Ok(runtime_events)
             }

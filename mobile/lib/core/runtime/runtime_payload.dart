@@ -74,7 +74,7 @@ class RuntimePayload {
             phase: TransportPhase.fromValue(phase),
             label: (string(EngineContract.label)?.trim().isNotEmpty ?? false)
                 ? string(EngineContract.label)!
-                : TransportPhase.fromValue(phase).label,
+                : TransportPhase.fromValue(phase).name,
             detail: string(EngineContract.detail) ?? '',
             progress: intValue(EngineContract.progress),
             latencyMs: intValue(EngineContract.latencyMs),

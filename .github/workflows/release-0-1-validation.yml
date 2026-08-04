@@ -35,9 +35,12 @@ jobs:
       - name: Clean architecture check
         shell: pwsh
         run: ./scripts/internal/check-clean-architecture.ps1
-      - name: Runtime contract check
-        shell: pwsh
-        run: ./scripts/internal/check-runtime-contract.ps1
+- name: Runtime contract check
+  shell: pwsh
+  run: ./scripts/internal/check-runtime-contract.ps1
+- name: Localization contract check
+  shell: pwsh
+  run: ./scripts/internal/check-localization.ps1
       - name: SQL isolation check
         shell: pwsh
         run: ./scripts/internal/check-sql-isolation.ps1

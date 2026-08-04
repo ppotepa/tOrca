@@ -89,6 +89,7 @@ object EngineContract {
     const val ITEMS = "items"
     const val LEVEL = "level"
     const val BODY = "body"
+    const val PREVIEW_TEXT = "previewText"
     const val TYPING = "typing"
     const val FOCUSED = "focused"
     const val IDLE = "idle"

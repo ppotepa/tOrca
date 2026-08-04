@@ -5,6 +5,8 @@ import '../../core/connection/connection_component.dart';
 import '../../core/connection/connection_readiness.dart';
 import '../../core/connection/connection_summary.dart';
 import '../../shared/widgets/tor_status_bar.dart';
+import '../../locales/presentation/app_localizations_x.dart';
+import '../../locales/presentation/status_localizer.dart';
 
 class ConnectionWarmupScreen extends StatelessWidget {
   const ConnectionWarmupScreen({
@@ -22,6 +24,7 @@ class ConnectionWarmupScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final statuses = [
       ...connection.components,
       ConnectionComponentStatus(
@@ -34,8 +37,11 @@ class ConnectionWarmupScreen extends StatelessWidget {
             ? ConnectionComponentState.degraded
             : ConnectionComponentState.starting,
         detail: connection.communicationReady
-            ? 'TorChat jest gotowy do komunikacji'
-            : connection.startupSteps.last.detail,
+            ? l10n.startupCommunicationDescription
+            : localizeStartupStepDescription(
+                l10n,
+                connection.startupSteps.last.kind,
+              ),
       ),
     ];
 
@@ -70,13 +76,13 @@ class ConnectionWarmupScreen extends StatelessWidget {
                             ),
                             const SizedBox(height: 14),
                             Text(
-                              'Rozgrzewanie TorChat',
+                              l10n.warmupTitle,
                               style: Theme.of(context).textTheme.headlineMedium,
                               textAlign: TextAlign.center,
                             ),
                             const SizedBox(height: 4),
-                            const Text(
-                              'Prywatne wiadomości przez Tor',
+                            Text(
+                              l10n.warmupSubtitle,
                               textAlign: TextAlign.center,
                             ),
                             const SizedBox(height: 8),
@@ -102,8 +108,11 @@ class ConnectionWarmupScreen extends StatelessWidget {
                               _WarmupRow(
                                 status: statuses[index],
                                 title: index == statuses.length - 1
-                                    ? 'Gotowość komunikacji'
-                                    : statuses[index].component.title,
+                                    ? l10n.communicationReady
+                                    : localizeConnectionComponentTitle(
+                                        context.l10n,
+                                        statuses[index].component,
+                                      ),
                                 last: index == statuses.length - 1,
                               ),
                             if (error.isNotEmpty) ...[
@@ -121,7 +130,7 @@ class ConnectionWarmupScreen extends StatelessWidget {
                               FilledButton.icon(
                                 onPressed: retry,
                                 icon: const ThemedIcon(Icons.refresh),
-                                label: const Text('Spróbuj ponownie'),
+                                label: Text(l10n.retry),
                               ),
                             ],
                           ],
@@ -211,7 +220,10 @@ class _WarmupRow extends StatelessWidget {
                   const SizedBox(height: 2),
                   Text(
                     status.detail.isEmpty
-                        ? status.component.description
+                        ? localizeConnectionComponentDescription(
+                            context.l10n,
+                            status.component,
+                          )
                         : status.detail,
                     style: Theme.of(context).textTheme.bodySmall,
                   ),

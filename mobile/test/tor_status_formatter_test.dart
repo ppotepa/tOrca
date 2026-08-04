@@ -6,13 +6,13 @@ void main() {
     expect(TransportPhase.fromValue('connecting'), TransportPhase.connecting);
     expect(() => TransportPhase.fromValue('ready'), throwsFormatException);
     expect(
-      TransportPhase.fromValue('bootstrapping').label,
-      'Uruchamianie obwodu Tor',
+      TransportPhase.fromValue('bootstrapping').name,
+      'bootstrapping',
     );
     expect(TransportPhase.connected.isConnected, isTrue);
     expect(TransportPhase.degraded.isWarning, isTrue);
     expect(TransportPhase.offline.isError, isTrue);
     expect(TransportPhase.reconnecting.isConnecting, isTrue);
-    expect(TransportPhase.connected.label, contains('Połączono'));
+    expect(TransportPhase.connected.name, 'connected');
   });
 }

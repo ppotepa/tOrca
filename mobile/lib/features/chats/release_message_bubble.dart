@@ -12,6 +12,7 @@ import '../../core/attachments/image_message_codec.dart';
 import '../../core/models/domain.dart';
 import '../../core/relationships/relationship_message.dart';
 import '../../shared/widgets/message_delivery_surface.dart';
+import '../../locales/presentation/app_localizations_x.dart';
 import 'message_bubble.dart';
 
 class ReleaseMessageBubble extends ConsumerStatefulWidget {
@@ -303,7 +304,7 @@ class _ReleaseMessageBubbleState extends ConsumerState<ReleaseMessageBubble> {
           child: FilledButton.tonalIcon(
             onPressed: () => _loadImage(force: true),
             icon: const ThemedIcon(Icons.download_outlined),
-            label: const Text('Pobierz obraz'),
+            label: Text(context.l10n.imageDownload),
           ),
         ),
       );
@@ -338,7 +339,7 @@ class _ReleaseMessageBubbleState extends ConsumerState<ReleaseMessageBubble> {
           title: Text(contactName),
           actions: [
             IconButton(
-              tooltip: 'Zapisz w galerii',
+              tooltip: context.l10n.imageSaveToGallery,
               onPressed: _saveToGallery,
               icon: const ThemedIcon(Icons.download_for_offline_outlined),
             ),
@@ -370,30 +371,30 @@ class _ReleaseMessageBubbleState extends ConsumerState<ReleaseMessageBubble> {
                 decodeImageMessageBody(message.text) != null)
               ListTile(
                 leading: const ThemedIcon(Icons.download_outlined),
-                title: const Text('Pobierz obraz'),
+                title: Text(context.l10n.imageDownload),
                 onTap: () => Navigator.pop(sheetContext, 'download'),
               ),
             if (_imageBytes != null)
               ListTile(
                 leading: const ThemedIcon(Icons.download_for_offline_outlined),
-                title: const Text('Zapisz w galerii'),
+                title: Text(context.l10n.imageSaveToGallery),
                 onTap: () => Navigator.pop(sheetContext, 'save'),
               ),
             if (_cached)
               ListTile(
                 leading: const ThemedIcon(Icons.delete_sweep_outlined),
-                title: const Text('Usuń z zaszyfrowanego cache'),
+                title: Text(context.l10n.imageRemoveFromCache),
                 onTap: () => Navigator.pop(sheetContext, 'uncache'),
               ),
             if (message.outgoing && message.state == MessageState.failed)
               ListTile(
                 leading: const ThemedIcon(Icons.refresh),
-                title: const Text('Spróbuj ponownie'),
+                title: Text(context.l10n.commonRetry),
                 onTap: () => Navigator.pop(sheetContext, 'retry'),
               ),
             ListTile(
               leading: const ThemedIcon(Icons.delete_outline),
-              title: const Text('Usuń tylko na tym urządzeniu'),
+              title: Text(context.l10n.commonDeleteLocal),
               onTap: () => Navigator.pop(sheetContext, 'delete'),
             ),
           ],

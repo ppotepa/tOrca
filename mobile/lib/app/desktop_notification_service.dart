@@ -1,12 +1,16 @@
 import 'dart:async';
+import 'dart:ui';
 import 'dart:io';
 
 import 'package:local_notifier/local_notifier.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../client_runtime.dart';
+import '../core/models/domain.dart';
 import 'conversation_navigation_intent.dart';
 import 'desktop_window_lifecycle.dart';
+import '../locales/generated/app_localizations.dart';
+import '../locales/domain/app_locale_preference.dart';
 
 const _notificationDeduplicationKey =
     'torchat.notifications.desktop.processedIds';
@@ -52,10 +56,31 @@ class DesktopNotificationService {
     await _ensureInitialized();
     final showPreview =
         preferences.getBool('torchat.notifications.preview') ?? false;
+    final storedLocale = AppLocalePreference.fromStorage(
+      preferences.getString('torchat.locale.preference'),
+    );
+    final locale = storedLocale?.locale ??
+        (PlatformDispatcher.instance.locale.languageCode == 'pl'
+            ? const Locale('pl')
+            : const Locale('en'));
+    final l10n = await AppLocalizations.delegate.load(locale);
+    final title = switch (event.kind) {
+      NotificationKind.messageReceived => l10n.notificationNewMessageTitle,
+      NotificationKind.pairingRequest => l10n.notificationPairingRequestTitle,
+      NotificationKind.pairingCompleted => l10n.notificationNewMessageTitle,
+    };
+    final body = switch (event.kind) {
+      NotificationKind.messageReceived => showPreview &&
+              (event.previewText?.trim().isNotEmpty ?? false)
+          ? event.previewText!.trim()
+          : l10n.notificationPrivateMessageBody,
+      NotificationKind.pairingRequest => l10n.notificationPairingRequestBody,
+      NotificationKind.pairingCompleted => l10n.notificationNewMessageTitle,
+    };
     final notification = LocalNotification(
       identifier: id,
-      title: event.title.trim().isEmpty ? 'TorChat' : event.title.trim(),
-      body: showPreview ? event.body : 'Nowa zaszyfrowana wiadomość',
+      title: title,
+      body: body,
       // The existing controller owns the user-configurable pager sound. Keep
       // the native toast silent to avoid playing two sounds for one event.
       silent: true,

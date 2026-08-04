@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:torchat_mobile/client_runtime.dart';
 import 'package:torchat_mobile/core/application_state/application_snapshot.dart';
 import 'package:torchat_mobile/core/application_state/application_state_store.dart';
@@ -224,10 +225,17 @@ class _AttachedRuntime extends _SplashRuntime
 }
 
 void main() {
-  setUp(ApplicationStateStore.shared.clear);
+  setUp(() {
+    SharedPreferences.setMockInitialValues({
+      'torchat.locale.preference': 'pl',
+    });
+    ApplicationStateStore.shared.clear();
+  });
 
   testWidgets('shows TorChat splash before runtime bootstrap', (tester) async {
     await tester.pumpWidget(const TorChatMobileApp(runtime: _SplashRuntime()));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
     expect(find.text('Prywatne wiadomości przez Tor'), findsOneWidget);
     await tester.pump(const Duration(milliseconds: 900));
   });

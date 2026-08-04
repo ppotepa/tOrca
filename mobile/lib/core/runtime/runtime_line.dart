@@ -99,7 +99,7 @@ final class EngineConnectionLine extends EngineLine {
     return TorStatusEvent(
       RuntimeTorStatus(
         phase: phase,
-        label: phase.label,
+        label: phase.name,
         detail: detail,
         retryAttempt: retryAttempt,
       ),

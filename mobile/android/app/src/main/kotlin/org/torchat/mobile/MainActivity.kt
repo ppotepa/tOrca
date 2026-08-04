@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.LocaleList
 import android.util.Log
 import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
@@ -103,6 +104,23 @@ class MainActivity : FlutterActivity() {
             })
         MethodChannel(engine.dartExecutor.binaryMessenger, "org.torchat/mobile")
             .setMethodCallHandler { call, result -> handle(call, result) }
+        MethodChannel(engine.dartExecutor.binaryMessenger, "org.torchat/locale")
+            .setMethodCallHandler { call, result ->
+                if (call.method != "setApplicationLocale") {
+                    result.notImplemented()
+                    return@setMethodCallHandler
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    val languageTag = call.argument<String>("languageTag")
+                    getSystemService(android.app.LocaleManager::class.java)
+                        .applicationLocales = if (languageTag.isNullOrBlank()) {
+                        LocaleList.getEmptyLocaleList()
+                    } else {
+                        LocaleList.forLanguageTags(languageTag)
+                    }
+                }
+                result.success(null)
+            }
         MethodChannel(engine.dartExecutor.binaryMessenger, "org.torchat/audio")
             .setMethodCallHandler { call, result ->
                 if (call.method != "playIntro") {

@@ -37,16 +37,6 @@ enum TransportPhase {
       this == TransportPhase.connecting ||
       this == TransportPhase.reconnecting;
 
-  String get label => switch (this) {
-    TransportPhase.connected => 'Połączono z relayem przez Tor',
-    TransportPhase.starting => 'Uruchamianie Tor',
-    TransportPhase.bootstrapping => 'Uruchamianie obwodu Tor',
-    TransportPhase.connecting => 'Łączenie z relayem onion',
-    TransportPhase.degraded => 'Relay działa w trybie ograniczonym',
-    TransportPhase.reconnecting => 'Ponowne łączenie z relayem',
-    TransportPhase.offline => 'Tor offline',
-    TransportPhase.error => 'Sprawdzanie połączenia Tor',
-  };
 }
 
 enum MobileTab { chats, contacts }
@@ -111,26 +101,6 @@ class StartupStep {
   final StartupStepState state;
   final String detail;
 
-  String get title => switch (kind) {
-    StartupStepKind.engine => 'Wspólny silnik',
-    StartupStepKind.localData => 'Dane lokalne',
-    StartupStepKind.tor => 'Sieć Tor',
-    StartupStepKind.peerListener => 'Lokalny serwer P2P',
-    StartupStepKind.onionService => 'Usługa onion P2P',
-    StartupStepKind.relay => 'Tor relay',
-    StartupStepKind.communication => 'Gotowość komunikacji',
-  };
-
-  String get description => switch (kind) {
-    StartupStepKind.engine => 'Uruchamianie wspólnego silnika Rust',
-    StartupStepKind.localData => 'Otwieranie zaszyfrowanej bazy i tożsamości',
-    StartupStepKind.tor => 'Uruchamianie procesu Tor i przygotowanie SOCKS',
-    StartupStepKind.peerListener => 'Nasłuchiwanie lokalnego serwera peer',
-    StartupStepKind.onionService => 'Publikowanie adresu urządzenia w Tor',
-    StartupStepKind.relay => 'Połączenie z serwerem sterującym',
-    StartupStepKind.communication => 'Kolejki i odbieranie wiadomości',
-  };
-
   StartupStep copyWith({StartupStepState? state, String? detail}) =>
       StartupStep(
         kind: kind,
@@ -174,15 +144,6 @@ List<StartupStep> transitionStartupStep(
       else
         steps[index],
   ];
-}
-
-extension PeerServerStatusDisplay on PeerServerStatus {
-  String get label => switch (this) {
-    PeerServerStatus.starting => 'Serwer P2P uruchamia się',
-    PeerServerStatus.ready => 'Serwer P2P aktywny',
-    PeerServerStatus.offline => 'Serwer P2P niedostępny',
-    PeerServerStatus.error => 'Błąd serwera P2P',
-  };
 }
 
 enum ConversationState { pending, verifying, active, failed, offline }
@@ -239,16 +200,6 @@ enum InviteState {
     InviteState.expired => EngineContract.inviteStateExpired,
     InviteState.archived => EngineContract.inviteStateArchived,
     InviteState.cancelled => EngineContract.inviteStateCancelled,
-  };
-
-  String get label => switch (this) {
-    InviteState.pending => 'Oczekuje na decyzję',
-    InviteState.accepted => 'Zaakceptowane, finalizacja kontaktu',
-    InviteState.rejected => 'Odrzucone',
-    InviteState.completed => 'Zakończone',
-    InviteState.expired => 'Wygasło',
-    InviteState.archived => 'Zarchiwizowane',
-    InviteState.cancelled => 'Anulowane',
   };
 
   IconData get outboxIcon => switch (this) {
@@ -312,14 +263,6 @@ enum MessageState {
     MessageState.failed => EngineContract.messageStateFailed,
   };
 
-  String get label => switch (this) {
-    MessageState.queued => 'w kolejce',
-    MessageState.sending => 'wysyłanie…',
-    MessageState.sent => 'wysłano',
-    MessageState.delivered => 'dostarczono',
-    MessageState.read => 'odczytano',
-    MessageState.failed => 'błąd wysyłania',
-  };
 }
 
 class RuntimeTorStatus {
@@ -1036,18 +979,30 @@ class RuntimeLogEvent extends RuntimeEvent {
   final String message;
 }
 
+enum NotificationKind {
+  messageReceived('message_received'),
+  pairingRequest('pairing_request'),
+  pairingCompleted('pairing_completed');
+
+  const NotificationKind(this.wireValue);
+  final String wireValue;
+
+  static NotificationKind fromWire(Object? value) => NotificationKind.values
+      .firstWhere((item) => item.wireValue == value, orElse: () => NotificationKind.messageReceived);
+}
+
 class NotificationRequestedEvent extends RuntimeEvent {
   const NotificationRequestedEvent({
     required this.id,
-    required this.title,
-    required this.body,
+    required this.kind,
     this.conversationId,
+    this.previewText,
   });
 
   final String id;
-  final String title;
-  final String body;
+  final NotificationKind kind;
   final String? conversationId;
+  final String? previewText;
 }
 
 Map<String, dynamic> _map(Map<String, dynamic> map, String key) =>

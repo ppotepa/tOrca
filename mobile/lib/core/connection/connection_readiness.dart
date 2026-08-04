@@ -54,7 +54,7 @@ class ConnectionReadiness {
         component: ConnectionComponent.engine,
         state: engineState,
         detail: engineStep.detail.isEmpty
-            ? ConnectionComponent.engine.description
+            ? ConnectionComponent.engine.name
             : engineStep.detail,
       ),
       ConnectionComponentStatus(
@@ -230,12 +230,12 @@ class ConnectionReadiness {
       orElse: () => onionService,
     );
     if (firstBlocking.state == ConnectionComponentState.failed) {
-      return '${firstBlocking.component.title}: ${firstBlocking.detail}';
+      return '${firstBlocking.component.name}: ${firstBlocking.detail}';
     }
     if (firstBlocking.state == ConnectionComponentState.degraded) {
-      return '${firstBlocking.component.title} działa w trybie ograniczonym';
+      return '${firstBlocking.component.name} degraded';
     }
-    return 'Oczekiwanie: ${firstBlocking.component.title.toLowerCase()}';
+    return 'Waiting: ${firstBlocking.component.name}';
   }
 }
 
@@ -293,7 +293,7 @@ ConnectionComponentStatus _torStatus(RuntimeTorStatus transport) {
   return ConnectionComponentStatus(
     component: ConnectionComponent.tor,
     state: state,
-    detail: transport.detail.isEmpty ? transport.label : transport.detail,
+    detail: transport.detail.isEmpty ? transport.phase.name : transport.detail,
     progress: transport.progress,
     attempt: transport.retryAttempt,
     errorCode: state == ConnectionComponentState.failed
@@ -330,7 +330,7 @@ ConnectionComponentStatus _relayStatus(
     detail: relay?.detail.isNotEmpty == true
         ? relay!.detail
         : transport.detail.isEmpty
-        ? transport.label
+        ? transport.phase.name
         : transport.detail,
     attempt: relay?.retryAttempt ?? transport.retryAttempt,
     errorCode: state == ConnectionComponentState.failed
@@ -366,7 +366,7 @@ ConnectionComponentStatus _peerStatus({
   return ConnectionComponentStatus(
     component: component,
     state: state,
-    detail: step.detail.isEmpty ? component.description : step.detail,
+    detail: step.detail.isEmpty ? component.name : step.detail,
     errorCode: state == ConnectionComponentState.failed
         ? component == ConnectionComponent.peerListener
               ? 'PEER_LISTENER_FAILED'

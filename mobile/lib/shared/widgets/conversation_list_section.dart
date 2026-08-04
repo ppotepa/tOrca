@@ -9,6 +9,7 @@ import '../../core/attachments/image_message_codec.dart';
 import '../../core/models/domain.dart';
 import '../../core/presence/contact_presence_snapshot.dart';
 import '../../core/presence/contact_presence_store.dart';
+import '../../locales/presentation/app_localizations_x.dart';
 import '../async/busy_surface.dart';
 import '../formatters/conversation_display.dart';
 import 'empty_state.dart';
@@ -156,7 +157,7 @@ class ConversationListSection extends ConsumerWidget {
             presentation: visibleConversations.isEmpty
                 ? BusyPresentation.replace
                 : BusyPresentation.overlay,
-            label: 'Ładowanie rozmów…',
+            label: context.l10n.conversationsLoading,
             child: list,
           ),
         ),
@@ -181,26 +182,34 @@ class ConversationListSection extends ConsumerWidget {
         Offset.zero & overlay.size,
       ),
       items: [
-        const PopupMenuItem(
+        PopupMenuItem(
           value: 'rename',
-          child: Text('Zmień nazwę lokalną'),
+          child: Text(context.l10n.conversationRename),
         ),
         PopupMenuItem(
           value: 'pin',
-          child: Text(preference.pinned ? 'Odepnij' : 'Przypnij'),
+            child: Text(
+              preference.pinned
+                  ? context.l10n.conversationUnpin
+                  : context.l10n.conversationPin,
+            ),
         ),
         PopupMenuItem(
           value: 'mute',
-          child: Text(preference.muted ? 'Włącz powiadomienia' : 'Wycisz'),
+            child: Text(
+              preference.muted
+                  ? context.l10n.conversationEnableNotifications
+                  : context.l10n.conversationMute,
+            ),
         ),
         const PopupMenuDivider(),
-        const PopupMenuItem(
+        PopupMenuItem(
           value: 'clear_history',
-          child: Text('Wyczyść lokalną historię'),
+          child: Text(context.l10n.conversationClearHistory),
         ),
-        const PopupMenuItem(
+        PopupMenuItem(
           value: 'archive',
-          child: Text('Archiwizuj lokalnie'),
+          child: Text(context.l10n.conversationArchive),
         ),
       ],
     );
@@ -214,29 +223,29 @@ class ConversationListSection extends ConsumerWidget {
         final result = await showDialog<String?>(
           context: context,
           builder: (dialogContext) => AlertDialog(
-            title: const Text('Lokalna nazwa rozmowy'),
+            title: Text(context.l10n.conversationLocalName),
             content: TextField(
               controller: field,
               autofocus: true,
               maxLength: 48,
-              decoration: const InputDecoration(
-                labelText: 'Nazwa',
-                helperText: 'Nazwa pozostaje tylko na tym urządzeniu.',
+              decoration: InputDecoration(
+                labelText: context.l10n.conversationName,
+                helperText: context.l10n.conversationNameLocalOnly,
               ),
               onSubmitted: (value) => Navigator.pop(dialogContext, value),
             ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(dialogContext),
-                child: const Text('Anuluj'),
+                child: Text(context.l10n.commonCancel),
               ),
               TextButton(
                 onPressed: () => Navigator.pop(dialogContext, ''),
-                child: const Text('Przywróć'),
+                child: Text(context.l10n.conversationRestore),
               ),
               FilledButton(
                 onPressed: () => Navigator.pop(dialogContext, field.text),
-                child: const Text('Zapisz'),
+                child: Text(context.l10n.commonSave),
               ),
             ],
           ),
@@ -269,19 +278,18 @@ class ConversationListSection extends ConsumerWidget {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Wyczyścić lokalną historię?'),
-        content: const Text(
-          'Wiadomości zostaną usunięte wyłącznie z tego urządzenia. '
-          'Kontakt nie otrzyma informacji o tej operacji.',
+        title: Text(context.l10n.conversationClearHistoryTitle),
+        content: Text(
+          context.l10n.conversationClearHistoryDescription,
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Anuluj'),
+            child: Text(context.l10n.commonCancel),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Wyczyść'),
+            child: Text(context.l10n.conversationClear),
           ),
         ],
       ),
@@ -302,7 +310,7 @@ class ConversationListSection extends ConsumerWidget {
       ref
           .read(uiNotificationCenterProvider.notifier)
           .showSuccess(
-            'Lokalna historia została wyczyszczona.',
+            context.l10n.conversationHistoryCleared,
             deduplicationKey: 'history-cleared:${conversation.id}',
           );
     }

@@ -7,6 +7,7 @@ import '../../core/attachments/encrypted_image_store.dart';
 import '../../shared/widgets/action_section.dart';
 import '../../shared/widgets/info_tile.dart';
 import '../../shared/widgets/themed_switch_list_tile.dart';
+import '../../locales/presentation/app_localizations_x.dart';
 
 class ImageStorageSettingsSection extends ConsumerStatefulWidget {
   const ImageStorageSettingsSection({super.key});
@@ -72,19 +73,16 @@ class _ImageStorageSettingsSectionState
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Wyczyścić cache obrazów?'),
-        content: const Text(
-          'Usuwa wyłącznie lokalne zaszyfrowane kopie obrazów. '
-          'Wiadomości i historia rozmów pozostaną bez zmian.',
-        ),
+        title: Text(context.l10n.imageCacheClearTitle),
+        content: Text(context.l10n.imageCacheClearDescription),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Anuluj'),
+            child: Text(context.l10n.cancel),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Wyczyść'),
+            child: Text(context.l10n.clear),
           ),
         ],
       ),
@@ -99,7 +97,7 @@ class _ImageStorageSettingsSectionState
       ref
           .read(uiNotificationCenterProvider.notifier)
           .showSuccess(
-            'Cache obrazów został wyczyszczony.',
+            context.l10n.imageCacheCleared,
             deduplicationKey: 'image-cache-cleared',
           );
     } catch (error) {
@@ -124,25 +122,26 @@ class _ImageStorageSettingsSectionState
 
   @override
   Widget build(BuildContext context) => ActionSection(
-    title: 'OBRAZY I CACHE',
+    title: context.l10n.imageCacheSection,
     child: Column(
       children: [
         ThemedSwitchListTile(
           contentPadding: EdgeInsets.zero,
-          title: const Text('Automatycznie pobieraj obrazy'),
-          subtitle: const Text(
-            'Zapisuje przychodzące obrazy w lokalnym magazynie AES-GCM',
-          ),
+          title: Text(context.l10n.imageAutoDownload),
+          subtitle: Text(context.l10n.imageAutoDownloadDescription),
           value: _automaticDownload,
           onChanged: _loading || _saving ? null : _setAutomaticDownload,
         ),
         const Divider(),
         InfoTile(
           leading: const ThemedIcon(Icons.lock_outline),
-          title: 'Zaszyfrowany cache',
+          title: context.l10n.encryptedCache,
           subtitle: _loading
-              ? 'Obliczanie użycia…'
-              : '${_usage.files} plików · ${_usage.formattedBytes}',
+              ? context.l10n.calculatingUsage
+              : context.l10n.imageFilesCount(
+                  _usage.files,
+                  _usage.formattedBytes,
+                ),
         ),
         const SizedBox(height: 8),
         SizedBox(
@@ -157,7 +156,11 @@ class _ImageStorageSettingsSectionState
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : const ThemedIcon(Icons.delete_sweep_outlined),
-            label: Text(_clearing ? 'Czyszczenie…' : 'Wyczyść cache obrazów'),
+            label: Text(
+              _clearing
+                  ? context.l10n.imageCacheClearing
+                  : context.l10n.imageCacheClearButton,
+            ),
           ),
         ),
       ],

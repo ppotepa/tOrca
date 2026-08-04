@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:torchat_mobile/app/app_controller.dart';
+import 'package:torchat_mobile/locales/domain/user_problem_code.dart';
 import 'package:torchat_mobile/core/runtime/runtime_contract.dart';
 import 'package:torchat_mobile/core/runtime/runtime_repository.dart';
 import 'package:torchat_mobile/features/chats/message_bubble.dart';
@@ -474,7 +475,10 @@ void main() {
       final state = container.read(appControllerProvider);
       expect(runtime.submitPairingCalls, 0);
       expect(state.outbox, isEmpty);
-      expect(state.error, contains('Pairing wymaga dostępnego relay'));
+      expect(
+        state.problem?.code,
+        UserProblemCode.pairingRequiresRelay,
+      );
     },
   );
 

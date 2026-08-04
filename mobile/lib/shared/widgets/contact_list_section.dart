@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/notifications/ui_notification_center.dart';
 import '../../core/models/domain.dart';
+import '../../locales/presentation/app_localizations_x.dart';
 import 'empty_state.dart';
 import 'feature_header.dart';
 import 'identity_avatar.dart';
@@ -62,9 +63,8 @@ class ContactListSection extends ConsumerWidget {
                   final contact = contacts[index];
                   return Semantics(
                     container: true,
-                    label: 'Kontakt ${contact.displayName}',
-                    hint:
-                        'Naciśnij, aby rozpocząć rozmowę. Przytrzymaj, aby otworzyć menu.',
+                    label: context.l10n.contactSemantics(contact.displayName),
+                    hint: context.l10n.contactSemanticsHint,
                     child: GestureDetector(
                       behavior: HitTestBehavior.opaque,
                       onLongPressStart: (details) => _showContextMenu(
@@ -113,25 +113,33 @@ class ContactListSection extends ConsumerWidget {
         Offset.zero & overlay.size,
       ),
       items: [
-        const PopupMenuItem(value: 'open', child: Text('Rozpocznij rozmowę')),
+        PopupMenuItem(
+          value: 'open',
+          child: Text(context.l10n.contactStartConversation),
+        ),
         if (onDetails != null)
-          const PopupMenuItem(
+          PopupMenuItem(
             value: 'details',
-            child: Text('Szczegóły kontaktu'),
+            child: Text(context.l10n.contactDetails),
           ),
         if (onToggleMute != null)
           PopupMenuItem(
             value: 'mute',
             child: Text(
-              contact.muted ? 'Włącz powiadomienia' : 'Wycisz kontakt',
+              contact.muted
+                  ? context.l10n.contactEnableNotifications
+                  : context.l10n.contactMute,
             ),
           ),
-        const PopupMenuItem(value: 'copy', child: Text('Kopiuj fingerprint')),
+        PopupMenuItem(
+          value: 'copy',
+          child: Text(context.l10n.contactCopyFingerprint),
+        ),
         if (onRemove != null)
           PopupMenuItem(
             value: 'remove',
             child: Text(
-              'Zakończ relację',
+              context.l10n.contactEndRelationship,
               style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
           ),

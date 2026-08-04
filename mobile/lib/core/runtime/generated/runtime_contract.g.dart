@@ -84,6 +84,7 @@ abstract final class EngineContract {
   static const items = 'items';
   static const level = 'level';
   static const body = 'body';
+  static const previewText = 'previewText';
   static const typing = 'typing';
   static const focused = 'focused';
   static const idle = 'idle';

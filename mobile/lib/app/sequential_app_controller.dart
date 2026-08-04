@@ -209,6 +209,7 @@ class SequentialAppController extends base.AppController {
         isLoading: false,
         action: '',
         error: _message(error),
+        problem: problemForError(error),
         startupSteps: _startup.stepsFor(_phase, error: _message(error)),
         screen: localShellReady
             ? (state.profile.nickname.trim().isNotEmpty
@@ -443,6 +444,7 @@ class SequentialAppController extends base.AppController {
       isLoading: false,
       action: '',
       error: _message(error),
+      problem: problemForError(error),
       startupSteps: _startup.stepsFor(_phase, error: error),
     );
   }
@@ -495,7 +497,10 @@ class SequentialAppController extends base.AppController {
         }
         await refreshData(forcePairing: includePairing, allowAutoTorka: false);
       } catch (error) {
-        state = state.copyWith(error: _message(error));
+        state = state.copyWith(
+          error: _message(error),
+          problem: problemForError(error),
+        );
       }
     }
   }

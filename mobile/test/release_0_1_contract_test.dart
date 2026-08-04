@@ -42,8 +42,8 @@ void main() {
     expect(preferences, contains('torchat.conversation.preferences.v1'));
     expect(preferences, contains('togglePinned'));
     expect(preferences, contains('toggleMuted'));
-    expect(list, contains('Zmień nazwę lokalną'));
-    expect(list, contains('Archiwizuj lokalnie'));
+    expect(list, contains('conversationRename'));
+    expect(list, contains('conversationArchive'));
   });
 
   test('notification and privacy settings are enforced', () {

@@ -8,6 +8,17 @@ import '../../core/models/domain.dart';
 import '../../shared/async/themed_activity_indicator.dart';
 import '../../shared/formatters/message_timestamps.dart';
 import '../../shared/widgets/message_delivery_surface.dart';
+import '../../locales/presentation/app_localizations_x.dart';
+import '../../locales/generated/app_localizations.dart';
+
+String _messageStateLabel(AppLocalizations l10n, MessageState state) => switch (state) {
+  MessageState.queued => l10n.messageStateQueued,
+  MessageState.sending => l10n.messageStateSending,
+  MessageState.sent => l10n.messageStateSent,
+  MessageState.delivered => l10n.messageStateDelivered,
+  MessageState.read => l10n.messageStateRead,
+  MessageState.failed => l10n.messageStateFailed,
+};
 
 class MessageBubble extends ConsumerWidget {
   const MessageBubble({
@@ -31,6 +42,7 @@ class MessageBubble extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l10n = context.l10n;
     final retry = ref.watch(
       uiOperationProvider(UiOperationKey.messageRetry(message.id)),
     );
@@ -118,9 +130,9 @@ class MessageBubble extends ConsumerWidget {
                       message: message,
                       foreground: foreground,
                       busyLabel: retry.busy
-                          ? 'Ponawianie…'
+                          ? l10n.messageRetrying
                           : deletion.busy
-                          ? 'Usuwanie…'
+                          ? l10n.messageDeleting
                           : null,
                     ),
                   ],
@@ -134,6 +146,7 @@ class MessageBubble extends ConsumerWidget {
   }
 
   Future<void> _showMenu(BuildContext context, Offset position) async {
+    final l10n = context.l10n;
     final overlay =
         Overlay.of(context).context.findRenderObject()! as RenderBox;
     final action = await showMenu<String>(
@@ -143,13 +156,13 @@ class MessageBubble extends ConsumerWidget {
         Offset.zero & overlay.size,
       ),
       items: [
-        const PopupMenuItem(value: 'reply', child: Text('Odpowiedz')),
-        const PopupMenuItem(value: 'copy', child: Text('Kopiuj wiadomość')),
+        PopupMenuItem(value: 'reply', child: Text(l10n.messageReply)),
+        PopupMenuItem(value: 'copy', child: Text(l10n.messageCopy)),
         if (message.outgoing && message.state == MessageState.failed)
-          const PopupMenuItem(value: 'retry', child: Text('Spróbuj ponownie')),
-        const PopupMenuItem(
+          PopupMenuItem(value: 'retry', child: Text(l10n.messageRetry)),
+        PopupMenuItem(
           value: 'delete',
-          child: Text('Usuń tylko na tym urządzeniu'),
+          child: Text(l10n.messageDeleteLocal),
         ),
       ],
     );
@@ -220,7 +233,10 @@ class _BubbleFooter extends StatelessWidget {
             const SizedBox(width: 12),
           ],
           Text(
-            formatMessageTime(message.createdAt),
+            formatMessageTime(
+              message.createdAt,
+              locale: Localizations.localeOf(context).toLanguageTag(),
+            ),
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
               color: foreground.withValues(alpha: .72),
             ),
@@ -229,7 +245,7 @@ class _BubbleFooter extends StatelessWidget {
           Icon(icon, size: 14, color: foreground.withValues(alpha: .72)),
           const SizedBox(width: 4),
           Text(
-            message.state.label,
+            _messageStateLabel(context.l10n, message.state),
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
               color: message.state == MessageState.failed
                   ? context.statusTheme.danger

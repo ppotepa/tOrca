@@ -21,7 +21,7 @@ pub use client_api::PairingList;
 pub use error::{EngineError, EngineResult};
 pub use event::{
     ConnectionSnapshot, ConnectionState, EngineEvent, EngineFatalError, EngineLogEvent,
-    NotificationRequest, PlatformAction, ResponsePayload, ResponseResult,
+    NotificationKind, NotificationRequest, PlatformAction, ResponsePayload, ResponseResult,
 };
 pub use relay::{EngineRelay, NoopEngineRelay};
 pub use storage::{

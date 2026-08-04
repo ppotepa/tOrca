@@ -26,7 +26,7 @@ void main() {
     expect(result[1].state, ConnectionComponentState.starting);
     for (var index = 2; index < result.length; index += 1) {
       expect(result[index].state, ConnectionComponentState.pending);
-      expect(result[index].detail, contains('Dane lokalne'.toLowerCase()));
+      expect(result[index].detail, contains('localData'));
     }
   });
 

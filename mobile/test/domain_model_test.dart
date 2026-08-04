@@ -19,12 +19,12 @@ void main() {
     expect(TransportPhase.connected.isConnected, isTrue);
     expect(TransportPhase.bootstrapping.isConnecting, isTrue);
     expect(TransportPhase.offline.isError, isTrue);
-    expect(TransportPhase.connected.label, 'Połączono z relayem przez Tor');
-    expect(TransportPhase.error.label, 'Sprawdzanie połączenia Tor');
+    expect(TransportPhase.connected.name, 'connected');
+    expect(TransportPhase.error.name, 'error');
     expect(ConversationState.active.presenceLabel, 'online');
     expect(ConversationState.failed.presenceLabel, 'niedostępny');
-    expect(InviteState.accepted.label, 'Zaakceptowane, finalizacja kontaktu');
-    expect(MessageState.delivered.label, 'dostarczono');
+    expect(InviteState.accepted.wireValue, 'ACCEPTED');
+    expect(MessageState.delivered.wireValue, 'DELIVERED');
   });
 
   test('invite and pairing request expose pending state through status', () {
