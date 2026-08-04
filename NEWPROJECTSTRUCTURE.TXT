@@ -1,10 +1,81 @@
 TORCHAT — DOCZELOWA STRUKTURA PROJEKTU I PLAN MIGRACJI
 ========================================================
 
-Status dokumentu: plan architektoniczny
+Status dokumentu: docelowa struktura + stan wdrozenia na 2026-08-04
 Zakres: monorepo, granice odpowiedzialnosci, nazewnictwo, migracja i cleanup.
 Poza zakresem: zmiana zachowania produktu, zmiana protokolu kryptograficznego,
 automatyczne przenoszenie plikow bez osobnego review.
+
+UWAGA IMPLEMENTACYJNA
+----------------------
+
+Ten dokument opisuje aktualny kierunek i rzeczywiste punkty rozszerzen projektu.
+Pairing nie jest osobnym produktem ani wersja API. W kodzie nie tworzymy sciezki
+"v2" ani legacy path: podstawowy pairing korzysta z aktualnego kontraktu engine,
+efemerycznego relaya rendezvous oraz lokalnego SQLCipher runtime.
+
+Stan wdrozenia:
+
+DONE
+* canonicalny, symetryczny pair_key dla relacji A <-> B;
+* deduplikacja crossed pairing w pamieci i SQLite;
+* idempotentne submit, accept, Welcome i finalize/retry;
+* projekcje pairing/application z ochrona przed nieaktualnym wynikiem;
+* rozdzielenie pending pairing od aktywnego kontaktu;
+* PairingUiCoordinator dla kodu i promptu akceptacji;
+* wszystkie nowe zapytania SQL w common/torchat-client-engine/sql;
+* relay bez trwalego storage, profili, kontaktow i wiadomosci;
+* testy Rust, Flutter oraz testy kontraktu.
+
+Wymagajacy srodowiska:
+* koncowy smoke test Windows <-> Android na dwoch urzadzeniach.
+
+RZECZYWISTE DRZEWO REPOZYTORIUM — PUNKT ODNIESIENIA
+----------------------------------------------------
+
+  ./
+  ├── common/
+  │   ├── torchat-core/                       # wspolne typy kryptograficzne/protokol
+  │   ├── torchat-client-runtime/             # domena, state machine, retry, projekcje
+  │   │   ├── src/runtime.rs
+  │   │   ├── src/runtime/pairing_process.rs
+  │   │   ├── src/pairing_rules.rs
+  │   │   └── tests/
+  │   ├── torchat-client-engine/               # actor, P2P, relay client, SQLite
+  │   │   ├── src/actor/
+  │   │   ├── src/storage/
+  │   │   │   └── sqlite/
+  │   │   └── sql/
+  │   │       ├── migrations/
+  │   │       ├── queries/
+  │   │       └── commands/
+  │   └── torchat-client-engine-ffi/           # most JNI/C ABI
+  ├── desktop/                                 # cienki host Windows + Rust engine
+  │   └── src/
+  ├── mobile/                                  # Flutter UI Android/Windows
+  │   ├── lib/app/                             # controller i state aplikacji
+  │   ├── lib/core/runtime/                    # repository i kontrakt runtime
+  │   ├── lib/features/pairing/                # PairingUiCoordinator
+  │   ├── lib/features/onboarding/             # dialog kodu/QR
+  │   └── test/
+  ├── server/torchat-server/                  # tylko efemeryczny rendezvous relay
+  ├── protocol/                                # fixtures i dokumentacja protokolu
+  ├── infra/                                  # Docker, Tor, compose, deployment
+  ├── scripts/                                # jeden pipeline build/deploy/diagnostics
+  └── tools/torchat-contract-gen/             # generator wspolnego kontraktu
+
+Zasada granicy desktop/mobile:
+
+  mobile/lib/ nie jest biblioteka desktopowa. Wspolny jest tylko Flutter UI
+  i kontrakt runtime; desktopowy host Rust pozostaje w ./desktop/. Kod platformowy
+  trafia do ./mobile/lib/platform/android/ albo ./mobile/lib/platform/desktop/,
+  a nie do wspolnego modelu domenowego.
+
+Zasada granicy SQL:
+
+  Kod Rust nie zawiera nowych wielolinijkowych zapytan SQL. Kazde zapytanie
+  zapisujemy jako osobny plik w ./common/torchat-client-engine/sql/ i rejestrujemy
+  przez ./common/torchat-client-engine/src/storage/sqlite/sql_catalog.rs.
 
 
 0. CEL
@@ -997,4 +1068,3 @@ Kazdy refaktor ma odpowiadac na cztery pytania przed przeniesieniem pliku:
 
 Jesli nie ma jasnej odpowiedzi, pliku nie przenosimy. Najpierw stabilizujemy
 kontrakt i testy.
-
