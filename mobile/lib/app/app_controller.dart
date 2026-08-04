@@ -6,6 +6,7 @@ import 'app_controller_base.dart' as base;
 import 'desktop_window_lifecycle.dart';
 import 'notification_safe_app_controller.dart';
 
+export '../core/connection/app_state_connection.dart';
 export 'app_controller_base.dart';
 
 final appControllerProvider =
@@ -13,4 +14,3 @@ final appControllerProvider =
       unawaited(DesktopWindowLifecycle.initialize());
       return NotificationSafeAppController();
     });
-
