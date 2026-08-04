@@ -741,6 +741,14 @@ impl ClientEngineActor {
             return Ok(());
         }
         if let Some(pairing) = effect.pairing().cloned() {
+            // Accepted rendezvous pairings deliver the MLS Welcome directly
+            // from accept_invite. The old retry effect reused the original
+            // ContactInvite as if it were a RelayPayloadV1 response, which
+            // produced invalid relay payload encoding and could not repair a
+            // pairing. Only rejection still uses the generic envelope path.
+            if pairing.kind == torchat_client_runtime::PairingSendKind::Offer {
+                return Ok(());
+            }
             let Some((recipient_installation_id, ciphertext)) =
                 self.prepare_pairing_response_payload(&pairing)?
             else {

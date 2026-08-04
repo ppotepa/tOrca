@@ -71,11 +71,13 @@ impl ClientEngineActor {
             )
             .map_err(|error| EngineError::Serialization(error.to_string()))?;
         let mut invite = ContactInvite::parse(&payload).map_err(EngineError::InvalidCommand)?;
-        // Pairing must remain possible while the local onion service is still
-        // starting (or when Android is in a power-saving mode). The signed
-        // invite can omit the endpoint; the contact is then relay-only until
-        // a later endpoint exchange succeeds.
-        invite.peer_endpoint = self.local_peer_endpoint.clone();
+        let local_peer_endpoint = self.local_peer_endpoint.clone().ok_or_else(|| {
+            EngineError::Transport(
+                "peer endpoint is not ready; wait for onion service before creating a pairing code"
+                    .to_owned(),
+            )
+        })?;
+        invite.peer_endpoint = Some(local_peer_endpoint);
         invite
             .sign(&self.identity)
             .map_err(|error| EngineError::Serialization(error.to_string()))?;
@@ -303,7 +305,7 @@ impl ClientEngineActor {
                     ));
                 }
                 let result = runtime.welcome_accepted(
-                    contact_record_from_card(&card, false),
+                    contact_record_from_card(&card, true),
                     true,
                     pairing_invite_id.map(str::to_owned),
                 )?;

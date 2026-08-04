@@ -332,7 +332,7 @@ pub(crate) fn next_state_for_peer_outcome(
 pub(crate) fn complete_welcome(
     mut item: PairingItem,
     peer_installation_id: String,
-) -> RuntimeResult<(PairingItem, crate::PairingConfirmContactEffect)> {
+) -> RuntimeResult<PairingItem> {
     let capability = item
         .capability
         .clone()
@@ -349,14 +349,8 @@ pub(crate) fn complete_welcome(
             ));
         }
     }
-    Ok((
-        item.clone(),
-        crate::PairingConfirmContactEffect {
-            pairing_id: item.pairing_id,
-            capability,
-            peer_installation_id,
-        },
-    ))
+    let _ = (capability, peer_installation_id);
+    Ok(item)
 }
 
 pub(crate) fn visible_items(mut items: Vec<PairingItem>) -> Vec<PairingItem> {
@@ -657,10 +651,9 @@ mod tests {
             offer_invite_id: Some("invite-1".to_owned()),
             offer_payload: Some("payload-1".to_owned()),
         };
-        let (completed, effect) = complete_welcome(item, "peer-1".to_owned()).unwrap();
+        let completed = complete_welcome(item, "peer-1".to_owned()).unwrap();
         assert_eq!(completed.state, InviteState::Completed);
-        assert_eq!(effect.pairing_id, "pairing-1");
-        let (replayed, _) = complete_welcome(completed, "peer-1".to_owned()).unwrap();
+        let replayed = complete_welcome(completed, "peer-1".to_owned()).unwrap();
         assert_eq!(replayed.state, InviteState::Completed);
     }
 

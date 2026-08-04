@@ -519,8 +519,6 @@ where
         open_conversation: bool,
         invite_id: Option<String>,
     ) -> RuntimeResult<crate::WelcomeAcceptedResult> {
-        let mut confirm_contact = None;
-
         if let Some(invite_id) = invite_id {
             let item = self
                 .storage
@@ -531,7 +529,7 @@ where
                     RuntimeError::NotFound("pairing request does not exist".to_owned())
                 })?;
             let was_completed = item.state == InviteState::Completed;
-            let (updated_item, effect) =
+            let updated_item =
                 pairing_process::complete_welcome(item, contact.installation_id.clone())?;
             if !was_completed {
                 self.storage.put_pairing_inbox(updated_item.clone())?;
@@ -540,18 +538,20 @@ where
                     state: Some(updated_item.state),
                 });
             }
-            confirm_contact = Some(effect);
         }
 
+        // A valid MLS Welcome is the cryptographic confirmation. There is no
+        // server-side contact confirmation in the rendezvous-only design.
+        let mut contact = contact;
+        contact.verification = crate::VerificationState::Verified;
         let conversation = self.promote_contact_with_status(
-            contact.clone(),
-            crate::ConversationState::Verifying,
+            contact,
+            crate::ConversationState::Active,
             open_conversation,
         )?;
 
         Ok(crate::WelcomeAcceptedResult {
             conversation,
-            confirm_contact,
         })
     }
 
@@ -2301,9 +2301,8 @@ mod tests {
 
         assert_eq!(
             result.conversation.status,
-            crate::ConversationState::Verifying
+            crate::ConversationState::Active
         );
-        assert_eq!(result.confirm_contact.unwrap().pairing_id, "pairing-1");
         assert_eq!(
             runtime.storage.pairing_inbox().unwrap()[0].state,
             InviteState::Completed
@@ -2318,9 +2317,8 @@ mod tests {
 
         assert_eq!(
             result.conversation.status,
-            crate::ConversationState::Verifying
+            crate::ConversationState::Active
         );
-        assert!(result.confirm_contact.is_none());
         assert_eq!(runtime.contacts().unwrap()[0].installation_id, "peer-1");
     }
 

@@ -614,18 +614,8 @@ pub enum PairingPeerOutcome {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PairingConfirmContactEffect {
-    pub pairing_id: String,
-    pub capability: String,
-    pub peer_installation_id: String,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct WelcomeAcceptedResult {
     pub conversation: ConversationSummary,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub confirm_contact: Option<PairingConfirmContactEffect>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

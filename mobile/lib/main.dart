@@ -568,6 +568,27 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
       appControllerProvider.select((value) => value.outbox),
       _showPairingOutcomeToast,
     );
+    ref.listen<List<ContactRecord>>(
+      applicationSnapshotProvider.select(
+        (value) => value.valueOrNull?.contacts ?? const <ContactRecord>[],
+      ),
+      (previous, current) {
+        if (!mounted || previous == null) return;
+        final previousIds = previous.map((contact) => contact.id).toSet();
+        for (final contact in current) {
+          if (previousIds.contains(contact.id)) continue;
+          final name = contact.displayName.trim().isEmpty
+              ? 'Nowy kontakt'
+              : contact.displayName;
+          ref
+              .read(uiNotificationCenterProvider.notifier)
+              .showSuccess(
+                'Dodano kontakt $name.',
+                deduplicationKey: 'contact-added:${contact.id}',
+              );
+        }
+      },
+    );
     final snapshot = ref.watch(applicationSnapshotProvider).valueOrNull;
     final messageSnapshot = ref
         .watch(conversationMessagesProvider(state.selectedConversationId ?? ''))

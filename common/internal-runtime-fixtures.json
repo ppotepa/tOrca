@@ -121,15 +121,10 @@
     "conversation": {
       "id": "installation-bob",
       "contactInstallationId": "installation-bob",
-      "status": "VERIFYING",
+      "status": "ACTIVE",
       "lastMessagePreview": "Nowa rozmowa",
       "lastMessageAt": 1760000000000,
       "unreadCount": 0
-    },
-    "confirmContact": {
-      "pairingId": "pairing-1",
-      "capability": "chat",
-      "peerInstallationId": "installation-bob"
     }
   },
   "messageSendEffect": {

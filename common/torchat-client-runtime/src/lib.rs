@@ -44,7 +44,7 @@ pub use models::{
     CapabilityStatus, ChatMessage, ContactRecord, ContactTransportPolicy, ConversationState,
     ConversationSummary, InviteCode, InviteState, MessageReply, MessageSendEffect, MessageState,
     MessageTransportOutcome, PairingAcknowledgeEffect, PairingAvailableAction, PairingCancelEffect,
-    PairingConfirmContactEffect, PairingItem, PairingPeerOutcome, PairingPreparation,
+    PairingItem, PairingPeerOutcome, PairingPreparation,
     PairingSendEffect, PairingSendKind, PairingSyncResult, PeerConnectionStatus,
     PeerEndpointStatus, ReceiptSendEffect, RuntimeBootstrap, RuntimeEnvelope, RuntimeFixture,
     RuntimeIdentity, RuntimeProfile, RuntimeSendEffect, RuntimeTorStatus, VerificationState,
@@ -96,7 +96,6 @@ mod tests {
         assert_eq!(fixture.pairing_send_effects.len(), 2);
         assert_eq!(fixture.pairing_peer_outcomes.len(), 3);
         assert_eq!(fixture.pairing_sync_result.acknowledgements.len(), 1);
-        assert!(fixture.pairing_completion_result.confirm_contact.is_some());
         assert_eq!(fixture.pairing_inbox_item.state, InviteState::Pending);
         assert_eq!(fixture.pairing_outbox_item.state, InviteState::Pending);
 
