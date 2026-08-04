@@ -69,8 +69,14 @@ class PairingCodeDialogState extends ConsumerState<PairingCodeDialog> {
         unawaited(_refresh());
       }
     });
-    unawaited(_checkRequest());
-    if (_code.trim().isEmpty) unawaited(_refresh());
+    // Both operations can update Riverpod state through the controller. A
+    // dialog's initState runs while the route is still being built, so defer
+    // them until the first frame has completed.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(_checkRequest());
+      if (_code.trim().isEmpty) unawaited(_refresh());
+    });
   }
 
   @override

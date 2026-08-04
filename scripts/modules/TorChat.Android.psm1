@@ -210,7 +210,7 @@ function Get-TorChatAndroidApplicationReadiness {
     param([Parameter(Mandatory = $true)][string]$Device)
     $listing = @(& adb -s $Device shell run-as org.torchat.mobile ls -t no_backup/engine-logs 2>$null) |
         ForEach-Object { $_.Trim() } |
-        Where-Object { $_ -match '^startup-.*\.jsonl$' }
+        Where-Object { $_ -match '^(?:startup|platform)-.*\.jsonl$' }
     $latest = $listing | Select-Object -First 1
     if (-not $latest) {
         return [pscustomobject]@{ Engine = $false; PeerEndpoint = $false; Ready = $false }
@@ -223,7 +223,10 @@ function Get-TorChatAndroidApplicationReadiness {
         $_.component -eq 'engine' -and $_.message -eq 'client engine actor started for Android'
     }).Count -gt 0
     $peerEndpointReady = @($events | Where-Object {
-        $_.component -eq 'peer' -and $_.eventCode -eq 'peer_endpoint_changed' -and $_.message -match '(?:^|\s)status=Verified(?:\s|$)'
+        $_.component -eq 'peer' -and (
+            ($_.eventCode -eq 'onion_ready' -and $_.state -eq 'ready') -or
+            ($_.eventCode -eq 'peer_endpoint_changed' -and $_.message -match '(?:^|\s)status=Verified(?:\s|$)')
+        )
     }).Count -gt 0
     [pscustomobject]@{
         Engine = $engineReady
