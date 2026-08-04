@@ -815,21 +815,13 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
             // and retire any local outgoing attempt for the same pair.
             self.tx()
                 .execute(
-                    "UPDATE pairing_outbox
-                     SET state = 'CANCELLED', pair_key = ?1, updated_at = unixepoch()
-                     WHERE recipient_installation_id = ?2
-                       AND pairing_id <> ?3
-                       AND state IN ('PENDING', 'ACCEPTED')",
+                    super::sqlite::sql_catalog::runtime_storage::CANCEL_CROSSED_OUTBOX_BY_RECIPIENT,
                     rusqlite::params![pair_key, sender.installation_id, item.pairing_id],
                 )
                 .map_err(storage_error)?;
             self.tx()
                 .execute(
-                    "UPDATE pairing_inbox
-                     SET state = 'ARCHIVED', updated_at = unixepoch()
-                     WHERE pair_key = ?1
-                       AND pairing_id <> ?2
-                       AND state IN ('PENDING', 'ACCEPTED')",
+                    super::sqlite::sql_catalog::runtime_storage::ARCHIVE_CROSSED_INBOX,
                     rusqlite::params![pair_key, item.pairing_id],
                 )
                 .map_err(storage_error)?;
@@ -928,21 +920,13 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
             // Retire competing active rows before the unique outbox upsert.
             self.tx()
                 .execute(
-                    "UPDATE pairing_inbox
-                     SET state = 'ARCHIVED', updated_at = unixepoch()
-                     WHERE pair_key = ?1
-                       AND pairing_id <> ?2
-                       AND state IN ('PENDING', 'ACCEPTED')",
+                    super::sqlite::sql_catalog::runtime_storage::ARCHIVE_INBOX_FOR_PAIR,
                     params![pair_key, item.pairing_id],
                 )
                 .map_err(storage_error)?;
             self.tx()
                 .execute(
-                    "UPDATE pairing_outbox
-                     SET state = 'CANCELLED', updated_at = unixepoch()
-                     WHERE pair_key = ?1
-                       AND pairing_id <> ?2
-                       AND state IN ('PENDING', 'ACCEPTED')",
+                    super::sqlite::sql_catalog::runtime_storage::CANCEL_OUTBOX_FOR_PAIR,
                     params![pair_key, item.pairing_id],
                 )
                 .map_err(storage_error)?;

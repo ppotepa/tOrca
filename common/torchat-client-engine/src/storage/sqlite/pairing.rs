@@ -9,9 +9,7 @@ impl ClientDatabase {
         let candidate = self
             .connection
             .query_row(
-                "SELECT MIN(pairing_id) FROM pairing_outbox
-                 WHERE state IN ('PENDING', 'ACCEPTED')
-                   AND instr(CAST(payload AS TEXT), ?1) > 0",
+                super::sql_catalog::pairing::CANDIDATE_OUTBOX_FOR_INVITE,
                 params![invite_id],
                 |row| row.get::<_, Option<String>>(0),
             )
@@ -22,9 +20,7 @@ impl ClientDatabase {
         let existing = self
             .connection
             .query_row(
-                "SELECT MIN(pairing_id) FROM pairing_outbox
-                 WHERE pair_key = ?1 AND state IN ('PENDING', 'ACCEPTED')
-                   AND instr(CAST(payload AS TEXT), ?2) = 0",
+                super::sql_catalog::pairing::EXISTING_OUTBOX_FOR_PAIR,
                 params![pair_key, invite_id],
                 |row| row.get::<_, Option<String>>(0),
             )
@@ -35,10 +31,7 @@ impl ClientDatabase {
         if winner != candidate {
             self.connection
                 .execute(
-                    "UPDATE pairing_outbox
-                     SET state = 'CANCELLED', updated_at = unixepoch()
-                     WHERE state IN ('PENDING', 'ACCEPTED')
-                       AND instr(CAST(payload AS TEXT), ?1) > 0",
+                    super::sql_catalog::pairing::CANCEL_OUTBOX_FOR_INVITE,
                     params![invite_id],
                 )
                 .map_err(sqlite_error)?;
@@ -46,19 +39,13 @@ impl ClientDatabase {
         }
         self.connection
             .execute(
-                "UPDATE pairing_outbox
-                 SET state = 'CANCELLED', updated_at = unixepoch()
-                 WHERE pair_key = ?1 AND state IN ('PENDING', 'ACCEPTED')
-                   AND pairing_id <> ?2",
+                super::sql_catalog::pairing::CANCEL_OUTBOX_FOR_PAIR,
                 params![pair_key, candidate],
             )
             .map_err(sqlite_error)?;
         self.connection
             .execute(
-                "UPDATE pairing_outbox
-                 SET pair_key = ?1, updated_at = unixepoch()
-                 WHERE state IN ('PENDING', 'ACCEPTED')
-                   AND instr(CAST(payload AS TEXT), ?2) > 0",
+                super::sql_catalog::pairing::BIND_OUTBOX_PAIR_KEY,
                 params![pair_key, invite_id],
             )
             .map_err(sqlite_error)?;
@@ -67,39 +54,13 @@ impl ClientDatabase {
         // reconcile the two tables as one deterministic session set.
         self.connection
             .execute(
-                "WITH winner AS (
-                     SELECT MIN(pairing_id) AS pairing_id FROM (
-                         SELECT pairing_id FROM pairing_inbox
-                         WHERE pair_key = ?1 AND state IN ('PENDING', 'ACCEPTED')
-                         UNION ALL
-                         SELECT pairing_id FROM pairing_outbox
-                         WHERE pair_key = ?1 AND state IN ('PENDING', 'ACCEPTED')
-                     )
-                 )
-                 UPDATE pairing_inbox
-                 SET state = 'ARCHIVED', updated_at = unixepoch()
-                 WHERE pair_key = ?1
-                   AND state IN ('PENDING', 'ACCEPTED')
-                   AND pairing_id <> (SELECT pairing_id FROM winner)",
+                super::sql_catalog::pairing::RECONCILE_PAIRING_INBOX,
                 params![pair_key],
             )
             .map_err(sqlite_error)?;
         self.connection
             .execute(
-                "WITH winner AS (
-                     SELECT MIN(pairing_id) AS pairing_id FROM (
-                         SELECT pairing_id FROM pairing_inbox
-                         WHERE pair_key = ?1 AND state IN ('PENDING', 'ACCEPTED')
-                         UNION ALL
-                         SELECT pairing_id FROM pairing_outbox
-                         WHERE pair_key = ?1 AND state IN ('PENDING', 'ACCEPTED')
-                     )
-                 )
-                 UPDATE pairing_outbox
-                 SET state = 'CANCELLED', updated_at = unixepoch()
-                 WHERE pair_key = ?1
-                   AND state IN ('PENDING', 'ACCEPTED')
-                   AND pairing_id <> (SELECT pairing_id FROM winner)",
+                super::sql_catalog::pairing::RECONCILE_PAIRING_OUTBOX,
                 params![pair_key],
             )
             .map_err(sqlite_error)?;

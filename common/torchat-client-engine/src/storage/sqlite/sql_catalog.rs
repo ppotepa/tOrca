@@ -63,6 +63,26 @@ pub(crate) mod messages {
 }
 
 pub(crate) mod pairing {
+    pub(crate) const CANCEL_CROSSED_OUTBOX_BY_RECIPIENT: &str =
+        include_str!("../../../sql/commands/pairing/cancel_crossed_outbox_by_recipient_1.sql");
+    pub(crate) const ARCHIVE_CROSSED_INBOX: &str =
+        include_str!("../../../sql/commands/pairing/archive_crossed_inbox_1.sql");
+    pub(crate) const ARCHIVE_INBOX_FOR_PAIR: &str =
+        include_str!("../../../sql/commands/pairing/archive_inbox_for_pair_1.sql");
+    pub(crate) const CANCEL_OUTBOX_FOR_PAIR: &str =
+        include_str!("../../../sql/commands/pairing/cancel_outbox_for_pair_1.sql");
+    pub(crate) const CANDIDATE_OUTBOX_FOR_INVITE: &str =
+        include_str!("../../../sql/queries/pairing/candidate_outbox_for_invite_1.sql");
+    pub(crate) const EXISTING_OUTBOX_FOR_PAIR: &str =
+        include_str!("../../../sql/queries/pairing/existing_outbox_for_pair_1.sql");
+    pub(crate) const CANCEL_OUTBOX_FOR_INVITE: &str =
+        include_str!("../../../sql/commands/pairing/cancel_outbox_for_invite_1.sql");
+    pub(crate) const BIND_OUTBOX_PAIR_KEY: &str =
+        include_str!("../../../sql/commands/pairing/bind_outbox_pair_key_1.sql");
+    pub(crate) const RECONCILE_PAIRING_INBOX: &str =
+        include_str!("../../../sql/commands/pairing/reconcile_pairing_inbox_1.sql");
+    pub(crate) const RECONCILE_PAIRING_OUTBOX: &str =
+        include_str!("../../../sql/commands/pairing/reconcile_pairing_outbox_1.sql");
     pub(crate) const INVITE_USED: &str =
         include_str!("../../../sql/queries/pairing/invite_used_1.sql");
     pub(crate) const CONSUME_INVITE: &str =
@@ -183,6 +203,14 @@ pub(crate) mod peer_endpoints {
 }
 
 pub(crate) mod runtime_storage {
+    pub(crate) const CANCEL_CROSSED_OUTBOX_BY_RECIPIENT: &str =
+        include_str!("../../../sql/commands/pairing/cancel_crossed_outbox_by_recipient_1.sql");
+    pub(crate) const ARCHIVE_CROSSED_INBOX: &str =
+        include_str!("../../../sql/commands/pairing/archive_crossed_inbox_1.sql");
+    pub(crate) const ARCHIVE_INBOX_FOR_PAIR: &str =
+        include_str!("../../../sql/commands/pairing/archive_inbox_for_pair_1.sql");
+    pub(crate) const CANCEL_OUTBOX_FOR_PAIR: &str =
+        include_str!("../../../sql/commands/pairing/cancel_outbox_for_pair_1.sql");
     pub(crate) const LIST_CONVERSATIONS: &str =
         include_str!("../../../sql/queries/runtime/runtime_1003.sql");
     pub(crate) const UPSERT_CONVERSATION: &str =
