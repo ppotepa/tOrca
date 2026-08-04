@@ -1,5 +1,6 @@
 import 'package:flutter/widgets.dart';
 
+import '../../core/models/domain.dart';
 import '../generated/app_localizations.dart';
 
 extension AppLocalizationsContext on BuildContext {
@@ -27,6 +28,28 @@ extension AppLocalizationsUiCopy on AppLocalizations {
   String get uiImageCacheClearFailed => _isPolish
       ? 'Nie udało się wyczyścić pamięci obrazów.'
       : 'The image cache could not be cleared.';
+  String get uiMainWorkspaceSemantics =>
+      _isPolish ? 'Główna przestrzeń TorChat' : 'TorChat main workspace';
+  String get uiChats => _isPolish ? 'Czaty' : 'Chats';
+  String get uiContacts => _isPolish ? 'Kontakty' : 'Contacts';
+  String uiUnreadContactsSemantics(int count) => _isPolish
+      ? '$count kontaktów z nieprzeczytanymi wiadomościami'
+      : '$count contacts with unread messages';
+  String get uiStateReady => _isPolish ? 'gotowe' : 'ready';
+  String get uiStateFailed => _isPolish ? 'błąd' : 'failed';
+  String get uiStateDegraded => _isPolish ? 'ograniczone' : 'degraded';
+  String get uiStateStarting => _isPolish ? 'uruchamianie' : 'starting';
+  String get uiStateError => _isPolish ? 'błąd' : 'error';
+  String get uiConnectionSummaryDetail => _isPolish
+      ? 'Stan infrastruktury komunikacyjnej aplikacji.'
+      : 'Application communication infrastructure status.';
+  String get uiImageSearchKeyword => _isPolish ? 'obraz' : 'image';
+  String uiAttachmentLimitExceeded(int max) => _isPolish
+      ? 'Wiadomość może zawierać maksymalnie $max obrazów.'
+      : 'A message can contain at most $max images.';
+  String get uiAttachmentPreparationFailed => _isPolish
+      ? 'Nie udało się przygotować wybranego obrazu.'
+      : 'The selected image could not be prepared.';
   String get uiImageSavedToGallery => _isPolish
       ? 'Obraz zapisano w galerii.'
       : 'The image was saved to the gallery.';
@@ -38,7 +61,7 @@ extension AppLocalizationsUiCopy on AppLocalizations {
       _isPolish ? 'Obraz od $name' : 'Image from $name';
   String get uiDownloadEncryptedImage => _isPolish
       ? 'Pobierz do zaszyfrowanego magazynu'
-      : 'Download to encrypted storage';
+      : 'Download to the encrypted store';
   String get uiOpenImagePreview =>
       _isPolish ? 'Otwórz podgląd obrazu' : 'Open image preview';
   String get uiYou => _isPolish ? 'Ty' : 'You';
@@ -60,43 +83,48 @@ extension AppLocalizationsUiCopy on AppLocalizations {
   String get uiMessageRead =>
       _isPolish ? 'dostarczono · odczytano' : 'delivered · read';
   String get uiMessageFailed => _isPolish ? 'błąd' : 'failed';
-  String get uiMainWorkspaceSemantics =>
-      _isPolish ? 'Główna przestrzeń TorChat' : 'TorChat main workspace';
-  String get uiChats => _isPolish ? 'Czaty' : 'Chats';
-  String get uiContacts => _isPolish ? 'Kontakty' : 'Contacts';
-  String uiUnreadContactsSemantics(int count) => _isPolish
-      ? '$count kontaktów z nieprzeczytanymi wiadomościami'
-      : '$count contacts with unread messages';
-  String get uiStateReady => _isPolish ? 'gotowe' : 'ready';
-  String get uiStateFailed => _isPolish ? 'błąd' : 'failed';
-  String get uiStateDegraded => _isPolish ? 'ograniczone' : 'degraded';
-  String get uiStateStarting => _isPolish ? 'uruchamianie' : 'starting';
-  String get uiStateError => _isPolish ? 'błąd' : 'error';
-
-  String get uiCapabilityStatus => _isPolish ? 'Stan' : 'Status';
-  String get uiCapabilityId => 'ID';
-  String get uiCapabilitySequence => _isPolish ? 'Sekwencja' : 'Sequence';
-  String get uiTransportDiagnostics =>
-      _isPolish ? 'Diagnostyka transportu DEV' : 'DEV transport diagnostics';
-  String get uiPolicy => _isPolish ? 'Polityka' : 'Policy';
-  String get uiEffectiveRoute =>
+  String uiMessageState(MessageState state) => switch (state) {
+    MessageState.queued => uiMessageQueued,
+    MessageState.sending => uiMessageSending,
+    MessageState.sent => uiMessageSent,
+    MessageState.delivered => uiMessageDelivered,
+    MessageState.read => uiMessageRead,
+    MessageState.failed => uiMessageFailed,
+  };
+  String get uiContactCapabilityStatus => _isPolish ? 'Stan' : 'Status';
+  String get uiContactCapabilityId => 'ID';
+  String get uiContactCapabilitySequence => _isPolish ? 'Sekwencja' : 'Sequence';
+  String get uiContactTransportDiagnostics => _isPolish
+      ? 'Diagnostyka transportu DEV'
+      : 'DEV transport diagnostics';
+  String get uiContactPolicy => _isPolish ? 'Polityka' : 'Policy';
+  String get uiContactEffectiveRoute =>
       _isPolish ? 'Efektywna trasa' : 'Effective route';
-  String get uiEndpointStatus =>
-      _isPolish ? 'Stan endpointu' : 'Endpoint status';
-  String get uiP2pSessionStatus =>
-      _isPolish ? 'Stan sesji P2P' : 'P2P session status';
+  String get uiContactEndpointState =>
+      _isPolish ? 'Stan endpointu' : 'Endpoint state';
+  String get uiContactP2pSessionState =>
+      _isPolish ? 'Stan sesji P2P' : 'P2P session state';
   String get uiDeadLetterUnavailable => _isPolish
-      ? 'Diagnostyka dead-letter jest niedostępna.'
-      : 'Dead-letter diagnostics are unavailable.';
-  String get uiInstallationId => 'Installation ID';
+      ? 'Diagnostyka niedostarczonych operacji jest niedostępna.'
+      : 'Undelivered-operation diagnostics are unavailable.';
+  String get uiInstallationId => _isPolish ? 'ID instalacji' : 'Installation ID';
   String get uiFingerprint => 'Fingerprint';
-  String get uiFingerprintUnavailable =>
-      _isPolish ? 'Fingerprint niedostępny' : 'Fingerprint unavailable';
+  String get uiFingerprintUnavailable => _isPolish
+      ? 'Fingerprint niedostępny'
+      : 'Fingerprint unavailable';
   String uiRelationshipRemoved(String name) => _isPolish
       ? 'Relacja z $name została zakończona.'
-      : 'The relationship with $name has ended.';
+      : 'The relationship with $name was ended.';
   String get uiPendingPairings =>
       _isPolish ? 'Oczekujące parowania' : 'Pending pairings';
+  String get uiExpandNavigation =>
+      _isPolish ? 'Rozwiń nawigację' : 'Expand navigation';
+  String get uiCollapseNavigation =>
+      _isPolish ? 'Zwiń nawigację' : 'Collapse navigation';
+  String get uiShowDetails => _isPolish ? 'Pokaż szczegóły' : 'Show details';
+  String get uiHideDetails => _isPolish ? 'Ukryj szczegóły' : 'Hide details';
+  String get uiAccount => _isPolish ? 'Konto' : 'Account';
+  String get uiSettings => _isPolish ? 'Ustawienia' : 'Settings';
 
   String uiPairingAccepted(String name) => _isPolish
       ? '$name przyjął Twoje zaproszenie.'
