@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/app_theme.dart';
 import '../../core/models/domain.dart';
+import '../../locales/presentation/app_localizations_x.dart';
 import '../formatters/message_timestamps.dart';
 import 'counter_badge.dart';
 import 'identity_avatar.dart';
@@ -187,8 +188,8 @@ class ContactListTile extends StatelessWidget {
       subtitle: Text(
         subtitle ??
             (contact.verified
-                ? 'Gotowy do rozmowy'
-                : 'Fingerprint niepotwierdzony'),
+                ? context.l10n.desktopIdentityVerified
+                : context.l10n.desktopIdentityUnverified),
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
       ),
