@@ -6,6 +6,53 @@ impl ClientDatabase {
         invite_id: &str,
         pair_key: &str,
     ) -> EngineResult<()> {
+        let candidate = self
+            .connection
+            .query_row(
+                "SELECT MIN(pairing_id) FROM pairing_outbox
+                 WHERE state IN ('PENDING', 'ACCEPTED')
+                   AND instr(CAST(payload AS TEXT), ?1) > 0",
+                params![invite_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .map_err(sqlite_error)?;
+        let Some(candidate) = candidate else {
+            return Ok(());
+        };
+        let existing = self
+            .connection
+            .query_row(
+                "SELECT MIN(pairing_id) FROM pairing_outbox
+                 WHERE pair_key = ?1 AND state IN ('PENDING', 'ACCEPTED')
+                   AND instr(CAST(payload AS TEXT), ?2) = 0",
+                params![pair_key, invite_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .map_err(sqlite_error)?;
+        let winner = existing
+            .as_deref()
+            .map_or(candidate.as_str(), |value| value.min(candidate.as_str()));
+        if winner != candidate {
+            self.connection
+                .execute(
+                    "UPDATE pairing_outbox
+                     SET state = 'CANCELLED', updated_at = unixepoch()
+                     WHERE state IN ('PENDING', 'ACCEPTED')
+                       AND instr(CAST(payload AS TEXT), ?1) > 0",
+                    params![invite_id],
+                )
+                .map_err(sqlite_error)?;
+            return Ok(());
+        }
+        self.connection
+            .execute(
+                "UPDATE pairing_outbox
+                 SET state = 'CANCELLED', updated_at = unixepoch()
+                 WHERE pair_key = ?1 AND state IN ('PENDING', 'ACCEPTED')
+                   AND pairing_id <> ?2",
+                params![pair_key, candidate],
+            )
+            .map_err(sqlite_error)?;
         self.connection
             .execute(
                 "UPDATE pairing_outbox
