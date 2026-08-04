@@ -70,6 +70,7 @@ class PairingCodeDialogState extends ConsumerState<PairingCodeDialog> {
       }
     });
     unawaited(_checkRequest());
+    if (_code.trim().isEmpty) unawaited(_refresh());
   }
 
   @override
@@ -231,84 +232,88 @@ class PairingCodeDialogState extends ConsumerState<PairingCodeDialog> {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     return AlertDialog(
-    title: Text(l10n.pairingDialogTitle),
-    content: SingleChildScrollView(
-      child: SizedBox(
-        width: 300,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (_completed)
-              const _CompletedPairing()
-            else if (_request case final request?)
-              _PendingPairingDecision(
-                request: request,
-                processing: _processing,
-                awaitingContact: _awaitingContact,
-                onAccept: _accept,
-                onReject: _reject,
-              )
-            else
-              _PairingCode(code: _code, checkingRequest: _checkingRequest),
-            if (_request == null && !_completed && _expiresAt > 0) ...[
-              const SizedBox(height: 10),
-              Text(
-                _refreshing
-                    ? l10n.pairingRefreshing
-                    : _remaining == 0
-                    ? l10n.pairingExpiredRefreshing
-                    : l10n.pairingValidFor(formatCountdown(_remaining)),
-                style: Theme.of(context).textTheme.labelMedium,
-              ),
-              const SizedBox(height: 6),
-              LinearProgressIndicator(
-                value: _refreshing
-                    ? null
-                    : (_remaining / _ttlSeconds).clamp(0, 1),
-                minHeight: 3,
-              ),
-            ],
-            if (_status.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 10),
-                child: Text(
-                  _status,
-                  style: TextStyle(color: context.statusTheme.warning),
-                  textAlign: TextAlign.center,
+      title: Text(l10n.pairingDialogTitle),
+      content: SingleChildScrollView(
+        child: SizedBox(
+          width: 300,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_completed)
+                const _CompletedPairing()
+              else if (_request case final request?)
+                _PendingPairingDecision(
+                  request: request,
+                  processing: _processing,
+                  awaitingContact: _awaitingContact,
+                  onAccept: _accept,
+                  onReject: _reject,
+                )
+              else
+                _PairingCode(
+                  code: _code,
+                  checkingRequest: _checkingRequest,
+                  loading: _refreshing || _code.trim().isEmpty,
                 ),
-              ),
-            if (_error.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 10),
-                child: Text(
-                  _error,
-                  style: TextStyle(color: context.statusTheme.danger),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-            if (_request == null && !_completed)
-              TextButton.icon(
-                onPressed: _refreshing ? null : _refresh,
-                icon: _refreshing
-                    ? const ThemedActivityIndicator(compact: true)
-                    : const ThemedIcon(Icons.refresh),
-                label: Text(
+              if (_request == null && !_completed && _expiresAt > 0) ...[
+                const SizedBox(height: 10),
+                Text(
                   _refreshing
-                      ? l10n.pairingRefreshingAction
-                      : l10n.pairingRefreshCode,
+                      ? l10n.pairingRefreshing
+                      : _remaining == 0
+                      ? l10n.pairingExpiredRefreshing
+                      : l10n.pairingValidFor(formatCountdown(_remaining)),
+                  style: Theme.of(context).textTheme.labelMedium,
                 ),
-              ),
-          ],
+                const SizedBox(height: 6),
+                LinearProgressIndicator(
+                  value: _refreshing
+                      ? null
+                      : (_remaining / _ttlSeconds).clamp(0, 1),
+                  minHeight: 3,
+                ),
+              ],
+              if (_status.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: Text(
+                    _status,
+                    style: TextStyle(color: context.statusTheme.warning),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              if (_error.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: Text(
+                    _error,
+                    style: TextStyle(color: context.statusTheme.danger),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              if (_request == null && !_completed)
+                TextButton.icon(
+                  onPressed: _refreshing ? null : _refresh,
+                  icon: _refreshing
+                      ? const ThemedActivityIndicator(compact: true)
+                      : const ThemedIcon(Icons.refresh),
+                  label: Text(
+                    _refreshing
+                        ? l10n.pairingRefreshingAction
+                        : l10n.pairingRefreshCode,
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
-    ),
-    actions: [
-      TextButton(
-        onPressed: _processing ? null : () => Navigator.pop(context),
-        child: Text(l10n.close),
-      ),
-    ],
-  );
+      actions: [
+        TextButton(
+          onPressed: _processing ? null : () => Navigator.pop(context),
+          child: Text(l10n.close),
+        ),
+      ],
+    );
   }
 }
 
@@ -500,10 +505,15 @@ class _PendingPairingDecision extends StatelessWidget {
 }
 
 class _PairingCode extends StatelessWidget {
-  const _PairingCode({required this.code, required this.checkingRequest});
+  const _PairingCode({
+    required this.code,
+    required this.checkingRequest,
+    this.loading = false,
+  });
 
   final String code;
   final bool checkingRequest;
+  final bool loading;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -511,26 +521,41 @@ class _PairingCode extends StatelessWidget {
       Container(
         color: Theme.of(context).colorScheme.surface,
         padding: const EdgeInsets.all(16),
-        child: QrImageView(
-          data: code,
-          size: 240,
-          backgroundColor: Theme.of(context).colorScheme.surface,
-          eyeStyle: QrEyeStyle(color: Theme.of(context).colorScheme.onSurface),
-          dataModuleStyle: QrDataModuleStyle(
-            color: Theme.of(context).colorScheme.onSurface,
-          ),
-        ),
+        child: loading
+            ? const SizedBox(
+                width: 240,
+                height: 240,
+                child: Center(child: ThemedActivityIndicator()),
+              )
+            : QrImageView(
+                data: code,
+                size: 240,
+                backgroundColor: Theme.of(context).colorScheme.surface,
+                eyeStyle: QrEyeStyle(
+                  color: Theme.of(context).colorScheme.onSurface,
+                ),
+                dataModuleStyle: QrDataModuleStyle(
+                  color: Theme.of(context).colorScheme.onSurface,
+                ),
+              ),
       ),
       const SizedBox(height: 8),
-      SelectableText(
-        formatInviteCode(code),
-        style: const TextStyle(
-          fontSize: 28,
-          letterSpacing: 3,
-          fontWeight: FontWeight.bold,
-          fontFamily: 'monospace',
+      if (loading)
+        const SizedBox(
+          height: 34,
+          width: 220,
+          child: Center(child: LinearProgressIndicator()),
+        )
+      else
+        SelectableText(
+          formatInviteCode(code),
+          style: const TextStyle(
+            fontSize: 28,
+            letterSpacing: 3,
+            fontWeight: FontWeight.bold,
+            fontFamily: 'monospace',
+          ),
         ),
-      ),
       const SizedBox(height: 10),
       Text(
         checkingRequest

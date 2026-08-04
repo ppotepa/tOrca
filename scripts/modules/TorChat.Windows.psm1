@@ -116,24 +116,52 @@ function Save-TorChatWindowsDiagnostics {
 }
 
 function Get-TorChatWindowsApplicationReadiness {
-    param([Parameter(Mandatory = $true)][string]$RepositoryRoot)
+    param(
+        [Parameter(Mandatory = $true)][string]$RepositoryRoot,
+        [DateTime]$SinceUtc = [DateTime]::MinValue,
+        [string]$DeployRunId = ''
+    )
     $journalRoot = Join-Path $RepositoryRoot '.torchat\clients\desktop\engine-logs'
     $latest = Get-ChildItem -LiteralPath $journalRoot -Filter 'startup-*.jsonl' -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.LastWriteTimeUtc -ge $SinceUtc } |
         Sort-Object LastWriteTime -Descending |
         Select-Object -First 1
-    if (-not $latest) {
-        return [pscustomobject]@{ Engine = $false; PeerEndpoint = $false; Ready = $false }
+    $engineReady = $false
+    $peerEndpointReady = $false
+    if ($latest) {
+        $events = @(Get-Content -LiteralPath $latest.FullName -ErrorAction SilentlyContinue) |
+            ForEach-Object {
+                try { $_ | ConvertFrom-Json -ErrorAction Stop } catch { $null }
+            }
+        $engineReady = @($events | Where-Object {
+            $_.component -eq 'engine' -and $_.message -eq 'client engine actor started for Windows'
+        }).Count -gt 0
+        $peerEndpointReady = @($events | Where-Object {
+            $_.component -eq 'peer' -and $_.eventCode -eq 'peer_endpoint_changed' -and $_.message -match '(?:^|\s)status=Verified(?:\s|$)'
+        }).Count -gt 0
     }
-    $events = @(Get-Content -LiteralPath $latest.FullName -ErrorAction SilentlyContinue) |
-        ForEach-Object {
-            try { $_ | ConvertFrom-Json -ErrorAction Stop } catch { $null }
+
+    # The bridge log is the authoritative fallback for the current desktop
+    # process. It is written by the Flutter host and carries deployRunId,
+    # while the engine journal may be disabled or unavailable in a packaged
+    # desktop build.
+    if (-not ($engineReady -and $peerEndpointReady) -and $DeployRunId) {
+        $bridgeLogs = Get-ChildItem -LiteralPath (Join-Path $RepositoryRoot '.torchat\logs') -Recurse -Filter 'desktop.log' -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.LastWriteTimeUtc -ge $SinceUtc } |
+            Sort-Object LastWriteTimeUtc -Descending
+        foreach ($bridgeLog in $bridgeLogs) {
+            $lines = @(Get-Content -LiteralPath $bridgeLog.FullName -ErrorAction SilentlyContinue |
+                Where-Object { $_ -match ("deployRunId=" + [regex]::Escape($DeployRunId) + "(?:\s|$)") })
+            if ($lines.Count -eq 0) { continue }
+            $engineReady = $engineReady -or @($lines | Where-Object {
+                $_ -match 'STDOUT type=runtime runtimeType=runtime_ready'
+            }).Count -gt 0
+            $peerEndpointReady = $peerEndpointReady -or @($lines | Where-Object {
+                $_ -match 'STDOUT type=runtime runtimeType=peer_endpoint_changed'
+            }).Count -gt 0
+            if ($engineReady -and $peerEndpointReady) { break }
         }
-    $engineReady = @($events | Where-Object {
-        $_.component -eq 'engine' -and $_.message -eq 'client engine actor started for Windows'
-    }).Count -gt 0
-    $peerEndpointReady = @($events | Where-Object {
-        $_.component -eq 'peer' -and $_.eventCode -eq 'peer_endpoint_changed' -and $_.message -match '(?:^|\s)status=Verified(?:\s|$)'
-    }).Count -gt 0
+    }
     [pscustomobject]@{
         Engine = $engineReady
         PeerEndpoint = $peerEndpointReady
@@ -182,6 +210,7 @@ function Start-TorChatWindowsClient {
     $env:TORCHAT_LOG_DIR = Join-Path $Context.RepositoryRoot '.torchat\logs'
     $env:TORCHAT_DEPLOY_RUN_ID = $Context.RunId
 
+    $readinessSinceUtc = [DateTime]::UtcNow
     $started = Start-Process -FilePath $runner -WorkingDirectory (Split-Path -Parent $runner) -PassThru
     $runners = @()
     $sidecars = @()
@@ -202,7 +231,7 @@ function Start-TorChatWindowsClient {
     $applicationReadiness = $null
     $applicationReady = $false
     for ($attempt = 1; $attempt -le $FunctionalReadyAttempts; $attempt++) {
-        $applicationReadiness = Get-TorChatWindowsApplicationReadiness -RepositoryRoot $Context.RepositoryRoot
+        $applicationReadiness = Get-TorChatWindowsApplicationReadiness -RepositoryRoot $Context.RepositoryRoot -SinceUtc $readinessSinceUtc -DeployRunId $Context.RunId
         $applicationReady = $applicationReadiness.Ready
         $percent = [Math]::Min(99, [int](100 * $attempt / [Math]::Max(1,$FunctionalReadyAttempts)))
         Write-TorChatStageProgress -Context $Context -Name 'Windows application readiness' -Percent $percent -Detail "engine=$($applicationReadiness.Engine) p2p=$($applicationReadiness.PeerEndpoint)"

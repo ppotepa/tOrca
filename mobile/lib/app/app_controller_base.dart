@@ -156,7 +156,8 @@ class AppState {
     isLoading: isLoading ?? this.isLoading,
     action: action ?? this.action,
     error: error ?? this.error,
-    problem: problem ??
+    problem:
+        problem ??
         (clearProblem || (error != null && error.isEmpty)
             ? null
             : this.problem),
@@ -252,7 +253,9 @@ abstract class AppController extends Notifier<AppState> {
   Future<void> setNickname(String nickname) async {
     try {
       final profile = await _repository.setNickname(nickname.trim());
+      final snapshot = state.applicationSnapshot;
       state = state.copyWith(
+        applicationSnapshot: snapshot?.copyWith(profile: profile),
         screen: _screenAfterConnect(
           profile,
           state.transport,
@@ -686,8 +689,7 @@ abstract class AppController extends Notifier<AppState> {
   }
 
   bool get _devTorkaEnabled =>
-      kDebugMode &&
-      isPairingCode(_effectiveDevTorkaPairingCode);
+      kDebugMode && isPairingCode(_effectiveDevTorkaPairingCode);
 
   String get _effectiveDevTorkaPairingCode {
     final override = debugTorkaPairingCodeOverride?.trim() ?? '';

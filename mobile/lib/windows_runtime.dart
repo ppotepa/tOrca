@@ -324,8 +324,16 @@ class WindowsRuntime extends Object
         } catch (error) {
           _events.add(RuntimeErrorEvent(error.toString()));
         }
-      case final EngineConnectionLine connection:
-        _events.add(connection.runtimeEvent());
+      case EngineConnectionLine():
+        // The engine connection event describes the application/relay
+        // connection state, not the local Tor process.  In particular,
+        // TorEndpointAvailable deliberately leaves the relay connection in
+        // `disconnected` until the relay session is established.  Translating
+        // that event into TorStatusEvent would therefore turn a ready Tor
+        // process back into `offline` and block the peer listener/onion
+        // readiness chain.  Tor status is emitted explicitly by the engine
+        // through `tor_status` and `transport_status_changed` events.
+        break;
       case EngineNotificationLine(:final notification):
         _events.add(
           NotificationRequestedEvent(

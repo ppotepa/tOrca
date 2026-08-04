@@ -383,6 +383,9 @@ impl EngineRelay for SharedRelayActor {
             RendezvousServerFrame::PairingRejected { pairing_id } => {
                 Some(RelayEvent::PairingAvailable { pairing_id })
             }
+            RendezvousServerFrame::PairingFinalized { pairing_id } => {
+                Some(RelayEvent::PairingFinalized { pairing_id })
+            }
             _ => None,
         }
     }

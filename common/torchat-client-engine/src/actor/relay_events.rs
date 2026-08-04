@@ -49,6 +49,13 @@ impl ClientEngineActor {
                 )?;
                 Ok((events, None, None))
             }
+            RelayEvent::PairingFinalized { pairing_id } => {
+                let events = self.apply_pairing_peer_outcome(
+                    &pairing_id.to_string(),
+                    PairingPeerOutcome::WelcomePrepared,
+                )?;
+                Ok((events, None, None))
+            }
             RelayEvent::Envelope(envelope) => self
                 .handle_relay_envelope(envelope)
                 .map(|events| (events, None, None)),

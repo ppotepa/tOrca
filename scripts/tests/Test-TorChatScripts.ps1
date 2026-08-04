@@ -79,6 +79,37 @@ foreach ($contract in $startupContracts) {
     Write-Host ("[FAIL] torchat.ps1 {0}" -f $contract.Message) -ForegroundColor Red
 }
 
+$windowsModulePath = Join-Path $scriptsRoot 'modules\TorChat.Windows.psm1'
+$windowsModule = Get-Content -LiteralPath $windowsModulePath -Raw
+foreach ($requiredPattern in @(
+    'SinceUtc',
+    'DeployRunId',
+    'deployRunId=',
+    'runtimeType=runtime_ready',
+    'runtimeType=peer_endpoint_changed'
+)) {
+    if ($windowsModule -match [regex]::Escape($requiredPattern)) { continue }
+    [void]$failures.Add([pscustomobject]@{
+        File = $windowsModulePath
+        Line = 0
+        Column = 0
+        Message = "Windows readiness is missing current-run correlation: $requiredPattern"
+    })
+    Write-Host "[FAIL] TorChat.Windows.psm1 missing $requiredPattern" -ForegroundColor Red
+}
+
+$stackModulePath = Join-Path $scriptsRoot 'modules\TorChat.Stack.psm1'
+$stackModule = Get-Content -LiteralPath $stackModulePath -Raw
+if ($stackModule -notmatch '\$health\s+-eq\s+''ok''') {
+    [void]$failures.Add([pscustomobject]@{
+        File = $stackModulePath
+        Line = 0
+        Column = 0
+        Message = 'Stack status must accept the relay plain-text health response.'
+    })
+    Write-Host '[FAIL] TorChat.Stack.psm1 does not accept plain-text relay health.' -ForegroundColor Red
+}
+
 $androidModulePath = Join-Path $scriptsRoot 'modules\TorChat.Android.psm1'
 $androidModule = Get-Content -LiteralPath $androidModulePath -Raw
 if ($androidModule -match "Where-Object\s*\{\s*`$_\s*-notmatch\s*'\\\._adb-tls-connect") {

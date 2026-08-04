@@ -394,7 +394,9 @@ function Get-TorChatStackStatus {
     $localHealth = $false
     try {
         $health = Invoke-RestMethod -Uri ("http://127.0.0.1:{0}/health" -f $EnvironmentState.Values['TORCHAT_HTTP_PORT']) -TimeoutSec 3
-        $localHealth = $health.status -eq 'ok'
+        # The current ephemeral relay deliberately returns the minimal text
+        # response `ok`; older deployments returned JSON `{ status: "ok" }`.
+        $localHealth = $health -eq 'ok' -or $health.status -eq 'ok'
     } catch { }
     [pscustomobject]@{
         State = if ($localHealth) { 'Ready' } else { 'Warning' }

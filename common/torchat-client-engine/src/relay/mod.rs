@@ -20,6 +20,9 @@ pub enum RelayEvent {
     PairingAvailable {
         pairing_id: uuid::Uuid,
     },
+    PairingFinalized {
+        pairing_id: uuid::Uuid,
+    },
     Envelope(RelayEnvelope),
 }
 

@@ -29,8 +29,6 @@ import 'features/chats/composer_draft.dart';
 import 'locales/application/locale_controller.dart';
 import 'locales/application/locale_setup_gate.dart';
 import 'locales/generated/app_localizations.dart';
-import 'locales/presentation/app_localizations_x.dart';
-import 'locales/presentation/problem_localizer.dart';
 import 'shared/widgets/toast_host.dart';
 
 Future<void> main() async {
@@ -335,42 +333,6 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
     if (_pairingCodeDialogOpen || _incomingPairingDialogOpen) return;
     _pairingCodeDialogOpen = true;
     final controller = ref.read(appControllerProvider.notifier);
-    final code = await controller.refreshInviteCode();
-    if (!mounted) {
-      _pairingCodeDialogOpen = false;
-      return;
-    }
-    if (code == null) {
-      final currentState = ref.read(appControllerProvider);
-      final error = currentState.error.isNotEmpty
-          ? currentState.error
-          : currentState.problem == null
-          ? ''
-          : localizeProblem(context.l10n, currentState.problem!);
-      try {
-        await showDialog<void>(
-          context: context,
-          builder: (_) => AlertDialog(
-            title: const Text('Nie można wygenerować kodu'),
-            content: Text(
-              error.isEmpty ? 'Połączenie z relayem nie jest gotowe.' : error,
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Zamknij'),
-              ),
-            ],
-          ),
-        );
-      } finally {
-        _pairingCodeDialogOpen = false;
-        if (mounted) {
-          _queueIncomingPairingPrompt(ref.read(appControllerProvider).inbox);
-        }
-      }
-      return;
-    }
     final knownInboxIds = ref
         .read(appControllerProvider)
         .inbox
@@ -380,8 +342,8 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
       await showDialog<bool>(
         context: context,
         builder: (_) => PairingCodeDialog(
-          initialCode: code.code,
-          initialExpiresAt: code.expiresAt,
+          initialCode: '',
+          initialExpiresAt: 0,
           refresh: controller.refreshInviteCode,
           onChanged: (_) {},
           checkRequest: () async {
