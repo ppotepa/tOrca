@@ -26,8 +26,7 @@ class ConversationListSection extends ConsumerWidget {
     required this.selectedConversation,
     required this.onOpenConversation,
     this.subtitle,
-    this.emptyMessage =
-        'Nie masz jeszcze rozmów.\nWybierz osobę w zakładce Kontakty.',
+    this.emptyMessage,
     this.asCard = true,
     this.showHeader = true,
   });
@@ -38,7 +37,7 @@ class ConversationListSection extends ConsumerWidget {
   final List<ContactRecord> contacts;
   final String? selectedConversation;
   final ValueChanged<String> onOpenConversation;
-  final String emptyMessage;
+  final String? emptyMessage;
   final bool asCard;
   final bool showHeader;
 
@@ -64,7 +63,10 @@ class ConversationListSection extends ConsumerWidget {
           });
 
     final list = visibleConversations.isEmpty
-        ? EmptyState(icon: Icons.chat_bubble_outline, message: emptyMessage)
+        ? EmptyState(
+            icon: Icons.chat_bubble_outline,
+            message: emptyMessage ?? context.l10n.desktopNoConversations,
+          )
         : ListView.separated(
             itemCount: visibleConversations.length,
             separatorBuilder: (_, _) => const SizedBox(height: 6),
@@ -83,7 +85,7 @@ class ConversationListSection extends ConsumerWidget {
               final protocolName =
                   contact?.displayName.trim().isNotEmpty == true
                   ? contact!.displayName
-                  : 'Nieznany kontakt';
+                  : context.l10n.commonContact;
               final name = preference.localTitle?.trim().isNotEmpty == true
                   ? preference.localTitle!
                   : protocolName;
@@ -93,7 +95,7 @@ class ConversationListSection extends ConsumerWidget {
               );
               final tile = ConversationListTile(
                 contactName: name,
-                preview: _previewLabel(conversation.preview),
+                preview: _previewLabel(context, conversation.preview),
                 lastMessageAt: conversation.lastMessageAt,
                 unread: conversation.unread,
                 lastSeen: lastSeen,
@@ -116,30 +118,25 @@ class ConversationListSection extends ConsumerWidget {
                     ContactActivityVisualState.unknown,
                 },
               );
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onLongPressStart: (details) => _showConversationMenu(
-                      context,
-                      ref,
-                      conversation,
-                      protocolName,
-                      preference,
-                      details.globalPosition,
-                    ),
-                    onSecondaryTapDown: (details) => _showConversationMenu(
-                      context,
-                      ref,
-                      conversation,
-                      protocolName,
-                      preference,
-                      details.globalPosition,
-                    ),
-                    child: tile,
-                  ),
-                ],
+              return GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onLongPressStart: (details) => _showConversationMenu(
+                  context,
+                  ref,
+                  conversation,
+                  protocolName,
+                  preference,
+                  details.globalPosition,
+                ),
+                onSecondaryTapDown: (details) => _showConversationMenu(
+                  context,
+                  ref,
+                  conversation,
+                  protocolName,
+                  preference,
+                  details.globalPosition,
+                ),
+                child: tile,
               );
             },
           );
@@ -188,19 +185,19 @@ class ConversationListSection extends ConsumerWidget {
         ),
         PopupMenuItem(
           value: 'pin',
-            child: Text(
-              preference.pinned
-                  ? context.l10n.conversationUnpin
-                  : context.l10n.conversationPin,
-            ),
+          child: Text(
+            preference.pinned
+                ? context.l10n.conversationUnpin
+                : context.l10n.conversationPin,
+          ),
         ),
         PopupMenuItem(
           value: 'mute',
-            child: Text(
-              preference.muted
-                  ? context.l10n.conversationEnableNotifications
-                  : context.l10n.conversationMute,
-            ),
+          child: Text(
+            preference.muted
+                ? context.l10n.conversationEnableNotifications
+                : context.l10n.conversationMute,
+          ),
         ),
         const PopupMenuDivider(),
         PopupMenuItem(
@@ -317,7 +314,7 @@ class ConversationListSection extends ConsumerWidget {
   }
 }
 
-String _previewLabel(String preview) {
+String _previewLabel(BuildContext context, String preview) {
   if (preview.isEmpty) return '';
-  return isImageMessageBody(preview) ? 'Obraz' : preview;
+  return isImageMessageBody(preview) ? context.l10n.commonImage : preview;
 }
