@@ -1644,6 +1644,24 @@ mod tests {
         items.push(item);
     }
 
+    #[test]
+    fn crossed_pairing_keeps_one_deterministic_winner_across_views() {
+        let mut runtime = runtime();
+        let mut outgoing = pairing("pairing-z", InviteState::Pending);
+        outgoing.received = false;
+        outgoing.pair_key = Some("pair-key".to_owned());
+        runtime.storage.put_pairing_outbox(outgoing).unwrap();
+
+        let mut incoming = pairing("pairing-a", InviteState::Pending);
+        incoming.received = true;
+        incoming.pair_key = Some("pair-key".to_owned());
+        runtime.storage.put_pairing_inbox(incoming).unwrap();
+
+        let (inbox, outbox) = runtime.local_pairing_lists().unwrap();
+        assert_eq!(inbox.iter().map(|v| v.pairing_id.as_str()).collect::<Vec<_>>(), vec!["pairing-a"]);
+        assert!(outbox.is_empty());
+    }
+
     fn runtime() -> ClientRuntime<MemoryStorage, FakeTransport, FakeClock> {
         let storage = MemoryStorage {
             identity: Some(RuntimeIdentity::from_parts(
