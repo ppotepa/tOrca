@@ -16,6 +16,7 @@ import '../../shared/widgets/info_tile.dart';
 import '../../shared/widgets/themed_switch_list_tile.dart';
 import '../../locales/presentation/app_localizations_x.dart';
 import '../../locales/presentation/language_picker.dart';
+import '../../locales/presentation/localized_ui_copy.dart';
 import '../../locales/presentation/theme_localizer.dart';
 import 'image_storage_settings_section.dart';
 
@@ -106,6 +107,13 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     });
   }
 
+  void _showSettingsError({required String deduplicationKey}) {
+    final copy = LocalizedUiCopy(context.l10n);
+    ref
+        .read(uiNotificationCenterProvider.notifier)
+        .showError(copy.settingsSaveFailed, deduplicationKey: deduplicationKey);
+  }
+
   Future<void> _set(
     String key,
     bool previous,
@@ -119,16 +127,11 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     try {
       final store = await SharedPreferences.getInstance();
       final saved = await store.setBool(key, value);
-      if (!saved) throw StateError('Nie udało się zapisać ustawienia.');
-    } catch (error) {
+      if (!saved) throw const _SettingsPersistenceException();
+    } catch (_) {
       if (!mounted) return;
       setState(() => assign(previous));
-      ref
-          .read(uiNotificationCenterProvider.notifier)
-          .showError(
-            error.toString(),
-            deduplicationKey: 'setting:$key:${error.runtimeType}',
-          );
+      _showSettingsError(deduplicationKey: 'setting:$key:save-failed');
     } finally {
       if (mounted) setState(() => _saving.remove(key));
     }
@@ -142,17 +145,12 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     });
     try {
       await ref.read(themeControllerProvider.notifier).setReducedMotion(value);
-    } catch (error) {
+    } catch (_) {
       if (!mounted) return;
       setState(() {
         _themePreferences = _themePreferences.copyWith(reducedMotion: previous);
       });
-      ref
-          .read(uiNotificationCenterProvider.notifier)
-          .showError(
-            error.toString(),
-            deduplicationKey: 'setting:reduced-motion:${error.runtimeType}',
-          );
+      _showSettingsError(deduplicationKey: 'setting:reduced-motion:failed');
     } finally {
       if (mounted) setState(() => _saving.remove(_reducedMotionKey));
     }
@@ -167,19 +165,20 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     try {
       await DesktopAutostart.setEnabled(value);
       final actual = await DesktopAutostart.isEnabled();
-      if (actual != value) {
-        throw StateError('System Windows nie potwierdził zmiany autostartu.');
-      }
+      if (actual != value) throw const _AutostartConfirmationException();
       if (mounted) setState(() => _autostart = actual);
-    } catch (error) {
+    } on _AutostartConfirmationException {
       if (!mounted) return;
       setState(() => _autostart = previous);
-      ref
-          .read(uiNotificationCenterProvider.notifier)
-          .showError(
-            error.toString(),
-            deduplicationKey: 'setting:autostart:${error.runtimeType}',
+      final copy = LocalizedUiCopy(context.l10n);
+      ref.read(uiNotificationCenterProvider.notifier).showError(
+            copy.windowsAutostartNotConfirmed,
+            deduplicationKey: 'setting:autostart:not-confirmed',
           );
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _autostart = previous);
+      _showSettingsError(deduplicationKey: 'setting:autostart:failed');
     } finally {
       if (mounted) setState(() => _saving.remove(_autostartOperationKey));
     }
@@ -242,7 +241,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                   const SizedBox(height: 12),
                   InfoTile(
                     leading: const ThemedIcon(Icons.terminal_outlined),
-                  title: l10n.settingsTerminalPalette,
+                    title: l10n.settingsTerminalPalette,
                     subtitle: localizeRetroPalette(
                       l10n,
                       _themePreferences.retroPalette,
@@ -497,7 +496,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     bool enabled = true,
   }) => BusySurface(
     state: _preferenceState(key),
-    label: 'Zapisywanie…',
+    label: context.l10n.settingsSaving,
     child: ThemedSwitchListTile(
       contentPadding: EdgeInsets.zero,
       title: Text(title),
@@ -508,4 +507,12 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
           : null,
     ),
   );
+}
+
+final class _SettingsPersistenceException implements Exception {
+  const _SettingsPersistenceException();
+}
+
+final class _AutostartConfirmationException implements Exception {
+  const _AutostartConfirmationException();
 }
