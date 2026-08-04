@@ -211,6 +211,9 @@ pub fn merge_pairing_item(
             if item.offer_payload.is_none() {
                 item.offer_payload = remote.offer_payload;
             }
+            if item.pair_key.is_none() {
+                item.pair_key = remote.pair_key;
+            }
             item.expires_at = max(item.expires_at, remote.expires_at);
             item.received = item.received || remote.received;
             item.state = merge_invite_state(item.state, remote.state);
