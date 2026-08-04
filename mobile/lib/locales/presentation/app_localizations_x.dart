@@ -120,6 +120,9 @@ extension AppLocalizationsUiCopy on AppLocalizations {
   String get uiFingerprintUnavailable => _isPolish
       ? 'Fingerprint niedostępny'
       : 'Fingerprint unavailable';
+  String get uiFingerprintCopied =>
+      _isPolish ? 'Fingerprint skopiowany.' : 'Fingerprint copied.';
+  String get uiNoContacts => _isPolish ? 'Brak kontaktów.' : 'No contacts.';
   String uiRelationshipRemoved(String name) => _isPolish
       ? 'Relacja z $name została zakończona.'
       : 'The relationship with $name was ended.';
