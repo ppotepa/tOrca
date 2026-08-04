@@ -1068,3 +1068,210 @@ Kazdy refaktor ma odpowiadac na cztery pytania przed przeniesieniem pliku:
 
 Jesli nie ma jasnej odpowiedzi, pliku nie przenosimy. Najpierw stabilizujemy
 kontrakt i testy.
+
+
+14. NOWY PLAN IMPLEMENTACJI ZMIANY STRUKTURY REPO
+------------------------------------------------
+
+Cel planu
+~~~~~~~~~
+
+Zmiana ma doprowadzic repozytorium do struktury opisanej w rozdziale 3,
+bez laczenia jej z jednoczesna zmiana protokolu pairing, MLS albo FFI.
+Migracja struktury jest osobnym strumieniem prac. Kazdy etap ma pozostawic
+kompilowalny i testowalny stan repozytorium.
+
+Zasady bezwzgledne
+~~~~~~~~~~~~~~~~~~
+
+  * pracujemy tylko na `main` po zatwierdzeniu etapu;
+  * jeden etap = jeden logiczny commit albo maly, latwy do review zestaw
+    commitow;
+  * najpierw `git mv`, potem aktualizacja importow i manifestow;
+  * nie kopiujemy plikow rownolegle do starych i nowych sciezek;
+  * nie zostawiamy aliasow `v2`, `legacy`, `deprecated` ani martwych wrapperow;
+  * nie zmieniamy zachowania runtime w commicie strukturalnym;
+  * po kazdym etapie uruchamiamy testy wlasciciela zmienionej granicy;
+  * SQL pozostaje w `common/torchat-client-engine/sql/`, a Rust korzysta z
+    `src/storage/sqlite/sql_catalog.rs`.
+
+Etap 0 — zamrozenie stanu i inwentaryzacja
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  1. Sprawdzic `git status --short --branch` i zapisac bazowy commit.
+  2. Uruchomic:
+
+       cargo test --workspace
+       flutter analyze --no-pub
+       flutter test --no-pub
+
+  3. Wygenerowac liste plikow przez `rg --files` z pominięciem `target/`,
+     `build/`, `.torchat/runs/` i danych runtime.
+  4. Oznaczyc kazdy katalog jako `KEEP`, `MOVE`, `MERGE` albo `REMOVE`.
+  5. Utworzyc plik roboczy mapowania, ale nie commitowac go do produktu:
+
+       old path -> new path -> owner -> dependency rule -> verification
+
+Kryterium wyjscia: bazowe testy sa zielone, a kazdy plik ma wlasciciela.
+
+Etap 1 — dokumentacja granic i katalogow
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Dodac README tylko tam, gdzie granica nie jest oczywista:
+
+  * `./common/README.md` — shared crates i zakaz zaleznosci platformowych;
+  * `./common/torchat-client-runtime/README.md` — domena, state machine,
+    retry, projekcje i storage trait;
+  * `./common/torchat-client-engine/README.md` — actor, P2P, relay client,
+    SQLite/SQLCipher i FFI boundary;
+  * `./desktop/README.md` — cienki host Windows, Tor i engine stdio;
+  * `./mobile/README.md` — Flutter UI, controller, repository i platform;
+  * `./server/README.md` — wyłącznie efemeryczny relay rendezvous;
+  * `./docs/architecture/dependency-rules.md` — dozwolony graf zaleznosci.
+
+Ten etap nie przenosi kodu. Kryterium wyjscia: nowy developer potrafi wskazac
+wlasciciela kazdego pliku bez czytania implementacji.
+
+Etap 2 — stabilizacja wspolnych kontraktow
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  1. Zrodlem kontraktu pozostaje `common/client-engine-contract.json` oraz
+     `tools/torchat-contract-gen/src/main.rs`.
+  2. Rust DTO pozostaja w `common/torchat-client-runtime/src/models.rs`.
+  3. Flutter DTO pozostaja w `mobile/lib/core/models/domain.dart` i wygenerowanym
+     `mobile/lib/core/runtime/generated/runtime_contract.g.dart`.
+  4. Po kazdej zmianie kontraktu uruchamiamy generator oraz testy fixtures:
+     `common/internal-runtime-fixtures.json` i `mobile/test/`.
+  5. Nie przenosimy typow domenowych do `mobile/lib/platform/` ani do `desktop/`.
+
+Kryterium wyjscia: kontrakt generuje identyczne nazwy dla Rust, Flutter i FFI.
+
+Etap 3 — rozdzielenie klienta od aplikacji platformowych
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Stan docelowy:
+
+  * `common/torchat-client-runtime/` — czysta logika urzadzenia;
+  * `common/torchat-client-engine/` — actor i storage klienta;
+  * `common/torchat-client-engine-ffi/` — jedyna granica ABI;
+  * `desktop/` — host Windows, secret store, Tor runtime i stdio;
+  * `mobile/` — Flutter presentation/application layer;
+  * `mobile/lib/platform/android/` i `mobile/lib/platform/desktop/` — tylko
+    adaptery platformowe.
+
+Kolejnosc:
+
+  1. przeniesc kod platformowy z `mobile/lib/` do odpowiednich adapterow;
+  2. zostawic w `mobile/lib/core/` tylko modele, repository i wspolny runtime;
+  3. usunac importy UI z Rust i importy Rust z warstwy widokow;
+  4. sprawdzic, ze `desktop/` nie zalezy od Flutter source;
+  5. sprawdzic, ze Android nie implementuje drugiego engine.
+
+Kryterium wyjscia: desktop i Android korzystaja z tego samego engine/runtime,
+a roznia sie tylko hostem i adapterami platformowymi.
+
+Etap 4 — uporzadkowanie common crates
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Nie tworzyc nowych pakietow tylko po to, aby zmienic nazwe. Najpierw utrzymac
+obecne crate'y i wydzielac tylko granice potwierdzone zaleznosciami:
+
+  * `torchat-core` — typy protokolu i crypto primitives;
+  * `torchat-client-runtime` — domena i orkiestracja lokalnego stanu;
+  * `torchat-client-engine` — transport, actor, SQLCipher i P2P;
+  * `torchat-client-engine-ffi` — C/JNI/FFI;
+  * `torchat-contract-gen` — generator, nigdy runtime dependency.
+
+Zakaz: `server/torchat-server` nie moze zalezec od client runtime, engine,
+SQLCipher, kontaktow, profili ani historii wiadomosci.
+
+Etap 5 — SQL, migracje i storage
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  1. Wszystkie migracje sa w:
+     `common/torchat-client-engine/sql/migrations/`.
+  2. Wszystkie query sa w:
+     `common/torchat-client-engine/sql/queries/`.
+  3. Wszystkie commands sa w:
+     `common/torchat-client-engine/sql/commands/`.
+  4. Rejestracja plikow jest tylko w:
+     `common/torchat-client-engine/src/storage/sqlite/sql_catalog.rs`.
+  5. `src/storage/runtime_storage.rs` zawiera orkiestracje parametrów, nie
+     tresc nowych SQL.
+  6. Po scaleniu migracji uruchomic `scripts/internal/check-sql-files.py` oraz
+     testy migracji na pustej i istniejacej bazie.
+  7. Nie usuwac migracji juz zastosowanych; cleanup dotyczy tylko nieuzywanych
+     query, repozytoriow i artefaktow, nie historii schematu.
+
+Etap 6 — relay i infrastruktura
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  * `server/torchat-server/` pozostaje anonimowym, efemerycznym rendezvous;
+  * `infra/docker/` przechowuje deployment i Tor sidecar, nie logike klienta;
+  * `infra/docker/compose.dev.yml` nie uruchamia PostgreSQL;
+  * relay nie ma katalogu danych ani repository SQL;
+  * `scripts/internal/check-server-relay-ephemeral.ps1` i
+    `scripts/internal/check-sql-isolation.ps1` sa gates CI.
+
+Etap 7 — konsolidacja pipeline build/deploy
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  1. `scripts/torchat.ps1` jest jedynym entrypointem uzytkownika.
+  2. `scripts/modules/` zawiera orkiestracje komend.
+  3. `scripts/internal/` zawiera kroki techniczne, bez drugiego publicznego
+     interfejsu.
+  4. ABI Android jest wybierane jawnie przez `-Device` i polityke emulatora;
+     build nie moze samoczynnie dodawac `x86_64` do deployu fizycznego ARM64.
+  5. Cache, reset danych i logi runow maja jawne polityki oraz sa wykluczone
+     z commita.
+
+Etap 8 — cleanup
+~~~~~~~~~~~~~~~~
+
+Po przejsciu etapow usunac tylko rzeczy potwierdzone przez `rg` i build:
+
+  * nieuzywane wrappery i duplikaty controllerow;
+  * stare endpointy relay control-plane;
+  * nieuzywane repository profili/kontaktow relaya;
+  * martwe `v2`, `legacy`, `deprecated` i fallback protocol paths;
+  * stare katalogi build/cache oraz logi lokalne;
+  * dokumentacje opisujace nieistniejaca baze PostgreSQL;
+  * nieuzywane SQL po migracji kodu.
+
+Nie usuwac automatycznie:
+
+  * kluczy Tor z aktywnego srodowiska;
+  * lokalnej bazy SQLCipher uzytkownika;
+  * migracji schematu;
+  * fixtures i testow bez potwierdzenia, ze sa martwe.
+
+Etap 9 — finalny gate
+~~~~~~~~~~~~~~~~~~~~~
+
+Przed uznaniem migracji struktury za zakonczona:
+
+  * `cargo test --workspace`;
+  * `flutter analyze --no-pub`;
+  * `flutter test --no-pub`;
+  * `scripts/internal/check-clean-architecture.ps1`;
+  * `scripts/internal/check-sql-isolation.ps1`;
+  * `scripts/internal/check-server-relay-ephemeral.ps1`;
+  * brak zmian w `git status --short`;
+  * grep nie znajduje importow do usunietych sciezek;
+  * build Windows i Android korzysta z ustalonych targetow;
+  * smoke test pairing Windows <-> Android.
+
+Kolejnosc commitow
+~~~~~~~~~~~~~~~~~~
+
+  1. `docs: define repository boundaries`;
+  2. `refactor: isolate platform adapters`;
+  3. `refactor: normalize common crate boundaries`;
+  4. `refactor: isolate SQL catalog and storage commands`;
+  5. `refactor: consolidate build pipeline`;
+  6. `chore: remove obsolete paths and artifacts`;
+  7. `test: enforce final architecture gates`.
+
+Kazdy commit powinien miec opis wlasciciela zmiany, liste przeniesionych
+sciezek i komendy weryfikacyjne. Dopiero po przejsciu etapu mozna rozpoczac
+nastepny.
