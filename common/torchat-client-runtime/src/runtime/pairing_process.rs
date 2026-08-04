@@ -152,7 +152,9 @@ pub(crate) fn prepare_accept(
     let sender = item
         .sender
         .ok_or_else(|| RuntimeError::Conflict("pairing sender does not exist".to_owned()))?;
-    if contacts
+    let retrying = matches!(item.state, InviteState::Accepted | InviteState::Completed);
+    if !retrying
+        && contacts
         .iter()
         .any(|contact| contact.installation_id == sender.installation_id && !contact.blocked)
     {
@@ -163,12 +165,12 @@ pub(crate) fn prepare_accept(
     let capability = item
         .capability
         .ok_or_else(|| RuntimeError::Conflict("pairing capability does not exist".to_owned()))?;
-    if item.expires_at < now_secs {
+    if !retrying && item.expires_at < now_secs {
         return Err(RuntimeError::Conflict(
             "pairing request is expired".to_owned(),
         ));
     }
-    if !item.state.is_pending() {
+    if !retrying && !item.state.is_pending() {
         return Err(RuntimeError::Conflict(
             "pairing request cannot be prepared from its current state".to_owned(),
         ));
