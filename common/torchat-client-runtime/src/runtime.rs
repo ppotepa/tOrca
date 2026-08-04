@@ -2154,10 +2154,10 @@ mod tests {
     #[test]
     fn rendezvous_offer_is_a_user_decision_until_finalized() {
         let mut runtime = runtime();
-        let mut item = pairing("pairing-v2", InviteState::Pending);
+        let mut item = pairing("pairing-rendezvous", InviteState::Pending);
         item.received = true;
         item.sender = Some(contact());
-        item.offer_invite_id = Some("invite-v2".to_owned());
+        item.offer_invite_id = Some("invite-rendezvous".to_owned());
         item.offer_payload = Some("signed-offer".to_owned());
 
         runtime.receive_pairing_offer(item).unwrap();
@@ -2171,17 +2171,17 @@ mod tests {
             ]
         );
         assert_eq!(
-            runtime.pairing_offer_payload("pairing-v2").unwrap(),
+            runtime.pairing_offer_payload("pairing-rendezvous").unwrap(),
             "signed-offer"
         );
 
-        runtime.accept_received_pairing("pairing-v2").unwrap();
+        runtime.accept_received_pairing("pairing-rendezvous").unwrap();
         assert_eq!(
             runtime.storage.pairing_inbox().unwrap()[0].state,
             InviteState::Accepted
         );
 
-        runtime.finalize_pairing("pairing-v2").unwrap();
+        runtime.finalize_pairing("pairing-rendezvous").unwrap();
         let completed = &runtime.storage.pairing_inbox().unwrap()[0];
         assert_eq!(completed.state, InviteState::Completed);
         assert_eq!(
@@ -2195,11 +2195,11 @@ mod tests {
         let mut runtime = runtime();
         runtime
             .storage
-            .put_pairing_outbox(pairing("pairing-v2", InviteState::Completed))
+            .put_pairing_outbox(pairing("pairing-rendezvous", InviteState::Completed))
             .unwrap();
 
-        runtime.finalize_pairing("pairing-v2").unwrap();
-        runtime.finalize_pairing("pairing-v2").unwrap();
+        runtime.finalize_pairing("pairing-rendezvous").unwrap();
+        runtime.finalize_pairing("pairing-rendezvous").unwrap();
 
         assert_eq!(
             runtime.storage.pairing_outbox().unwrap()[0].state,

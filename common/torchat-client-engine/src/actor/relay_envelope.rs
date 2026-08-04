@@ -32,8 +32,8 @@ impl ClientEngineActor {
                 let item = PairingItem {
                     pairing_id: pairing_id.clone(),
                     sender: Some(sender),
-                    // V2 authorization is bound to the live WebSocket and its
-                    // side token. The runtime still requires a non-empty local
+                    // Rendezvous authorization is bound to the live WebSocket
+                    // and its side token. The runtime still requires a non-empty local
                     // capability to authorize the UI transition, but this
                     // value is never sent to the relay.
                     capability: Some(pairing_id.clone()),
