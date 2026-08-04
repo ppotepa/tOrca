@@ -712,6 +712,7 @@ void main() {
               onUpdateContactSettings: (_, _, _, _, _) async {},
               fingerprint: 'SELF',
               ownInvite: 'amber-birch-cobalt-dawn-ember-fjord',
+              canPair: true,
               error: '',
             ),
           ),

@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/app_theme.dart';
+import '../../app/app_controller.dart';
 import '../../app/ui_operation_registry.dart';
+import '../../core/connection/app_state_connection.dart';
+import '../../core/connection/connection_readiness.dart';
 import '../../shared/widgets/action_section.dart';
 import '../../shared/widgets/action_tile.dart';
 import '../../shared/widgets/identity_section.dart';
@@ -27,6 +30,12 @@ class AccountView extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l10n = context.l10n;
+    final canPair = ref.watch(
+      appControllerProvider.select(
+        (state) =>
+            state.connectionReadiness.canPerform(ConnectionOperation.pair),
+      ),
+    );
     final inviteLoad = ref.watch(
       uiOperationProvider(UiOperationKey.inviteCodeLoad),
     );
@@ -55,7 +64,7 @@ class AccountView extends ConsumerWidget {
                   busy: inviteLoad.busy,
                   busyLabel: l10n.accountInviteLoading,
                   subtitle: l10n.accountInviteSubtitle,
-                  onTap: onShowInvite,
+                  onTap: canPair ? onShowInvite : null,
                 ),
                 ActionTile(
                   leading: const ThemedIcon(Icons.settings_outlined),

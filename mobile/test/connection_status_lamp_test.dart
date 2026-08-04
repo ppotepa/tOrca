@@ -26,7 +26,7 @@ void main() {
   testWidgets('lamp exposes error state without animation dependency', (tester) async {
     await tester.pumpWidget(
       const MaterialApp(
-        home: const Scaffold(
+        home: Scaffold(
           body: ConnectionStatusLamp(phase: TransportPhase.error),
         ),
       ),

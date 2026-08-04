@@ -202,6 +202,7 @@ class MainShell extends ConsumerWidget {
             onSelect: onStartConversation,
             onScanInvite: onScanInvite,
             onShowInvite: onShowInvite,
+            canPair: readiness?.canPerform(ConnectionOperation.pair) ?? false,
             onUpdateContactSettings: onUpdateContactSettings,
             fingerprint: fingerprint,
             ownInvite: ownInvite,

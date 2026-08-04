@@ -35,6 +35,7 @@ class ContactsView extends ConsumerWidget {
     required this.onUpdateContactSettings,
     required this.fingerprint,
     required this.ownInvite,
+    required this.canPair,
     required this.error,
     this.showContactList = true,
     this.pendingPairings = const [],
@@ -57,6 +58,7 @@ class ContactsView extends ConsumerWidget {
   onUpdateContactSettings;
   final String fingerprint;
   final String ownInvite;
+  final bool canPair;
   final String error;
   final bool showContactList;
   final List<PairingItem> pendingPairings;
@@ -96,7 +98,7 @@ class ContactsView extends ConsumerWidget {
             ),
             BusyIconButton(
               busy: inviteCode.busy,
-              onPressed: inviteCode.busy ? null : onShowInvite,
+              onPressed: inviteCode.busy || !canPair ? null : onShowInvite,
               tooltip: l10n.myPairingCode,
               icon: const ThemedIcon(Icons.qr_code_2),
             ),

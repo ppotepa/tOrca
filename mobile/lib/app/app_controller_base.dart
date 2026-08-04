@@ -477,6 +477,19 @@ abstract class AppController extends Notifier<AppState> {
   }
 
   Future<InviteCode?> refreshInviteCode() async {
+    // Rendezvous requires a live Tor SOCKS endpoint and the local onion
+    // listener.  Do not start a worker before those platform facts exist;
+    // that used to surface as a misleading DNS/SOCKS failure.
+    if (!state.connectionReadiness.canPerform(ConnectionOperation.pair)) {
+      state = state.copyWith(
+        action: '',
+        error: '',
+        problem: const UserProblem(
+          code: UserProblemCode.secureConnectionPending,
+        ),
+      );
+      return null;
+    }
     try {
       state = state.copyWith(action: OperationAction.refreshPairing, error: '');
       final code = await _repository.refreshInviteCode();
