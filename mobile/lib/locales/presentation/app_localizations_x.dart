@@ -35,6 +35,8 @@ extension AppLocalizationsUiCopy on AppLocalizations {
   String uiUnreadContactsSemantics(int count) => _isPolish
       ? '$count kontaktów z nieprzeczytanymi wiadomościami'
       : '$count contacts with unread messages';
+  String uiUnreadCountSemantics(int count) =>
+      _isPolish ? '$count nieprzeczytanych' : '$count unread';
   String get uiStateReady => _isPolish ? 'gotowe' : 'ready';
   String get uiStateFailed => _isPolish ? 'błąd' : 'failed';
   String get uiStateDegraded => _isPolish ? 'ograniczone' : 'degraded';
