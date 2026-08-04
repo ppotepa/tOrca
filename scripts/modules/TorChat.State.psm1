@@ -95,6 +95,7 @@ function Clear-TorChatBuildState {
 }
 
 Export-ModuleMember -Function @(
+    'Get-TorChatFileSha256',
     'Test-TorChatArtifactDeploymentRequired',
     'Set-TorChatArtifactDeployed',
     'Clear-TorChatBuildState'

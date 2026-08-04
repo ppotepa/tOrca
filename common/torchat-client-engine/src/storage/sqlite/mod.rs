@@ -145,6 +145,15 @@ impl ClientDatabase {
         }
         let migration_runner = MigrationRunner::new(MIGRATIONS);
         migration_runner.run(&connection)?;
+        // The base schema owns the projection singleton. Keep this repair
+        // idempotent so databases created by the first flattened-schema build
+        // (which lacked the seed row) can recover without losing local data.
+        connection
+            .execute(
+                "INSERT OR IGNORE INTO projection_meta (singleton, store_id, global_revision) VALUES (1, lower(hex(randomblob(16))), 0)",
+                [],
+            )
+            .map_err(sqlite_error)?;
         let database = Self {
             connection,
             migration_runner,

@@ -89,7 +89,7 @@ function Get-TorChatEmbeddedTor {
         Write-TorChatInfo "Downloading Tor Expert Bundle $($manifest.version) for $platform"
         Invoke-WebRequest -Uri $package.url -OutFile $archive
     }
-    $actualHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash
+    $actualHash = Get-TorChatFileSha256 -Path $archive
     if ($actualHash -ne $package.sha256) { throw "Tor package checksum mismatch. Expected $($package.sha256), got $actualHash." }
     if (-not (Test-Path -LiteralPath $binary)) {
         Assert-TorChatTool -Name tar
