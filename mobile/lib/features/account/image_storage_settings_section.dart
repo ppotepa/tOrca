@@ -42,10 +42,10 @@ class _ImageStorageSettingsSectionState
         _usage = usage;
         _loading = false;
       });
-    } catch (error) {
+    } catch (_) {
       if (!mounted) return;
       setState(() => _loading = false);
-      _showError(error);
+      _showError(context.l10n.uiImageCacheLoadFailed, 'load');
     }
   }
 
@@ -58,10 +58,10 @@ class _ImageStorageSettingsSectionState
     });
     try {
       await ImageAttachmentPreferences.setAutomaticDownloadEnabled(value);
-    } catch (error) {
+    } catch (_) {
       if (mounted) {
         setState(() => _automaticDownload = previous);
-        _showError(error);
+        _showError(context.l10n.uiImagePreferenceSaveFailed, 'preference');
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -100,23 +100,21 @@ class _ImageStorageSettingsSectionState
             context.l10n.imageCacheCleared,
             deduplicationKey: 'image-cache-cleared',
           );
-    } catch (error) {
-      if (mounted) _showError(error);
+    } catch (_) {
+      if (mounted) {
+        _showError(context.l10n.uiImageCacheClearFailed, 'clear');
+      }
     } finally {
       if (mounted) setState(() => _clearing = false);
     }
   }
 
-  void _showError(Object error) {
-    final message = error
-        .toString()
-        .replaceFirst('Exception: ', '')
-        .replaceFirst('Bad state: ', '');
+  void _showError(String message, String operation) {
     ref
         .read(uiNotificationCenterProvider.notifier)
         .showError(
           message,
-          deduplicationKey: 'image-cache-error:${error.runtimeType}',
+          deduplicationKey: 'image-cache-error:$operation',
         );
   }
 
