@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/app_theme.dart';
 import '../../app/app_controller.dart';
 import '../../app/ui_operation_registry.dart';
-import '../../core/connection/app_state_connection.dart';
 import '../../core/connection/connection_readiness.dart';
 import '../../shared/widgets/action_section.dart';
 import '../../shared/widgets/action_tile.dart';

@@ -15,7 +15,6 @@ import 'app/desktop_notification_service.dart';
 import 'app/desktop_window_lifecycle.dart';
 import 'app/notifications/ui_notification_center.dart';
 import 'client_runtime.dart';
-import 'core/connection/app_state_connection.dart';
 import 'core/connection/connection_gate.dart';
 import 'features/account/account_view.dart';
 import 'features/account/settings_view.dart';

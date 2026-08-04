@@ -19,6 +19,7 @@ import 'package:torchat_mobile/core/application_state/application_state_store.da
 import 'package:torchat_mobile/core/runtime/runtime_payload.dart';
 import 'package:torchat_mobile/shared/widgets/action_tile.dart';
 import 'package:torchat_mobile/features/shell/desktop/desktop_workspace.dart';
+import 'package:torchat_mobile/locales/generated/app_localizations.dart';
 
 final _statefulRuntimes = <_StatefulRuntime>[];
 
@@ -479,7 +480,7 @@ void main() {
     },
   );
 
-  test('controller localizes an expired pairing code error', () async {
+  test('controller preserves an expired pairing code error', () async {
     final runtime = _StatefulRuntime()
       ..submitPairingError = PlatformException(
         code: 'RUNTIME',
@@ -495,7 +496,7 @@ void main() {
     await controller.submitPairingCode('1234 5678');
 
     final state = container.read(appControllerProvider);
-    expect(state.error, contains('nieprawidłowy albo wygasł'));
+    expect(state.error, contains('pairing code expired or invalid'));
     expect(state.error, isNot(contains('relay transport error')));
   });
 
@@ -696,6 +697,9 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        locale: const Locale('pl'),
         home: ProviderScope(
           child: Scaffold(
             body: ContactsView(
@@ -1029,6 +1033,9 @@ void main() {
   ) async {
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        locale: const Locale('pl'),
         home: ProviderScope(
           child: Scaffold(
             body: Column(
@@ -1078,13 +1085,23 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(
-      const ProviderScope(child: MaterialApp(home: ManualInviteCodePage())),
+      ProviderScope(
+        child: MaterialApp(
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          locale: const Locale('pl'),
+          home: const ManualInviteCodePage(),
+        ),
+      ),
     );
 
     await tester.enterText(find.byType(TextField), '1234');
     await tester.tap(find.widgetWithText(FilledButton, 'Dodaj kontakt'));
     await tester.pump();
-    expect(find.text('Kod musi zawierać dokładnie 8 cyfr.'), findsOneWidget);
+    expect(
+      find.textContaining('Kod parowania jest nieprawidłowy albo wygasł.'),
+      findsOneWidget,
+    );
 
     await tester.enterText(find.byType(TextField), '1234 5678');
     await tester.tap(find.widgetWithText(FilledButton, 'Dodaj kontakt'));

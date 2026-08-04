@@ -493,10 +493,5 @@ IconData _stateIcon(MessageState state) => switch (state) {
 };
 
 String _stateLabel(BuildContext context, MessageState state) => switch (state) {
-  MessageState.queued => context.l10n.uiMessageQueued,
-  MessageState.sending => context.l10n.uiMessageSending,
-  MessageState.sent => context.l10n.uiMessageSent,
-  MessageState.delivered => context.l10n.uiMessageDelivered,
-  MessageState.read => context.l10n.uiMessageRead,
-  MessageState.failed => context.l10n.uiMessageFailed,
+  _ => context.l10n.uiMessageState(state),
 };
