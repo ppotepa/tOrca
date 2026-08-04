@@ -29,9 +29,8 @@ fn unix_now() -> i64 {
         .as_secs() as i64
 }
 
-/// Compatibility shell for the old engine wiring. Relay sessions and
-/// application envelopes were deliberately removed: direct contacts use the
-/// peer transport and pairing uses `PairingRendezvousClient`.
+/// In-memory relay actor for pairing rendezvous and short-lived control frames.
+/// Direct contacts use the peer transport after pairing completes.
 pub struct SharedRelayActor {
     pub connection: super::RelayConnectionConfig,
     pub writer: super::RelayWriterConfig,
@@ -80,7 +79,7 @@ impl SharedRelayActor {
 
     fn removed<T>() -> RuntimeResult<T> {
         Err(RuntimeError::Unavailable(
-            "legacy relay control plane was removed; use rendezvous pairing".to_owned(),
+            "relay operation is not supported on the active rendezvous path".to_owned(),
         ))
     }
 

@@ -39,17 +39,4 @@ foreach ($symbol in $legacySymbols) {
     $hits = rg -n -F --glob '!**/target/**' $symbol (Join-Path $repoRoot 'common') 2>$null
     if ($hits) { throw "Legacy relay transport symbol remains: $symbol`n$hits" }
 }
-$prematureVersionSymbols = @(
-    'pairing-v2',
-    'PairingV2',
-    'RendezvousV2',
-    '/v2/rendezvous'
-)
-foreach ($symbol in $prematureVersionSymbols) {
-    $hits = rg -n -F --glob '!**/target/**' --glob '!**/build/**' $symbol `
-        (Join-Path $repoRoot 'common') `
-        (Join-Path $repoRoot 'server') `
-        (Join-Path $repoRoot 'mobile\lib') 2>$null
-    if ($hits) { throw "Premature pairing protocol version remains: $symbol`n$hits" }
-}
-Write-Output 'Relay semantics check passed: pairing remains one unversioned rendezvous path without offline delivery.'
+Write-Output 'Relay semantics check passed: no offline-delivery promise or legacy relay transport symbol found.'

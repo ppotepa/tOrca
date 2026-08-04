@@ -90,20 +90,6 @@ struct ContactCapabilityStatusResponse {
 }
 
 #[derive(Clone, Debug)]
-enum PendingRelayDelivery {
-    PairingResponse {
-        pairing_id: String,
-    },
-    Welcome {
-        invite_id: String,
-    },
-    Ephemeral {
-        installation_id: String,
-        delivery_id: Option<String>,
-    },
-}
-
-#[derive(Clone, Debug)]
 struct IdempotencyCommitContext {
     command_id: String,
     command_descriptor: String,
@@ -120,7 +106,6 @@ pub struct ClientEngineActor {
     pub identity: Identity,
     pub conversations: HashMap<String, DirectConversation>,
     pub pending_welcomes: HashMap<String, PendingWelcomeRecord>,
-    pending_relay_deliveries: HashMap<uuid::Uuid, PendingRelayDelivery>,
     pending_engine_events: Vec<EngineEvent>,
     /// Process-local diagnostic count; durable receipt state remains in SQLite.
     receipt_queue_failed_after_commit: u64,
@@ -246,7 +231,6 @@ impl ClientEngineActor {
             identity,
             conversations,
             pending_welcomes,
-            pending_relay_deliveries: HashMap::new(),
             pending_engine_events: Vec::new(),
             receipt_queue_failed_after_commit: 0,
             active_peer_sessions: HashMap::new(),
@@ -606,7 +590,6 @@ impl ClientEngineActor {
         let now_ms = self.clock.now_ms();
         self.database.requeue_after_disconnect(now_ms)?;
         self.database.requeue_peer_deliveries(now_ms)?;
-        self.pending_relay_deliveries.clear();
         Ok(())
     }
 
@@ -622,12 +605,10 @@ impl ClientEngineActor {
         envelope_id: uuid::Uuid,
         recipient: &str,
         ciphertext: &str,
-        delivery: PendingRelayDelivery,
     ) -> EngineResult<()> {
         self.relay
             .send_envelope(envelope_id, recipient, ciphertext)
             .map_err(runtime_error)?;
-        self.pending_relay_deliveries.insert(envelope_id, delivery);
         Ok(())
     }
 
@@ -771,9 +752,6 @@ impl ClientEngineActor {
                 envelope_id,
                 &recipient_installation_id,
                 &ciphertext,
-                PendingRelayDelivery::PairingResponse {
-                    pairing_id: pairing.pairing_id.clone(),
-                },
             ) {
                 self.database
                     .record_pairing_response_error(&pairing.pairing_id, &error.to_string())?;

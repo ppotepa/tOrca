@@ -42,10 +42,6 @@ impl ClientEngineActor {
             uuid::Uuid::new_v4(),
             recipient_installation_id,
             &payload,
-            PendingRelayDelivery::Ephemeral {
-                installation_id: recipient_installation_id.to_owned(),
-                delivery_id: None,
-            },
         )
     }
 
@@ -121,9 +117,6 @@ impl ClientEngineActor {
                 envelope_id,
                 &pending.recipient_installation_id,
                 &ciphertext,
-                PendingRelayDelivery::Welcome {
-                    invite_id: pending.invite_id.clone(),
-                },
             ) {
                 self.database.record_pending_welcome_error(
                     &pending.invite_id,
@@ -178,9 +171,6 @@ impl ClientEngineActor {
                     envelope_id,
                     &pending.recipient_installation_id,
                     &ciphertext,
-                    PendingRelayDelivery::Welcome {
-                        invite_id: pending.invite_id,
-                    },
                 ) {
                     self.database.record_pending_welcome_error(
                         &invite.invite_id,
@@ -272,9 +262,6 @@ impl ClientEngineActor {
             envelope_id,
             &card.installation_id,
             &ciphertext,
-            PendingRelayDelivery::Welcome {
-                invite_id: invite.invite_id.clone(),
-            },
         ) {
             self.database
                 .record_pending_welcome_error(&invite.invite_id, &error.to_string())?;

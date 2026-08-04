@@ -23,7 +23,7 @@ pub use event::{
     ConnectionSnapshot, ConnectionState, EngineEvent, EngineFatalError, EngineLogEvent,
     NotificationKind, NotificationRequest, PlatformAction, ResponsePayload, ResponseResult,
 };
-pub use relay::{EngineRelay, NoopEngineRelay};
+pub use relay::EngineRelay;
 pub use storage::{
     ClientDatabase, InboundEnvelopeStoreResult, InboundPeerEnvelopeRecord, Migration,
     MigrationRunner, MlsCheckpointRecord, OutboundDeliveryRecord,
