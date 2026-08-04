@@ -36,16 +36,21 @@ class BootScreen extends StatelessWidget {
   const BootScreen({
     super.key,
     required this.phase,
-    required this.status,
-    required this.detail,
+    this.status = '',
+    this.detail = '',
     required this.error,
     required this.retry,
-    required this.connecting,
+    this.connecting = false,
     required this.steps,
   });
   final TransportPhase phase;
-  final String status, detail, error;
+  @Deprecated('Status copy is localized from phase in the presentation layer.')
+  final String status;
+  @Deprecated('Technical details are not presented on the boot screen.')
+  final String detail;
+  final String error;
   final VoidCallback retry;
+  @Deprecated('Progress is derived from startup steps.')
   final bool connecting;
   final List<StartupStep> steps;
 
@@ -292,17 +297,24 @@ class _StartupTimelineRowState extends State<_StartupTimelineRow>
 class TorScreen extends StatelessWidget {
   const TorScreen({
     super.key,
-    required this.status,
-    required this.detail,
+    this.phase = TransportPhase.starting,
+    this.status = '',
+    this.detail = '',
     required this.progress,
     required this.error,
     required this.retry,
     required this.connecting,
   });
-  final String status, detail, error;
+  final TransportPhase phase;
+  @Deprecated('Status copy is localized from phase in the presentation layer.')
+  final String status;
+  @Deprecated('Technical details are not presented on the Tor screen.')
+  final String detail;
   final int? progress;
+  final String error;
   final VoidCallback retry;
   final bool connecting;
+
   @override
   Widget build(BuildContext context) => Scaffold(
     body: SafeArea(
@@ -319,7 +331,7 @@ class TorScreen extends StatelessWidget {
               ),
               const SizedBox(height: 18),
               Text(
-                status,
+                localizeTransportPhase(context.l10n, phase),
                 style: Theme.of(context).textTheme.titleLarge,
                 textAlign: TextAlign.center,
               ),
@@ -369,6 +381,7 @@ class NicknameScreen extends StatelessWidget {
   final RuntimeTorStatus transport;
   final bool ready;
   final VoidCallback onSave;
+
   @override
   Widget build(BuildContext context) => Scaffold(
     body: SafeArea(
