@@ -27,29 +27,25 @@ impl ClientEngineActor {
             RelayPayloadV1::PairingOffer {
                 pairing_id, invite, ..
             } => {
-                let mut runtime_events = self.accept_invite(invite)?;
-                // The contact and durable Welcome have now been committed by
-                // accept_invite. Finalize the originating local request as
-                // well; otherwise its PENDING record blocks every later code.
-                if let Ok(mut outcome_events) =
-                    self.apply_pairing_peer_outcome(pairing_id, PairingPeerOutcome::OfferReceived)
-                {
-                    runtime_events.append(&mut outcome_events);
-                    if let Ok(mut completion_events) = self
-                        .apply_pairing_peer_outcome(pairing_id, PairingPeerOutcome::WelcomePrepared)
-                    {
-                        runtime_events.append(&mut completion_events);
-                    }
-                } else {
-                    self.pending_engine_events.push(EngineEvent::Log {
-                        log: EngineLogEvent {
-                            level: "warn".to_owned(),
-                            message: format!(
-                                "pairing offer accepted without a local outbox record pairing_id={pairing_id}"
-                            ),
-                        },
-                    });
-                }
+                let parsed = ContactInvite::parse(invite).map_err(EngineError::InvalidCommand)?;
+                let sender = contact_record_from_card(&contact_card_from_invite(&parsed), false);
+                let item = PairingItem {
+                    pairing_id: pairing_id.clone(),
+                    sender: Some(sender),
+                    // V2 authorization is bound to the live WebSocket and its
+                    // side token. The runtime still requires a non-empty local
+                    // capability to authorize the UI transition, but this
+                    // value is never sent to the relay.
+                    capability: Some(pairing_id.clone()),
+                    expires_at: parsed.expires_at as i64,
+                    state: InviteState::Pending,
+                    received: true,
+                    available_actions: Vec::new(),
+                    offer_invite_id: Some(parsed.invite_id),
+                    offer_payload: Some(invite.clone()),
+                };
+                let (_, runtime_events) =
+                    self.with_runtime(|runtime| runtime.receive_pairing_offer(item))?;
                 self.queue_notification(NotificationRequest {
                     id: pairing_id.clone(),
                     kind: NotificationKind::PairingRequest,

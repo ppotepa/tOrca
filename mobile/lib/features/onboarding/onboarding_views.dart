@@ -101,7 +101,12 @@ class PairingCodeDialogState extends ConsumerState<PairingCodeDialog> {
       final code = fresh?.code ?? '';
       if (!mounted) return;
       if (code.isEmpty) {
-        setState(() => _error = 'Nie udało się odświeżyć kodu.');
+        // The dialog is intentionally opened before Tor/rendezvous readiness.
+        // Keep the initial skeleton visible while the periodic retry waits for
+        // the transport instead of flashing a transient red error.
+        if (_code.trim().isNotEmpty) {
+          setState(() => _error = 'Nie udało się odświeżyć kodu.');
+        }
         return;
       }
       setState(() {

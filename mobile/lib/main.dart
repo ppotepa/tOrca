@@ -344,7 +344,7 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
         builder: (_) => PairingCodeDialog(
           initialCode: '',
           initialExpiresAt: 0,
-          refresh: controller.refreshInviteCode,
+          refresh: () => controller.refreshInviteCode(quietWhenPending: true),
           onChanged: (_) {},
           checkRequest: () async {
             await controller.refreshData(forcePairing: true);

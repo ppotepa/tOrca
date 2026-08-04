@@ -84,6 +84,21 @@ impl SharedRelayActor {
         ))
     }
 
+    fn remember_invite_pairing(&mut self, pairing_id: Uuid, payload: &str) {
+        if let Ok(RelayPayloadV1::PairingOffer { invite, .. }) = RelayPayloadV1::decode(payload)
+            && let Ok(invite) = ContactInvite::parse(&invite)
+        {
+            self.invite_pairings.insert(invite.invite_id, pairing_id);
+        }
+    }
+
+    fn pairing_id_for_message(&self, message_id: Uuid) -> Uuid {
+        self.invite_pairings
+            .get(&message_id.to_string())
+            .copied()
+            .unwrap_or(message_id)
+    }
+
     fn start_rendezvous(&mut self) -> RuntimeResult<()> {
         if self.commands.is_some() {
             return Ok(());
@@ -201,11 +216,7 @@ impl SharedRelayActor {
                 ));
             }
         };
-        if let Ok(RelayPayloadV1::PairingOffer { invite, .. }) = RelayPayloadV1::decode(&offer) {
-            if let Ok(invite) = ContactInvite::parse(&invite) {
-                self.invite_pairings.insert(invite.invite_id, pairing_id);
-            }
-        }
+        self.remember_invite_pairing(pairing_id, &offer);
         let mut joiner_key = [0_u8; 32];
         getrandom::fill(&mut joiner_key).map_err(|e| RuntimeError::Unavailable(e.to_string()))?;
         self.pairing_private_keys.insert(pairing_id, joiner_key);
@@ -308,26 +319,27 @@ impl EngineRelay for SharedRelayActor {
                 })
             }
             _ => {
-                let token = self.owner_tokens.get(&message_id).cloned().ok_or_else(|| {
+                let pairing_id = self.pairing_id_for_message(message_id);
+                let token = self.owner_tokens.get(&pairing_id).cloned().ok_or_else(|| {
                     RuntimeError::Unavailable("pairing owner token missing".into())
                 })?;
                 let private_key = self
                     .pairing_private_keys
-                    .get(&message_id)
+                    .get(&pairing_id)
                     .copied()
                     .ok_or_else(|| {
                         RuntimeError::Unavailable("rendezvous private key missing".into())
                     })?;
                 let peer_key = self
                     .pairing_peer_keys
-                    .get(&message_id)
+                    .get(&pairing_id)
                     .copied()
                     .ok_or_else(|| RuntimeError::Unavailable("pairing peer key missing".into()))?;
                 let encrypted_response =
                     rendezvous_crypto::seal(private_key, peer_key, ciphertext.as_bytes())
                         .map_err(RuntimeError::Unavailable)?;
                 self.send_frame(RendezvousClientFrame::AcceptPairing {
-                    pairing_id: message_id,
+                    pairing_id,
                     side_token: token,
                     encrypted_response,
                 })
@@ -362,9 +374,11 @@ impl EngineRelay for SharedRelayActor {
                     &encrypted_offer,
                 )
                 .ok()?;
+                let offer = String::from_utf8(offer).ok()?;
+                self.remember_invite_pairing(pairing_id, &offer);
                 Some(RelayEvent::Envelope(envelope_for_payload(
                     pairing_id,
-                    String::from_utf8(offer).ok()?,
+                    offer,
                 )))
             }
             RendezvousServerFrame::PairingAccepted {
@@ -458,6 +472,46 @@ impl EngineRelay for SharedRelayActor {
             });
         }
         Self::removed()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn welcome_invite_id_resolves_to_the_live_pairing_bridge() {
+        let identity = Identity::generate();
+        let pairing_id = Uuid::new_v4();
+        let invite_id = Uuid::new_v4();
+        let expires_at = unix_now() as u64 + 60;
+        let mut invite = ContactInvite::from_identity(
+            &identity,
+            Some("Alice".to_owned()),
+            None,
+            "key-package".to_owned(),
+            invite_id.to_string(),
+            expires_at,
+        );
+        invite.sign(&identity).unwrap();
+        let payload = RelayPayloadV1::pairing_offer(
+            pairing_id.to_string(),
+            String::new(),
+            serde_json::to_string(&invite).unwrap(),
+        )
+        .encode()
+        .unwrap();
+        let mut relay = SharedRelayActor::new(
+            Url::parse("http://example.onion").unwrap(),
+            None,
+            Identity::generate(),
+        );
+
+        relay.remember_invite_pairing(pairing_id, &payload);
+
+        assert_eq!(relay.pairing_id_for_message(invite_id), pairing_id);
+        let unrelated = Uuid::new_v4();
+        assert_eq!(relay.pairing_id_for_message(unrelated), unrelated);
     }
 }
 

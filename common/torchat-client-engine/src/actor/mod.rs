@@ -10,8 +10,8 @@ use tokio::sync::mpsc;
 use tokio::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 use torchat_client_runtime::{
-    MessageSendEffect, MessageTransportOutcome, PairingPeerOutcome, PairingPreparation,
-    PairingSendKind, PeerConnectionStatus, PeerEndpointStatus, RuntimeClock, RuntimeError,
+    InviteState, MessageSendEffect, MessageTransportOutcome, PairingItem, PairingPeerOutcome,
+    PairingPreparation, PairingSendKind, PeerConnectionStatus, PeerEndpointStatus, RuntimeClock, RuntimeError,
     RuntimeIdentity, RuntimeProfile, RuntimeSendEffect, RuntimeSession, RuntimeStatusPhase,
     RuntimeStorage, RuntimeTorStatus, RuntimeTransport, StartupReadinessSnapshot,
     SystemRuntimeClock, WelcomeAcceptedResult, contact_card_from_invite, contact_record_from_card,

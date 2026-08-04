@@ -114,10 +114,13 @@ class RuntimeRepository {
       await _runtime.identity() ??
       const RuntimeIdentity();
 
-  Future<RuntimeProfile> profile() async =>
-      applicationState.current?.profile ??
-      await _runtime.profile() ??
-      const RuntimeProfile();
+  Future<RuntimeProfile> profile({bool force = false}) async {
+    if (!force) {
+      final projected = applicationState.current?.profile;
+      if (projected != null) return projected;
+    }
+    return await _runtime.profile() ?? const RuntimeProfile();
+  }
 
   Future<RuntimeMessagePage> messagePage(
     String conversationId, {

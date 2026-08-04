@@ -50,10 +50,9 @@ impl ClientEngineActor {
                 Ok((events, None, None))
             }
             RelayEvent::PairingFinalized { pairing_id } => {
-                let events = self.apply_pairing_peer_outcome(
-                    &pairing_id.to_string(),
-                    PairingPeerOutcome::WelcomePrepared,
-                )?;
+                let (_, events) = self.with_runtime(|runtime| {
+                    runtime.finalize_pairing(&pairing_id.to_string())
+                })?;
                 Ok((events, None, None))
             }
             RelayEvent::Envelope(envelope) => self

@@ -272,6 +272,85 @@ where
         })
     }
 
+    pub fn receive_pairing_offer(&mut self, item: PairingItem) -> RuntimeResult<()> {
+        self.merge_pairing_inbox(vec![item])?;
+        Ok(())
+    }
+
+    pub fn pairing_offer_payload(&self, pairing_id: &str) -> RuntimeResult<String> {
+        self.storage
+            .pairing_inbox()?
+            .into_iter()
+            .find(|item| item.pairing_id == pairing_id)
+            .and_then(|item| item.offer_payload)
+            .ok_or_else(|| RuntimeError::NotFound("pairing offer does not exist".to_owned()))
+    }
+
+    pub fn accept_received_pairing(&mut self, pairing_id: &str) -> RuntimeResult<()> {
+        let mut item = self
+            .storage
+            .pairing_inbox()?
+            .into_iter()
+            .find(|item| item.pairing_id == pairing_id)
+            .ok_or_else(|| RuntimeError::NotFound("pairing request does not exist".to_owned()))?;
+        if item.state == InviteState::Accepted {
+            return Ok(());
+        }
+        item.state = transition_invite_state(&item.state, PairingAction::Accept)?;
+        item = normalize_pairing_item(item);
+        self.storage.put_pairing_inbox(item)?;
+        self.session.push_event(RuntimeEvent::InviteStateChanged {
+            pairing_id: Some(pairing_id.to_owned()),
+            state: Some(InviteState::Accepted),
+        });
+        Ok(())
+    }
+
+    pub fn finalize_pairing(&mut self, pairing_id: &str) -> RuntimeResult<()> {
+        if let Some(mut item) = self
+            .storage
+            .pairing_inbox()?
+            .into_iter()
+            .find(|item| item.pairing_id == pairing_id)
+        {
+            if item.state == InviteState::Completed {
+                return Ok(());
+            }
+            item.state = transition_invite_state(&item.state, PairingAction::Complete)?;
+            item = normalize_pairing_item(item);
+            self.storage.put_pairing_inbox(item)?;
+            self.session.push_event(RuntimeEvent::InviteStateChanged {
+                pairing_id: Some(pairing_id.to_owned()),
+                state: Some(InviteState::Completed),
+            });
+            return Ok(());
+        }
+
+        let Some(mut item) = self
+            .storage
+            .pairing_outbox()?
+            .into_iter()
+            .find(|item| item.pairing_id == pairing_id)
+        else {
+            return Ok(());
+        };
+        if item.state == InviteState::Completed {
+            return Ok(());
+        }
+        let next_state = pairing_process::next_state_for_peer_outcome(
+            item.state,
+            crate::PairingPeerOutcome::WelcomePrepared,
+        )?;
+        item.state = next_state;
+        item = normalize_pairing_item(item);
+        self.storage.put_pairing_outbox(item)?;
+        self.session.push_event(RuntimeEvent::InviteStateChanged {
+            pairing_id: Some(pairing_id.to_owned()),
+            state: Some(next_state),
+        });
+        Ok(())
+    }
+
     pub fn prepare_accept_pairing(
         &self,
         pairing_id: &str,
@@ -2070,6 +2149,62 @@ mod tests {
             event,
             RuntimeEvent::InviteStateChanged { state, .. } if *state == Some(InviteState::Accepted)
         )));
+    }
+
+    #[test]
+    fn rendezvous_offer_is_a_user_decision_until_finalized() {
+        let mut runtime = runtime();
+        let mut item = pairing("pairing-v2", InviteState::Pending);
+        item.received = true;
+        item.sender = Some(contact());
+        item.offer_invite_id = Some("invite-v2".to_owned());
+        item.offer_payload = Some("signed-offer".to_owned());
+
+        runtime.receive_pairing_offer(item).unwrap();
+        let inbox = runtime.storage.pairing_inbox().unwrap();
+        assert_eq!(inbox[0].state, InviteState::Pending);
+        assert_eq!(
+            inbox[0].available_actions,
+            vec![
+                crate::PairingAvailableAction::Accept,
+                crate::PairingAvailableAction::Reject,
+            ]
+        );
+        assert_eq!(
+            runtime.pairing_offer_payload("pairing-v2").unwrap(),
+            "signed-offer"
+        );
+
+        runtime.accept_received_pairing("pairing-v2").unwrap();
+        assert_eq!(
+            runtime.storage.pairing_inbox().unwrap()[0].state,
+            InviteState::Accepted
+        );
+
+        runtime.finalize_pairing("pairing-v2").unwrap();
+        let completed = &runtime.storage.pairing_inbox().unwrap()[0];
+        assert_eq!(completed.state, InviteState::Completed);
+        assert_eq!(
+            completed.available_actions,
+            vec![crate::PairingAvailableAction::Archive]
+        );
+    }
+
+    #[test]
+    fn rendezvous_finalization_is_idempotent_for_completed_outbox() {
+        let mut runtime = runtime();
+        runtime
+            .storage
+            .put_pairing_outbox(pairing("pairing-v2", InviteState::Completed))
+            .unwrap();
+
+        runtime.finalize_pairing("pairing-v2").unwrap();
+        runtime.finalize_pairing("pairing-v2").unwrap();
+
+        assert_eq!(
+            runtime.storage.pairing_outbox().unwrap()[0].state,
+            InviteState::Completed
+        );
     }
 
     #[test]

@@ -241,26 +241,18 @@ impl ClientEngineActor {
                 Ok((json_response(value)?, runtime_events, None))
             }
             EngineCommand::AcceptPairing { pairing_id } => {
-                let (preparation, mut runtime_events): (PairingPreparation, _) =
+                let (_preparation, mut runtime_events): (PairingPreparation, _) =
                     self.with_runtime(|runtime| runtime.prepare_accept_pairing(&pairing_id))?;
-                let invite =
-                    self.build_contact_invite(Some(preparation.recipient_installation_id.clone()))?;
-                let invite_id = ContactInvite::parse(&invite)
-                    .map_err(EngineError::InvalidCommand)?
-                    .invite_id;
-                let payload = RelayPayloadV1::pairing_offer(
-                    pairing_id.clone(),
-                    preparation.capability,
-                    invite,
-                )
-                .encode()
-                .map_err(EngineError::InvalidCommand)?;
-                let (effect, mut commit_events) = self.with_runtime_idempotent(
+                let (offer, mut read_events) =
+                    self.with_runtime(|runtime| runtime.pairing_offer_payload(&pairing_id))?;
+                runtime_events.append(&mut read_events);
+                let mut accept_events = self.accept_invite(&offer)?;
+                runtime_events.append(&mut accept_events);
+                let (_, mut commit_events) = self.with_runtime_idempotent(
                     idempotency,
-                    |runtime| runtime.commit_accept_pairing(&pairing_id, invite_id, payload),
+                    |runtime| runtime.accept_received_pairing(&pairing_id),
                     |_| Ok(ResponsePayload::Empty),
                 )?;
-                self.deliver_send_effect(effect)?;
                 runtime_events.append(&mut commit_events);
                 Ok((ResponsePayload::Empty, runtime_events, None))
             }

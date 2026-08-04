@@ -38,6 +38,20 @@ void main() {
     expect(runtime.pairingOutboxCalls, 0);
   });
 
+  test('forced profile read bypasses a stale application projection', () async {
+    final runtime = _SnapshotRuntime();
+    final repository = RuntimeRepository(runtime);
+    repository.applicationState.hydrate(
+      const ApplicationSnapshot(
+        profile: RuntimeProfile(nickname: ''),
+        generation: 1,
+      ),
+    );
+
+    expect((await repository.profile()).nickname, isEmpty);
+    expect((await repository.profile(force: true)).nickname, 'Alice');
+  });
+
   test(
     'refresh returns its transaction snapshot when cache is invalidated',
     () async {

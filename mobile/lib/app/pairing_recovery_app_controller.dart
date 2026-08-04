@@ -135,10 +135,12 @@ class PairingRecoveryAppController extends SequentialAppController {
   );
 
   @override
-  Future<InviteCode?> refreshInviteCode() async {
+  Future<InviteCode?> refreshInviteCode({bool quietWhenPending = false}) async {
     const key = UiOperationKey.inviteCodeLoad;
     _begin(key, 'Pobieranie kodu parowania');
-    final value = await super.refreshInviteCode();
+    final value = await super.refreshInviteCode(
+      quietWhenPending: quietWhenPending,
+    );
     _finishFromController(key, 'Pobieranie kodu parowania');
     return value;
   }

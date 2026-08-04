@@ -443,7 +443,14 @@ abstract class AppController extends Notifier<AppState> {
       );
       return;
     }
-    if (state.profile.nickname.trim().length < 2) {
+    final profile = await _repository.profile(force: true);
+    final snapshot = state.applicationSnapshot;
+    if (snapshot != null && snapshot.profile != profile) {
+      state = state.copyWith(
+        applicationSnapshot: snapshot.copyWith(profile: profile),
+      );
+    }
+    if (profile.nickname.trim().length < 2) {
       state = state.copyWith(
         error: '',
         problem: const UserProblem(code: UserProblemCode.nicknameRequired),
@@ -479,18 +486,20 @@ abstract class AppController extends Notifier<AppState> {
     }
   }
 
-  Future<InviteCode?> refreshInviteCode() async {
+  Future<InviteCode?> refreshInviteCode({bool quietWhenPending = false}) async {
     // Rendezvous requires a live Tor SOCKS endpoint and the local onion
     // listener.  Do not start a worker before those platform facts exist;
     // that used to surface as a misleading DNS/SOCKS failure.
     if (!state.connectionReadiness.canPerform(ConnectionOperation.pair)) {
-      state = state.copyWith(
-        action: '',
-        error: '',
-        problem: const UserProblem(
-          code: UserProblemCode.secureConnectionPending,
-        ),
-      );
+      if (!quietWhenPending) {
+        state = state.copyWith(
+          action: '',
+          error: '',
+          problem: const UserProblem(
+            code: UserProblemCode.secureConnectionPending,
+          ),
+        );
+      }
       return null;
     }
     try {
