@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+
 import '../../app/app_theme.dart';
+import '../../locales/presentation/app_localizations_x.dart';
 
 class CounterBadge extends StatelessWidget {
   const CounterBadge({
@@ -32,7 +34,7 @@ class CounterBadge extends StatelessWidget {
         ? '$maxDisplayCount+'
         : '$count';
     final badge = Semantics(
-      label: semanticLabel ?? '$count nieprzeczytanych',
+      label: semanticLabel ?? context.l10n.uiUnreadCountSemantics(count),
       child: ExcludeSemantics(
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
