@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/desktop_window_lifecycle.dart';
 import '../domain/app_locale_preference.dart';
 import '../infrastructure/locale_preferences_store.dart';
 import '../infrastructure/native_locale_bridge.dart';
@@ -30,7 +31,10 @@ class LocaleController extends AsyncNotifier<LocaleState> {
 
   Future<void> setPreference(AppLocalePreference preference) async {
     await _store.save(preference);
-    await _nativeBridge.setPreference(preference);
+    await Future.wait([
+      _nativeBridge.setPreference(preference),
+      DesktopWindowLifecycle.refreshLocale(preference),
+    ]);
     state = AsyncData(LocaleState(preference: preference, setupCompleted: true));
   }
 }
