@@ -4,6 +4,7 @@ import '../../app/app_theme.dart';
 import '../../core/connection/connection_component.dart';
 import '../../core/connection/connection_readiness.dart';
 import '../../core/models/domain.dart';
+import '../../locales/presentation/app_localizations_x.dart';
 
 /// Compact transport indicator. The left dot is Tor/SOCKS; the right dot is
 /// the local P2P/onion path. Detailed diagnostics remain behind the tap.
@@ -82,7 +83,7 @@ class _ConnectionStatusLampState extends State<ConnectionStatusLamp>
   Widget build(BuildContext context) {
     final tor = _torState;
     final p2p = _p2pState;
-    final label = 'Tor: ${_lampLabel(tor)} · P2P: ${_lampLabel(p2p)}';
+    final label = 'Tor: ${_lampLabel(context, tor)} · P2P: ${_lampLabel(context, p2p)}';
     final animationsDisabled = MediaQuery.disableAnimationsOf(context);
     final size = widget.embeddedInHeader ? 42.0 : 52.0;
     return Semantics(
@@ -118,11 +119,11 @@ class _ConnectionStatusLampState extends State<ConnectionStatusLamp>
 
 enum _LampState { starting, ready, degraded, error }
 
-String _lampLabel(_LampState state) => switch (state) {
-  _LampState.ready => 'ready',
-  _LampState.starting => 'starting',
-  _LampState.degraded => 'retrying',
-  _LampState.error => 'error',
+String _lampLabel(BuildContext context, _LampState state) => switch (state) {
+  _LampState.ready => context.l10n.uiStatusReady,
+  _LampState.starting => context.l10n.uiStatusStarting,
+  _LampState.degraded => context.l10n.uiStatusRetrying,
+  _LampState.error => context.l10n.uiStatusError,
 };
 
 class _DualLampPainter extends CustomPainter {
@@ -160,7 +161,7 @@ class _DualLampPainter extends CustomPainter {
       _LampState.degraded => phase < .2 ? .95 : .18,
       _LampState.error => phase < .1 || (phase > .25 && phase < .4) ? .95 : .14,
     };
-    final radius = 8.0;
+    const radius = 8.0;
     canvas.drawCircle(
       center,
       radius * .78,
