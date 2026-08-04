@@ -11,10 +11,10 @@ import '../../../shared/widgets/counter_badge.dart';
 import '../../../shared/widgets/feature_header.dart';
 import '../../../shared/widgets/identity_section.dart';
 import '../../../shared/widgets/info_tile.dart';
-import '../../../shared/widgets/identity_avatar.dart';
 import '../../../shared/widgets/section_card.dart';
 import '../../../shared/formatters/message_timestamps.dart';
 import '../../../locales/presentation/app_localizations_x.dart';
+import '../../../locales/presentation/status_localizer.dart';
 import 'resizable_split_pane.dart';
 
 class DesktopWorkspace extends StatefulWidget {
@@ -60,9 +60,6 @@ class DesktopWorkspace extends StatefulWidget {
 class _DesktopWorkspaceState extends State<DesktopWorkspace> {
   late final ContactPresenceStore _presenceStore =
       widget.presenceStore ?? ContactPresenceStore();
-  // Keep the inspector visible for an active conversation by default.  It is
-  // still user-toggleable from the header, but the desktop layout must expose
-  // delivery/connection details without requiring a hidden discovery action.
   bool _inspectorOpen = true;
   bool _railExpanded = true;
 
@@ -75,11 +72,6 @@ class _DesktopWorkspaceState extends State<DesktopWorkspace> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final compactRail = constraints.maxWidth < 900 || !_railExpanded;
-        // Keep the details panel available on ordinary 1080p desktop windows;
-        // the previous 1320 px gate silently removed it on common laptop
-        // resolutions.  Below this width the conversation remains usable in a
-        // single-column layout and the header toggle can still be used when the
-        // window grows again.
         final canShowInspector = constraints.maxWidth >= 1280;
         final selected = widget.selectedContact;
         final showInspector =
@@ -88,11 +80,6 @@ class _DesktopWorkspaceState extends State<DesktopWorkspace> {
         return Row(
           children: [
             SizedBox(
-              // The expanded rail needs enough room for the labels and their
-              // icons.  A 116 px rail looked fine at large sizes but clipped
-              // "Kontakty" and "Ustawienia" as soon as the workspace became
-              // narrower.  Compact mode remains icon-only for truly narrow
-              // windows.
               width: compactRail ? 68 : 164,
               child: _CompactNavigationRail(
                 compact: compactRail,
@@ -139,15 +126,12 @@ class _DesktopWorkspaceState extends State<DesktopWorkspace> {
                           ),
                           if (selected != null && canShowInspector)
                             Positioned(
-                              // Keep the inspector affordance out of the
-                              // conversation AppBar action row. It behaves as a
-                              // floating side tab below the 68 px header.
                               top: 78,
                               right: 12,
                               child: Tooltip(
                                 message: showInspector
-                                    ? 'Ukryj szczegóły'
-                                    : 'Pokaż szczegóły',
+                                    ? context.l10n.uiHideDetails
+                                    : context.l10n.uiShowDetails,
                                 child: IconButton.filledTonal(
                                   onPressed: () => setState(
                                     () => _inspectorOpen = !_inspectorOpen,
@@ -224,14 +208,16 @@ class _CompactNavigationRail extends StatelessWidget {
             _RailItem(
               compact: compact,
               icon: compact ? Icons.menu : Icons.menu_open,
-              label: compact ? 'Rozwiń nawigację' : 'Zwiń nawigację',
+              label: compact
+                  ? context.l10n.uiExpandNavigation
+                  : context.l10n.uiCollapseNavigation,
               onPressed: onToggle,
             ),
             _RailItem(
               compact: compact,
               selected: tab == MobileTab.chats,
               icon: Icons.chat_bubble_outline,
-              label: 'Czaty',
+              label: context.l10n.desktopChats,
               badge: unreadContactCount,
               onPressed: () => onTab(MobileTab.chats),
             ),
@@ -239,7 +225,7 @@ class _CompactNavigationRail extends StatelessWidget {
               compact: compact,
               selected: tab == MobileTab.contacts,
               icon: Icons.people_outline,
-              label: 'Kontakty',
+              label: context.l10n.desktopContacts,
               onPressed: () => onTab(MobileTab.contacts),
             ),
             const Spacer(),
@@ -247,13 +233,15 @@ class _CompactNavigationRail extends StatelessWidget {
             _RailItem(
               compact: compact,
               icon: Icons.person_outline,
-              label: nickname.trim().isEmpty ? 'Konto' : nickname,
+              label: nickname.trim().isEmpty
+                  ? context.l10n.accountTitle
+                  : nickname,
               onPressed: onAccount,
             ),
             _RailItem(
               compact: compact,
               icon: Icons.settings_outlined,
-              label: 'Ustawienia',
+              label: context.l10n.settingsTitle,
               onPressed: onSettings,
             ),
             Divider(color: shell.border, height: 1),
@@ -272,7 +260,7 @@ class _CompactNavigationRail extends StatelessWidget {
                     const SizedBox(width: 9),
                     Flexible(
                       child: Text(
-                        'TorChat',
+                        context.l10n.appTitle,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.titleSmall,
@@ -340,8 +328,7 @@ class _RailItem extends StatelessWidget {
             children: [
               CounterBadge(
                 count: badge,
-                semanticLabel:
-                    '$badge kontaktów z nieprzeczytanymi wiadomościami',
+                semanticLabel: context.l10n.uiUnreadContactsSemantics(badge),
                 child: ThemedIcon(icon, size: 20),
               ),
               if (!compact) ...[
@@ -430,7 +417,7 @@ class _ConversationSidebarState extends State<_ConversationSidebar> {
             onChanged: (_) => setState(() {}),
             decoration: InputDecoration(
               hintText: context.l10n.desktopSearch,
-              prefixIcon: ThemedIcon(Icons.search, size: 18),
+              prefixIcon: const ThemedIcon(Icons.search, size: 18),
               isDense: true,
             ),
           ),
@@ -525,7 +512,7 @@ class _ContactSidebarState extends State<_ContactSidebar> {
             onChanged: (_) => setState(() {}),
             decoration: InputDecoration(
               hintText: context.l10n.desktopSearchContacts,
-              prefixIcon: ThemedIcon(Icons.search, size: 18),
+              prefixIcon: const ThemedIcon(Icons.search, size: 18),
               isDense: true,
             ),
           ),
@@ -565,11 +552,8 @@ class _ContactSidebarState extends State<_ContactSidebar> {
                 final availability = widget.presenceStore
                     .snapshot(contact.id)
                     .availability;
-                final presenceLabel = _availabilityLabel(availability);
-                final route = switch (contact.transportPolicy) {
-                  ContactTransportPolicy.peerOnly => 'Tor P2P',
-                };
-                return '$presenceLabel · $route';
+                return '${localizeContactAvailability(context.l10n, availability)} · '
+                    '${localizeContactRoute(context.l10n, contact)}';
               },
               contactTrailingBuilder: (contact) =>
                   const ThemedIcon(Icons.chevron_right, size: 18),
@@ -684,14 +668,17 @@ class _ConversationInspector extends StatelessWidget {
               children: [
                 InfoTile(
                   title: context.l10n.desktopStatus,
-                  subtitle: _availabilityLabel(presence.availability),
+                  subtitle: localizeContactAvailability(
+                    context.l10n,
+                    presence.availability,
+                  ),
                 ),
                 InfoTile(
                   title: context.l10n.desktopLastSeen,
                   subtitle: formatRelativeTimestamp(
                     presence.lastSeenAt?.toString(),
                     context.l10n,
-                    empty: 'Brak danych',
+                    empty: context.l10n.contactsNoData,
                   ),
                 ),
                 InfoTile(
@@ -699,7 +686,7 @@ class _ConversationInspector extends StatelessWidget {
                   subtitle: formatRelativeTimestamp(
                     presence.observedAt?.toString(),
                     context.l10n,
-                    empty: 'Brak danych',
+                    empty: context.l10n.contactsNoData,
                   ),
                 ),
                 InfoTile(
@@ -707,7 +694,7 @@ class _ConversationInspector extends StatelessWidget {
                   subtitle: formatRelativeTimestamp(
                     presence.expiresAt?.toString(),
                     context.l10n,
-                    empty: 'Brak expiry',
+                    empty: context.l10n.contactsNoData,
                   ),
                 ),
                 InfoTile(
@@ -726,46 +713,48 @@ class _ConversationInspector extends StatelessWidget {
               children: [
                 InfoTile(
                   title: context.l10n.desktopP2pConnection,
-                  subtitle: _peerLinkLabel(presence.peerLink),
+                  subtitle: localizeContactPeerLink(
+                    context.l10n,
+                    presence.peerLink,
+                  ),
                 ),
                 InfoTile(
                   title: context.l10n.desktopProbeLatency,
                   subtitle: presence.latencyMs == null
-                      ? 'Brak danych'
+                      ? context.l10n.contactsNoData
                       : '${presence.latencyMs} ms',
                 ),
                 InfoTile(
                   title: context.l10n.desktopNextProbe,
                   subtitle: presence.retryInMs == null
-                      ? 'Brak zaplanowanego retry'
-                      : 'Za ${presence.retryInMs} ms',
+                      ? context.l10n.contactsNoData
+                      : '${presence.retryInMs} ms',
                 ),
                 InfoTile(
                   title: context.l10n.desktopLastP2pConnection,
                   subtitle: formatRelativeTimestamp(
                     presence.lastPeerConnectedAt?.toString(),
                     context.l10n,
-                    empty: 'Brak danych',
+                    empty: context.l10n.contactsNoData,
                   ),
                 ),
                 InfoTile(
                   title: context.l10n.desktopRoute,
-                  subtitle: _inspectorRouteLabel(contact),
-                  /*
-                      contact.peerConnectionStatus ==
-                          PeerConnectionStatus.connected
-                      ? 'Bezpośrednio przez Tor P2P'
-                      : 'Przez Tor relay / oczekiwanie na P2P',
-                ),
-                  */
+                  subtitle: localizeContactRoute(context.l10n, contact),
                 ),
                 InfoTile(
                   title: context.l10n.desktopEndpoint,
-                  subtitle: _endpointLabel(contact.peerEndpointStatus),
+                  subtitle: localizePeerEndpointStatus(
+                    context.l10n,
+                    contact.peerEndpointStatus,
+                  ),
                 ),
                 InfoTile(
                   title: context.l10n.desktopPolicy,
-                  subtitle: _policyLabel(contact.transportPolicy),
+                  subtitle: localizeTransportPolicy(
+                    context.l10n,
+                    contact.transportPolicy,
+                  ),
                 ),
               ],
             ),
@@ -784,7 +773,7 @@ class _ConversationInspector extends StatelessWidget {
                   subtitle: formatRelativeTimestamp(
                     contact.lastPeerConnectedAt,
                     context.l10n,
-                    empty: 'Brak zapisanej sesji',
+                    empty: context.l10n.contactsNoData,
                   ),
                 ),
                 InfoTile(
@@ -792,7 +781,7 @@ class _ConversationInspector extends StatelessWidget {
                   subtitle: formatRelativeTimestamp(
                     contact.lastSeenAt,
                     context.l10n,
-                    empty: 'Brak danych',
+                    empty: context.l10n.contactsNoData,
                   ),
                 ),
               ],
@@ -809,39 +798,6 @@ class _ConversationInspector extends StatelessWidget {
     );
   }
 }
-
-String _inspectorRouteLabel(ContactRecord contact) =>
-    switch (contact.transportPolicy) {
-      ContactTransportPolicy.peerOnly => 'Przez Tor P2P / oczekiwanie na peer',
-    };
-
-String _availabilityLabel(ContactAvailability value) => switch (value) {
-  ContactAvailability.active => 'Aktywny w aplikacji',
-  ContactAvailability.idle => 'Bezczynny',
-  ContactAvailability.checking => 'Sprawdzanie',
-  ContactAvailability.offline => 'Offline',
-  ContactAvailability.unknown => 'Status nieznany',
-};
-
-String _peerLinkLabel(ContactPeerLink value) => switch (value) {
-  ContactPeerLink.connected => 'Connected',
-  ContactPeerLink.connecting => 'Connecting',
-  ContactPeerLink.authenticating => 'Authenticating',
-  ContactPeerLink.backoff => 'Backoff',
-  ContactPeerLink.offline => 'Offline',
-  ContactPeerLink.unknown => 'Unknown',
-};
-
-String _endpointLabel(PeerEndpointStatus status) => switch (status) {
-  PeerEndpointStatus.verified => 'Zweryfikowany',
-  PeerEndpointStatus.pendingExchange => 'Oczekuje na wymianę',
-  PeerEndpointStatus.missing => 'Niedostępny',
-  PeerEndpointStatus.invalid => 'Nieprawidłowy',
-};
-
-String _policyLabel(ContactTransportPolicy policy) => switch (policy) {
-  ContactTransportPolicy.peerOnly => 'Tylko P2P',
-};
 
 String _compactIdentifier(String value) {
   final clean = value.trim();
