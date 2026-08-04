@@ -2,6 +2,16 @@
     <string name="app_name">TorChat</string>
     <string name="notification_new_message_title">New message</string>
     <string name="notification_pairing_request_title">New contact request</string>
+    <string name="notification_pairing_completed_title">Contact added</string>
     <string name="notification_private_message_body">New encrypted message</string>
     <string name="notification_pairing_request_body">You have a new conversation request.</string>
+    <string name="notification_pairing_completed_body">A secure contact was added.</string>
+    <string name="foreground_starting">Starting TorChat…</string>
+    <string name="foreground_local_ready">TorChat is locally ready · starting Tor</string>
+    <string name="foreground_engine_failed">TorChat local engine error</string>
+    <string name="foreground_tor_bootstrap">Tor bootstrap: %1$d%%</string>
+    <string name="foreground_tor_unavailable">Tor unavailable · local app remains active</string>
+    <string name="notification_channel_connection">TorChat connection</string>
+    <string name="notification_channel_messages">TorChat messages</string>
+    <string name="notification_channel_messages_description">New messages and contact requests</string>
 </resources>
