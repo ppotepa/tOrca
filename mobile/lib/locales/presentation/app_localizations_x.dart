@@ -94,6 +94,11 @@ extension AppLocalizationsUiCopy on AppLocalizations {
   String get uiContactCapabilityStatus => _isPolish ? 'Stan' : 'Status';
   String get uiContactCapabilityId => 'ID';
   String get uiContactCapabilitySequence => _isPolish ? 'Sekwencja' : 'Sequence';
+  String uiCapabilityStatus(CapabilityStatus status) => switch (status) {
+    CapabilityStatus.active => _isPolish ? 'aktywna' : 'active',
+    CapabilityStatus.revoked => _isPolish ? 'unieważniona' : 'revoked',
+    CapabilityStatus.expired => _isPolish ? 'wygasła' : 'expired',
+  };
   String get uiContactTransportDiagnostics => _isPolish
       ? 'Diagnostyka transportu DEV'
       : 'DEV transport diagnostics';
