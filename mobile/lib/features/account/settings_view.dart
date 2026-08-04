@@ -3,10 +3,16 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../../app/app_controller.dart';
 import '../../app/app_theme.dart';
 import '../../app/desktop_autostart.dart';
 import '../../app/notifications/ui_notification_center.dart';
 import '../../app/ui_operation_registry.dart';
+import '../../locales/presentation/app_localizations_x.dart';
+import '../../locales/presentation/language_picker.dart';
+import '../../locales/presentation/status_localizer.dart';
+import '../../locales/presentation/theme_localizer.dart';
 import '../../shared/async/async_operation_state.dart';
 import '../../shared/async/busy_surface.dart';
 import '../../shared/widgets/action_section.dart';
@@ -14,17 +20,14 @@ import '../../shared/widgets/action_tile.dart';
 import '../../shared/widgets/callout_card.dart';
 import '../../shared/widgets/info_tile.dart';
 import '../../shared/widgets/themed_switch_list_tile.dart';
-import '../../locales/presentation/app_localizations_x.dart';
-import '../../locales/presentation/language_picker.dart';
-import '../../locales/presentation/localized_ui_copy.dart';
-import '../../locales/presentation/theme_localizer.dart';
 import 'image_storage_settings_section.dart';
 
 class SettingsView extends ConsumerStatefulWidget {
   const SettingsView({
     super.key,
     required this.nickname,
-    required this.torStatus,
+    @Deprecated('Tor status is read from the typed controller state.')
+    this.torStatus = '',
     required this.themePreferences,
     required this.onThemeFamilyChanged,
     required this.onBrightnessChanged,
@@ -35,6 +38,7 @@ class SettingsView extends ConsumerStatefulWidget {
   });
 
   final String nickname;
+  @Deprecated('Tor status is read from the typed controller state.')
   final String torStatus;
   final TorChatThemePreferences themePreferences;
   final ValueChanged<TorChatThemeFamily> onThemeFamilyChanged;
@@ -108,10 +112,10 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
   }
 
   void _showSettingsError({required String deduplicationKey}) {
-    final copy = LocalizedUiCopy(context.l10n);
-    ref
-        .read(uiNotificationCenterProvider.notifier)
-        .showError(copy.settingsSaveFailed, deduplicationKey: deduplicationKey);
+    ref.read(uiNotificationCenterProvider.notifier).showError(
+          context.l10n.uiSettingsSaveFailed,
+          deduplicationKey: deduplicationKey,
+        );
   }
 
   Future<void> _set(
@@ -170,9 +174,8 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     } on _AutostartConfirmationException {
       if (!mounted) return;
       setState(() => _autostart = previous);
-      final copy = LocalizedUiCopy(context.l10n);
       ref.read(uiNotificationCenterProvider.notifier).showError(
-            copy.windowsAutostartNotConfirmed,
+            context.l10n.uiWindowsAutostartNotConfirmed,
             deduplicationKey: 'setting:autostart:not-confirmed',
           );
     } catch (_) {
@@ -195,6 +198,9 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
+    final torPhase = ref.watch(
+      appControllerProvider.select((state) => state.connectionSummary.phase),
+    );
     final nicknameSave = ref.watch(
       uiOperationProvider(UiOperationKey.nicknameSave),
     );
@@ -209,7 +215,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 InfoTile(
-                  leading: ThemedIcon(Icons.palette_outlined),
+                  leading: const ThemedIcon(Icons.palette_outlined),
                   title: l10n.settingsFamilyTitle,
                   subtitle: l10n.settingsFamilyDescription,
                 ),
@@ -444,7 +450,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
           ActionTile(
             leading: const ThemedIcon(Icons.eco_outlined),
             title: l10n.settingsTorConnection,
-            subtitle: widget.torStatus,
+            subtitle: localizeTransportPhase(l10n, torPhase),
             onTap: widget.onOpenTor,
           ),
           const Divider(),
