@@ -69,9 +69,6 @@ class PairingCodeDialogState extends ConsumerState<PairingCodeDialog> {
         unawaited(_refresh());
       }
     });
-    // Both operations can update Riverpod state through the controller. A
-    // dialog's initState runs while the route is still being built, so defer
-    // them until the first frame has completed.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       unawaited(_checkRequest());
@@ -107,11 +104,8 @@ class PairingCodeDialogState extends ConsumerState<PairingCodeDialog> {
       final code = fresh?.code ?? '';
       if (!mounted) return;
       if (code.isEmpty) {
-        // The dialog is intentionally opened before Tor/rendezvous readiness.
-        // Keep the initial skeleton visible while the periodic retry waits for
-        // the transport instead of flashing a transient red error.
         if (_code.trim().isNotEmpty) {
-          setState(() => _error = 'Nie udało się odświeżyć kodu.');
+          setState(() => _error = context.l10n.uiPairingRefreshFailed);
         }
         return;
       }
@@ -125,8 +119,10 @@ class PairingCodeDialogState extends ConsumerState<PairingCodeDialog> {
             );
       });
       widget.onChanged(code);
-    } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
+    } catch (_) {
+      if (mounted) {
+        setState(() => _error = context.l10n.uiPairingRefreshFailed);
+      }
     } finally {
       if (mounted) setState(() => _refreshing = false);
     }
@@ -175,8 +171,7 @@ class PairingCodeDialogState extends ConsumerState<PairingCodeDialog> {
         setState(() {
           _processing = false;
           _awaitingContact = true;
-          _status =
-              'Zaproszenie zaakceptowano. Finalizacja bezpiecznego kontaktu trwa w tle.';
+          _status = context.l10n.uiPairingFinalizing;
         });
       }
 
@@ -186,16 +181,14 @@ class PairingCodeDialogState extends ConsumerState<PairingCodeDialog> {
         _processing = false;
         _awaitingContact = !contactReady;
         _completed = contactReady;
-        _status = contactReady
-            ? ''
-            : 'Zaproszenie zaakceptowano. Kontakt pojawi się po zakończeniu wymiany MLS.';
+        _status = contactReady ? '' : context.l10n.uiPairingWaitingForMls;
       });
-    } catch (error) {
+    } catch (_) {
       if (mounted) {
         setState(() {
           _processing = false;
           _awaitingContact = false;
-          _error = error.toString();
+          _error = context.l10n.uiOperationFailed;
         });
       }
     }
@@ -210,12 +203,10 @@ class PairingCodeDialogState extends ConsumerState<PairingCodeDialog> {
       observedBusy = observedBusy || operation.busy;
       if (observedBusy && !operation.busy) return;
       if (operation.failed) {
-        throw StateError(operation.error);
+        throw const _LocalizedPairingFailure();
       }
       await Future<void>.delayed(const Duration(milliseconds: 60));
     }
-    // The callback may include remote reconciliation. Do not keep the UI busy
-    // after the local command window; transition to a domain waiting state.
   }
 
   Future<void> _reject() async {
@@ -229,11 +220,11 @@ class PairingCodeDialogState extends ConsumerState<PairingCodeDialog> {
     try {
       await widget.onReject?.call(request);
       if (mounted) Navigator.pop(context, false);
-    } catch (error) {
+    } catch (_) {
       if (mounted) {
         setState(() {
           _processing = false;
-          _error = error.toString();
+          _error = context.l10n.uiOperationFailed;
         });
       }
     }
@@ -328,9 +319,6 @@ class PairingCodeDialogState extends ConsumerState<PairingCodeDialog> {
   }
 }
 
-/// A recipient-side pairing prompt. Unlike [PairingCodeDialog], this dialog is
-/// driven by an already persisted inbox item and is safe to show after the
-/// original invite-code sheet has been closed.
 class IncomingPairingDialog extends StatefulWidget {
   const IncomingPairingDialog({
     super.key,
@@ -360,11 +348,11 @@ class _IncomingPairingDialogState extends State<IncomingPairingDialog> {
     try {
       await action();
       if (mounted) Navigator.of(context).pop();
-    } catch (error) {
+    } catch (_) {
       if (mounted) {
         setState(() {
           _busy = false;
-          _error = error.toString();
+          _error = context.l10n.uiOperationFailed;
         });
       }
     }
@@ -577,4 +565,8 @@ class _PairingCode extends StatelessWidget {
       ),
     ],
   );
+}
+
+final class _LocalizedPairingFailure implements Exception {
+  const _LocalizedPairingFailure();
 }
