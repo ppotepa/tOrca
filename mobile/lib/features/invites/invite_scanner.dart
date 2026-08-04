@@ -10,7 +10,10 @@ import '../../app/ui_operation_registry.dart';
 import '../../shared/async/busy_action_button.dart';
 import '../../shared/async/busy_surface.dart';
 import '../../shared/formatters/invite_code.dart';
+import '../../locales/domain/user_problem.dart';
+import '../../locales/domain/user_problem_code.dart';
 import '../../locales/presentation/app_localizations_x.dart';
+import '../../locales/presentation/problem_localizer.dart';
 
 class InviteScannerPage extends ConsumerStatefulWidget {
   const InviteScannerPage({super.key});
@@ -37,14 +40,16 @@ class _InviteScannerPageState extends ConsumerState<InviteScannerPage> {
     setState(() => _error = '');
     await ref.read(appControllerProvider.notifier).submitPairingCode(code);
     if (!mounted) return;
-    final error = ref.read(appControllerProvider).error;
-    if (error.isEmpty) {
+    final state = ref.read(appControllerProvider);
+    if (state.problem == null && state.error.isEmpty) {
       Navigator.of(context).pop<void>();
       return;
     }
     setState(() {
       _handled = false;
-      _error = error;
+      _error = state.problem == null
+          ? context.l10n.problemOperationFailed
+          : localizeProblem(context.l10n, state.problem!);
     });
     await _scanner.start();
   }
@@ -120,24 +125,35 @@ class _ManualInviteCodePageState extends ConsumerState<ManualInviteCodePage> {
   Future<void> _submit() async {
     final code = pairingCode(_controller.text);
     if (code == null) {
-      setState(() => _error = 'Kod musi zawierać dokładnie 8 cyfr.');
+      setState(
+        () => _error = localizeProblem(
+          context.l10n,
+          const UserProblem(code: UserProblemCode.pairingCodeInvalid),
+        ),
+      );
       return;
     }
-    // Do not start a desktop sidecar request while the transport is still
-    // offline. The page can be opened from a cold shell; report the state
-    // locally and let the startup coordinator retry once relay is ready.
     if (!ref.read(appControllerProvider).transport.connected) {
-      setState(() => _error = 'Poczekaj na gotowe połączenie Tor/relay.');
+      setState(
+        () => _error = localizeProblem(
+          context.l10n,
+          const UserProblem(code: UserProblemCode.connectionUnavailable),
+        ),
+      );
       return;
     }
     setState(() => _error = '');
     await ref.read(appControllerProvider.notifier).submitPairingCode(code);
     if (!mounted) return;
-    final error = ref.read(appControllerProvider).error;
-    if (error.isEmpty) {
+    final state = ref.read(appControllerProvider);
+    if (state.problem == null && state.error.isEmpty) {
       Navigator.of(context).pop<void>();
     } else {
-      setState(() => _error = error);
+      setState(() {
+        _error = state.problem == null
+            ? context.l10n.problemOperationFailed
+            : localizeProblem(context.l10n, state.problem!);
+      });
     }
   }
 
