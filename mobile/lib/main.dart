@@ -29,7 +29,7 @@ import 'features/chats/composer_draft.dart';
 import 'locales/application/locale_controller.dart';
 import 'locales/application/locale_setup_gate.dart';
 import 'locales/generated/app_localizations.dart';
-import 'locales/presentation/localized_ui_copy.dart';
+import 'locales/presentation/app_localizations_x.dart';
 import 'locales/presentation/state_problem_localizer.dart';
 import 'shared/widgets/toast_host.dart';
 
@@ -117,10 +117,9 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
   Timer? _backgroundDebounce;
   StreamSubscription<DesktopNavigationIntent>? _desktopNavigationSubscription;
   StreamSubscription<ConversationNavigationIntent>?
-  _conversationNavigationSubscription;
+      _conversationNavigationSubscription;
 
   AppLocalizations get _l10n => AppLocalizations.of(context)!;
-  LocalizedUiCopy get _copy => LocalizedUiCopy(_l10n);
 
   @override
   void initState() {
@@ -260,7 +259,7 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
   ) {
     if (!mounted || previous == null) return;
     final previousById = {for (final item in previous) item.id: item};
-    final copy = _copy;
+    final l10n = _l10n;
     for (final item in current) {
       if (item.origin != PairingOrigin.outbox || item.received) continue;
       final old = previousById[item.id];
@@ -268,14 +267,14 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
 
       final peerName = item.peer?.displayName.trim();
       final name = peerName == null || peerName.isEmpty
-          ? copy.unknownUser
+          ? l10n.uiUnknownUser
           : peerName;
       final message = switch (item.status) {
         InviteState.accepted || InviteState.completed =>
-          copy.pairingAccepted(name),
-        InviteState.rejected => copy.pairingRejected(name),
-        InviteState.expired => copy.pairingExpired,
-        InviteState.cancelled => copy.pairingCancelled,
+          l10n.uiPairingAccepted(name),
+        InviteState.rejected => l10n.uiPairingRejected(name),
+        InviteState.expired => l10n.uiPairingExpired,
+        InviteState.cancelled => l10n.uiPairingCancelled,
         _ => null,
       };
       if (message == null) continue;
@@ -388,11 +387,11 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
   }
 
   Future<void> _showTransportStatus() => showModalBottomSheet<void>(
-    context: context,
-    showDragHandle: true,
-    isScrollControlled: true,
-    builder: (_) => const ConnectionCenterSheet(),
-  );
+        context: context,
+        showDragHandle: true,
+        isScrollControlled: true,
+        builder: (_) => const ConnectionCenterSheet(),
+      );
 
   Future<void> _scanInvite() async {
     final value = await Navigator.of(context).push<String>(
@@ -441,16 +440,14 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
 
   void _openSettings() {
     final state = ref.read(appControllerProvider);
-    final summary = state.connectionSummary;
     final snapshot = ref.read(applicationSnapshotProvider).valueOrNull;
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => SettingsView(
           nickname: snapshot?.profile.nickname ?? state.profile.nickname,
-          torStatus: summary.status,
           themePreferences:
               ref.read(themeControllerProvider).valueOrNull ??
-              const TorChatThemePreferences(),
+                  const TorChatThemePreferences(),
           onThemeFamilyChanged: (family) {
             unawaited(
               ref.read(themeControllerProvider.notifier).setFamily(family),
@@ -482,7 +479,7 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
             context: context,
             builder: (_) => AlertDialog(
               title: Text(_l10n.settingsResetDemoData),
-              content: Text(_copy.resetLocalStateInstructions),
+              content: Text(_l10n.uiResetLocalStateInstructions),
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(context),
@@ -521,7 +518,7 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
     final nickname = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(_copy.editNickname),
+        title: Text(_l10n.uiEditNickname),
         content: TextField(
           controller: field,
           autofocus: true,
@@ -537,7 +534,7 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, field.text),
-            child: Text(_copy.save),
+            child: Text(_l10n.commonSave),
           ),
         ],
       ),
@@ -578,7 +575,7 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
               ? _l10n.newContact
               : contact.displayName;
           ref.read(uiNotificationCenterProvider.notifier).showSuccess(
-                _copy.contactAdded(name),
+                _l10n.uiContactAdded(name),
                 deduplicationKey: 'contact-added:${contact.id}',
               );
         }
@@ -611,8 +608,8 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
     final launchPhase = _runningUnlocked
         ? AppLaunchPhase.running
         : _onboardingUnlocked && profile.nickname.trim().isEmpty
-        ? AppLaunchPhase.onboarding
-        : resolvedPhase;
+            ? AppLaunchPhase.onboarding
+            : resolvedPhase;
 
     if (launchPhase == AppLaunchPhase.running) {
       _queueIncomingPairingPrompt(state.inbox);
