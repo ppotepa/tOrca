@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui';
 import 'dart:io';
 
+import 'package:flutter/widgets.dart';
 import 'package:local_notifier/local_notifier.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -59,15 +60,18 @@ class DesktopNotificationService {
     final storedLocale = AppLocalePreference.fromStorage(
       preferences.getString('torchat.locale.preference'),
     );
+    final systemLocale = PlatformDispatcher.instance.locale;
     final locale = storedLocale?.locale ??
-        (PlatformDispatcher.instance.locale.languageCode == 'pl'
-            ? const Locale('pl')
+        (AppLocalizations.supportedLocales.any(
+              (candidate) => candidate.languageCode == systemLocale.languageCode,
+            )
+            ? Locale(systemLocale.languageCode)
             : const Locale('en'));
     final l10n = await AppLocalizations.delegate.load(locale);
     final title = switch (event.kind) {
       NotificationKind.messageReceived => l10n.notificationNewMessageTitle,
       NotificationKind.pairingRequest => l10n.notificationPairingRequestTitle,
-      NotificationKind.pairingCompleted => l10n.notificationNewMessageTitle,
+      NotificationKind.pairingCompleted => l10n.pairingCompletedTitle,
     };
     final body = switch (event.kind) {
       NotificationKind.messageReceived => showPreview &&
@@ -75,14 +79,12 @@ class DesktopNotificationService {
           ? event.previewText!.trim()
           : l10n.notificationPrivateMessageBody,
       NotificationKind.pairingRequest => l10n.notificationPairingRequestBody,
-      NotificationKind.pairingCompleted => l10n.notificationNewMessageTitle,
+      NotificationKind.pairingCompleted => l10n.pairingCompletedDescription,
     };
     final notification = LocalNotification(
       identifier: id,
       title: title,
       body: body,
-      // The existing controller owns the user-configurable pager sound. Keep
-      // the native toast silent to avoid playing two sounds for one event.
       silent: true,
     );
     notification.onClick = () {
