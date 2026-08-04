@@ -40,6 +40,31 @@ extension AppLocalizationsUiCopy on AppLocalizations {
   String get uiStateStarting => _isPolish ? 'uruchamianie' : 'starting';
   String get uiStateError => _isPolish ? 'błąd' : 'error';
 
+  String get uiCapabilityStatus => _isPolish ? 'Stan' : 'Status';
+  String get uiCapabilityId => 'ID';
+  String get uiCapabilitySequence => _isPolish ? 'Sekwencja' : 'Sequence';
+  String get uiTransportDiagnostics =>
+      _isPolish ? 'Diagnostyka transportu DEV' : 'DEV transport diagnostics';
+  String get uiPolicy => _isPolish ? 'Polityka' : 'Policy';
+  String get uiEffectiveRoute =>
+      _isPolish ? 'Efektywna trasa' : 'Effective route';
+  String get uiEndpointStatus =>
+      _isPolish ? 'Stan endpointu' : 'Endpoint status';
+  String get uiP2pSessionStatus =>
+      _isPolish ? 'Stan sesji P2P' : 'P2P session status';
+  String get uiDeadLetterUnavailable => _isPolish
+      ? 'Diagnostyka dead-letter jest niedostępna.'
+      : 'Dead-letter diagnostics are unavailable.';
+  String get uiInstallationId => 'Installation ID';
+  String get uiFingerprint => 'Fingerprint';
+  String get uiFingerprintUnavailable =>
+      _isPolish ? 'Fingerprint niedostępny' : 'Fingerprint unavailable';
+  String uiRelationshipRemoved(String name) => _isPolish
+      ? 'Relacja z $name została zakończona.'
+      : 'The relationship with $name has ended.';
+  String get uiPendingPairings =>
+      _isPolish ? 'Oczekujące parowania' : 'Pending pairings';
+
   String uiPairingAccepted(String name) => _isPolish
       ? '$name przyjął Twoje zaproszenie.'
       : '$name accepted your invitation.';
