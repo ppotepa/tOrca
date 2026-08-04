@@ -116,7 +116,7 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
   Timer? _backgroundDebounce;
   StreamSubscription<DesktopNavigationIntent>? _desktopNavigationSubscription;
   StreamSubscription<ConversationNavigationIntent>?
-      _conversationNavigationSubscription;
+  _conversationNavigationSubscription;
 
   AppLocalizations get _l10n => AppLocalizations.of(context)!;
 
@@ -282,8 +282,8 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
           ? l10n.uiUnknownUser
           : peerName;
       final message = switch (item.status) {
-        InviteState.accepted || InviteState.completed =>
-          l10n.uiPairingAccepted(name),
+        InviteState.accepted ||
+        InviteState.completed => l10n.uiPairingAccepted(name),
         InviteState.rejected => l10n.uiPairingRejected(name),
         InviteState.expired => l10n.uiPairingExpired,
         InviteState.cancelled => l10n.uiPairingCancelled,
@@ -318,7 +318,9 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
       final name = contact.displayName.trim().isEmpty
           ? _l10n.newContact
           : contact.displayName;
-      ref.read(uiNotificationCenterProvider.notifier).showSuccess(
+      ref
+          .read(uiNotificationCenterProvider.notifier)
+          .showSuccess(
             _l10n.uiContactAdded(name),
             deduplicationKey: 'contact-added:${contact.id}',
           );
@@ -379,9 +381,8 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
             final inbox = ref.read(appControllerProvider).inbox;
             return inbox.firstOrNullWhere(
               (item) =>
-                  item.origin == PairingOrigin.inbox &&
-                  !_resolvedIncomingPairingIds.contains(item.id) &&
-                  item.can(PairingAvailableAction.accept),
+                  item.requiresLocalDecision &&
+                  !_resolvedIncomingPairingIds.contains(item.id),
             );
           },
           onAccept: (request) async {
@@ -414,11 +415,11 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
   }
 
   Future<void> _showTransportStatus() => showModalBottomSheet<void>(
-        context: context,
-        showDragHandle: true,
-        isScrollControlled: true,
-        builder: (_) => const ConnectionCenterSheet(),
-      );
+    context: context,
+    showDragHandle: true,
+    isScrollControlled: true,
+    builder: (_) => const ConnectionCenterSheet(),
+  );
 
   Future<void> _scanInvite() async {
     final value = await Navigator.of(context).push<String>(
@@ -474,7 +475,7 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
           nickname: snapshot?.profile.nickname ?? state.profile.nickname,
           themePreferences:
               ref.read(themeControllerProvider).valueOrNull ??
-                  const TorChatThemePreferences(),
+              const TorChatThemePreferences(),
           onThemeFamilyChanged: (family) {
             unawaited(
               ref.read(themeControllerProvider.notifier).setFamily(family),
@@ -575,7 +576,8 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(appControllerProvider);
-    final localizedError = localizeStateProblem(
+    final localizedError =
+        localizeStateProblem(
           _l10n,
           problem: state.problem,
           diagnosticError: state.error,
@@ -623,8 +625,8 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
     final launchPhase = _runningUnlocked
         ? AppLaunchPhase.running
         : _onboardingUnlocked && profile.nickname.trim().isEmpty
-            ? AppLaunchPhase.onboarding
-            : resolvedPhase;
+        ? AppLaunchPhase.onboarding
+        : resolvedPhase;
 
     if (launchPhase == AppLaunchPhase.running) {
       _queueIncomingPairingPrompt(state.inbox);

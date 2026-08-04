@@ -789,6 +789,11 @@ class PairingItem {
   );
 
   bool can(PairingAvailableAction action) => availableActions.contains(action);
+
+  bool get requiresLocalDecision =>
+      origin == PairingOrigin.inbox &&
+      status == InviteState.pending &&
+      can(PairingAvailableAction.accept);
 }
 
 class ContactRequest {

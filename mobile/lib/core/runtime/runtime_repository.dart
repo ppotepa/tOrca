@@ -41,6 +41,8 @@ class RuntimeRepository {
   DateTime? _pairingCacheTime;
   int _snapshotGeneration = 0;
   int _localInvalidationEpoch = 0;
+  int _applicationInvalidationEpoch = 0;
+  int _pairingInvalidationEpoch = 0;
   final Map<String, int> _messageInvalidationEpoch = <String, int>{};
   final Map<String, int> _messageRequestSequence = <String, int>{};
   final Map<String, int> _messageAppliedSequence = <String, int>{};
@@ -219,6 +221,7 @@ class RuntimeRepository {
   Future<ApplicationSnapshot> _buildApplicationSnapshot({
     bool includePairing = false,
   }) async {
+    final applicationEpoch = _applicationInvalidationEpoch;
     var snapshot = _runtime is RuntimeProjectionProvider
         ? await (_runtime as RuntimeProjectionProvider).applicationSnapshot()
         : null;
@@ -238,6 +241,9 @@ class RuntimeRepository {
         conversations: local.conversations,
         peerEndpointAvailable: local.peerEndpointAvailable,
       );
+    }
+    if (applicationEpoch != _applicationInvalidationEpoch) {
+      return _buildApplicationSnapshot(includePairing: includePairing);
     }
     if (!includePairing) {
       applicationState.hydrate(snapshot);
@@ -371,7 +377,16 @@ class RuntimeRepository {
       return Future.value(_latestPairingSnapshot!);
     }
     final current = _pairingBatchInFlight;
-    if (current != null) return current;
+    if (current != null) {
+      final requestedEpoch = _pairingInvalidationEpoch;
+      return current.then((snapshot) {
+        if (requestedEpoch != _pairingInvalidationEpoch) {
+          return _loadPairingBatch(force: true);
+        }
+        return snapshot;
+      });
+    }
+    final invalidationEpoch = _pairingInvalidationEpoch;
     final generation = _nextGeneration();
     final request = _runtime.listPairings().then((items) {
       final inbox = <PairingItem>[];
@@ -395,9 +410,14 @@ class RuntimeRepository {
         outbox: List.unmodifiable(outbox),
         generation: generation,
       );
-      _latestPairingSnapshot = snapshot;
-      ApplicationStateStore.shared.setPairing(snapshot.inbox, snapshot.outbox);
-      _pairingCacheTime = DateTime.now();
+      if (invalidationEpoch == _pairingInvalidationEpoch) {
+        _latestPairingSnapshot = snapshot;
+        ApplicationStateStore.shared.setPairing(
+          snapshot.inbox,
+          snapshot.outbox,
+        );
+        _pairingCacheTime = DateTime.now();
+      }
       return snapshot;
     });
     _pairingBatchInFlight = request;
@@ -410,6 +430,7 @@ class RuntimeRepository {
 
   void invalidateLocalCache({bool markSnapshotStale = true}) {
     _localInvalidationEpoch += 1;
+    _applicationInvalidationEpoch += 1;
     _localCacheTime = null;
     _latestLocalSnapshot = null;
     _cachedApplicationSnapshotIncludesPairing = false;
@@ -417,6 +438,8 @@ class RuntimeRepository {
   }
 
   void invalidatePairingCache({bool markSnapshotStale = true}) {
+    _pairingInvalidationEpoch += 1;
+    _applicationInvalidationEpoch += 1;
     _pairingCacheTime = null;
     _latestPairingSnapshot = null;
     _cachedApplicationSnapshotIncludesPairing = false;
@@ -453,6 +476,15 @@ class RuntimeRepository {
     final item = await _runtime.submitPairingCode(code);
     invalidatePairingCache();
     return item;
+  }
+
+  /// Atomically refreshes the two projections used by pairing UI. A pairing
+  /// event can change both the inbox and the visible contact projection; the
+  /// caller must not publish either one independently.
+  Future<RuntimeRefreshSnapshot> refreshPairingAndApplication() async {
+    invalidatePairingCache();
+    invalidateLocalCache();
+    return refresh(includePairing: true, bypassCooldown: true);
   }
 
   Future<void> acceptPairing(String id) async {
