@@ -29,6 +29,8 @@ import 'features/chats/composer_draft.dart';
 import 'locales/application/locale_controller.dart';
 import 'locales/application/locale_setup_gate.dart';
 import 'locales/generated/app_localizations.dart';
+import 'locales/presentation/localized_ui_copy.dart';
+import 'locales/presentation/state_problem_localizer.dart';
 import 'shared/widgets/toast_host.dart';
 
 Future<void> main() async {
@@ -109,10 +111,6 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
   bool _runningUnlocked = false;
   bool _incomingPairingDialogOpen = false;
   bool _pairingCodeDialogOpen = false;
-  // A prompt can be requested while the page is changing route (notably just
-  // after a pairing code was submitted).  Keep only a *scheduled* marker;
-  // marking it permanently as presented before showDialog has mounted loses
-  // the only accept/reject affordance when that frame cannot present a route.
   final Set<String> _scheduledIncomingPairingIds = <String>{};
   final Set<String> _resolvedIncomingPairingIds = <String>{};
   String _reattachedNickname = '';
@@ -120,6 +118,9 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
   StreamSubscription<DesktopNavigationIntent>? _desktopNavigationSubscription;
   StreamSubscription<ConversationNavigationIntent>?
   _conversationNavigationSubscription;
+
+  AppLocalizations get _l10n => AppLocalizations.of(context)!;
+  LocalizedUiCopy get _copy => LocalizedUiCopy(_l10n);
 
   @override
   void initState() {
@@ -246,9 +247,6 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
       );
     } finally {
       _incomingPairingDialogOpen = false;
-      // The dialog itself is the presentation lock.  Releasing this marker
-      // means a failed route presentation is retried from the persisted inbox
-      // instead of silently hiding a still-pending invitation forever.
       _scheduledIncomingPairingIds.remove(request.id);
       if (mounted) {
         _queueIncomingPairingPrompt(ref.read(appControllerProvider).inbox);
@@ -262,18 +260,22 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
   ) {
     if (!mounted || previous == null) return;
     final previousById = {for (final item in previous) item.id: item};
+    final copy = _copy;
     for (final item in current) {
       if (item.origin != PairingOrigin.outbox || item.received) continue;
       final old = previousById[item.id];
       if (old == null || old.status != InviteState.pending) continue;
 
+      final peerName = item.peer?.displayName.trim();
+      final name = peerName == null || peerName.isEmpty
+          ? copy.unknownUser
+          : peerName;
       final message = switch (item.status) {
         InviteState.accepted || InviteState.completed =>
-          '${item.peer?.displayName ?? 'Użytkownik'} przyjął Twoje zaproszenie.',
-        InviteState.rejected =>
-          '${item.peer?.displayName ?? 'Użytkownik'} odrzucił Twoje zaproszenie.',
-        InviteState.expired => 'Zaproszenie wygasło bez odpowiedzi.',
-        InviteState.cancelled => 'Zaproszenie zostało anulowane.',
+          copy.pairingAccepted(name),
+        InviteState.rejected => copy.pairingRejected(name),
+        InviteState.expired => copy.pairingExpired,
+        InviteState.cancelled => copy.pairingCancelled,
         _ => null,
       };
       if (message == null) continue;
@@ -479,14 +481,12 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
           onReset: () => showDialog<void>(
             context: context,
             builder: (_) => AlertDialog(
-              title: const Text('Reset danych demo'),
-              content: const Text(
-                'Reset lokalnego stanu wykonaj przez deploy z opcją resetu.',
-              ),
+              title: Text(_l10n.settingsResetDemoData),
+              content: Text(_copy.resetLocalStateInstructions),
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(context),
-                  child: const Text('Zamknij'),
+                  child: Text(_l10n.close),
                 ),
               ],
             ),
@@ -496,12 +496,6 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
     );
   }
 
-  /// Handles the Android system back gesture before the root route is popped.
-  ///
-  /// The app keeps the active conversation and the selected top-level tab in
-  /// controller state rather than in Navigator routes. Without this bridge,
-  /// Android sees a single root route and immediately backgrounds the whole
-  /// application, even when the user is visibly inside a conversation.
   Future<void> _handleSystemBack() async {
     if (!mounted) return;
     final controller = ref.read(appControllerProvider.notifier);
@@ -514,9 +508,6 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
       controller.selectDestination(MainDestination.chats);
       return;
     }
-
-    // At the root of the app the native Android behaviour is intentional:
-    // leave the Flutter activity and keep the foreground service alive.
     await SystemNavigator.pop();
   }
 
@@ -530,23 +521,23 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
     final nickname = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Edytuj nick'),
+        title: Text(_copy.editNickname),
         content: TextField(
           controller: field,
           autofocus: true,
           maxLength: 32,
           textInputAction: TextInputAction.done,
-          decoration: const InputDecoration(labelText: 'Nick'),
+          decoration: InputDecoration(labelText: _l10n.nicknameLabel),
           onSubmitted: (value) => Navigator.pop(context, value),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Anuluj'),
+            child: Text(_l10n.cancel),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, field.text),
-            child: const Text('Zapisz'),
+            child: Text(_copy.save),
           ),
         ],
       ),
@@ -560,6 +551,12 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(appControllerProvider);
+    final localizedError = localizeStateProblem(
+          _l10n,
+          problem: state.problem,
+          diagnosticError: state.error,
+        ) ??
+        '';
     ref.listen<List<PairingItem>>(
       appControllerProvider.select((value) => value.inbox),
       (_, inbox) => _queueIncomingPairingPrompt(inbox),
@@ -578,12 +575,10 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
         for (final contact in current) {
           if (previousIds.contains(contact.id)) continue;
           final name = contact.displayName.trim().isEmpty
-              ? 'Nowy kontakt'
+              ? _l10n.newContact
               : contact.displayName;
-          ref
-              .read(uiNotificationCenterProvider.notifier)
-              .showSuccess(
-                'Dodano kontakt $name.',
+          ref.read(uiNotificationCenterProvider.notifier).showSuccess(
+                _copy.contactAdded(name),
                 deduplicationKey: 'contact-added:${contact.id}',
               );
         }
@@ -627,7 +622,7 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
       return ConnectionWarmupScreen(
         connection: connection,
         summary: summary,
-        error: state.error,
+        error: localizedError,
         retry: controller.retryTor,
       );
     }
@@ -635,7 +630,7 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
       return NicknameOnboardingScreen(
         controller: _nickname,
         connection: connection,
-        error: state.error,
+        error: localizedError,
         onSave: () async {
           await controller.setNickname(_nickname.text);
           if (ref
@@ -685,7 +680,7 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
       selectedContact: selectedContact,
       search: _search,
       composer: _composer,
-      error: state.error,
+      error: localizedError,
       problem: state.problem,
       action: state.action,
       onTab: (tab) => controller.selectDestination(switch (tab) {
