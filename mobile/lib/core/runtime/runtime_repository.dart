@@ -157,7 +157,6 @@ class RuntimeRepository {
       applicationState.hydrate(
         current.copyWith(
           profile: profile,
-          generation: _nextGeneration(current.generation),
           createdAtMs: DateTime.now().millisecondsSinceEpoch,
         ),
       );

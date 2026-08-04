@@ -77,7 +77,14 @@ impl ClientEngineActor {
                     .to_owned(),
             )
         })?;
-        invite.peer_endpoint = Some(local_peer_endpoint);
+        let local_capability_id = uuid::Uuid::new_v4().simple().to_string()[..16].to_owned();
+        let local_capability_secret = uuid::Uuid::new_v4().as_bytes().to_vec();
+        invite.peer_endpoint = Some(self.endpoint_with_capability(
+            &local_peer_endpoint,
+            &local_capability_id,
+        ));
+        invite.peer_capability_id = Some(local_capability_id.clone());
+        invite.peer_capability_secret = Some(URL_SAFE_NO_PAD.encode(&local_capability_secret));
         invite
             .sign(&self.identity)
             .map_err(|error| EngineError::Serialization(error.to_string()))?;
@@ -89,6 +96,8 @@ impl ClientEngineActor {
                 invite_id,
                 recipient_installation_id,
                 snapshot,
+                local_capability_id,
+                local_capability_secret,
                 expires_at,
             })?;
         Ok(encoded)
@@ -225,6 +234,15 @@ impl ClientEngineActor {
         let profile = self.runtime_profile()?;
         let protocol_nickname =
             protocol_nickname(&self.identity.installation_id(), &profile.nickname);
+        let _ = self
+            .database
+            .ensure_contact_endpoint_capability(&card.installation_id)?;
+        let (local_capability_id, local_capability_secret) =
+            self.local_capability_credentials(&card.installation_id)?;
+        let welcome_endpoint = self
+            .local_peer_endpoint
+            .clone()
+            .map(|endpoint| self.endpoint_with_capability(&endpoint, &local_capability_id));
         let ciphertext = RelayPayloadV1::welcome_with_endpoint(
             &self.identity,
             &protocol_nickname,
@@ -232,7 +250,9 @@ impl ClientEngineActor {
             invite.invite_id.clone(),
             &welcome,
             &tree,
-            self.local_peer_endpoint.clone(),
+            welcome_endpoint,
+            Some(local_capability_id),
+            Some(URL_SAFE_NO_PAD.encode(local_capability_secret)),
         )
         .encode()
         .map_err(EngineError::InvalidCommand)?;
@@ -255,6 +275,22 @@ impl ClientEngineActor {
             None,
         )?;
         if let Some(peer_endpoint) = peer_endpoint {
+            if let (Some(capability_id), Some(secret)) = (
+                invite.peer_capability_id.as_deref(),
+                invite.peer_capability_secret.as_deref(),
+            ) {
+                let secret = URL_SAFE_NO_PAD.decode(secret).map_err(|_| {
+                    EngineError::InvalidCommand("invalid invite capability secret".to_owned())
+                })?;
+                self.database.put_peer_endpoint_capability(
+                    &card.installation_id,
+                    capability_id,
+                    &secret,
+                    peer_endpoint.sequence,
+                    self.clock.now_ms() / 1_000,
+                    peer_endpoint.expires_at,
+                )?;
+            }
             runtime_events.extend(self.apply_peer_endpoint(peer_endpoint)?);
         }
         self.pending_welcomes
@@ -337,19 +373,10 @@ impl ClientEngineActor {
         // while Welcome was still being committed. Replay those frames now
         // that the MLS conversation is available.
         runtime_events.extend(self.drain_pending_pre_welcome(&card.installation_id)?);
-        // Exchange the per-contact endpoint secret only after the MLS
-        // conversation has been committed. The offer is MLS-encrypted.
-        if let Err(error) = self.send_capability_offer(&card.installation_id) {
-            self.pending_engine_events.push(EngineEvent::Log {
-                log: EngineLogEvent {
-                    level: "warn".to_owned(),
-                    message: format!(
-                        "capability offer deferred contact={} error={error}",
-                        card.installation_id
-                    ),
-                },
-            });
-        }
+        // Fresh pairings carry both endpoint capabilities in the signed
+        // invite/Welcome. Sending a first capability offer here would create
+        // a circular dependency: that offer itself requires the remote
+        // capability to open the first P2P connection.
         Ok(runtime_events)
     }
 }

@@ -2,9 +2,14 @@ import 'package:flutter/widgets.dart';
 
 import '../../core/models/domain.dart';
 import '../generated/app_localizations.dart';
+import '../generated/app_localizations_pl.dart';
 
 extension AppLocalizationsContext on BuildContext {
-  AppLocalizations get l10n => AppLocalizations.of(this)!;
+  // Widgets used in isolated tests may not be wrapped in a full application
+  // Localizations tree. Keep the presentation layer usable there while the
+  // real app still resolves the active locale normally.
+  AppLocalizations get l10n =>
+      AppLocalizations.of(this) ?? AppLocalizationsPl();
 }
 
 /// Typed presentation adapters built exclusively from generated ARB messages.
@@ -26,6 +31,10 @@ extension AppLocalizationsUiCopy on AppLocalizations {
   String get uiAccount => accountTitle;
   String get uiSettings => settingsTitle;
   String get uiSave => commonSave;
+  String get uiStatusReady => statusTransportConnected;
+  String get uiStatusStarting => statusTransportStarting;
+  String get uiStatusRetrying => statusTransportReconnecting;
+  String get uiStatusError => statusTransportError;
 
   String uiMessageState(MessageState state) => switch (state) {
     MessageState.queued => messageStateQueued,

@@ -11,7 +11,6 @@ import 'package:window_manager/window_manager.dart';
 
 import '../locales/domain/app_locale_preference.dart';
 import '../locales/generated/app_localizations.dart';
-import '../locales/presentation/app_localizations_x.dart';
 import 'desktop_navigation_intent.dart';
 
 const _windowWidthKey = 'torchat.desktop.window.width';

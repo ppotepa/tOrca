@@ -1,6 +1,21 @@
 use super::*;
 
 impl ClientEngineActor {
+    pub(super) fn endpoint_with_capability(
+        &self,
+        endpoint: &PeerEndpointBundle,
+        capability_id: &str,
+    ) -> PeerEndpointBundle {
+        let marker = format!("contact_endpoint_v1:{capability_id}");
+        let mut endpoint = endpoint.clone();
+        if !endpoint.capabilities.iter().any(|value| value == &marker) {
+            endpoint.sequence = endpoint.sequence.saturating_add(1);
+            endpoint.capabilities.push(marker);
+            endpoint.signature = self.identity.sign(&endpoint.signing_bytes());
+        }
+        endpoint
+    }
+
     pub(super) fn local_endpoint_for_contact(
         &mut self,
         contact_installation_id: &str,

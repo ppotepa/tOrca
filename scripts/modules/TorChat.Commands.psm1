@@ -246,6 +246,16 @@ function Invoke-TorChatDeployCommand {
         throw 'Onion rotation requires -Confirm.'
     }
 
+    # This combination is the explicit clean deployment contract: do not
+    # reuse local build/deployment state and do not allow Docker layers to be
+    # reused. The command line remains concise and deterministic.
+    if ($BuildPolicy -eq 'rebuild' -and $ClientDataPolicy -eq 'reset' -and $InstallPolicy -eq 'always') {
+        $NoCache = $true
+        Invoke-TorChatStage -Context $Context -Id 'clean.deploy' -Name 'Clear local build and deployment caches' -Action {
+            Clear-TorChatBuildState -RepositoryRoot $Context.RepositoryRoot -Artifacts
+        }
+    }
+
     function Ensure-TorChatWindowsArtifacts {
         param(
             [Parameter(Mandatory = $true)]$Context,

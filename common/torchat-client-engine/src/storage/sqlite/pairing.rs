@@ -12,6 +12,8 @@ impl ClientDatabase {
                     record.invite_id,
                     record.recipient_installation_id,
                     record.snapshot,
+                    record.local_capability_id,
+                    record.local_capability_secret,
                     record.expires_at,
                 ],
             )
@@ -33,6 +35,8 @@ impl ClientDatabase {
                         invite_id: row.get("invite_id")?,
                         recipient_installation_id: row.get("recipient_installation_id")?,
                         snapshot: row.get("snapshot")?,
+                        local_capability_id: row.get("local_capability_id")?,
+                        local_capability_secret: row.get("local_capability_secret")?,
                         expires_at: row.get("expires_at")?,
                     })
                 },

@@ -52,6 +52,24 @@ void main() {
     expect((await repository.profile(force: true)).nickname, 'Alice');
   });
 
+  test('nickname update does not advance authoritative generation', () async {
+    final repository = RuntimeRepository(_SnapshotRuntime());
+    repository.applicationState.hydrate(
+      const ApplicationSnapshot(
+        generation: 7,
+        projectionStoreId: 'engine-store',
+        projectionRevision: 12,
+        profile: RuntimeProfile(nickname: 'Alice'),
+      ),
+    );
+
+    await repository.setNickname('Alicja');
+
+    expect(repository.applicationState.current?.generation, 7);
+    expect(repository.applicationState.current?.projectionRevision, 12);
+    expect(repository.applicationState.current?.profile.nickname, 'Alicja');
+  });
+
   test(
     'refresh returns its transaction snapshot when cache is invalidated',
     () async {

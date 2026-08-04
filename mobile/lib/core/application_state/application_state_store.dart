@@ -184,20 +184,44 @@ class ApplicationStateStore {
       _current = null;
       _stale = false;
       _changes.add(null);
-    } else if (current != null &&
-        current.projectionStoreId.isNotEmpty &&
-        snapshot.projectionStoreId == current.projectionStoreId &&
-        snapshot.projectionRevision < current.projectionRevision) {
-      // A response from an older engine revision must never roll the
-      // application projection back, even if its Future completed later.
-      return false;
-    } else if (current != null && snapshot.generation < current.generation) {
-      return false;
+    } else if (current != null) {
+      final currentStore = current.projectionStoreId.trim();
+      final nextStore = snapshot.projectionStoreId.trim();
+      if (currentStore.isNotEmpty && nextStore == currentStore) {
+        if (snapshot.projectionRevision < current.projectionRevision) {
+          _logSnapshot('rejected', snapshot, reason: 'older projection');
+          return false;
+        }
+        // Revisions from the same engine store are authoritative. Generic
+        // generations may have been produced by retained UI-only updates and
+        // must not hide a newly committed contact or conversation.
+      } else if (nextStore.isEmpty &&
+          snapshot.generation < current.generation) {
+        _logSnapshot('rejected', snapshot, reason: 'older generation');
+        return false;
+      }
     }
     _current = snapshot;
     _stale = false;
     _changes.add(snapshot);
+    _logSnapshot('published', snapshot);
     return true;
+  }
+
+  void _logSnapshot(
+    String outcome,
+    ApplicationSnapshot snapshot, {
+    String reason = '',
+  }) {
+    developer.log(
+      'application snapshot $outcome '
+      'generation=${snapshot.generation} '
+      'projectionRevision=${snapshot.projectionRevision} '
+      'contacts=${snapshot.contacts.length} '
+      'conversations=${snapshot.conversations.length}'
+      '${reason.isEmpty ? '' : ' reason=$reason'}',
+      name: 'torchat.projection',
+    );
   }
 
   bool applyPatch(ApplicationSnapshotPatch patch) {

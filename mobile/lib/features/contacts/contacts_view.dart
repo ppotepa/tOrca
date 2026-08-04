@@ -18,6 +18,7 @@ import '../../shared/widgets/contact_list_section.dart';
 import '../../shared/widgets/feature_header.dart';
 import '../../shared/widgets/status_banner.dart';
 import '../../shared/widgets/themed_switch_list_tile.dart';
+import '../../shared/widgets/identity_avatar.dart';
 import '../../locales/presentation/app_localizations_x.dart';
 import '../../locales/presentation/status_localizer.dart';
 

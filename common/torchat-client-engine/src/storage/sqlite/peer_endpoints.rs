@@ -1,6 +1,22 @@
 use super::*;
 
 impl ClientDatabase {
+    pub fn put_contact_endpoint_capability(
+        &self,
+        contact_installation_id: &str,
+        capability_id: &str,
+        secret: &[u8],
+    ) -> EngineResult<()> {
+        let secret_hash = sha2::Sha256::digest(secret).to_vec();
+        self.connection
+            .execute(
+                super::sql_catalog::peer_endpoints::ENSURE_CONTACT_CAPABILITY_COMMAND,
+                params![contact_installation_id, capability_id, secret_hash, secret],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
     pub fn local_peer_endpoint(&self) -> EngineResult<Option<(PeerEndpointBundle, u64)>> {
         let stored = self
             .connection

@@ -90,8 +90,12 @@ function Clear-TorChatBuildState {
         if (Test-Path -LiteralPath $mobileBuild) {
             Remove-TorChatDirectoryRobust -Path $mobileBuild -Description 'mobile build directory'
         }
+        $pubCacheTemp = Join-Path $RepositoryRoot '.torchat\pub-cache-temp'
+        if (Test-Path -LiteralPath $pubCacheTemp) {
+            Remove-TorChatDirectoryRobust -Path $pubCacheTemp -Description 'temporary pub cache'
+        }
     }
-    [pscustomobject]@{ State = 'Ready'; Code = 'BUILD_STATE_CLEARED'; Message = if ($Artifacts) { 'Build state and mobile artifacts removed' } else { 'Build and deployment caches removed' } }
+    [pscustomobject]@{ State = 'Ready'; Code = 'BUILD_STATE_CLEARED'; Message = if ($Artifacts) { 'Build state, Flutter artifacts and temporary caches removed' } else { 'Build and deployment caches removed' } }
 }
 
 Export-ModuleMember -Function @(

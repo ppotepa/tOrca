@@ -14,6 +14,8 @@ pub struct PendingLocalInviteMlsRecord {
     pub invite_id: String,
     pub recipient_installation_id: Option<String>,
     pub snapshot: Vec<u8>,
+    pub local_capability_id: String,
+    pub local_capability_secret: Vec<u8>,
     pub expires_at: i64,
 }
 

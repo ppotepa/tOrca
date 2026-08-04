@@ -186,13 +186,24 @@ function Invoke-TorChatNative {
             $previousNativeErrorPreference = $PSNativeCommandUseErrorActionPreference
             $PSNativeCommandUseErrorActionPreference = $false
         }
-        $output = @(& $FilePath @ArgumentList 2>&1)
-        $exitCode = $LASTEXITCODE
-        $text = ($output | Out-String).TrimEnd()
-        if ($text) { Add-Content -LiteralPath $logPath -Value $text -Encoding UTF8 }
-        if ($Context.Verbosity -in @('detailed','trace') -and $text) {
-            $output | ForEach-Object { Write-Host "     $_" -ForegroundColor DarkGray }
+        $output = [Collections.Generic.List[string]]::new()
+        $utf8 = [Text.UTF8Encoding]::new($false)
+        $writer = [IO.StreamWriter]::new($logPath, $true, $utf8)
+        try {
+            & $FilePath @ArgumentList 2>&1 | ForEach-Object {
+                $line = [string]$_
+                [void]$output.Add($line)
+                $writer.WriteLine($line)
+                $writer.Flush()
+                if ($Context.Verbosity -in @('detailed','trace')) {
+                    Write-Host "     $line" -ForegroundColor DarkGray
+                }
+            }
+            $exitCode = $LASTEXITCODE
+        } finally {
+            $writer.Dispose()
         }
+        $text = ($output -join [Environment]::NewLine).TrimEnd()
         if ($AllowedExitCodes -notcontains $exitCode) {
             $summary = "$FilePath exited with code $exitCode."
             if ($FilePath -eq 'docker') {

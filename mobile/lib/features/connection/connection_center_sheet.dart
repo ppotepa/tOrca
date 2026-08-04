@@ -7,7 +7,6 @@ import '../../app/application_snapshot_provider.dart';
 import '../../app/notifications/ui_notification_center.dart';
 import '../../app/ui_operation_registry.dart';
 import '../../core/application_state/application_snapshot.dart';
-import '../../core/connection/app_state_connection.dart';
 import '../../core/connection/connection_component.dart';
 import '../../core/models/domain.dart';
 import '../../core/presence/contact_presence_snapshot.dart';

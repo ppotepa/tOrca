@@ -116,6 +116,12 @@ function Remove-TorChatDirectoryRobust {
     $resolved = [IO.Path]::GetFullPath($Path)
     for ($attempt = 1; $attempt -le 4; $attempt++) {
         try {
+            # Interrupted native builds can leave a generated directory with
+            # a broken inherited ACL on Windows. Reset only this exact build
+            # path before removal; never broaden the cleanup scope.
+            if ($env:OS -eq 'Windows_NT') {
+                & icacls $resolved /reset /T /C *> $null
+            }
             Remove-Item -LiteralPath $resolved -Recurse -Force -ErrorAction Stop
             return
         } catch {
@@ -281,6 +287,20 @@ function Build-TorChatAndroidEngine {
         'i686-linux-android' { 'i686-linux-android' }
     }
     Initialize-TorChatAndroidToolchain -AndroidNdk $ndk -RustTarget $RustTarget -ToolPrefix $toolPrefix
+    # Cargo can sporadically fail with os error 5 while creating a new target
+    # triple directory on Windows (typically after an aggressive cleanup or an
+    # antivirus/indexer race). Prepare and verify the exact directory before
+    # Cargo starts so the build never depends on that racy first mkdir.
+    $cargoTarget = Join-Path $Context.RepositoryRoot "target\$RustTarget"
+    New-Item -ItemType Directory -Force -Path $cargoTarget -ErrorAction Stop | Out-Null
+    $writeProbe = Join-Path $cargoTarget '.torchat-write-probe'
+    try {
+        [IO.File]::WriteAllText($writeProbe, 'ok')
+    } catch {
+        throw "Android Rust target directory is not writable: $cargoTarget. $($_.Exception.Message)"
+    } finally {
+        Remove-Item -LiteralPath $writeProbe -Force -ErrorAction SilentlyContinue
+    }
     $out = Join-Path $Context.RepositoryRoot "mobile\build\app\generated\jniLibs\$abi"
     $artifact = Join-Path $out 'libtorchat_client_engine.so'
     $hash = Get-TorChatInputHash -RepositoryRoot $Context.RepositoryRoot -Roots @(

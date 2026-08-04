@@ -12,6 +12,7 @@ import '../../../shared/widgets/feature_header.dart';
 import '../../../shared/widgets/identity_section.dart';
 import '../../../shared/widgets/info_tile.dart';
 import '../../../shared/widgets/section_card.dart';
+import '../../../shared/widgets/identity_avatar.dart';
 import '../../../shared/formatters/message_timestamps.dart';
 import '../../../locales/presentation/app_localizations_x.dart';
 import '../../../locales/presentation/status_localizer.dart';

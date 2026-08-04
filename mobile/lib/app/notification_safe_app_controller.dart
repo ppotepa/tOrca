@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../client_runtime.dart';
 import '../core/models/domain.dart';
 import '../core/runtime/message_paging.dart';
+import '../core/runtime/runtime_repository_models.dart';
 import '../locales/domain/user_problem.dart';
 import '../locales/domain/user_problem_code.dart';
 import 'app_controller_base.dart' as base;
