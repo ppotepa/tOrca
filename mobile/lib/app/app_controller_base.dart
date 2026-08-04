@@ -189,10 +189,12 @@ abstract class AppController extends Notifier<AppState> {
   }) async {
     late final bool peerEndpointAvailable;
 
-    final snapshot = await _repository.refresh(
-      includePairing: forcePairing,
-      bypassCooldown: true,
-    );
+    final snapshot = forcePairing
+        ? await _repository.refreshPairingAndApplication()
+        : await _repository.refresh(
+            includePairing: false,
+            bypassCooldown: true,
+          );
     final applicationSnapshot = snapshot.application;
     final pairing = snapshot.pairing;
     peerEndpointAvailable = snapshot.local.peerEndpointAvailable;
