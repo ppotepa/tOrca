@@ -6,6 +6,19 @@ use std::{
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
+
+pub(crate) fn pairing_pair_key(left: &str, right: &str) -> String {
+    let (first, second) = if left <= right {
+        (left, right)
+    } else {
+        (right, left)
+    };
+    let mut input = Vec::with_capacity(first.len() + second.len() + 1);
+    input.extend_from_slice(first.as_bytes());
+    input.push(b':');
+    input.extend_from_slice(second.as_bytes());
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(Sha256::digest(input))
+}
 use tokio::sync::mpsc;
 use tokio::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;

@@ -31,6 +31,10 @@ impl ClientEngineActor {
                 let sender = contact_record_from_card(&contact_card_from_invite(&parsed), false);
                 let item = PairingItem {
                     pairing_id: pairing_id.clone(),
+                    pair_key: Some(pairing_pair_key(
+                        &self.identity.installation_id(),
+                        &parsed.installation_id,
+                    )),
                     sender: Some(sender),
                     // Rendezvous authorization is bound to the live WebSocket
                     // and its side token. The runtime still requires a non-empty local

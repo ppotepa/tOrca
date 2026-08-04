@@ -1,12 +1,13 @@
 INSERT INTO pairing_inbox (
-                    pairing_id, sender_installation_id, sender_nickname,
+                    pairing_id, pair_key, sender_installation_id, sender_nickname,
                     sender_public_key, sender_fingerprint, capability,
                     expires_at, state, offer_invite_id, offer_payload,
                     attempt_count, next_attempt_at, last_error, created_at, updated_at
                  ) VALUES (
-                    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 0, 0, NULL, unixepoch(), unixepoch()
+                    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 0, 0, NULL, unixepoch(), unixepoch()
                  )
                  ON CONFLICT(pairing_id) DO UPDATE SET
+                    pair_key = excluded.pair_key,
                     sender_installation_id = excluded.sender_installation_id,
                     sender_nickname = excluded.sender_nickname,
                     sender_public_key = excluded.sender_public_key,

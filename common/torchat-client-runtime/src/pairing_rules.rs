@@ -619,6 +619,7 @@ mod tests {
     fn merge_pairing_item_preserves_local_artifacts() {
         let local = crate::PairingItem {
             pairing_id: "pairing-1".into(),
+            pair_key: None,
             sender: None,
             capability: Some(String::new()),
             expires_at: 10,
@@ -630,6 +631,7 @@ mod tests {
         };
         let remote = crate::PairingItem {
             pairing_id: "pairing-1".into(),
+            pair_key: None,
             sender: Some(crate::ContactRecord {
                 installation_id: "peer-1".into(),
                 nickname: "Peer".into(),
@@ -668,6 +670,7 @@ mod tests {
     fn merge_pairing_item_derives_actions_for_new_incoming_item() {
         let remote = crate::PairingItem {
             pairing_id: "pairing-1".into(),
+            pair_key: None,
             sender: Some(crate::ContactRecord {
                 installation_id: "peer-1".into(),
                 nickname: "Peer".into(),
@@ -709,6 +712,7 @@ mod tests {
     fn merge_pairing_item_refreshes_actions_after_state_merge() {
         let local = crate::PairingItem {
             pairing_id: "pairing-1".into(),
+            pair_key: None,
             sender: None,
             capability: Some("chat".into()),
             expires_at: 10,
@@ -720,6 +724,7 @@ mod tests {
         };
         let remote = crate::PairingItem {
             pairing_id: "pairing-1".into(),
+            pair_key: None,
             sender: None,
             capability: Some("chat".into()),
             expires_at: 12,

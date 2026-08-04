@@ -41,6 +41,7 @@ abstract final class EngineContract {
   static const deviceIdle = 'deviceIdle';
   static const restricted = 'restricted';
   static const pairingId = 'pairingId';
+  static const pairKey = 'pairKey';
   static const conversationId = 'conversationId';
   static const installationId = 'installationId';
   static const contactId = 'contactId';

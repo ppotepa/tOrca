@@ -513,6 +513,11 @@ pub struct InviteCode {
 #[serde(rename_all = "camelCase")]
 pub struct PairingItem {
     pub pairing_id: String,
+    /// Symmetric identity of the two-device pairing session. It is populated
+    /// once both installation IDs are known and is deliberately optional for
+    /// legacy/local records created before the peer identity was received.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pair_key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sender: Option<ContactRecord>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -247,6 +247,7 @@ impl SharedRelayActor {
         self.joiner_tokens.insert(started, token);
         Ok(PairingItem {
             pairing_id: started.to_string(),
+            pair_key: None,
             sender: None,
             capability: None,
             expires_at: unix_now() + 180,

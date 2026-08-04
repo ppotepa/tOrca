@@ -222,6 +222,7 @@ pub fn runtime_pairing_item(
 ) -> PairingItem {
     PairingItem {
         pairing_id,
+        pair_key: None,
         sender,
         capability,
         expires_at,

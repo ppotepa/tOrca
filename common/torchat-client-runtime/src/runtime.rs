@@ -1603,6 +1603,7 @@ mod tests {
     fn pairing(id: &str, state: InviteState) -> PairingItem {
         PairingItem {
             pairing_id: id.to_owned(),
+            pair_key: None,
             sender: None,
             capability: Some("chat".to_owned()),
             expires_at: 100,
@@ -1846,6 +1847,7 @@ mod tests {
             .storage
             .put_pairing_outbox(PairingItem {
                 pairing_id: "expired-outbox".to_owned(),
+                pair_key: None,
                 sender: None,
                 capability: None,
                 expires_at: -1,

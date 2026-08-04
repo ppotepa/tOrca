@@ -436,6 +436,7 @@ class RuntimeProfile {
 class ContactRecord {
   const ContactRecord({
     required this.id,
+    this.pairKey,
     required this.nickname,
     required this.fingerprint,
     required this.publicKey,
@@ -451,6 +452,7 @@ class ContactRecord {
     this.transportPolicy = ContactTransportPolicy.peerOnly,
   });
   final String id;
+  final String? pairKey;
   final String nickname;
   final String fingerprint;
   final String publicKey;
@@ -748,6 +750,7 @@ enum PairingOrigin { inbox, outbox, unknown }
 class PairingItem {
   const PairingItem({
     required this.id,
+    this.pairKey,
     required this.status,
     this.availableActions = const [],
     this.peer,
@@ -756,6 +759,7 @@ class PairingItem {
     this.origin = PairingOrigin.unknown,
   });
   final String id;
+  final String? pairKey;
   final InviteState status;
   final List<PairingAvailableAction> availableActions;
   final ContactRecord? peer;
@@ -768,6 +772,7 @@ class PairingItem {
     PairingOrigin origin = PairingOrigin.unknown,
   }) => PairingItem(
     id: _string(map, EngineContract.pairingId),
+    pairKey: _optionalString(map, EngineContract.pairKey),
     status: InviteState.fromValue(_string(map, EngineContract.state)),
     availableActions: _availableActions(map),
     peer: map[EngineContract.sender] is Map

@@ -725,6 +725,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
             .query_map([], |row| {
                 Ok((
                     row.get::<_, String>("pairing_id")?,
+                    row.get::<_, Option<String>>("pair_key")?,
                     row.get::<_, String>("sender_installation_id")?,
                     row.get::<_, String>("sender_nickname")?,
                     row.get::<_, String>("sender_public_key")?,
@@ -740,6 +741,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
         rows.map(|row| {
             let (
                 pairing_id,
+                pair_key,
                 sender_installation_id,
                 sender_nickname,
                 sender_public_key,
@@ -752,6 +754,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
             ) = row.map_err(storage_error)?;
             Ok(finalize_pairing_item(PairingItem {
                 pairing_id,
+                pair_key,
                 sender: Some(ContactRecord {
                     nickname: normalized_contact_nickname(
                         &sender_installation_id,
@@ -791,11 +794,37 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
         let capability = item.capability.ok_or_else(|| {
             RuntimeError::Storage("pairing inbox item missing capability".to_owned())
         })?;
+        if let Some(pair_key) = item.pair_key.as_deref() {
+            // A crossed invite is one device relationship, not two pending
+            // UI rows. Preserve the incoming request as the actionable side
+            // and retire any local outgoing attempt for the same pair.
+            self.tx()
+                .execute(
+                    "UPDATE pairing_outbox
+                     SET state = 'CANCELLED', pair_key = ?1, updated_at = unixepoch()
+                     WHERE recipient_installation_id = ?2
+                       AND pairing_id <> ?3
+                       AND state IN ('PENDING', 'ACCEPTED')",
+                    rusqlite::params![pair_key, sender.installation_id, item.pairing_id],
+                )
+                .map_err(storage_error)?;
+            self.tx()
+                .execute(
+                    "UPDATE pairing_inbox
+                     SET state = 'ARCHIVED', updated_at = unixepoch()
+                     WHERE pair_key = ?1
+                       AND pairing_id <> ?2
+                       AND state IN ('PENDING', 'ACCEPTED')",
+                    rusqlite::params![pair_key, item.pairing_id],
+                )
+                .map_err(storage_error)?;
+        }
         self.tx()
             .execute(
                 super::sqlite::sql_catalog::runtime_storage::UPSERT_PAIRING_INBOX,
                 params![
                     item.pairing_id,
+                    item.pair_key,
                     sender.installation_id,
                     sender.nickname,
                     sender.public_key,
@@ -820,6 +849,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
             .query_map([], |row| {
                 Ok((
                     row.get::<_, String>("pairing_id")?,
+                    row.get::<_, Option<String>>("pair_key")?,
                     row.get::<_, Option<String>>("recipient_installation_id")?,
                     row.get::<_, Option<String>>("capability")?,
                     row.get::<_, Option<Vec<u8>>>("payload")?,
@@ -829,10 +859,11 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
             })
             .map_err(storage_error)?;
         rows.map(|row| {
-            let (pairing_id, recipient_installation_id, capability, payload, expires_at, state) =
+            let (pairing_id, pair_key, recipient_installation_id, capability, payload, expires_at, state) =
                 row.map_err(storage_error)?;
             Ok(finalize_pairing_item(PairingItem {
                 pairing_id,
+                pair_key,
                 sender: recipient_installation_id.map(|installation_id| ContactRecord {
                     nickname: fallback_contact_nickname(&installation_id),
                     public_key: String::new(),
@@ -867,6 +898,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                 super::sqlite::sql_catalog::runtime_storage::UPSERT_PAIRING_OUTBOX,
                 params![
                     item.pairing_id,
+                    item.pair_key,
                     item.sender.map(|contact| contact.installation_id),
                     item.capability,
                     item.offer_payload.map(|value| value.into_bytes()),

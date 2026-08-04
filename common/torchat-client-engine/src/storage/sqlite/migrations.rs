@@ -19,4 +19,9 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "002_pairing_capability_bootstrap.sql",
         sql: include_str!("../../../sql/migrations/002_pairing_capability_bootstrap.sql"),
     },
+    Migration {
+        version: 3,
+        name: "003_pairing_session_identity.sql",
+        sql: include_str!("../../../sql/migrations/003_pairing_session_identity.sql"),
+    },
 ];

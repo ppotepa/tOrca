@@ -702,6 +702,7 @@ fn wire_keys() -> &'static [(&'static str, &'static str)] {
         ("DEVICE_IDLE", "deviceIdle"),
         ("RESTRICTED", "restricted"),
         ("PAIRING_ID", "pairingId"),
+        ("PAIR_KEY", "pairKey"),
         ("CONVERSATION_ID", "conversationId"),
         ("INSTALLATION_ID", "installationId"),
         ("CONTACT_ID", "contactId"),

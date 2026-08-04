@@ -484,6 +484,7 @@ mod tests {
     fn rejects_expired_pairing_before_transport() {
         let item = PairingItem {
             pairing_id: "pairing-1".to_owned(),
+            pair_key: None,
             sender: Some(ContactRecord {
                 installation_id: "peer-1".to_owned(),
                 nickname: "Peer".to_owned(),
@@ -515,6 +516,7 @@ mod tests {
     fn cancel_is_allowed_only_for_outstanding_pairing() {
         let item = PairingItem {
             pairing_id: "pairing-1".to_owned(),
+            pair_key: None,
             sender: None,
             capability: None,
             expires_at: 10,
@@ -534,6 +536,7 @@ mod tests {
     fn commit_accept_is_idempotent_for_same_offer_artifacts() {
         let mut item = PairingItem {
             pairing_id: "pairing-1".to_owned(),
+            pair_key: None,
             sender: Some(ContactRecord {
                 installation_id: "sender-1".to_owned(),
                 nickname: "Sender".to_owned(),
@@ -575,6 +578,7 @@ mod tests {
     fn commit_cancel_is_idempotent_and_rejects_terminal_state() {
         let item = PairingItem {
             pairing_id: "pairing-1".to_owned(),
+            pair_key: None,
             capability: Some("capability".to_owned()),
             expires_at: 100,
             state: InviteState::Pending,
@@ -600,6 +604,7 @@ mod tests {
     fn confirm_cancel_returns_only_real_transition() {
         let item = PairingItem {
             pairing_id: "pairing-1".to_owned(),
+            pair_key: None,
             capability: Some("capability".to_owned()),
             expires_at: 100,
             state: InviteState::Pending,
@@ -625,6 +630,7 @@ mod tests {
     fn expiry_changes_only_pending_items_past_deadline() {
         let item = PairingItem {
             pairing_id: "pairing-1".to_owned(),
+            pair_key: None,
             capability: None,
             expires_at: 10,
             state: InviteState::Pending,
@@ -642,6 +648,7 @@ mod tests {
     fn complete_welcome_replays_completed_pairing_without_duplicate_transition() {
         let item = PairingItem {
             pairing_id: "pairing-1".to_owned(),
+            pair_key: None,
             capability: Some("capability".to_owned()),
             expires_at: 100,
             state: InviteState::Accepted,
@@ -680,6 +687,7 @@ mod tests {
     fn visible_items_filters_archived_and_sorts_deterministically() {
         let item = |id: &str, expires_at: i64, state| PairingItem {
             pairing_id: id.to_owned(),
+            pair_key: None,
             sender: None,
             capability: None,
             expires_at,

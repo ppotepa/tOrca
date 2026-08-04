@@ -60,6 +60,7 @@ where
             let received = item.runtime_pairing_received();
             PairingItem {
                 pairing_id: item.runtime_pairing_id(),
+                pair_key: None,
                 sender: item.runtime_pairing_sender(),
                 capability: item.runtime_pairing_capability(),
                 expires_at: item.runtime_pairing_expires_at(),
