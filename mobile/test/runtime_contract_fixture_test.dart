@@ -25,7 +25,7 @@ void main() {
     expect(data.contact.verified, isTrue);
     expect(data.conversation.state, ConversationState.active);
     expect(data.message.state, MessageState.delivered);
-    expect(data.pairingCode.code, 'amber-birch-cobalt-dawn-ember-fjord');
+    expect(data.pairingCode.code, '1234 5678');
     expect(data.pairingInboxItem.received, isTrue);
     expect(data.pairingOutboxItem.received, isFalse);
     expect(data.pairingInboxItem.can(PairingAvailableAction.accept), isTrue);

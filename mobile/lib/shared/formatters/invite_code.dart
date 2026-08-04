@@ -1,16 +1,17 @@
 import 'package:flutter/services.dart';
 
+const _pairingCodeLength = 8;
+
 String normalizePairingCode(String value) =>
-    value.trim().toLowerCase().split(RegExp(r'[\s-]+')).where((word) => word.isNotEmpty).join('-');
+    value.trim().replaceAll(RegExp(r'\s'), '');
 
 String? pairingCode(String value) {
-  final words = normalizePairingCode(value).split('-');
-  if (words.length != 6 ||
-      words.any((word) => word.length < 3 || word.length > 12 ||
-          !RegExp(r'^[a-z]+$').hasMatch(word))) {
+  final normalized = normalizePairingCode(value);
+  if (normalized.length != _pairingCodeLength ||
+      !RegExp(r'^\d{8}$').hasMatch(normalized)) {
     return null;
   }
-  return words.join('-');
+  return normalized;
 }
 
 bool isPairingCode(String value) => pairingCode(value) != null;
@@ -18,14 +19,16 @@ bool isPairingCode(String value) => pairingCode(value) != null;
 String? firstPairingCode(Iterable<String?> values) {
   for (final value in values) {
     if (value == null) continue;
-    final digits = pairingCode(value);
-    if (digits != null) return digits;
+    final code = pairingCode(value);
+    if (code != null) return code;
   }
   return null;
 }
 
 String formatInviteCode(String code) {
-  return normalizePairingCode(code).replaceAll('-', ' ');
+  final normalized = normalizePairingCode(code);
+  if (normalized.length <= 4) return normalized;
+  return '${normalized.substring(0, 4)} ${normalized.substring(4)}';
 }
 
 String formatCountdown(int seconds) {
@@ -42,14 +45,14 @@ class PairingCodeInputFormatter extends TextInputFormatter {
     TextEditingValue oldValue,
     TextEditingValue newValue,
   ) {
-    final words = newValue.text
-        .toLowerCase()
-        .replaceAll(RegExp(r'[^a-z\s-]'), '')
-        .split(RegExp(r'[\s-]+'))
-        .where((word) => word.isNotEmpty)
-        .take(6)
-        .join('-');
-    final formatted = formatInviteCode(words);
+    final rawDigits = newValue.text.replaceAll(RegExp(r'[^0-9]'), '');
+    final digits = rawDigits.substring(
+      0,
+      rawDigits.length > _pairingCodeLength
+          ? _pairingCodeLength
+          : rawDigits.length,
+    );
+    final formatted = formatInviteCode(digits);
     return TextEditingValue(
       text: formatted,
       selection: TextSelection.collapsed(offset: formatted.length),

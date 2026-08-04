@@ -31,6 +31,7 @@ const MAX_SLOTS_PER_CONNECTION: usize = 2;
 const MAX_PAIRINGS_PER_CONNECTION: usize = 2;
 const MAX_FRAME_BYTES: usize = 64 * 1024;
 const MAX_CODE_ATTEMPTS: usize = 5;
+const PAIRING_CODE_DIGITS: usize = 8;
 
 type ConnectionId = Uuid;
 
@@ -297,7 +298,18 @@ async fn process_frame(
             }
             let ttl =
                 Duration::from_secs(u64::from(requested_ttl_seconds).clamp(10, SLOT_TTL.as_secs()));
-            let code = generate_code();
+            // Keep the raw code canonical in memory and in the digest. The
+            // grouped form is presentation-only and is returned to the UI.
+            let code = loop {
+                let candidate = generate_code();
+                if !slots
+                    .values()
+                    .any(|slot| slot.code_hash == hash(&candidate))
+                {
+                    break candidate;
+                }
+            };
+            let display_code = format_pairing_code(&code);
             let handle = random_token();
             let capability = random_token();
             slots.insert(
@@ -318,7 +330,7 @@ async fn process_frame(
                 RendezvousServerFrame::PairingSlotCreated {
                     request_id,
                     slot_handle: handle,
-                    display_code: code,
+                    display_code,
                     slot_capability: capability,
                     expires_at_unix: unix_now() + ttl.as_secs() as i64,
                 },
@@ -337,9 +349,13 @@ async fn process_frame(
                 return;
             }
             c.attempts.push(now);
+            let Some(code) = normalize_pairing_code(&display_code) else {
+                reject(connections, metrics, id, Some(request_id), "invalid_code").await;
+                return;
+            };
             let Some(slot) = slots
                 .values()
-                .find(|slot| slot.code_hash == hash(&display_code) && slot.expires_at > now)
+                .find(|slot| slot.code_hash == hash(&code) && slot.expires_at > now)
             else {
                 reject(connections, metrics, id, Some(request_id), "invalid_code").await;
                 return;
@@ -377,7 +393,14 @@ async fn process_frame(
                 return;
             }
             if bridges.contains_key(&pairing_id) {
-                reject(connections, metrics, id, Some(request_id), "duplicate_pairing").await;
+                reject(
+                    connections,
+                    metrics,
+                    id,
+                    Some(request_id),
+                    "duplicate_pairing",
+                )
+                .await;
                 return;
             }
             if connections[&id].pairings >= MAX_PAIRINGS_PER_CONNECTION
@@ -618,30 +641,47 @@ fn unix_now() -> i64 {
         .as_secs() as i64
 }
 fn generate_code() -> String {
-    const ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyz";
     let mut r = rng();
-    (0..6)
-        .map(|_| {
-            (0..8)
-                .map(|_| ALPHABET[r.random_range(0..ALPHABET.len())] as char)
-                .collect::<String>()
-        })
-        .collect::<Vec<_>>()
-        .join("-")
+    (0..PAIRING_CODE_DIGITS)
+        .map(|_| char::from(b'0' + r.random_range(0..10) as u8))
+        .collect()
+}
+
+fn normalize_pairing_code(value: &str) -> Option<String> {
+    let normalized = value
+        .chars()
+        .filter(|character| !character.is_ascii_whitespace())
+        .collect::<String>();
+    if normalized.len() == PAIRING_CODE_DIGITS
+        && normalized.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        Some(normalized)
+    } else {
+        None
+    }
+}
+
+fn format_pairing_code(code: &str) -> String {
+    format!("{} {}", &code[..4], &code[4..])
 }
 
 #[cfg(test)]
 mod tests {
-    use super::generate_code;
+    use super::{format_pairing_code, generate_code, normalize_pairing_code};
 
     #[test]
-    fn pairing_code_is_six_words_and_manual_entry_safe() {
+    fn pairing_code_is_eight_digits() {
         let code = generate_code();
-        let words: Vec<&str> = code.split('-').collect();
-        assert_eq!(words.len(), 6);
-        assert!(words.iter().all(|word| {
-            (3..=12).contains(&word.len())
-                && word.bytes().all(|byte| byte.is_ascii_lowercase())
-        }));
+        assert_eq!(code.len(), 8);
+        assert!(code.bytes().all(|byte| byte.is_ascii_digit()));
+    }
+
+    #[test]
+    fn pairing_code_accepts_grouped_or_compact_input() {
+        assert_eq!(normalize_pairing_code("1234 5678"), Some("12345678".into()));
+        assert_eq!(normalize_pairing_code("12345678"), Some("12345678".into()));
+        assert_eq!(normalize_pairing_code("1234-5678"), None);
+        assert_eq!(normalize_pairing_code("1234567"), None);
+        assert_eq!(format_pairing_code("12345678"), "1234 5678");
     }
 }

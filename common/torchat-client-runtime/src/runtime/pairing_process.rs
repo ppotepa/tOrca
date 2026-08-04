@@ -6,21 +6,13 @@ use crate::{InviteState, pairing_rules::PairingAction};
 /// The runtime owns persistence and transport orchestration; this module owns
 /// only input normalization so the workflow can be tested independently.
 pub(crate) fn normalize_pairing_code(code: &str) -> RuntimeResult<String> {
-    let words = code.trim().split('-').map(str::trim).collect::<Vec<_>>();
-    if words.len() == 6
-        && words.iter().all(|word| {
-            (3..=12).contains(&word.len()) && word.chars().all(|c| c.is_ascii_lowercase())
-        })
-    {
-        return Ok(words.join("-"));
-    }
     let normalized = code
         .chars()
-        .filter(|value| value.is_ascii_digit())
+        .filter(|value| !value.is_ascii_whitespace())
         .collect::<String>();
-    if normalized.len() != 8 {
+    if normalized.len() != 8 || !normalized.bytes().all(|value| value.is_ascii_digit()) {
         return Err(RuntimeError::InvalidParams(
-            "pairing code must contain six words or exactly eight legacy digits".to_owned(),
+            "pairing code must contain exactly eight digits".to_owned(),
         ));
     }
     Ok(normalized)
@@ -470,17 +462,17 @@ mod tests {
     use crate::{ContactRecord, InviteState, PairingItem};
 
     #[test]
-    fn normalizes_six_word_code() {
-        assert_eq!(
-            normalize_pairing_code("amber-birch-cobalt-dawn-ember-fjord").unwrap(),
-            "amber-birch-cobalt-dawn-ember-fjord"
-        );
+    fn normalizes_grouped_eight_digit_code() {
+        assert_eq!(normalize_pairing_code("1234 5678").unwrap(), "12345678");
+        assert_eq!(normalize_pairing_code("12345678").unwrap(), "12345678");
     }
 
     #[test]
-    fn rejects_codes_with_wrong_word_count() {
-        assert!(normalize_pairing_code("amber-birch-cobalt").is_err());
-        assert!(normalize_pairing_code("amber-birch-cobalt-dawn-ember-fjord-gale").is_err());
+    fn rejects_codes_with_wrong_shape() {
+        assert!(normalize_pairing_code("1234567").is_err());
+        assert!(normalize_pairing_code("123456789").is_err());
+        assert!(normalize_pairing_code("1234-5678").is_err());
+        assert!(normalize_pairing_code("1234abcd").is_err());
     }
 
     #[test]
