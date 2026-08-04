@@ -64,14 +64,19 @@ function Invoke-TorChatAndroidBuildPlan {
     param(
         [Parameter(Mandatory = $true)]$Context,
         [Parameter(Mandatory = $true)]$EnvironmentState,
-        [Parameter(Mandatory = $true)][string]$BuildPolicy
+        [Parameter(Mandatory = $true)][string]$BuildPolicy,
+        [ValidateSet('prompt','emulator','android-desktop')][string]$ClientMode = 'android-desktop'
     )
     $skip = $BuildPolicy -eq 'skip'
     Invoke-TorChatStage -Context $Context -Id 'build.android.engine.arm64' -Name 'Build Android Rust engine (arm64)' -Skip:$skip -Action {
         Build-TorChatAndroidEngine -Context $Context -Policy $BuildPolicy -RustTarget 'aarch64-linux-android'
     }
-    Invoke-TorChatStage -Context $Context -Id 'build.android.engine.x86_64' -Name 'Build Android Rust engine (x86_64 emulator)' -Skip:$skip -Action {
-        Build-TorChatAndroidEngine -Context $Context -Policy $BuildPolicy -RustTarget 'x86_64-linux-android'
+    if ($ClientMode -eq 'emulator') {
+        Invoke-TorChatStage -Context $Context -Id 'build.android.engine.x86_64' -Name 'Build Android Rust engine (x86_64 emulator)' -Skip:$skip -Action {
+            Build-TorChatAndroidEngine -Context $Context -Policy $BuildPolicy -RustTarget 'x86_64-linux-android'
+        }
+    } else {
+        Write-TorChatInfo 'Skipping Android x86_64 engine; deployment target is physical/ARM64 Android.'
     }
     Invoke-TorChatStage -Context $Context -Id 'build.android.client' -Name 'Build Android APK' -Skip:$skip -Action {
         Build-TorChatAndroidClient -Context $Context -EnvironmentState $EnvironmentState -Policy $BuildPolicy
@@ -184,7 +189,7 @@ function Invoke-TorChatBuildCommand {
         Invoke-TorChatWindowsBuildPlan -Context $Context -EnvironmentState $EnvironmentState -BuildPolicy $BuildPolicy
     }
     if ($Target -in @('android','clients','all')) {
-        Invoke-TorChatAndroidBuildPlan -Context $Context -EnvironmentState $EnvironmentState -BuildPolicy $BuildPolicy
+        Invoke-TorChatAndroidBuildPlan -Context $Context -EnvironmentState $EnvironmentState -BuildPolicy $BuildPolicy -ClientMode 'android-desktop'
     }
 }
 
@@ -302,7 +307,7 @@ function Invoke-TorChatDeployCommand {
         Invoke-TorChatWindowsBuildPlan -Context $Context -EnvironmentState $EnvironmentState -BuildPolicy $BuildPolicy
     }
     if ($effectiveTarget -in @('android','all')) {
-        Invoke-TorChatAndroidBuildPlan -Context $Context -EnvironmentState $EnvironmentState -BuildPolicy $BuildPolicy
+        Invoke-TorChatAndroidBuildPlan -Context $Context -EnvironmentState $EnvironmentState -BuildPolicy $BuildPolicy -ClientMode $ClientMode
     }
 
     if ($Context.Environment -eq 'local' -and $StackPolicy -eq 'ensure') {
