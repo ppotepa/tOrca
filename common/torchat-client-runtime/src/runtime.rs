@@ -293,7 +293,7 @@ where
             .into_iter()
             .find(|item| item.pairing_id == pairing_id)
             .ok_or_else(|| RuntimeError::NotFound("pairing request does not exist".to_owned()))?;
-        if item.state == InviteState::Accepted {
+        if matches!(item.state, InviteState::Accepted | InviteState::Completed) {
             return Ok(());
         }
         item.state = transition_invite_state(&item.state, PairingAction::Accept)?;
