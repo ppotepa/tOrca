@@ -53,7 +53,7 @@ class NicknameOnboardingScreen extends ConsumerWidget {
                     Text(
                       canSave
                           ? l10n.nicknameReady
-                          : 'Przywracanie gotowości komunikacji…',
+                          : l10n.statusTransportReconnecting,
                       style: Theme.of(context).textTheme.titleLarge,
                       textAlign: TextAlign.center,
                     ),
@@ -61,7 +61,7 @@ class NicknameOnboardingScreen extends ConsumerWidget {
                     Text(
                       canSave
                           ? l10n.nicknameDescription
-                          : 'Wpisany nick zostanie zachowany. Zapis będzie dostępny po przywróceniu relaya i lokalnego onion.',
+                          : l10n.problemSecureConnectionPending,
                       textAlign: TextAlign.center,
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
@@ -77,7 +77,7 @@ class NicknameOnboardingScreen extends ConsumerWidget {
                       },
                       decoration: InputDecoration(
                         labelText: l10n.nicknameLabel,
-                        border: OutlineInputBorder(),
+                        border: const OutlineInputBorder(),
                       ),
                     ),
                     if (error.isNotEmpty)
