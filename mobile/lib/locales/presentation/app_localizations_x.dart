@@ -27,6 +27,39 @@ extension AppLocalizationsUiCopy on AppLocalizations {
   String get uiImageCacheClearFailed => _isPolish
       ? 'Nie udało się wyczyścić pamięci obrazów.'
       : 'The image cache could not be cleared.';
+  String get uiImageSavedToGallery => _isPolish
+      ? 'Obraz zapisano w galerii.'
+      : 'The image was saved to the gallery.';
+  String get uiImageSaveFailed => _isPolish
+      ? 'Nie udało się zapisać obrazu w galerii.'
+      : 'The image could not be saved to the gallery.';
+  String get uiSentImage => _isPolish ? 'Wysłany obraz' : 'Sent image';
+  String uiImageFrom(String name) =>
+      _isPolish ? 'Obraz od $name' : 'Image from $name';
+  String get uiDownloadEncryptedImage => _isPolish
+      ? 'Pobierz do zaszyfrowanego magazynu'
+      : 'Download to encrypted storage';
+  String get uiOpenImagePreview =>
+      _isPolish ? 'Otwórz podgląd obrazu' : 'Open image preview';
+  String get uiYou => _isPolish ? 'Ty' : 'You';
+  String get uiCorruptedImage =>
+      _isPolish ? 'obraz uszkodzony' : 'corrupted image';
+  String get uiImageReadFailed => _isPolish
+      ? 'Nie udało się odczytać obrazu.'
+      : 'The image could not be read.';
+  String uiRelationshipEndedByYou(String name) => _isPolish
+      ? 'Zakończono relację z kontaktem $name.'
+      : 'The relationship with $name was ended.';
+  String uiRelationshipEndedByContact(String name) => _isPolish
+      ? '$name zakończył relację.'
+      : '$name ended the relationship.';
+  String get uiMessageQueued => _isPolish ? 'w kolejce' : 'queued';
+  String get uiMessageSending => _isPolish ? 'wysyłanie' : 'sending';
+  String get uiMessageSent => _isPolish ? 'wysłano' : 'sent';
+  String get uiMessageDelivered => _isPolish ? 'dostarczono' : 'delivered';
+  String get uiMessageRead =>
+      _isPolish ? 'dostarczono · odczytano' : 'delivered · read';
+  String get uiMessageFailed => _isPolish ? 'błąd' : 'failed';
   String get uiMainWorkspaceSemantics =>
       _isPolish ? 'Główna przestrzeń TorChat' : 'TorChat main workspace';
   String get uiChats => _isPolish ? 'Czaty' : 'Chats';
