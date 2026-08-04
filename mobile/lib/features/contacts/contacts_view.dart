@@ -16,7 +16,6 @@ import '../../shared/async/busy_surface.dart';
 import '../../shared/formatters/invite_code.dart';
 import '../../shared/widgets/contact_list_section.dart';
 import '../../shared/widgets/feature_header.dart';
-import '../../shared/widgets/identity_avatar.dart';
 import '../../shared/widgets/status_banner.dart';
 import '../../shared/widgets/themed_switch_list_tile.dart';
 import '../../locales/presentation/app_localizations_x.dart';
@@ -54,8 +53,7 @@ class ContactsView extends ConsumerWidget {
     bool,
     bool,
     ContactTransportPolicy,
-  )
-  onUpdateContactSettings;
+  ) onUpdateContactSettings;
   final String fingerprint;
   final String ownInvite;
   final bool canPair;
@@ -322,10 +320,17 @@ class ContactsView extends ConsumerWidget {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'Stan: ${capability.status.name.toUpperCase()}',
+                                '${context.l10n.uiContactCapabilityStatus}: '
+                                '${context.l10n.uiCapabilityStatus(capability.status)}',
                               ),
-                              Text('ID: ${capability.capabilityId}'),
-                              Text('Sekwencja: ${capability.sequence}'),
+                              Text(
+                                '${context.l10n.uiContactCapabilityId}: '
+                                '${capability.capabilityId}',
+                              ),
+                              Text(
+                                '${context.l10n.uiContactCapabilitySequence}: '
+                                '${capability.sequence}',
+                              ),
                               const SizedBox(height: 6),
                               Wrap(
                                 spacing: 8,
@@ -401,30 +406,30 @@ class ContactsView extends ConsumerWidget {
                         const SizedBox(height: 12),
                         const Divider(),
                         Text(
-                          'Diagnostyka transportu DEV',
+                          context.l10n.uiContactTransportDiagnostics,
                           style: Theme.of(context).textTheme.titleSmall,
                         ),
                         const SizedBox(height: 6),
                         _DiagnosticLine(
-                          label: 'Polityka',
+                          label: context.l10n.uiContactPolicy,
                           value: localizeTransportPolicy(
                             context.l10n,
                             contact.transportPolicy,
                           ),
                         ),
                         _DiagnosticLine(
-                          label: 'Efektywna trasa',
+                          label: context.l10n.uiContactEffectiveRoute,
                           value: localizeContactRoute(context.l10n, contact),
                         ),
                         _DiagnosticLine(
-                          label: 'Stan endpointu',
+                          label: context.l10n.uiContactEndpointState,
                           value: localizePeerEndpointStatus(
                             context.l10n,
                             contact.peerEndpointStatus,
                           ),
                         ),
                         _DiagnosticLine(
-                          label: 'Stan sesji P2P',
+                          label: context.l10n.uiContactP2pSessionState,
                           value: localizePeerConnectionStatus(
                             context.l10n,
                             contact.peerConnectionStatus,
@@ -454,7 +459,7 @@ class ContactsView extends ConsumerWidget {
                             }
                             if (snapshot.hasError) {
                               return Text(
-                                'Dead-letter niedostępny: ${snapshot.error}',
+                                context.l10n.uiDeadLetterUnavailable,
                               );
                             }
                             final records = snapshot.data ?? const [];
@@ -473,8 +478,9 @@ class ContactsView extends ConsumerWidget {
                                       '${record['kind']}: ${record['id']}',
                                     ),
                                     subtitle: Text(
-                                      record['lastError']?.toString() ??
-                                          context.l10n.contactsNoError,
+                                      record['lastError'] == null
+                                          ? context.l10n.contactsNoError
+                                          : context.l10n.uiOperationFailed,
                                     ),
                                     trailing: IconButton(
                                       tooltip: context.l10n.commonRetry,
@@ -539,18 +545,18 @@ class ContactsView extends ConsumerWidget {
                       ),
                       const SizedBox(height: 16),
                       Text(
-                        'Installation ID',
+                        context.l10n.uiInstallationId,
                         style: Theme.of(context).textTheme.labelLarge,
                       ),
                       SelectableText(contact.id),
                       const SizedBox(height: 12),
                       Text(
-                        'Fingerprint',
+                        context.l10n.uiFingerprint,
                         style: Theme.of(context).textTheme.labelLarge,
                       ),
                       SelectableText(
                         contact.fingerprint.isEmpty
-                            ? 'Fingerprint niedostępny'
+                            ? context.l10n.uiFingerprintUnavailable
                             : contact.fingerprint,
                         style: const TextStyle(fontFamily: 'monospace'),
                       ),
@@ -694,7 +700,7 @@ class ContactsView extends ConsumerWidget {
       ref
           .read(uiNotificationCenterProvider.notifier)
           .showSuccess(
-            'Relacja z ${contact.displayName} została zakończona.',
+            context.l10n.uiRelationshipRemoved(contact.displayName),
             deduplicationKey: 'relationship-removed:${contact.id}',
           );
     }
@@ -713,7 +719,7 @@ class _PendingPairingSection extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Oczekujące parowania',
+          context.l10n.uiPendingPairings,
           style: Theme.of(context).textTheme.labelLarge,
         ),
         const SizedBox(height: 6),
