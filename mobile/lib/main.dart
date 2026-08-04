@@ -29,6 +29,8 @@ import 'features/chats/composer_draft.dart';
 import 'locales/application/locale_controller.dart';
 import 'locales/application/locale_setup_gate.dart';
 import 'locales/generated/app_localizations.dart';
+import 'locales/presentation/app_localizations_x.dart';
+import 'locales/presentation/problem_localizer.dart';
 import 'shared/widgets/toast_host.dart';
 
 Future<void> main() async {
@@ -339,7 +341,12 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
       return;
     }
     if (code == null) {
-      final error = ref.read(appControllerProvider).error;
+      final currentState = ref.read(appControllerProvider);
+      final error = currentState.error.isNotEmpty
+          ? currentState.error
+          : currentState.problem == null
+          ? ''
+          : localizeProblem(context.l10n, currentState.problem!);
       try {
         await showDialog<void>(
           context: context,
