@@ -69,14 +69,8 @@ class AppState {
   List<ContactRecord> get contacts => applicationSnapshot?.contacts ?? const [];
   List<ConversationSummary> get conversations =>
       applicationSnapshot?.conversations ?? const [];
-  // Pairing projections are authoritative, including an explicit empty list.
-  // Falling back to a process singleton resurrected expired/acknowledged
-  // invitations and made the modal depend on a restart.
   List<PairingItem> get inbox => pairingInboxItems;
   List<PairingItem> get outbox => pairingOutboxItems;
-  // Message views still use the conversation store until the projection
-  // coordinator owns message windows completely. Keep this compatibility
-  // accessor, but do not use the store as a fallback for pairing state.
   List<ChatMessage> get messages =>
       ApplicationStateStore.shared.messages(selectedConversationId ?? '');
   final InviteCode? ownInvite;
@@ -200,9 +194,6 @@ abstract class AppController extends Notifier<AppState> {
       bypassCooldown: true,
     );
     final applicationSnapshot = snapshot.application;
-    // Use the pairing snapshot captured by this refresh, not the mutable
-    // repository cache, which may already have been invalidated by a newer
-    // invite event.
     final pairing = snapshot.pairing;
     peerEndpointAvailable = snapshot.local.peerEndpointAvailable;
     final peerServerStatus = _peerServerStatusForRefresh(
@@ -297,9 +288,6 @@ abstract class AppController extends Notifier<AppState> {
         destination: MainDestination.chats,
         error: '',
       );
-      // Read receipts are durable MLS effects. They are queued by the engine
-      // after focus is accepted and therefore survive a transient transport
-      // failure or engine reattach.
     } catch (error) {
       state = state.copyWith(
         error: _message(error),
@@ -394,8 +382,7 @@ abstract class AppController extends Notifier<AppState> {
       if (!(preferences.getBool('torchat.privacy.typing') ?? true)) return;
       await _repository.setTyping(conversationId, typing);
     } catch (_) {
-      // Typing is a best-effort control signal. It must never block sending
-      // durable messages or surface a transport error in the chat composer.
+      // Best-effort transient signal.
     }
   }
 
@@ -406,8 +393,8 @@ abstract class AppController extends Notifier<AppState> {
     );
     if (result?.status == ReadReceiptQueueStatus.error) {
       state = state.copyWith(
-        error:
-            'Nie udało się zakolejkować potwierdzenia odczytu: ${result!.error}',
+        error: 'Unable to queue read receipt: ${result!.error}',
+        problem: const UserProblem(code: UserProblemCode.operationFailed),
       );
     }
   }
@@ -419,9 +406,6 @@ abstract class AppController extends Notifier<AppState> {
     }
     await _repository.updateAppVisibility(foreground);
     if (foreground && conversationId != null) {
-      // The chat widget can remain mounted while Android/Windows backgrounds
-      // the application. Reassert local attention immediately on resume
-      // instead of waiting for the next focus heartbeat.
       await _repository.setConversationFocus(conversationId, true);
     }
     try {
@@ -429,8 +413,7 @@ abstract class AppController extends Notifier<AppState> {
       final enabled = preferences.getBool('torchat.privacy.presence') ?? true;
       await _repository.setPresence(foreground && enabled);
     } catch (_) {
-      // Presence is best-effort and will be retried on the next lifecycle
-      // transition or peer probe.
+      // Best-effort presence update.
     }
   }
 
@@ -473,8 +456,6 @@ abstract class AppController extends Notifier<AppState> {
       if (hintedInstallationId.isNotEmpty) {
         _torkaInstallationIdHint = hintedInstallationId;
       }
-      // Publish the concrete outbox returned by the refresh to AppState;
-      // refreshing the repository alone leaves the UI with the old list.
       await refreshData(forcePairing: true, allowAutoTorka: false);
       state = state.copyWith(action: '');
     } catch (error) {
@@ -487,9 +468,6 @@ abstract class AppController extends Notifier<AppState> {
   }
 
   Future<InviteCode?> refreshInviteCode({bool quietWhenPending = false}) async {
-    // Rendezvous requires a live Tor SOCKS endpoint and the local onion
-    // listener.  Do not start a worker before those platform facts exist;
-    // that used to surface as a misleading DNS/SOCKS failure.
     if (!state.connectionReadiness.canPerform(ConnectionOperation.pair)) {
       if (!quietWhenPending) {
         state = state.copyWith(
@@ -607,94 +585,38 @@ abstract class AppController extends Notifier<AppState> {
   String _message(Object error) {
     if (error is PlatformException) {
       final message = error.message?.trim();
-      if (message != null && message.isNotEmpty) {
-        return _localizedRuntimeError(message);
-      }
-      return switch (error.code) {
-        'RUNTIME' =>
-          'Operacja nie jest jeszcze dostępna. Poczekaj na połączenie z relayem.',
-        _ => 'Operacja nie powiodła się (${error.code}).',
-      };
+      if (message != null && message.isNotEmpty) return message;
+      return 'Platform operation failed (${error.code}).';
     }
-    return _localizedRuntimeError(
-      error
-          .toString()
-          .replaceFirst('Exception: ', '')
-          .replaceFirst('Bad state: ', ''),
-    );
+    return error
+        .toString()
+        .replaceFirst('Exception: ', '')
+        .replaceFirst('Bad state: ', '');
   }
 
   UserProblem problemForError(Object error) {
     final normalized = error.toString().toLowerCase();
-    final code = normalized.contains('pairing code expired')
+    final code = normalized.contains('pairing code expired') ||
+            normalized.contains('pairing code expired or invalid')
         ? UserProblemCode.pairingCodeInvalid
         : normalized.contains('stale welcome') ||
-              normalized.contains('old invitation')
+              normalized.contains('old invitation') ||
+              normalized.contains('pairing request not found') ||
+              normalized.contains('invalid welcome signature') ||
+              normalized.contains('signature is invalid') ||
+              (normalized.contains('identity') &&
+                  normalized.contains('does not match'))
         ? UserProblemCode.pairingWelcomeStale
         : normalized.contains('relay transport error') ||
               normalized.contains('gateway')
         ? UserProblemCode.pairingGatewayUnavailable
-        : normalized.contains('connection') || normalized.contains('tor')
+        : normalized.contains('connection') ||
+              normalized.contains('tor') ||
+              normalized.contains('acknowledgement') ||
+              normalized.contains('peer endpoint')
         ? UserProblemCode.connectionUnavailable
         : UserProblemCode.operationFailed;
     return UserProblem(code: code, arguments: {'raw': error.toString()});
-  }
-
-  String _localizedRuntimeError(String message) {
-    final normalized = message.toLowerCase();
-    if (normalized.contains('active pairing request already exists')) {
-      return 'Inne zaproszenie nadal oczekuje. Anuluj je albo poczekaj na wygaśnięcie.';
-    }
-    if (normalized.contains('pairing code expired or invalid')) {
-      return 'Kod parowania jest nieprawidłowy albo wygasł. Poproś kontakt o nowy kod.';
-    }
-    if (normalized.contains('cannot pair with yourself')) {
-      return 'Nie możesz dodać własnego kodu parowania.';
-    }
-    if (normalized.contains(
-      'a pending invitation to this user already exists',
-    )) {
-      return 'Zaproszenie do tego kontaktu już oczekuje.';
-    }
-    if (normalized.contains('too many pairing attempts')) {
-      return 'Zbyt wiele prób parowania. Poczekaj chwilę i spróbuj ponownie.';
-    }
-    if (normalized.contains('pairing request not found')) {
-      return 'To zaproszenie wygasło albo zostało już obsłużone.';
-    }
-    if (normalized.contains('invalid welcome signature') ||
-        normalized.contains('identity') &&
-            normalized.contains('does not match') ||
-        normalized.contains('signature is invalid')) {
-      return 'Nie udało się potwierdzić tożsamości drugiej strony. Zaproszenie zostało odrzucone.';
-    }
-    if (normalized.contains('peer endpoint') &&
-        normalized.contains('missing')) {
-      return 'Kontakt nie przekazał jeszcze zweryfikowanego endpointu P2P.';
-    }
-    if (normalized.contains('peer endpoint') &&
-        (normalized.contains('invalid') ||
-            normalized.contains('expired') ||
-            normalized.contains('stale'))) {
-      return 'Endpoint P2P kontaktu jest nieprawidłowy albo wygasł.';
-    }
-    if (normalized.contains('contact must be verified') ||
-        normalized.contains('contact is not verified')) {
-      return 'Najpierw zweryfikuj fingerprint kontaktu w szczegółach kontaktu.';
-    }
-    if (normalized.contains('contact') &&
-        (normalized.contains('already exists') ||
-            normalized.contains('already a contact'))) {
-      return 'Ten kontakt już istnieje.';
-    }
-    if (normalized.contains('acknowledgement') &&
-        (normalized.contains('missing') || normalized.contains('timed out'))) {
-      return 'Brak potwierdzenia drugiej strony. Spróbuj ponownie po odzyskaniu połączenia.';
-    }
-    if (normalized.contains('relay transport error')) {
-      return 'Relay onion jest chwilowo niedostępny. Spróbuj ponownie za chwilę.';
-    }
-    return message;
   }
 
   bool get _devTorkaEnabled =>
@@ -702,9 +624,7 @@ abstract class AppController extends Notifier<AppState> {
 
   String get _effectiveDevTorkaPairingCode {
     final override = debugTorkaPairingCodeOverride?.trim() ?? '';
-    if (override.isNotEmpty) {
-      return override;
-    }
+    if (override.isNotEmpty) return override;
     return '';
   }
 
@@ -722,16 +642,11 @@ abstract class AppController extends Notifier<AppState> {
 
   bool _isTorkaPairingItem(PairingItem item) {
     final peer = item.peer;
-    if (peer != null) {
-      return _isTorkaContact(peer);
-    }
-    return false;
+    return peer != null && _isTorkaContact(peer);
   }
 
   Future<void> _cancelBlockingTorkaOutboxIfNeeded(String code) async {
-    if (!_devTorkaEnabled) {
-      return;
-    }
+    if (!_devTorkaEnabled) return;
     final outstanding = state.outbox
         .where(
           (item) =>
@@ -776,16 +691,13 @@ abstract class AppController extends Notifier<AppState> {
       if (hintedInstallationId.isNotEmpty) {
         _torkaInstallationIdHint = hintedInstallationId;
       }
-      // Refresh the concrete outbox after submitting. A plain application
-      // snapshot contains only pending counts and would leave the watchdog
-      // believing that no Torka request exists, causing repeated submits.
       await refreshData(forcePairing: true, allowAutoTorka: false);
       _ensureTorkaWatchdog(immediate: true);
     } catch (error) {
       final message = _message(error).toLowerCase();
-      if (!message.contains('zaproszenie do tego kontaktu już oczekuje') &&
-          !message.contains('inne zaproszenie nadal oczekuje') &&
-          !message.contains('kod parowania jest nieprawidłowy')) {
+      if (!message.contains('pending invitation') &&
+          !message.contains('active pairing request already exists') &&
+          !message.contains('pairing code expired or invalid')) {
         debugPrint('Torka pairing deferred: ${_message(error)}');
       }
     } finally {
@@ -794,18 +706,9 @@ abstract class AppController extends Notifier<AppState> {
   }
 
   Duration get _torkaWatchdogInterval =>
-      // Tor publishes the relay endpoint before a freshly created onion
-      // descriptor is necessarily reachable.  The shared engine owns the
-      // connection retry cadence, so the UI only needs to observe it without
-      // creating a burst of pairing refreshes.  Five seconds keeps the
-      // contact list responsive while allowing the normal five-minute startup
-      // window to complete.
       debugTorkaWatchdogIntervalOverride ?? const Duration(seconds: 5);
 
   int get _torkaWatchdogMaxAttempts =>
-      // 60 x 5 seconds = the same bounded five-minute window used by the
-      // sequential startup gate.  The old 18 x 2 seconds expired after only
-      // 36 seconds, often before Torka had recovered its relay connection.
       debugTorkaWatchdogMaxAttemptsOverride ?? 60;
 
   void _ensureTorkaWatchdog({bool immediate = false}) {
@@ -813,9 +716,7 @@ abstract class AppController extends Notifier<AppState> {
     _torkaWatchdog ??= Timer.periodic(_torkaWatchdogInterval, (_) {
       unawaited(_runTorkaWatchdogTick());
     });
-    if (immediate) {
-      unawaited(_runTorkaWatchdogTick());
-    }
+    if (immediate) unawaited(_runTorkaWatchdogTick());
   }
 
   void _stopTorkaWatchdog() {
@@ -836,9 +737,7 @@ abstract class AppController extends Notifier<AppState> {
       _stopTorkaWatchdog();
       return;
     }
-    if (_torkaPairingInFlight || _torkaConversationInFlight) {
-      return;
-    }
+    if (_torkaPairingInFlight || _torkaConversationInFlight) return;
 
     final torka = state.contacts.firstOrNullWhere(_isTorkaContact);
     if (torka != null) {
@@ -846,9 +745,7 @@ abstract class AppController extends Notifier<AppState> {
       final exists = state.conversations.any(
         (conversation) => conversation.contactId == torka.id,
       );
-      if (exists) {
-        _stopTorkaWatchdog();
-      }
+      if (exists) _stopTorkaWatchdog();
       return;
     }
 
@@ -861,7 +758,7 @@ abstract class AppController extends Notifier<AppState> {
     if (_torkaWatchdogAttempts > _torkaWatchdogMaxAttempts) {
       _stopTorkaWatchdog();
       debugPrint(
-        'Torka pairing timeout: kontakt nie potwierdził się jeszcze w runtime.',
+        'Torka pairing timeout: contact is not confirmed in runtime yet.',
       );
       return;
     }
@@ -882,13 +779,9 @@ abstract class AppController extends Notifier<AppState> {
     _torkaConversationInFlight = true;
     try {
       await _repository.startConversation(contact.id);
-      // The conversation mutation is committed by the engine, but the
-      // controller state is a separate projection. Refresh that projection
-      // explicitly so the new chat appears without leaving/re-entering the
-      // screen. Suppress the watchdog recursion for this refresh.
       await refreshData(allowAutoTorka: false);
     } catch (_) {
-      // Torka conversation bootstrap is best-effort in local dev only.
+      // Local development helper only.
     } finally {
       _torkaConversationInFlight = false;
     }
@@ -899,9 +792,7 @@ abstract class AppController extends Notifier<AppState> {
     StartupStepKind kind,
     StartupStepState stepState,
     String detail,
-  ) {
-    return transitionStartupStep(current, kind, stepState, detail);
-  }
+  ) => transitionStartupStep(current, kind, stepState, detail);
 
   List<StartupStep> _startupStepsForEndpoint(
     List<StartupStep> current,
@@ -922,10 +813,10 @@ abstract class AppController extends Notifier<AppState> {
             ? StartupStepState.running
             : StartupStepState.pending,
         failed
-            ? 'Lokalny listener P2P nie jest gotowy'
+            ? 'Local P2P listener is not ready'
             : torReady
-            ? 'Oczekiwanie na lokalny endpoint P2P'
-            : 'Tor lokalny jeszcze nie jest gotowy',
+            ? 'Waiting for local P2P endpoint'
+            : 'Local Tor is not ready yet',
       );
       waiting = _startupSteps(
         waiting,
@@ -936,39 +827,37 @@ abstract class AppController extends Notifier<AppState> {
             ? StartupStepState.running
             : StartupStepState.pending,
         failed
-            ? 'Usługa onion P2P nie jest dostępna'
+            ? 'P2P onion service is unavailable'
             : torReady
-            ? 'Oczekiwanie na adres onion P2P'
-            : 'Tor lokalny jeszcze nie jest gotowy',
+            ? 'Waiting for P2P onion address'
+            : 'Local Tor is not ready yet',
       );
       return _startupSteps(
         waiting,
         StartupStepKind.communication,
         failed ? StartupStepState.error : StartupStepState.pending,
         failed
-            ? 'Komunikacja nie jest gotowa bez endpointu P2P'
-            : 'Oczekiwanie na endpoint P2P',
+            ? 'Communication is unavailable without a P2P endpoint'
+            : 'Waiting for P2P endpoint',
       );
     }
     var steps = _startupSteps(
       current,
       StartupStepKind.peerListener,
       StartupStepState.ready,
-      'Lokalny listener działa',
+      'Local listener is ready',
     );
     steps = _startupSteps(
       steps,
       StartupStepKind.onionService,
       StartupStepState.ready,
-      'Adres onion jest dostępny',
+      'Onion address is available',
     );
     steps = _startupSteps(
       steps,
       StartupStepKind.communication,
       StartupStepState.ready,
-      available
-          ? 'Komunikacja jest gotowa'
-          : 'Endpoint P2P gotowy · oczekiwanie na relay',
+      'Communication is ready',
     );
     return steps;
   }
@@ -980,10 +869,6 @@ abstract class AppController extends Notifier<AppState> {
     PeerServerStatus? peerServerStatus,
   }) {
     final startupReady = state.connectionReadiness.localCoreReady;
-
-    // The application is usable only after both its local onion service and
-    // the control-plane relay are ready.  This keeps a half-started client on
-    // the explicit diagnostic timeline instead of opening an unusable shell.
     if (!startupReady) return ControllerScreen.boot;
     if (profile.nickname.trim().isNotEmpty) return ControllerScreen.main;
     return ControllerScreen.nickname;
@@ -994,18 +879,9 @@ abstract class AppController extends Notifier<AppState> {
     bool peerEndpointAvailable, {
     required PeerServerStatus current,
   }) {
-    // Local onion availability is independent of relay connectivity.  A
-    // cold relay circuit must not turn an already published local P2P service
-    // back into "starting".
-    if (peerEndpointAvailable) {
-      return PeerServerStatus.ready;
-    }
-    if (transport.failed) {
-      return PeerServerStatus.error;
-    }
-    if (!transport.usable) {
-      return PeerServerStatus.starting;
-    }
+    if (peerEndpointAvailable) return PeerServerStatus.ready;
+    if (transport.failed) return PeerServerStatus.error;
+    if (!transport.usable) return PeerServerStatus.starting;
     if (current == PeerServerStatus.offline ||
         current == PeerServerStatus.error) {
       return current;
