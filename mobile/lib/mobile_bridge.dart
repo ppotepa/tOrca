@@ -70,6 +70,13 @@ class MobileBridge extends Object
     RuntimeArguments params = RuntimeArguments.empty,
   ]) async {
     final arguments = params.toMap();
+    // Refreshing a pairing code is a new rendezvous allocation, not a
+    // retryable mutation. Reusing the persisted idempotency key returns the
+    // previous code forever because the command has no changing payload.
+    final nonIdempotent = method == EngineContract.refreshPairingCode;
+    if (nonIdempotent) {
+      return _channel.invokeMethod(method, arguments);
+    }
     final journal = _operationJournal ??= SharedPreferences.getInstance().then(
       OperationJournal.new,
     );

@@ -4,7 +4,7 @@ import 'package:torchat_mobile/core/models/domain.dart';
 import 'package:torchat_mobile/shared/widgets/tor_status_bar.dart';
 
 void main() {
-  testWidgets('lamp exposes ready state and opens diagnostics', (tester) async {
+  testWidgets('lamp exposes separate Tor and P2P state', (tester) async {
     var opened = false;
     await tester.pumpWidget(
       MaterialApp(
@@ -18,20 +18,20 @@ void main() {
       ),
     );
 
-    expect(find.bySemanticsLabel('Gotowe: Tor i P2P są dostępne'), findsOneWidget);
+    expect(find.bySemanticsLabel('Tor: ready · P2P: ready'), findsOneWidget);
     await tester.tap(find.byType(ConnectionStatusLamp));
     expect(opened, isTrue);
   });
 
-  testWidgets('lamp exposes error state without animation dependency', (tester) async {
+  testWidgets('lamp exposes error state without animation dependency', (
+    tester,
+  ) async {
     await tester.pumpWidget(
       const MaterialApp(
-        home: Scaffold(
-          body: ConnectionStatusLamp(phase: TransportPhase.error),
-        ),
+        home: Scaffold(body: ConnectionStatusLamp(phase: TransportPhase.error)),
       ),
     );
 
-    expect(find.bySemanticsLabel('Błąd komunikacji'), findsOneWidget);
+    expect(find.bySemanticsLabel('Tor: error · P2P: error'), findsOneWidget);
   });
 }

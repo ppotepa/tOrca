@@ -45,6 +45,7 @@ pub struct SharedRelayActor {
     rendezvous_private_keys: HashMap<String, [u8; 32]>,
     pairing_private_keys: HashMap<Uuid, [u8; 32]>,
     pairing_peer_keys: HashMap<Uuid, [u8; 32]>,
+    active_slot: Option<(String, String)>,
 }
 
 impl SharedRelayActor {
@@ -73,6 +74,7 @@ impl SharedRelayActor {
             rendezvous_private_keys: HashMap::new(),
             pairing_private_keys: HashMap::new(),
             pairing_peer_keys: HashMap::new(),
+            active_slot: None,
         }
     }
 
@@ -309,9 +311,13 @@ impl EngineRelay for SharedRelayActor {
                 let token = self.owner_tokens.get(&message_id).cloned().ok_or_else(|| {
                     RuntimeError::Unavailable("pairing owner token missing".into())
                 })?;
-                let private_key = self.pairing_private_keys.get(&message_id).copied().ok_or_else(|| {
-                    RuntimeError::Unavailable("rendezvous private key missing".into())
-                })?;
+                let private_key = self
+                    .pairing_private_keys
+                    .get(&message_id)
+                    .copied()
+                    .ok_or_else(|| {
+                        RuntimeError::Unavailable("rendezvous private key missing".into())
+                    })?;
                 let peer_key = self
                     .pairing_peer_keys
                     .get(&message_id)
@@ -348,10 +354,7 @@ impl EngineRelay for SharedRelayActor {
                 self.owner_tokens.insert(pairing_id, owner_side_token);
                 self.pairing_peer_keys
                     .insert(pairing_id, joiner_rendezvous_public_key);
-                let private_key = self
-                    .rendezvous_private_keys
-                    .get(&slot_handle)
-                    .copied()?;
+                let private_key = self.rendezvous_private_keys.get(&slot_handle).copied()?;
                 self.pairing_private_keys.insert(pairing_id, private_key);
                 let offer = rendezvous_crypto::open(
                     private_key,
@@ -386,6 +389,12 @@ impl EngineRelay for SharedRelayActor {
 
     fn refresh_pairing_code(&mut self) -> RuntimeResult<InviteCode> {
         self.start_rendezvous()?;
+        if let Some((slot_handle, slot_capability)) = self.active_slot.take() {
+            self.send_frame(RendezvousClientFrame::CancelPairingSlot {
+                slot_handle,
+                slot_capability,
+            })?;
+        }
         let request_id = Uuid::new_v4();
         let mut rendezvous_key = [0_u8; 32];
         getrandom::fill(&mut rendezvous_key)
@@ -400,12 +409,18 @@ impl EngineRelay for SharedRelayActor {
                 request_id: received,
                 slot_handle,
                 display_code,
+                slot_capability,
                 expires_at_unix,
                 ..
             } if received == request_id => {
-                self.rendezvous_private_keys.insert(slot_handle, rendezvous_key);
-                Ok(InviteCode { code: display_code, expires_at: expires_at_unix })
-            },
+                self.rendezvous_private_keys
+                    .insert(slot_handle.clone(), rendezvous_key);
+                self.active_slot = Some((slot_handle, slot_capability));
+                Ok(InviteCode {
+                    code: display_code,
+                    expires_at: expires_at_unix,
+                })
+            }
             RendezvousServerFrame::Error { code, .. } => Err(RuntimeError::Unavailable(code)),
             _ => Self::removed(),
         }

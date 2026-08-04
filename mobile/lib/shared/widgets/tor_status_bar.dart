@@ -1,13 +1,12 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 
+import '../../app/app_theme.dart';
+import '../../core/connection/connection_component.dart';
 import '../../core/connection/connection_readiness.dart';
 import '../../core/models/domain.dart';
-import '../../app/app_theme.dart';
 
-/// Compact, single-lamp status indicator for the application header.
-/// Detailed component diagnostics remain available through the tap action.
+/// Compact transport indicator. The left dot is Tor/SOCKS; the right dot is
+/// the local P2P/onion path. Detailed diagnostics remain behind the tap.
 class ConnectionStatusLamp extends StatefulWidget {
   const ConnectionStatusLamp({
     super.key,
@@ -37,18 +36,37 @@ class _ConnectionStatusLampState extends State<ConnectionStatusLamp>
     duration: const Duration(milliseconds: 1800),
   )..repeat();
 
-  _LampState get _state {
+  _LampState get _fallbackState => switch (widget.phase) {
+    TransportPhase.connected => _LampState.ready,
+    TransportPhase.degraded ||
+    TransportPhase.reconnecting => _LampState.degraded,
+    TransportPhase.error || TransportPhase.offline => _LampState.error,
+    _ => _LampState.starting,
+  };
+
+  _LampState _state(ConnectionComponentStatus? status) =>
+      switch (status?.state) {
+        ConnectionComponentState.ready => _LampState.ready,
+        ConnectionComponentState.degraded => _LampState.degraded,
+        ConnectionComponentState.failed => _LampState.error,
+        _ => _LampState.starting,
+      };
+
+  _LampState get _torState =>
+      widget.readiness == null ? _fallbackState : _state(widget.readiness!.tor);
+
+  _LampState get _p2pState {
     final readiness = widget.readiness;
-    if (readiness?.failed == true || widget.phase == TransportPhase.error) {
+    if (readiness == null) return _fallbackState;
+    if (readiness.peerListener.state == ConnectionComponentState.failed ||
+        readiness.onionService.state == ConnectionComponentState.failed) {
       return _LampState.error;
     }
-    if (readiness?.degraded == true ||
-        widget.phase == TransportPhase.degraded ||
-        widget.peerStatus == PeerServerStatus.offline) {
+    if (readiness.peerListener.state == ConnectionComponentState.degraded ||
+        readiness.onionService.state == ConnectionComponentState.degraded) {
       return _LampState.degraded;
     }
-    if (readiness?.communicationReady == true ||
-        widget.phase == TransportPhase.connected) {
+    if (readiness.peerListener.ready && readiness.onionService.ready) {
       return _LampState.ready;
     }
     return _LampState.starting;
@@ -62,31 +80,11 @@ class _ConnectionStatusLampState extends State<ConnectionStatusLamp>
 
   @override
   Widget build(BuildContext context) {
-    final state = _state;
-    final tone = switch (state) {
-      _LampState.ready => context.statusTheme.success,
-      _LampState.starting || _LampState.degraded => context.statusTheme.warning,
-      _LampState.error => context.statusTheme.danger,
-    };
-    final label = switch (state) {
-      _LampState.ready => 'Gotowe: Tor i P2P są dostępne',
-      _LampState.starting => 'Uruchamianie komunikacji',
-      _LampState.degraded => 'Komunikacja działa częściowo lub ponawia próbę',
-      _LampState.error => 'Błąd komunikacji',
-    };
+    final tor = _torState;
+    final p2p = _p2pState;
+    final label = 'Tor: ${_lampLabel(tor)} · P2P: ${_lampLabel(p2p)}';
     final animationsDisabled = MediaQuery.disableAnimationsOf(context);
-    final child = AnimatedBuilder(
-      animation: _controller,
-      builder: (context, _) => CustomPaint(
-        size: Size.square(widget.embeddedInHeader ? 18 : 22),
-        painter: _LampPainter(
-          color: tone,
-          state: state,
-          phase: animationsDisabled ? 0 : _controller.value,
-        ),
-      ),
-    );
-
+    final size = widget.embeddedInHeader ? 42.0 : 52.0;
     return Semantics(
       button: widget.onOpenConnectionCenter != null,
       label: label,
@@ -97,7 +95,20 @@ class _ConnectionStatusLampState extends State<ConnectionStatusLamp>
           radius: widget.embeddedInHeader ? 20 : 24,
           child: Padding(
             padding: EdgeInsets.all(widget.embeddedInHeader ? 5 : 7),
-            child: child,
+            child: AnimatedBuilder(
+              animation: _controller,
+              builder: (context, _) => CustomPaint(
+                size: Size(size, widget.embeddedInHeader ? 18 : 22),
+                painter: _DualLampPainter(
+                  tor: tor,
+                  p2p: p2p,
+                  readyColor: context.statusTheme.success,
+                  warningColor: context.statusTheme.warning,
+                  errorColor: context.statusTheme.danger,
+                  phase: animationsDisabled ? 0 : _controller.value,
+                ),
+              ),
+            ),
           ),
         ),
       ),
@@ -107,37 +118,74 @@ class _ConnectionStatusLampState extends State<ConnectionStatusLamp>
 
 enum _LampState { starting, ready, degraded, error }
 
-class _LampPainter extends CustomPainter {
-  const _LampPainter({required this.color, required this.state, required this.phase});
+String _lampLabel(_LampState state) => switch (state) {
+  _LampState.ready => 'ready',
+  _LampState.starting => 'starting',
+  _LampState.degraded => 'retrying',
+  _LampState.error => 'error',
+};
 
-  final Color color;
-  final _LampState state;
+class _DualLampPainter extends CustomPainter {
+  const _DualLampPainter({
+    required this.tor,
+    required this.p2p,
+    required this.readyColor,
+    required this.warningColor,
+    required this.errorColor,
+    required this.phase,
+  });
+
+  final _LampState tor;
+  final _LampState p2p;
+  final Color readyColor;
+  final Color warningColor;
+  final Color errorColor;
   final double phase;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final center = size.center(Offset.zero);
-    final radius = math.min(size.width, size.height) / 2;
+    _paintDot(canvas, Offset(size.width * .25, size.height / 2), tor);
+    _paintDot(canvas, Offset(size.width * .75, size.height / 2), p2p);
+  }
+
+  void _paintDot(Canvas canvas, Offset center, _LampState state) {
+    final color = switch (state) {
+      _LampState.ready => readyColor,
+      _LampState.starting || _LampState.degraded => warningColor,
+      _LampState.error => errorColor,
+    };
     final intensity = switch (state) {
       _LampState.ready => .82,
       _LampState.starting => .35 + (.55 * (1 - (2 * phase - 1).abs())),
-      _LampState.degraded => phase < .12 || (phase > .22 && phase < .34) ? .95 : .18,
-      _LampState.error => phase < .08 || (phase > .14 && phase < .22) || (phase > .28 && phase < .36) ? .95 : .14,
+      _LampState.degraded => phase < .2 ? .95 : .18,
+      _LampState.error => phase < .1 || (phase > .25 && phase < .4) ? .95 : .14,
     };
-    final glow = Paint()
-      ..color = color.withValues(alpha: intensity * .35)
-      ..maskFilter = MaskFilter.blur(BlurStyle.normal, radius * .65);
-    canvas.drawCircle(center, radius * .78, glow);
-    final fill = Paint()..color = color.withValues(alpha: intensity);
-    canvas.drawCircle(center, radius * .54, fill);
-    final border = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.2
-      ..color = color.withValues(alpha: .9);
-    canvas.drawCircle(center, radius * .72, border);
+    final radius = 8.0;
+    canvas.drawCircle(
+      center,
+      radius * .78,
+      Paint()
+        ..color = color.withValues(alpha: intensity * .35)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5),
+    );
+    canvas.drawCircle(
+      center,
+      radius * .54,
+      Paint()..color = color.withValues(alpha: intensity),
+    );
+    canvas.drawCircle(
+      center,
+      radius * .72,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.2
+        ..color = color.withValues(alpha: .9),
+    );
   }
 
   @override
-  bool shouldRepaint(covariant _LampPainter oldDelegate) =>
-      oldDelegate.color != color || oldDelegate.state != state || oldDelegate.phase != phase;
+  bool shouldRepaint(covariant _DualLampPainter oldDelegate) =>
+      oldDelegate.tor != tor ||
+      oldDelegate.p2p != p2p ||
+      oldDelegate.phase != phase;
 }

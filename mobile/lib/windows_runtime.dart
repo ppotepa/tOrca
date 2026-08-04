@@ -573,6 +573,31 @@ class WindowsRuntime extends Object
     final completer = Completer<Object?>();
     _pending[id] = completer;
     final command = _engineCommand(method, params);
+    final nonIdempotent = method == EngineContract.refreshPairingCode;
+    if (nonIdempotent) {
+      final request = {
+        EngineContract.requestId: id,
+        EngineContract.command: command,
+      };
+      _writeLog(
+        _logSink,
+        generation,
+        'STDIN requestId=$id command=${command[EngineContract.type] ?? method}',
+      );
+      try {
+        process.stdin.writeln(jsonEncode(request));
+      } catch (error, stackTrace) {
+        _pending.remove(id);
+        completer.completeError(error, stackTrace);
+      }
+      return completer.future.timeout(
+        const Duration(seconds: 45),
+        onTimeout: () {
+          _pending.remove(id);
+          throw TimeoutException('Client engine command timed out: $method');
+        },
+      );
+    }
     // The complete canonical command payload is part of the journal key.
     // Target-only keys incorrectly reused a completed command for a later
     // mutation against the same conversation/contact.
