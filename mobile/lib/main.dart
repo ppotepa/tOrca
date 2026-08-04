@@ -409,6 +409,14 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
     } finally {
       _pairingCodeDialogOpen = false;
       if (mounted) {
+        // The code dialog is the active pairing surface. Reconcile once more
+        // before handing control back to the global incoming prompt so an
+        // invite submitted while the dialog was open cannot be lost between
+        // the polling interval and the dialog teardown.
+        await controller.refreshData(
+          forcePairing: true,
+          allowAutoTorka: false,
+        );
         _queueIncomingPairingPrompt(ref.read(appControllerProvider).inbox);
       }
     }
