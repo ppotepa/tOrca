@@ -419,7 +419,11 @@ function Build-TorChatWindowsClient {
         $sha.Dispose()
     }
     $mobileRoot = Join-Path $Context.RepositoryRoot 'mobile'
-    $stagingMobile = Join-Path $stagingParent "TorChat\flutter-windows\$repoHash\mobile"
+    # Keep staging isolated per exact Flutter input set. The old fixed path could
+    # retain a partially copied project (including merge-conflict markers) when
+    # a previous build was interrupted or robocopy was unable to replace a file.
+    $inputHash = $hash.Substring(0, 16).ToLowerInvariant()
+    $stagingMobile = Join-Path $stagingParent "TorChat\flutter-windows\$repoHash\$inputHash\mobile"
     $stagingBuild = Join-Path $stagingMobile 'build\windows'
     $destinationBuild = Join-Path $mobileRoot 'build\windows'
     Remove-TorChatDirectoryRobust -Path $stagingMobile -Description 'Windows Flutter staging directory'
@@ -431,6 +435,14 @@ function Build-TorChatWindowsClient {
             (Join-Path $mobileRoot 'android') `
         /XF '*.apk' '*.aab' '*.log' | Out-Null
     if ($LASTEXITCODE -gt 7) { throw "Windows Flutter staging copy failed with robocopy exit $LASTEXITCODE." }
+    $sourceArb = Join-Path $mobileRoot 'lib\locales\resources\app_en.arb'
+    $stagedArb = Join-Path $stagingMobile 'lib\locales\resources\app_en.arb'
+    if (-not (Test-Path -LiteralPath $stagedArb)) { throw "Windows Flutter staging copy omitted localization catalog: $stagedArb" }
+    $sourceArbHash = (Get-FileHash -LiteralPath $sourceArb -Algorithm SHA256).Hash
+    $stagedArbHash = (Get-FileHash -LiteralPath $stagedArb -Algorithm SHA256).Hash
+    if ($sourceArbHash -ne $stagedArbHash) {
+        throw "Windows Flutter staging copy produced a different app_en.arb (source $sourceArb, staged $stagedArb)."
+    }
     $previousConfig = $env:TORCHAT_CONFIG_FILE
     $torkaPairingCode = [string]$EnvironmentState.Values['TORCHAT_TORKA_PAIRING_CODE']
     $env:TORCHAT_CONFIG_FILE = $EnvironmentState.Paths.RuntimeEnvironment
