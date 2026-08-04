@@ -19,12 +19,12 @@ class SplashScreen extends StatelessWidget {
             size: 72,
             color: Theme.of(context).colorScheme.primary,
           ),
-          SizedBox(height: 16),
+          const SizedBox(height: 16),
           Text(
-            'TorChat',
-            style: TextStyle(fontSize: 30, fontWeight: FontWeight.bold),
+            context.l10n.appTitle,
+            style: const TextStyle(fontSize: 30, fontWeight: FontWeight.bold),
           ),
-          SizedBox(height: 8),
+          const SizedBox(height: 8),
           Text(context.l10n.appTagline),
         ],
       ),
@@ -70,36 +70,19 @@ class BootScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 16),
                     Text(
-                      'TorChat',
+                      context.l10n.appTitle,
                       style: Theme.of(context).textTheme.headlineMedium,
                     ),
                     const SizedBox(height: 8),
-                      Text(context.l10n.appTagline),
+                    Text(context.l10n.appTagline),
                     const SizedBox(height: 30),
                     Text(
-                      switch (phase) {
-                        TransportPhase.starting ||
-                        TransportPhase.bootstrapping =>
-                          'Rozgrzewanie sieci Tor',
-                        TransportPhase.connecting ||
-                        TransportPhase.reconnecting =>
-                          'Łączenie z serwerem TorChat',
-                        TransportPhase.connected => 'Połączono',
-                        _ => 'Sprawdzanie połączenia',
-                      },
+                      localizeTransportPhase(context.l10n, phase),
                       style: Theme.of(context).textTheme.titleMedium,
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 14),
                     StartupTimeline(steps: steps),
-                    if (status.isNotEmpty) ...[
-                      const SizedBox(height: 16),
-                      Text(status, textAlign: TextAlign.center),
-                    ],
-                    if (detail.isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      Text(detail, textAlign: TextAlign.center),
-                    ],
                     if (error.isNotEmpty) ...[
                       const SizedBox(height: 18),
                       Text(
@@ -290,13 +273,7 @@ class _StartupTimelineRowState extends State<_StartupTimelineRow>
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      step.state == StartupStepState.error &&
-                              step.detail.isNotEmpty
-                          ? step.detail
-                          : localizeStartupStepDescription(
-                              context.l10n,
-                              step.kind,
-                            ),
+                      localizeStartupStepDescription(context.l10n, step.kind),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.bodySmall,
@@ -351,10 +328,6 @@ class TorScreen extends StatelessWidget {
                 LinearProgressIndicator(value: progress! / 100),
                 const SizedBox(height: 8),
                 Text('$progress%'),
-              ],
-              if (detail.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Text(detail, textAlign: TextAlign.center),
               ],
               if (error.isNotEmpty) ...[
                 const SizedBox(height: 18),
@@ -418,14 +391,14 @@ class NicknameScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 20),
                   Text(
-                    'Ustaw swój nick',
+                    context.l10n.nicknameLabel,
                     style: Theme.of(context).textTheme.headlineSmall,
                   ),
                   const SizedBox(height: 8),
                   Text(
                     ready
-                        ? 'Środowisko komunikacyjne jest gotowe. Możesz zapisać konto lokalne.'
-                        : 'Oczekiwanie na pełną gotowość relay i P2P…',
+                        ? context.l10n.nicknameDescription
+                        : context.l10n.warmupSubtitle,
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
@@ -437,7 +410,7 @@ class NicknameScreen extends StatelessWidget {
                     },
                     decoration: InputDecoration(
                       labelText: context.l10n.onboardingNicknameLabel,
-                      border: OutlineInputBorder(),
+                      border: const OutlineInputBorder(),
                     ),
                   ),
                   if (error.isNotEmpty)
