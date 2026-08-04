@@ -122,7 +122,7 @@ function Get-TorChatWindowsApplicationReadiness {
         Sort-Object LastWriteTime -Descending |
         Select-Object -First 1
     if (-not $latest) {
-        return [pscustomobject]@{ Engine = $false; PeerEndpoint = $false; Relay = $false; Ready = $false }
+        return [pscustomobject]@{ Engine = $false; PeerEndpoint = $false; Ready = $false }
     }
     $events = @(Get-Content -LiteralPath $latest.FullName -ErrorAction SilentlyContinue) |
         ForEach-Object {
@@ -134,14 +134,12 @@ function Get-TorChatWindowsApplicationReadiness {
     $peerEndpointReady = @($events | Where-Object {
         $_.component -eq 'peer' -and $_.eventCode -eq 'peer_endpoint_changed' -and $_.message -match '(?:^|\s)status=Verified(?:\s|$)'
     }).Count -gt 0
-    $relayReady = @($events | Where-Object {
-        $_.component -eq 'relay' -and $_.eventCode -eq 'connection_state_changed' -and $_.message -match '^Connected:'
-    }).Count -gt 0
     [pscustomobject]@{
         Engine = $engineReady
         PeerEndpoint = $peerEndpointReady
-        Relay = $relayReady
-        Ready = $engineReady -and $peerEndpointReady -and $relayReady
+        # The rendezvous relay is connected only while pairing. Normal
+        # application readiness requires the local engine and onion endpoint.
+        Ready = $engineReady -and $peerEndpointReady
     }
 }
 
@@ -155,7 +153,7 @@ function Start-TorChatWindowsClient {
         [Parameter(Mandatory = $true)]$Context,
         [Parameter(Mandatory = $true)]$EnvironmentState,
         [ValidateSet('preserve','reset')][string]$ClientDataPolicy = 'preserve',
-        [int]$ReadyAttempts = 50,
+        [int]$ReadyAttempts = 300,
         [int]$FunctionalReadyAttempts = 180
     )
     if ($env:OS -ne 'Windows_NT') { throw 'Windows client can only be started on Windows.' }
@@ -207,14 +205,14 @@ function Start-TorChatWindowsClient {
         $applicationReadiness = Get-TorChatWindowsApplicationReadiness -RepositoryRoot $Context.RepositoryRoot
         $applicationReady = $applicationReadiness.Ready
         $percent = [Math]::Min(99, [int](100 * $attempt / [Math]::Max(1,$FunctionalReadyAttempts)))
-        Write-TorChatStageProgress -Context $Context -Name 'Windows application readiness' -Percent $percent -Detail "engine=$($applicationReadiness.Engine) p2p=$($applicationReadiness.PeerEndpoint) relay=$($applicationReadiness.Relay)"
+        Write-TorChatStageProgress -Context $Context -Name 'Windows application readiness' -Percent $percent -Detail "engine=$($applicationReadiness.Engine) p2p=$($applicationReadiness.PeerEndpoint)"
         if ($applicationReady) { break }
         if ($started.HasExited) { throw "Windows runner exited with code $($started.ExitCode)." }
         Start-Sleep -Seconds 1
     }
     if (-not $applicationReady) {
         $diagnostics = Save-TorChatWindowsDiagnostics -Context $Context
-        throw "Windows processes started, but onion/relay did not reach APPLICATION_READY. Diagnostics: $diagnostics"
+        throw "Windows processes started, but the engine/onion endpoint did not reach APPLICATION_READY. Diagnostics: $diagnostics"
     }
     $runnerPid = [int]$runners[0].ProcessId
     $sidecarPid = [int]$sidecars[0].ProcessId

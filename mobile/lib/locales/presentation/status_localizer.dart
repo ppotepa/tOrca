@@ -22,7 +22,6 @@ String localizeConnectionComponentTitle(
   ConnectionComponent.engine => l10n.statusComponentEngine,
   ConnectionComponent.localData => l10n.statusComponentLocalData,
   ConnectionComponent.tor => l10n.statusComponentTor,
-  ConnectionComponent.relay => l10n.statusComponentRelay,
   ConnectionComponent.peerListener => l10n.statusComponentPeerListener,
   ConnectionComponent.onionService => l10n.statusComponentOnionService,
 };
@@ -34,7 +33,6 @@ String localizeConnectionComponentDescription(
   ConnectionComponent.engine => l10n.statusComponentEngineDescription,
   ConnectionComponent.localData => l10n.statusComponentLocalDataDescription,
   ConnectionComponent.tor => l10n.statusComponentTorDescription,
-  ConnectionComponent.relay => l10n.statusComponentRelayDescription,
   ConnectionComponent.peerListener =>
     l10n.statusComponentPeerListenerDescription,
   ConnectionComponent.onionService =>
@@ -43,7 +41,6 @@ String localizeConnectionComponentDescription(
 
 String localizeProbeLabel(AppLocalizations l10n, String id) => switch (id) {
   'engine' => l10n.statusProbeEngine,
-  'relay' => l10n.statusProbeRelay,
   'peer' => l10n.statusProbePeer,
   _ => id,
 };
@@ -55,7 +52,6 @@ String localizeStartupStepTitle(AppLocalizations l10n, StartupStepKind kind) =>
       StartupStepKind.tor => l10n.startupTor,
       StartupStepKind.peerListener => l10n.startupPeerListener,
       StartupStepKind.onionService => l10n.startupOnionService,
-      StartupStepKind.relay => l10n.startupRelay,
       StartupStepKind.communication => l10n.startupCommunication,
     };
 
@@ -68,19 +64,12 @@ String localizeStartupStepDescription(
   StartupStepKind.tor => l10n.startupTorDescription,
   StartupStepKind.peerListener => l10n.startupPeerListenerDescription,
   StartupStepKind.onionService => l10n.startupOnionServiceDescription,
-  StartupStepKind.relay => l10n.startupRelayDescription,
   StartupStepKind.communication => l10n.startupCommunicationDescription,
 };
 
 String localizeContactRoute(AppLocalizations l10n, ContactRecord contact) {
-  if (contact.transportPolicy == ContactTransportPolicy.relayOnly) {
-    return l10n.contactRouteRelay;
-  }
   if (contact.peerConnectionStatus == PeerConnectionStatus.connected) {
     return l10n.contactRouteP2pOnion;
-  }
-  if (contact.transportPolicy == ContactTransportPolicy.peerWithRelayFallback) {
-    return l10n.contactRouteRelayFallback;
   }
   return l10n.contactRouteP2pOffline;
 }
@@ -122,6 +111,4 @@ String localizeTransportPolicy(
   ContactTransportPolicy policy,
 ) => switch (policy) {
   ContactTransportPolicy.peerOnly => l10n.contactPolicyP2pOnly,
-  ContactTransportPolicy.peerWithRelayFallback => l10n.contactPolicyFallback,
-  ContactTransportPolicy.relayOnly => l10n.contactPolicyRelayOnly,
 };

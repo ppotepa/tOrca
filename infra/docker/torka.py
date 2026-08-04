@@ -34,7 +34,6 @@ class Engine:
         )
         self.responses = {}
         self.lines = queue.Queue()
-        self.relay_ready = threading.Event()
         self.peer_status = {}
         threading.Thread(target=self._read, daemon=True).start()
 
@@ -68,14 +67,6 @@ class Engine:
                         log(f"peer {contact_id}: {status[0]} retry_in_ms={status[1]}")
                 else:
                     log(f"runtime {runtime_type}")
-                if (
-                    runtime_type == "transport_status_changed"
-                    and runtime.get("component") == "RELAY"
-                ):
-                    if runtime.get("state") == "READY":
-                        self.relay_ready.set()
-                    elif runtime.get("state") in {"ERROR", "OFFLINE"}:
-                        self.relay_ready.clear()
             self.lines.put(event)
 
     def command(self, command, timeout=30):
@@ -105,23 +96,6 @@ class Engine:
             runtime = event.get("event") if event.get("type") == "runtime" else None
             if isinstance(runtime, dict) and runtime.get("type") == "message_received":
                 yield runtime
-
-    def wait_for_relay(self):
-        """Wait for the shared engine's retry actor instead of restarting Torka.
-
-        A fresh Tor circuit may temporarily reject the relay onion even after
-        bootstrap reaches 100%. `connect` is deliberately asynchronous in the
-        engine, so a test peer must wait for its transport event before issuing
-        profile and pairing commands that require the control plane.
-        """
-        next_log = time.monotonic()
-        while not self.relay_ready.wait(timeout=1):
-            if self.process.poll() is not None:
-                raise RuntimeError(f"desktop engine exited with {self.process.returncode}")
-            now = time.monotonic()
-            if now >= next_log:
-                log("waiting for shared relay retry actor")
-                next_log = now + 15
 
 
 def pending_pairing_ids(value):
@@ -297,15 +271,10 @@ def main():
     try:
         engine.command({"type": "bootstrap"})
         engine.command({"type": "connect"})
-        engine.wait_for_relay()
         profile = engine.command({"type": "set_nickname", "nickname": os.environ.get("TORCHAT_NICKNAME", "Torka")})
         log(f"identity ready installation={profile.get('installationId', 'unknown')}")
         with open(readiness_path, "w", encoding="utf-8") as readiness:
             readiness.write("ready\n")
-        reserved_code = os.environ.get("TORCHAT_TORKA_PAIRING_CODE", "").strip()
-        if reserved_code:
-            log(f"reserved pairing code: {reserved_code}")
-
         pairing_interval = env_interval("TORCHAT_TORKA_PAIRING_POLL_SECONDS", 20, 5)
         message_interval = env_interval("TORCHAT_TORKA_MESSAGE_POLL_SECONDS", 10, 5)
         idle_sleep = env_interval("TORCHAT_TORKA_IDLE_SLEEP_SECONDS", 1, 0.25)
@@ -334,7 +303,7 @@ def main():
                     code = invite.get("code") if isinstance(invite, dict) else None
                     if code:
                         log(f"pairing code (valid until rotation): {code}")
-                    next_code_refresh = now + 10 * 60
+                next_code_refresh = now + 90
                 except Exception as error:
                     next_code_refresh = now + 60
                     log(f"pairing code refresh deferred: {error}")

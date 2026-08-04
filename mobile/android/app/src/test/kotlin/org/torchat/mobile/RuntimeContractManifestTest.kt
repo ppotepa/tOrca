@@ -98,9 +98,7 @@ class RuntimeContractManifestTest {
 
         assertEquals(
             listOf(
-                EngineContract.OUTCOME_FORWARDED,
                 EngineContract.OUTCOME_DELIVERED,
-                EngineContract.OUTCOME_RECIPIENT_OFFLINE,
                 EngineContract.OUTCOME_PEER_PERSISTED,
                 EngineContract.OUTCOME_PEER_DELIVERED,
                 EngineContract.OUTCOME_PEER_UNAVAILABLE,

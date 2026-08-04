@@ -23,14 +23,6 @@ impl ClientEngineActor {
         Ok(Some((stored.recipient_installation_id, ciphertext)))
     }
 
-    pub(super) fn send_contact_confirmation(
-        &mut self,
-        record: PendingContactConfirmationRecord,
-    ) -> EngineResult<()> {
-        self.enqueue_contact_confirmation(&record);
-        Ok(())
-    }
-
     pub(super) fn queue_welcome_applied(
         &mut self,
         recipient_installation_id: &str,
@@ -55,11 +47,6 @@ impl ClientEngineActor {
                 delivery_id: None,
             },
         )
-    }
-
-    pub(super) fn acknowledge_pairing_request(&mut self, pairing_id: &str) -> EngineResult<()> {
-        self.enqueue_pairing_acknowledgement(pairing_id);
-        Ok(())
     }
 
     pub(super) fn build_contact_invite(
@@ -148,75 +135,6 @@ impl ClientEngineActor {
                         message: format!(
                             "pending welcome retry failed invite_id={} error={error}",
                             pending.invite_id
-                        ),
-                    },
-                });
-            }
-        }
-        Ok(())
-    }
-
-    pub(super) fn retry_pending_contact_confirmations(&mut self) -> EngineResult<()> {
-        if self.connection_state != ConnectionState::Connected {
-            return Ok(());
-        }
-        for record in self
-            .database
-            .due_pending_contact_confirmations(self.clock.now_ms())?
-        {
-            let next_attempt_at =
-                self.clock.now_ms() + pairing_retry_backoff_ms(record.attempt_count);
-            if !self.database.claim_pending_contact_confirmation_attempt(
-                &record.pairing_id,
-                next_attempt_at,
-                None,
-            )? {
-                continue;
-            }
-            if let Err(error) = self.send_contact_confirmation(record.clone()) {
-                self.database.record_pending_contact_confirmation_error(
-                    &record.pairing_id,
-                    &format!("{}: {error}", super::retry_error_code(&error.to_string())),
-                )?;
-                self.pending_engine_events.push(EngineEvent::Log {
-                    log: EngineLogEvent {
-                        level: "warn".to_owned(),
-                        message: format!(
-                            "contact confirmation retry failed pairing_id={} error={error}",
-                            record.pairing_id
-                        ),
-                    },
-                });
-            } else {
-                // Completion is performed by the relay-control worker after the
-                // HTTP effect succeeds; keep the durable row until then.
-            }
-        }
-        Ok(())
-    }
-
-    pub(super) fn retry_pending_pairing_acknowledgements(&mut self) -> EngineResult<()> {
-        if self.connection_state != ConnectionState::Connected {
-            return Ok(());
-        }
-        for (pairing_id, attempt_count) in self
-            .database
-            .due_pending_pairing_acknowledgements(self.clock.now_ms())?
-        {
-            let next_attempt_at = self.clock.now_ms() + pairing_retry_backoff_ms(attempt_count);
-            if !self
-                .database
-                .claim_pending_pairing_acknowledgement_attempt(&pairing_id, next_attempt_at, None)?
-            {
-                continue;
-            }
-            if let Err(error) = self.acknowledge_pairing_request(&pairing_id) {
-                self.pending_engine_events.push(EngineEvent::Log {
-                    log: EngineLogEvent {
-                        level: "warn".to_owned(),
-                        message: format!(
-                            "pairing acknowledgement retry failed pairing_id={} error={error}",
-                            pairing_id
                         ),
                     },
                 });
@@ -388,7 +306,7 @@ impl ClientEngineActor {
             .snapshot()
             .map_err(|error| EngineError::Storage(error.to_string()))?;
         let boundary_at = self.clock.now_ms();
-        let (result, mut runtime_events): (WelcomeAcceptedResult, _) =
+        let (_result, mut runtime_events): (WelcomeAcceptedResult, _) =
             self.with_runtime(|runtime| {
                 if let Some(invite_id) = consume_invite_id
                     && !runtime.storage_mut().consume_invite(invite_id)?
@@ -430,39 +348,6 @@ impl ClientEngineActor {
         // while Welcome was still being committed. Replay those frames now
         // that the MLS conversation is available.
         runtime_events.extend(self.drain_pending_pre_welcome(&card.installation_id)?);
-        if let Some(confirm) = result.confirm_contact {
-            self.database.put_pending_contact_confirmation(
-                &confirm.pairing_id,
-                &confirm.peer_installation_id,
-                &confirm.capability,
-            )?;
-            // The canonical SQL/MLS transition is already committed. Relay
-            // confirmation is an external side effect and must not roll back
-            // or desynchronize in-memory MLS state when the network is down.
-            if let Err(error) = self.send_contact_confirmation(PendingContactConfirmationRecord {
-                pairing_id: confirm.pairing_id.clone(),
-                peer_installation_id: confirm.peer_installation_id.clone(),
-                capability: confirm.capability.clone(),
-                attempt_count: 0,
-                next_attempt_at: 0,
-                last_error: None,
-            }) {
-                self.database.record_pending_contact_confirmation_error(
-                    &confirm.pairing_id,
-                    &format!("{}: {error}", super::retry_error_code(&error.to_string())),
-                )?;
-                self.pending_engine_events.push(EngineEvent::Log {
-                    log: EngineLogEvent {
-                        level: "warn".to_owned(),
-                        message: format!(
-                            "contact confirmation enqueue failed pairing_id={} error={error}",
-                            confirm.pairing_id
-                        ),
-                    },
-                });
-            }
-        }
-        let _ = self.queue_relay_endpoint_bootstraps();
         // Exchange the per-contact endpoint secret only after the MLS
         // conversation has been committed. The offer is MLS-encrypted.
         if let Err(error) = self.send_capability_offer(&card.installation_id) {

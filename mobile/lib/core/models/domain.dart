@@ -36,7 +36,6 @@ enum TransportPhase {
       this == TransportPhase.bootstrapping ||
       this == TransportPhase.connecting ||
       this == TransportPhase.reconnecting;
-
 }
 
 enum MobileTab { chats, contacts }
@@ -84,7 +83,6 @@ enum StartupStepKind {
   tor,
   peerListener,
   onionService,
-  relay,
   communication,
 }
 
@@ -262,7 +260,6 @@ enum MessageState {
     MessageState.read => EngineContract.messageStateRead,
     MessageState.failed => EngineContract.messageStateFailed,
   };
-
 }
 
 class RuntimeTorStatus {
@@ -306,13 +303,12 @@ class RuntimeTorStatus {
 
 enum TransportComponent {
   engine,
-  relay,
   peer;
 
   static TransportComponent fromValue(String? value) => switch (value) {
     'ENGINE' => engine,
     'PEER' => peer,
-    _ => relay,
+    _ => engine,
   };
 }
 
@@ -367,7 +363,6 @@ class StartupReadinessSnapshot {
     required this.torReady,
     required this.peerListenerReady,
     required this.onionServiceReady,
-    required this.relayReady,
     required this.generation,
     required this.detail,
   });
@@ -379,7 +374,6 @@ class StartupReadinessSnapshot {
         torReady: json['torReady'] == true,
         peerListenerReady: json['peerListenerReady'] == true,
         onionServiceReady: json['onionServiceReady'] == true,
-        relayReady: json['relayReady'] == true,
         generation: (json['generation'] as num?)?.toInt() ?? 0,
         detail: json['detail']?.toString() ?? '',
       );
@@ -389,7 +383,6 @@ class StartupReadinessSnapshot {
   final bool torReady;
   final bool peerListenerReady;
   final bool onionServiceReady;
-  final bool relayReady;
   final int generation;
   final String detail;
 }
@@ -550,23 +543,11 @@ int _intFrom(Object? value) {
 }
 
 enum ContactTransportPolicy {
-  peerOnly,
-  peerWithRelayFallback,
-  relayOnly;
+  peerOnly;
 
-  factory ContactTransportPolicy.fromValue(String? value) => switch (value) {
-    EngineContract.contactTransportPolicyPeerWithRelayFallback =>
-      peerWithRelayFallback,
-    EngineContract.contactTransportPolicyRelayOnly => relayOnly,
-    _ => peerOnly,
-  };
+  factory ContactTransportPolicy.fromValue(String? value) => peerOnly;
 
-  String get wireValue => switch (this) {
-    peerOnly => EngineContract.contactTransportPolicyPeerOnly,
-    peerWithRelayFallback =>
-      EngineContract.contactTransportPolicyPeerWithRelayFallback,
-    relayOnly => EngineContract.contactTransportPolicyRelayOnly,
-  };
+  String get wireValue => EngineContract.contactTransportPolicyPeerOnly;
 }
 
 enum PeerEndpointStatus {
@@ -987,8 +968,11 @@ enum NotificationKind {
   const NotificationKind(this.wireValue);
   final String wireValue;
 
-  static NotificationKind fromWire(Object? value) => NotificationKind.values
-      .firstWhere((item) => item.wireValue == value, orElse: () => NotificationKind.messageReceived);
+  static NotificationKind fromWire(Object? value) =>
+      NotificationKind.values.firstWhere(
+        (item) => item.wireValue == value,
+        orElse: () => NotificationKind.messageReceived,
+      );
 }
 
 class NotificationRequestedEvent extends RuntimeEvent {

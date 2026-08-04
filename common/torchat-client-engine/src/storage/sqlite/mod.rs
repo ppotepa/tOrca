@@ -550,14 +550,6 @@ impl ClientDatabase {
                 include_str!("../../../sql/commands/delivery/retry_dead_letter_1.sql"),
                 [id],
             ),
-            "endpoint_bootstrap" => self.connection.execute(
-                include_str!("../../../sql/commands/delivery/retry_dead_letter_2.sql"),
-                [id],
-            ),
-            "contact_confirmation" => self.connection.execute(
-                include_str!("../../../sql/commands/delivery/retry_dead_letter_3.sql"),
-                [id],
-            ),
             "welcome" => self.connection.execute(
                 include_str!("../../../sql/commands/delivery/retry_dead_letter_4.sql"),
                 [id],
@@ -854,24 +846,6 @@ impl ClientDatabase {
         if let Some(deadline) = self.next_read_receipt_retry_deadline(now_ms)? {
             deadlines.push(RetryDeadline {
                 kind: RetryKind::ReadReceipt,
-                at_ms: deadline,
-            });
-        }
-        if let Some(deadline) = self.next_peer_endpoint_bootstrap_retry_deadline_ms()? {
-            deadlines.push(RetryDeadline {
-                kind: RetryKind::PeerEndpointBootstrap,
-                at_ms: deadline,
-            });
-        }
-        if let Some(deadline) = self.next_pending_contact_confirmation_retry_deadline_ms()? {
-            deadlines.push(RetryDeadline {
-                kind: RetryKind::ContactConfirmation,
-                at_ms: deadline,
-            });
-        }
-        if let Some(deadline) = self.next_pending_pairing_acknowledgement_retry_deadline_ms()? {
-            deadlines.push(RetryDeadline {
-                kind: RetryKind::PairingAcknowledgement,
                 at_ms: deadline,
             });
         }
@@ -1360,55 +1334,6 @@ mod tests {
     }
 
     #[test]
-    fn opening_version_7_database_applies_contact_transport_policy_migration() {
-        let path = temp_database_path("migration-7-to-8");
-        let database_key = key(17);
-        let connection = Connection::open(&path).expect("database file opens");
-        let key = sqlcipher_key_value(database_key.expose());
-        connection
-            .pragma_update(None, "key", &*key)
-            .expect("database key applies");
-        connection
-            .pragma_update(None, "foreign_keys", true)
-            .expect("foreign keys apply");
-        connection
-            .pragma_update(None, "journal_mode", "WAL")
-            .expect("journal mode applies");
-        MigrationRunner::new(&MIGRATIONS[..8])
-            .run(&connection)
-            .expect("version 7 migrations apply");
-        connection
-            .execute(
-                include_str!("../../../tests/sql/storage/opening_version_7_database_applies_contact_transport_policy_migration_1.sql"),
-                [],
-            )
-            .expect("contact inserts");
-        drop(connection);
-
-        let database =
-            ClientDatabase::open(&path, &database_key).expect("version 8 database opens");
-        let policy: String = database
-            .connection()
-            .query_row(
-                include_str!("../../../tests/sql/storage/opening_version_7_database_applies_contact_transport_policy_migration_2.sql"),
-                [],
-                |row| row.get(0),
-            )
-            .expect("transport policy is readable");
-        let latest_version: i64 = database
-            .connection()
-            .query_row(include_str!("../../../tests/sql/storage/opening_version_7_database_applies_contact_transport_policy_migration_3.sql"), [], |row| {
-                row.get(0)
-            })
-            .expect("latest migration is readable");
-
-        assert_eq!(policy, "PEER_ONLY");
-        assert_eq!(latest_version, MIGRATIONS.last().unwrap().version);
-        drop(database);
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
     fn reopen_with_wrong_sqlcipher_key_fails_integrity_check() {
         let path = temp_database_path("wrong-key");
         let database = ClientDatabase::open(&path, &key(11)).expect("database opens");
@@ -1417,136 +1342,6 @@ mod tests {
         let result = ClientDatabase::open(&path, &key(12));
 
         assert!(matches!(result, Err(EngineError::Storage(_))));
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn refreshing_peer_endpoint_bootstrap_resets_retry_metadata() {
-        let path = temp_database_path("peer-endpoint-bootstrap-reset");
-        let database = ClientDatabase::open(&path, &key(21)).expect("database opens");
-        database
-            .connection()
-            .execute(
-                include_str!("../../../tests/sql/storage/refreshing_peer_endpoint_bootstrap_resets_retry_metadata_1.sql"),
-                [],
-            )
-            .expect("contact inserts");
-
-        database
-            .put_peer_endpoint_bootstrap("contact-1", b"payload-a", 1)
-            .expect("bootstrap inserts");
-        assert!(
-            database
-                .claim_peer_endpoint_bootstrap_attempt("contact-1", 1, 12345, Some("timeout"))
-                .expect("claim works")
-        );
-
-        database
-            .put_peer_endpoint_bootstrap("contact-1", b"payload-b", 2)
-            .expect("bootstrap refreshes");
-
-        let record = database
-            .due_peer_endpoint_bootstraps(0)
-            .expect("bootstrap rows are readable")
-            .into_iter()
-            .find(|row| row.contact_installation_id == "contact-1")
-            .expect("bootstrap row exists");
-
-        assert_eq!(record.endpoint_sequence, 2);
-        assert_eq!(record.attempt_count, 0);
-        assert_eq!(record.next_attempt_at, 0);
-        assert_eq!(record.last_error, None);
-        assert_eq!(record.payload, b"payload-b");
-
-        drop(database);
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn refreshing_pending_contact_confirmation_resets_retry_metadata() {
-        let path = temp_database_path("contact-confirmation-reset");
-        let database = ClientDatabase::open(&path, &key(22)).expect("database opens");
-
-        database
-            .put_pending_contact_confirmation("pairing-1", "peer-1", "cap-a")
-            .expect("confirmation inserts");
-        assert!(
-            database
-                .claim_pending_contact_confirmation_attempt(
-                    "pairing-1",
-                    12345,
-                    Some("relay unavailable"),
-                )
-                .expect("claim works")
-        );
-
-        database
-            .put_pending_contact_confirmation("pairing-1", "peer-1", "cap-b")
-            .expect("confirmation refreshes");
-
-        let record = database
-            .due_pending_contact_confirmations(0)
-            .expect("confirmation rows are readable")
-            .into_iter()
-            .find(|row| row.pairing_id == "pairing-1")
-            .expect("confirmation row exists");
-
-        assert_eq!(record.peer_installation_id, "peer-1");
-        assert_eq!(record.capability, "cap-b");
-        assert_eq!(record.attempt_count, 0);
-        assert_eq!(record.next_attempt_at, 0);
-        assert_eq!(record.last_error, None);
-
-        drop(database);
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn recording_peer_endpoint_bootstrap_error_updates_last_error() {
-        let path = temp_database_path("peer-endpoint-bootstrap-error");
-        let database = ClientDatabase::open(&path, &key(24)).expect("database opens");
-        database
-            .connection()
-            .execute(
-                include_str!("../../../tests/sql/storage/recording_peer_endpoint_bootstrap_error_updates_last_error_1.sql"),
-                [],
-            )
-            .expect("contact inserts");
-
-        database
-            .put_peer_endpoint_bootstrap("contact-1", b"payload-a", 1)
-            .expect("bootstrap inserts");
-        database
-            .record_peer_endpoint_bootstrap_error("contact-1", 1, "protocol: malformed payload")
-            .expect("error persists");
-
-        assert!(
-            database
-                .due_peer_endpoint_bootstraps(0)
-                .expect("bootstrap rows are readable")
-                .is_empty()
-        );
-        let dead_letters = database.dead_letters().expect("dead letters are listed");
-        assert_eq!(dead_letters.len(), 1);
-        assert_eq!(dead_letters[0].kind, "endpoint_bootstrap");
-
-        assert!(
-            database
-                .retry_dead_letter("endpoint_bootstrap", "contact-1")
-                .expect("dead letter retry succeeds")
-        );
-        let record = database
-            .due_peer_endpoint_bootstraps(0)
-            .expect("retried bootstrap is readable")
-            .into_iter()
-            .find(|row| row.contact_installation_id == "contact-1")
-            .expect("retried bootstrap row exists");
-        assert_eq!(
-            record.last_error.as_deref(),
-            Some("protocol: malformed payload")
-        );
-
-        drop(database);
         let _ = std::fs::remove_file(path);
     }
 
@@ -1571,28 +1366,4 @@ mod tests {
         let _ = std::fs::remove_file(path);
     }
 
-    #[test]
-    fn recording_pending_contact_confirmation_error_updates_last_error() {
-        let path = temp_database_path("contact-confirmation-error");
-        let database = ClientDatabase::open(&path, &key(23)).expect("database opens");
-
-        database
-            .put_pending_contact_confirmation("pairing-1", "peer-1", "cap-a")
-            .expect("confirmation inserts");
-        database
-            .record_pending_contact_confirmation_error("pairing-1", "relay unavailable")
-            .expect("error persists");
-
-        let record = database
-            .due_pending_contact_confirmations(0)
-            .expect("confirmation rows are readable")
-            .into_iter()
-            .find(|row| row.pairing_id == "pairing-1")
-            .expect("confirmation row exists");
-
-        assert_eq!(record.last_error.as_deref(), Some("relay unavailable"));
-
-        drop(database);
-        let _ = std::fs::remove_file(path);
-    }
 }

@@ -272,7 +272,7 @@ fn inbound_delivery_receipt_survives_restart_after_message_commit() {
         conversation_id: "peer-receipt".to_owned(),
         original_sender: "peer-receipt".to_owned(),
         received_at: 300,
-        relay_payload: None,
+        wire_ciphertext: None,
         state: "PENDING".to_owned(),
         attempt_count: 0,
         next_attempt_at: 0,

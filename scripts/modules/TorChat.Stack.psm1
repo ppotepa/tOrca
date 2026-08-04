@@ -66,7 +66,10 @@ function Wait-TorChatHttpHealth {
         $attempt++
         try {
             $health = Invoke-RestMethod -Uri $Url -TimeoutSec 3
-            if ($health.status -eq 'ok') {
+            # The relay health endpoint intentionally returns a minimal
+            # text response (`ok`), while older deployments returned JSON.
+            # Accept both during the transition.
+            if ($health -eq 'ok' -or $health.status -eq 'ok') {
                 return [pscustomobject]@{
                     State = 'Ready'
                     Code = 'HTTP_HEALTH_READY'
@@ -244,19 +247,17 @@ function Reset-TorChatStackState {
     )
     if ($DatabasePolicy -eq 'preserve' -and $OnionPolicy -eq 'preserve') { return }
 
-    # A database-only reset keeps the published hidden service running. Tor is
-    # stopped only for an explicit onion rotation.
+    # A client-database reset keeps the published hidden service running. Tor is
+    # stopped only for an explicit onion rotation. The relay has no database.
     $resetServices = if ($OnionPolicy -eq 'rotate') {
-        @('server','postgres','tor','torka')
+        @('server','tor','torka')
     } else {
-        @('server','postgres','torka')
+        @('server','torka')
     }
     [void](Invoke-TorChatCompose -Context $Context -ComposeContext $ComposeContext -Arguments (@('stop') + $resetServices) -LogName 'docker-reset-stop.log' -AllowedExitCodes @(0))
     [void](Invoke-TorChatCompose -Context $Context -ComposeContext $ComposeContext -Arguments (@('rm','-f') + $resetServices) -LogName 'docker-reset-rm.log' -AllowedExitCodes @(0))
     if ($DatabasePolicy -eq 'reset') {
-        [void](Invoke-TorChatNative -Context $Context -FilePath 'docker' -ArgumentList @('volume','rm','-f',"$($ComposeContext.Project)_postgres_dev") -LogName 'docker-reset-postgres.log' -AllowedExitCodes @(0,1))
-        # Torka owns a client database too. Reset it together with the relay
-        # database so it cannot probe freshly reset clients using stale keys.
+        # Torka owns the only application database in the local stack.
         [void](Invoke-TorChatNative -Context $Context -FilePath 'docker' -ArgumentList @('volume','rm','-f',"$($ComposeContext.Project)_torka_dev") -LogName 'docker-reset-torka.log' -AllowedExitCodes @(0,1))
     }
     if ($OnionPolicy -eq 'rotate') {
@@ -288,7 +289,7 @@ function Start-TorChatStack {
     # Resolve the relay onion before starting Torka. A compose environment is
     # fixed at container creation time, so starting the peer before this point
     # would give it an empty or stale TORCHAT_ONION_URL after an onion rotate.
-    [void](Invoke-TorChatCompose -Context $Context -ComposeContext $compose -Arguments @('up','-d','--remove-orphans','server','postgres','tor') -LogName 'docker-up.log')
+    [void](Invoke-TorChatCompose -Context $Context -ComposeContext $compose -Arguments @('up','-d','--remove-orphans','server','tor') -LogName 'docker-up.log')
     [void](Wait-TorChatHttpHealth -Context $Context -Url ("http://127.0.0.1:{0}/health" -f $EnvironmentState.Values['TORCHAT_HTTP_PORT']) -TimeoutSeconds 90)
 
     $previousOnion = [string]$EnvironmentState.Values['TORCHAT_ONION_URL']

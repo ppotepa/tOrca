@@ -1,18 +1,6 @@
 use super::*;
 
 impl ClientEngineActor {
-    pub(super) fn contact_transport_policy(
-        &mut self,
-        installation_id: &str,
-    ) -> EngineResult<ContactTransportPolicy> {
-        Ok(self
-            .list_contacts()?
-            .into_iter()
-            .find(|contact| contact.installation_id == installation_id)
-            .map(|contact| contact.transport_policy)
-            .unwrap_or_default())
-    }
-
     pub(super) fn queue_peer_payload(
         &mut self,
         message_id: uuid::Uuid,
@@ -132,11 +120,10 @@ impl ClientEngineActor {
         let contacts = self.list_contacts()?;
         let now = Instant::now();
         for contact in &contacts {
-            if !matches!(contact.transport_policy, ContactTransportPolicy::RelayOnly)
-                && self
-                    .database
-                    .contact_peer_endpoint(&contact.installation_id)?
-                    .is_some()
+            if self
+                .database
+                .contact_peer_endpoint(&contact.installation_id)?
+                .is_some()
             {
                 self.probe_coordinator
                     .ensure(ProbeKey::contact(contact.installation_id.clone()), now);
@@ -149,9 +136,6 @@ impl ClientEngineActor {
             .filter_map(|key| key.target_id)
             .collect();
         for contact in contacts {
-            if matches!(contact.transport_policy, ContactTransportPolicy::RelayOnly) {
-                continue;
-            }
             if !due_contacts.contains(&contact.installation_id) {
                 continue;
             }
@@ -230,12 +214,6 @@ impl ClientEngineActor {
     }
 
     pub(super) fn queue_peer_probe(&mut self, recipient: &str) -> EngineResult<()> {
-        if matches!(
-            self.contact_transport_policy(recipient)?,
-            ContactTransportPolicy::RelayOnly
-        ) {
-            return Ok(());
-        }
         if !self.network_online {
             return Ok(());
         }
@@ -296,11 +274,7 @@ impl ClientEngineActor {
         recipient: &str,
         delivery: PeerDeliveryTag,
     ) -> EngineResult<()> {
-        if matches!(
-            self.contact_transport_policy(recipient)?,
-            ContactTransportPolicy::RelayOnly
-        ) || !self.network_online
-        {
+        if !self.network_online {
             return Ok(());
         }
         let Some(socks5_url) = self.socks5_url.clone() else {

@@ -24,11 +24,6 @@ final runtimeRepositoryProvider = Provider<RuntimeRepository>(
   (ref) => RuntimeRepository(ref.watch(clientRuntimeProvider)),
 );
 
-const _devTorkaPairingCode = String.fromEnvironment(
-  'TORCHAT_TORKA_PAIRING_CODE',
-  defaultValue: '',
-);
-
 @visibleForTesting
 String? debugTorkaPairingCodeOverride;
 
@@ -223,7 +218,6 @@ abstract class AppController extends Notifier<AppState> {
         state.startupSteps,
         peerEndpointAvailable,
         torReady: state.transport.usable,
-        relayReady: state.transport.connected,
         peerServerStatus: peerServerStatus,
       ),
     );
@@ -442,7 +436,7 @@ abstract class AppController extends Notifier<AppState> {
         !state.connectionReadiness.canPerform(ConnectionOperation.pair)) {
       state = state.copyWith(
         error: '',
-        problem: const UserProblem(code: UserProblemCode.pairingRequiresRelay),
+        problem: const UserProblem(code: UserProblemCode.connectionUnavailable),
       );
       return;
     }
@@ -453,7 +447,7 @@ abstract class AppController extends Notifier<AppState> {
       );
       return;
     }
-    final normalizedCode = pairingCodeDigits(code);
+    final normalizedCode = pairingCode(code);
     if (normalizedCode == null) {
       state = state.copyWith(
         error: '',
@@ -680,17 +674,14 @@ abstract class AppController extends Notifier<AppState> {
 
   bool get _devTorkaEnabled =>
       kDebugMode &&
-      _effectiveDevTorkaPairingCode.length == 8 &&
-      _effectiveDevTorkaPairingCode.runes.every(
-        (value) => value >= 0x30 && value <= 0x39,
-      );
+      isPairingCode(_effectiveDevTorkaPairingCode);
 
   String get _effectiveDevTorkaPairingCode {
     final override = debugTorkaPairingCodeOverride?.trim() ?? '';
     if (override.isNotEmpty) {
       return override;
     }
-    return _devTorkaPairingCode;
+    return '';
   }
 
   bool _isTorkaContact(ContactRecord contact) {
@@ -714,7 +705,7 @@ abstract class AppController extends Notifier<AppState> {
   }
 
   Future<void> _cancelBlockingTorkaOutboxIfNeeded(String code) async {
-    if (!_devTorkaEnabled || code == _effectiveDevTorkaPairingCode) {
+    if (!_devTorkaEnabled) {
       return;
     }
     final outstanding = state.outbox
@@ -892,7 +883,6 @@ abstract class AppController extends Notifier<AppState> {
     List<StartupStep> current,
     bool available, {
     required bool torReady,
-    required bool relayReady,
     required PeerServerStatus peerServerStatus,
   }) {
     if (!available) {
@@ -951,8 +941,8 @@ abstract class AppController extends Notifier<AppState> {
     steps = _startupSteps(
       steps,
       StartupStepKind.communication,
-      relayReady ? StartupStepState.ready : StartupStepState.pending,
-      relayReady
+      StartupStepState.ready,
+      available
           ? 'Komunikacja jest gotowa'
           : 'Endpoint P2P gotowy · oczekiwanie na relay',
     );

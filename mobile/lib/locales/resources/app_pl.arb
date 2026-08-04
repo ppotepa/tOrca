@@ -383,7 +383,6 @@
   ,"contactPeerUnknown": "nieznany"
   ,"contactPolicyP2pOnly": "Tylko P2P"
   ,"contactPolicyFallback": "P2P + live relay fallback"
-  ,"contactPolicyRelayOnly": "Tylko relay"
   ,"contactsNewContact": "Nowy kontakt"
   ,"contactsWaitingForSecureConversation": "Oczekiwanie na ustanowienie szyfrowanej rozmowy"
   ,"contactsTransportPolicy": "Polityka transportu"

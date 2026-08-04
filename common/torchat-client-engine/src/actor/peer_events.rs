@@ -140,6 +140,7 @@ impl ClientEngineActor {
                     PeerDeliveryTag::Message { message_id }
                     | PeerDeliveryTag::Receipt { message_id } => message_id.as_str(),
                     PeerDeliveryTag::ReadReceipt { receipt_id } => receipt_id.as_str(),
+                    PeerDeliveryTag::RelationshipRemovalAck { removal_id } => removal_id.as_str(),
                     PeerDeliveryTag::Ephemeral => "ephemeral",
                     PeerDeliveryTag::Probe => "probe",
                     PeerDeliveryTag::EndpointUpdate => "endpoint-update",
@@ -231,6 +232,20 @@ impl ClientEngineActor {
                             PeerAckKind::Persisted | PeerAckKind::Delivered | PeerAckKind::Rejected
                         ) {
                             self.database.complete_read_receipt(&receipt_id)?;
+                        }
+                        Ok(Vec::new())
+                    }
+                    PeerDeliveryTag::RelationshipRemovalAck { removal_id } => {
+                        if matches!(
+                            kind,
+                            PeerAckKind::Persisted
+                                | PeerAckKind::Delivered
+                                | PeerAckKind::Rejected
+                        ) {
+                            self.database.mark_relationship_removal_ack_dispatched(
+                                &removal_id,
+                                self.clock.now_ms() + retry_backoff_ms(1),
+                            )?;
                         }
                         Ok(Vec::new())
                     }

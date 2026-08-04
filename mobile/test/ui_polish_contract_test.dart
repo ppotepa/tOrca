@@ -20,7 +20,7 @@ void main() {
   test('shell uses the unified transport dock without global busy strip', () {
     final shell = File('lib/features/shell/main_shell.dart').readAsStringSync();
 
-    expect(shell, contains('TransportStatusDock('));
+    expect(shell, contains('ConnectionStatusLamp('));
     expect(shell, isNot(contains('CockpitStatusBar(')));
     expect(shell, isNot(contains('CompactCockpitStatusBar(')));
     expect(shell, contains('DesktopWorkspace('));

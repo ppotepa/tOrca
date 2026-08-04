@@ -103,8 +103,6 @@ pub enum PeerConnectionStatus {
 pub enum ContactTransportPolicy {
     #[default]
     PeerOnly,
-    PeerWithRelayFallback,
-    RelayOnly,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -310,9 +308,7 @@ pub struct ReceiptSendEffect {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum MessageTransportOutcome {
-    Forwarded,
     Delivered,
-    RecipientOffline,
     PeerPersisted,
     PeerDelivered,
     PeerUnavailable,

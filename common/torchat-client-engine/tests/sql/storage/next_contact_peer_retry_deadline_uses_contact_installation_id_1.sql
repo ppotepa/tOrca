@@ -12,7 +12,7 @@ INSERT INTO contacts (
                     ('conversation-2', 'contact-2', 'ACTIVE', 0, NULL, NULL, 1, 1);
                  INSERT INTO messages (
                     id, conversation_id, outgoing, body, state, created_at,
-                    relay_payload, ciphertext_hash, attempt_count, last_attempt_at,
+                    wire_ciphertext, ciphertext_hash, attempt_count, last_attempt_at,
                     next_attempt_at, ack_deadline, last_transport_error
                  ) VALUES
                     ('message-1', 'conversation-1', 1, 'hello', 'QUEUED', 100, NULL, NULL, 0, NULL, 0, NULL, NULL),

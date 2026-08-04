@@ -27,32 +27,15 @@ class ConnectionWarmupScreen extends StatelessWidget {
     final l10n = context.l10n;
     final statuses = [
       ...connection.components,
-      ConnectionComponentStatus(
-        component: ConnectionComponent.relay,
-        state: connection.communicationReady
-            ? ConnectionComponentState.ready
-            : connection.failed
-            ? ConnectionComponentState.failed
-            : connection.degraded
-            ? ConnectionComponentState.degraded
-            : ConnectionComponentState.starting,
-        detail: connection.communicationReady
-            ? l10n.startupCommunicationDescription
-            : localizeStartupStepDescription(
-                l10n,
-                connection.startupSteps.last.kind,
-              ),
-      ),
     ];
 
     return Scaffold(
       body: SafeArea(
         child: Column(
           children: [
-            TransportStatusDock(
+            ConnectionStatusLamp(
               phase: summary.phase,
               peerStatus: summary.peerServerStatus,
-              latencyMs: summary.latencyMs,
               readiness: connection,
             ),
             Expanded(
@@ -169,70 +152,34 @@ class _WarmupRow extends StatelessWidget {
       ConnectionComponentState.degraded => theme.warning,
       ConnectionComponentState.failed => theme.danger,
     };
-    final icon = switch (status.state) {
-      ConnectionComponentState.pending => Icons.circle_outlined,
-      ConnectionComponentState.starting => Icons.more_horiz,
-      ConnectionComponentState.ready => Icons.check,
-      ConnectionComponentState.degraded => Icons.priority_high,
-      ConnectionComponentState.failed => Icons.close,
-    };
-
-    return IntrinsicHeight(
+    return Padding(
+      padding: EdgeInsets.only(bottom: last ? 0 : 16),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: 28,
-            child: Column(
-              children: [
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 220),
-                  width: 22,
-                  height: 22,
-                  decoration: BoxDecoration(
-                    color: color.withValues(alpha: .16),
-                    shape: BoxShape.circle,
-                    border: Border.all(color: color.withValues(alpha: .75)),
-                  ),
-                  child: Icon(icon, size: 14, color: color),
-                ),
-                if (!last)
-                  Expanded(
-                    child: Container(
-                      width: 1,
-                      color: color.withValues(alpha: .35),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 12),
           Expanded(
-            child: Padding(
-              padding: EdgeInsets.only(bottom: last ? 0 : 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: TextStyle(color: color, fontWeight: FontWeight.w600),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    status.detail.isEmpty
-                        ? localizeConnectionComponentDescription(
-                            context.l10n,
-                            status.component,
-                          )
-                        : status.detail,
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  if (status.progress case final progress?) ...[
-                    const SizedBox(height: 6),
-                    LinearProgressIndicator(value: progress / 100),
-                  ],
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(color: color, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  status.detail.isEmpty
+                      ? localizeConnectionComponentDescription(
+                          context.l10n,
+                          status.component,
+                        )
+                      : status.detail,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                if (status.progress case final progress?) ...[
+                  const SizedBox(height: 6),
+                  LinearProgressIndicator(value: progress / 100),
                 ],
-              ),
+              ],
             ),
           ),
         ],

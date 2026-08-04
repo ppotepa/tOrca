@@ -213,7 +213,7 @@ function Get-TorChatAndroidApplicationReadiness {
         Where-Object { $_ -match '^startup-.*\.jsonl$' }
     $latest = $listing | Select-Object -First 1
     if (-not $latest) {
-        return [pscustomobject]@{ Engine = $false; PeerEndpoint = $false; Relay = $false; Ready = $false }
+        return [pscustomobject]@{ Engine = $false; PeerEndpoint = $false; Ready = $false }
     }
     $events = @(& adb -s $Device shell run-as org.torchat.mobile cat "no_backup/engine-logs/$latest" 2>$null) |
         ForEach-Object {
@@ -225,14 +225,12 @@ function Get-TorChatAndroidApplicationReadiness {
     $peerEndpointReady = @($events | Where-Object {
         $_.component -eq 'peer' -and $_.eventCode -eq 'peer_endpoint_changed' -and $_.message -match '(?:^|\s)status=Verified(?:\s|$)'
     }).Count -gt 0
-    $relayReady = @($events | Where-Object {
-        $_.component -eq 'relay' -and $_.eventCode -eq 'connection_state_changed' -and $_.message -match '^Connected:'
-    }).Count -gt 0
     [pscustomobject]@{
         Engine = $engineReady
         PeerEndpoint = $peerEndpointReady
-        Relay = $relayReady
-        Ready = $engineReady -and $peerEndpointReady -and $relayReady
+        # The rendezvous relay is connected only while pairing. Normal
+        # application readiness requires the local engine and onion endpoint.
+        Ready = $engineReady -and $peerEndpointReady
     }
 }
 
@@ -363,13 +361,13 @@ function Start-TorChatAndroidClient {
         $applicationReadiness = Get-TorChatAndroidApplicationReadiness -Device $resolvedDevice
         $applicationReady = $applicationReadiness.Ready
         $percent = [Math]::Min(99, [int](100 * $attempt / [Math]::Max(1,$FunctionalReadyAttempts)))
-        Write-TorChatStageProgress -Context $Context -Name 'Android application readiness' -Percent $percent -Detail "engine=$($applicationReadiness.Engine) p2p=$($applicationReadiness.PeerEndpoint) relay=$($applicationReadiness.Relay)"
+        Write-TorChatStageProgress -Context $Context -Name 'Android application readiness' -Percent $percent -Detail "engine=$($applicationReadiness.Engine) p2p=$($applicationReadiness.PeerEndpoint)"
         if ($applicationReady) { break }
         Start-Sleep -Seconds 1
     }
     if (-not $applicationReady) {
         $diagnostics = Save-TorChatAndroidDiagnostics -Context $Context -Device $resolvedDevice
-        throw "Android process started, but onion/relay did not reach APPLICATION_READY. Diagnostics: $diagnostics"
+        throw "Android process started, but the engine/onion endpoint did not reach APPLICATION_READY. Diagnostics: $diagnostics"
     }
     $initialPid = $appPid
     Start-Sleep -Seconds 5

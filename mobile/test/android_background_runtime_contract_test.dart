@@ -21,15 +21,13 @@ void main() {
     expect(manifest, isNot(contains('foregroundServiceType="dataSync"')));
   });
 
-  test('Android relay adapter does not own a reconnect loop', () {
-    final supervisor = File(
-      'android/app/src/main/kotlin/org/torchat/mobile/RelaySupervisor.kt',
+  test('Android foreground service has no global relay supervisor', () {
+    final service = File(
+      'android/app/src/main/kotlin/org/torchat/mobile/TorChatForegroundService.kt',
     ).readAsStringSync();
 
-    expect(supervisor, contains('Shared Rust relay supervisor'));
-    expect(supervisor, isNot(contains('while (scope.isActive)')));
-    expect(supervisor, isNot(contains('delay(retryDelayMs)')));
-    expect(supervisor, isNot(contains('Random.nextLong')));
+    expect(service, isNot(contains('RelaySupervisor')));
+    expect(service, isNot(contains('relay_ready')));
   });
 
   test('Android process lifecycle diagnostics remain registered', () {

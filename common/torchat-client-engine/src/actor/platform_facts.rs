@@ -61,7 +61,7 @@ impl ClientEngineActor {
                     Ok(())
                 })?;
                 runtime_events.push(transport_status_event(
-                    torchat_client_runtime::TransportComponent::Relay,
+                    torchat_client_runtime::TransportComponent::Engine,
                     relay_probe_state(&self.tor_status.phase),
                     self.tor_status.detail.clone(),
                     self.tor_status.progress,
@@ -83,12 +83,6 @@ impl ClientEngineActor {
                     self.relay.set_socks5_url(self.socks5_url.clone());
                     self.connection_state = ConnectionState::Disconnected;
                 }
-                if self.connect_requested
-                    && self.network_online
-                    && self.connection_state != ConnectionState::Connected
-                {
-                    self.schedule_relay_bootstrap_now();
-                }
                 if self.tor_status.phase == RuntimeStatusPhase::Starting
                     || self.tor_status.phase == RuntimeStatusPhase::Offline
                 {
@@ -103,7 +97,7 @@ impl ClientEngineActor {
                     Ok(())
                 })?;
                 runtime_events.push(transport_status_event(
-                    torchat_client_runtime::TransportComponent::Relay,
+                    torchat_client_runtime::TransportComponent::Engine,
                     relay_probe_state(&self.tor_status.phase),
                     self.tor_status.detail.clone(),
                     self.tor_status.progress,
@@ -132,7 +126,7 @@ impl ClientEngineActor {
                     Ok(())
                 })?;
                 runtime_events.push(transport_status_event(
-                    torchat_client_runtime::TransportComponent::Relay,
+                    torchat_client_runtime::TransportComponent::Engine,
                     torchat_client_runtime::TransportProbeState::Offline,
                     self.tor_status.detail.clone(),
                     None,
@@ -199,7 +193,6 @@ impl ClientEngineActor {
                 self.local_peer_endpoint = Some(endpoint);
                 self.refresh_peer_authorizations()?;
                 let _ = self.queue_endpoint_update_probes();
-                let _ = self.queue_relay_endpoint_bootstraps();
                 let _ = self.send_capability_offers_for_contacts();
                 let mut events = vec![torchat_client_runtime::RuntimeEvent::PeerEndpointChanged {
                     contact_id: self.identity.installation_id(),
@@ -267,9 +260,7 @@ impl ClientEngineActor {
                     self.requeue_after_disconnect()?;
                     self.relay.set_socks5_url(self.socks5_url.clone());
                     self.connection_state = ConnectionState::Connecting;
-                    if self.connect_requested {
-                        self.schedule_relay_bootstrap_now();
-                    }
+                    if self.connect_requested {}
                     let _ = self.queue_endpoint_update_probes();
                 }
                 Ok(Vec::new())

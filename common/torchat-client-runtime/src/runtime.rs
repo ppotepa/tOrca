@@ -99,7 +99,6 @@ where
     /// `commit_nickname` after performing the network effect outside SQLite.
     pub fn set_nickname(&mut self, nickname: String) -> RuntimeResult<RuntimeProfile> {
         let nickname = validate_nickname(nickname)?;
-        self.transport.update_profile(&nickname)?;
         self.commit_nickname(nickname)
     }
 
@@ -1475,7 +1474,6 @@ mod tests {
     struct FakeTransport {
         remote_inbox: Vec<PairingItem>,
         submitted: Vec<String>,
-        updated_profiles: Vec<String>,
     }
 
     impl RuntimeTransport for FakeTransport {
@@ -1499,13 +1497,9 @@ mod tests {
                 retry_attempt: 0,
             }
         }
-        fn update_profile(&mut self, nickname: &str) -> RuntimeResult<()> {
-            self.updated_profiles.push(nickname.to_owned());
-            Ok(())
-        }
         fn refresh_pairing_code(&mut self) -> RuntimeResult<crate::InviteCode> {
             Ok(crate::InviteCode {
-                code: "12345678".to_owned(),
+                code: "amber-birch-cobalt-dawn-ember-fjord".to_owned(),
                 expires_at: 100,
             })
         }
@@ -1722,7 +1716,6 @@ mod tests {
         let profile = runtime.set_nickname("Alice".to_owned()).unwrap();
 
         assert_eq!(profile.nickname, "Alice");
-        assert_eq!(runtime.transport.updated_profiles, ["Alice"]);
         assert!(matches!(
             runtime.drain_events().as_slice(),
             [RuntimeEvent::ProfileReady { .. }]
@@ -1758,11 +1751,13 @@ mod tests {
     #[test]
     fn submit_pairing_code_normalizes_digits_and_deduplicates_active_outbox() {
         let mut runtime = runtime();
-        let item = runtime.submit_pairing_code("1234 5678".to_owned()).unwrap();
+        let item = runtime
+            .submit_pairing_code("amber-birch-cobalt-dawn-ember-fjord".to_owned())
+            .unwrap();
         assert_eq!(item.pairing_id, "outbox-1");
 
         let error = runtime
-            .submit_pairing_code("12345678".to_owned())
+            .submit_pairing_code("amber-birch-cobalt-dawn-ember-fjord".to_owned())
             .unwrap_err();
         assert!(matches!(error, RuntimeError::Conflict(_)));
     }
@@ -1785,7 +1780,9 @@ mod tests {
             })
             .unwrap();
 
-        let item = runtime.submit_pairing_code("12345678".to_owned()).unwrap();
+        let item = runtime
+            .submit_pairing_code("amber-birch-cobalt-dawn-ember-fjord".to_owned())
+            .unwrap();
 
         assert_eq!(item.pairing_id, "outbox-1");
         let expired = runtime
@@ -1808,9 +1805,11 @@ mod tests {
 
         assert_eq!(
             runtime
-                .prepare_submit_pairing_code("1234 5678".to_owned())
+                .prepare_submit_pairing_code(
+                    "amber-birch-cobalt-dawn-ember-fjord".to_owned(),
+                )
                 .unwrap(),
-            "12345678"
+            "amber-birch-cobalt-dawn-ember-fjord"
         );
         assert_eq!(
             runtime.storage.pairing_outbox().unwrap()[0].state,
@@ -1899,7 +1898,7 @@ mod tests {
 
         runtime.set_nickname("Alice".to_owned()).unwrap();
         let code = runtime.refresh_pairing_code().unwrap();
-        assert_eq!(code.code, "12345678");
+        assert_eq!(code.code, "amber-birch-cobalt-dawn-ember-fjord");
     }
 
     #[test]
@@ -2571,7 +2570,7 @@ mod tests {
         let mut runtime = runtime_with_sending_message();
 
         let message = runtime
-            .apply_message_transport_outcome(Uuid::from_u128(1), MessageTransportOutcome::Forwarded)
+            .apply_message_transport_outcome(Uuid::from_u128(1), MessageTransportOutcome::PeerPersisted)
             .unwrap();
 
         assert_eq!(message.state, MessageState::Sent);
@@ -2581,7 +2580,7 @@ mod tests {
     fn retryable_failure_can_requeue_sent_message() {
         let mut runtime = runtime_with_sending_message();
         runtime
-            .apply_message_transport_outcome(Uuid::from_u128(1), MessageTransportOutcome::Forwarded)
+            .apply_message_transport_outcome(Uuid::from_u128(1), MessageTransportOutcome::PeerPersisted)
             .unwrap();
 
         let message = runtime
@@ -2598,7 +2597,7 @@ mod tests {
     fn delivered_message_stays_delivered_for_retryable_failure() {
         let mut runtime = runtime_with_sending_message();
         runtime
-            .apply_message_transport_outcome(Uuid::from_u128(1), MessageTransportOutcome::Forwarded)
+            .apply_message_transport_outcome(Uuid::from_u128(1), MessageTransportOutcome::PeerPersisted)
             .unwrap();
         runtime
             .apply_message_transport_outcome(Uuid::from_u128(1), MessageTransportOutcome::Delivered)
@@ -2750,7 +2749,7 @@ mod tests {
             .apply_message_transport_outcome(Uuid::from_u128(1), MessageTransportOutcome::Delivered)
             .unwrap();
         let repeated_forwarded = runtime
-            .apply_message_transport_outcome(Uuid::from_u128(1), MessageTransportOutcome::Forwarded)
+            .apply_message_transport_outcome(Uuid::from_u128(1), MessageTransportOutcome::PeerPersisted)
             .unwrap();
 
         assert_eq!(repeated_forwarded.state, MessageState::Delivered);
@@ -2763,7 +2762,7 @@ mod tests {
         let message = runtime
             .apply_message_transport_outcome(
                 Uuid::from_u128(1),
-                MessageTransportOutcome::RecipientOffline,
+                MessageTransportOutcome::PeerUnavailable,
             )
             .unwrap();
 
@@ -2776,7 +2775,7 @@ mod tests {
         runtime
             .apply_message_transport_outcome(
                 Uuid::from_u128(1),
-                MessageTransportOutcome::RecipientOffline,
+                MessageTransportOutcome::PeerUnavailable,
             )
             .unwrap();
 
@@ -2788,7 +2787,7 @@ mod tests {
         );
 
         let forwarded = runtime
-            .apply_message_transport_outcome(Uuid::from_u128(1), MessageTransportOutcome::Forwarded)
+            .apply_message_transport_outcome(Uuid::from_u128(1), MessageTransportOutcome::PeerPersisted)
             .unwrap();
         assert_eq!(forwarded.state, MessageState::Sent);
     }

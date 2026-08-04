@@ -125,18 +125,11 @@ class SequentialAppController extends base.AppController {
       if (readiness.onionServiceReady) {
         _startup.observePeerEndpoint(true);
       }
-      _startup.observeRelayReady(readiness.relayReady);
       final restoredTransport = RuntimeTorStatus(
-        phase: readiness.relayReady
+        phase: readiness.torReady
             ? TransportPhase.connected
-            : readiness.torReady
-            ? TransportPhase.connecting
             : TransportPhase.starting,
-        label: readiness.relayReady
-            ? 'connected'
-            : readiness.torReady
-            ? 'connecting'
-            : 'starting',
+        label: readiness.torReady ? 'tor_ready' : 'starting',
         detail: readiness.detail,
       );
       _startup.observeTransport(restoredTransport);
@@ -169,32 +162,12 @@ class SequentialAppController extends base.AppController {
       _startupComplete = true;
       _startup.observePeerEndpoint(snapshot.peerEndpointAvailable);
 
-      _applyPhase(SequentialStartupPhase.tor);
-      await _startup.waitForTor(generation);
-      _ensureGeneration(generation);
-
-      _applyPhase(SequentialStartupPhase.peerListener);
-      await _startup.waitForPeerListener(generation);
-      _ensureGeneration(generation);
-
-      _applyPhase(SequentialStartupPhase.onionService);
-      await _waitForOnionService(generation);
-      _ensureGeneration(generation);
-
-      _applyPhase(SequentialStartupPhase.relay);
-      await _startup.waitForRelay(generation);
-      _ensureGeneration(generation);
-
-      _applyPhase(SequentialStartupPhase.communication);
-      await Future<void>.delayed(Duration.zero);
-      _ensureGeneration(generation);
-
-      _phase = SequentialStartupPhase.complete;
-      _startupComplete = true;
       state = state.copyWith(
-        startupSteps: _startup.stepsFor(SequentialStartupPhase.complete),
-        peerServerStatus: PeerServerStatus.ready,
-        screen: state.profile.nickname.trim().isNotEmpty
+        startupSteps: _startup.stepsFor(SequentialStartupPhase.localData),
+        peerServerStatus: snapshot.peerEndpointAvailable
+            ? PeerServerStatus.ready
+            : PeerServerStatus.starting,
+        screen: snapshot.profile.nickname.trim().isNotEmpty
             ? base.ControllerScreen.main
             : base.ControllerScreen.nickname,
         isLoading: false,
@@ -235,11 +208,6 @@ class SequentialAppController extends base.AppController {
         }
       }
     }
-  }
-
-  Future<void> _waitForOnionService(int generation) async {
-    await _startup.waitForOnionService(generation);
-    _ensureGeneration(generation);
   }
 
   void _ensureGeneration(int expected) {
@@ -338,11 +306,6 @@ class SequentialAppController extends base.AppController {
             snapshot.state == TransportProbeState.ready) {
           _startup.observePeerListenerReady();
           state = state.copyWith(peerServerStatus: PeerServerStatus.ready);
-        }
-        if (snapshot.component == TransportComponent.relay) {
-          _startup.observeRelayReady(
-            snapshot.state == TransportProbeState.ready,
-          );
         }
       case ProfileReadyEvent():
         _repository.invalidateLocalCache();

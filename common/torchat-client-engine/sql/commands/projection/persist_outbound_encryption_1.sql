@@ -1,3 +1,3 @@
 UPDATE messages
-                 SET relay_payload = ?2, ciphertext_hash = ?3
+                 SET wire_ciphertext = ?2, ciphertext_hash = ?3
                  WHERE id = ?1;

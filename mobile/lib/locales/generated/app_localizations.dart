@@ -2330,12 +2330,6 @@ abstract class AppLocalizations {
   /// **'P2P + live relay fallback'**
   String get contactPolicyFallback;
 
-  /// No description provided for @contactPolicyRelayOnly.
-  ///
-  /// In en, this message translates to:
-  /// **'relay only'**
-  String get contactPolicyRelayOnly;
-
   /// No description provided for @contactsNewContact.
   ///
   /// In en, this message translates to:

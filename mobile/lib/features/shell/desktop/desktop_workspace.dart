@@ -498,8 +498,7 @@ class _ContactSidebarState extends State<_ContactSidebar> {
             _ContactFilter.online =>
               widget.presenceStore.snapshot(contact.id).availability ==
                   ContactAvailability.active,
-            _ContactFilter.p2p =>
-              contact.transportPolicy != ContactTransportPolicy.relayOnly,
+            _ContactFilter.p2p => true,
           };
           return matchesQuery && matchesFilter;
         })
@@ -568,9 +567,6 @@ class _ContactSidebarState extends State<_ContactSidebar> {
                     .availability;
                 final presenceLabel = _availabilityLabel(availability);
                 final route = switch (contact.transportPolicy) {
-                  ContactTransportPolicy.relayOnly => 'Tor relay',
-                  ContactTransportPolicy.peerWithRelayFallback =>
-                    'Tor P2P + live relay fallback',
                   ContactTransportPolicy.peerOnly => 'Tor P2P',
                 };
                 return '$presenceLabel · $route';
@@ -816,11 +812,6 @@ class _ConversationInspector extends StatelessWidget {
 
 String _inspectorRouteLabel(ContactRecord contact) =>
     switch (contact.transportPolicy) {
-      ContactTransportPolicy.relayOnly => 'Przez Tor relay',
-      ContactTransportPolicy.peerWithRelayFallback =>
-        contact.peerConnectionStatus == PeerConnectionStatus.connected
-            ? 'Bezpośrednio przez Tor P2P'
-            : 'P2P / live relay fallback',
       ContactTransportPolicy.peerOnly => 'Przez Tor P2P / oczekiwanie na peer',
     };
 
@@ -850,8 +841,6 @@ String _endpointLabel(PeerEndpointStatus status) => switch (status) {
 
 String _policyLabel(ContactTransportPolicy policy) => switch (policy) {
   ContactTransportPolicy.peerOnly => 'Tylko P2P',
-  ContactTransportPolicy.peerWithRelayFallback => 'P2P + live relay fallback',
-  ContactTransportPolicy.relayOnly => 'Tylko relay',
 };
 
 String _compactIdentifier(String value) {
@@ -859,4 +848,3 @@ String _compactIdentifier(String value) {
   if (clean.length <= 20) return clean;
   return '${clean.substring(0, 10)}…${clean.substring(clean.length - 8)}';
 }
-

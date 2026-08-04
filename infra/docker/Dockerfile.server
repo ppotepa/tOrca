@@ -4,7 +4,6 @@ COPY infra/docker/Cargo.server.toml ./Cargo.toml
 COPY Cargo.lock ./
 COPY common ./common
 COPY server ./server
-COPY infra/db ./infra/db
 RUN cargo build --release -p torchat-server
 
 FROM debian:bookworm-slim

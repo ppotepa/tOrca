@@ -84,7 +84,6 @@ abstract final class EngineContract {
   static const items = 'items';
   static const level = 'level';
   static const body = 'body';
-  static const previewText = 'previewText';
   static const typing = 'typing';
   static const focused = 'focused';
   static const idle = 'idle';
@@ -296,9 +295,7 @@ abstract final class EngineContract {
   static const pairingActionArchive = 'ARCHIVE';
   static const pairingActionCancel = 'CANCEL';
 
-  static const outcomeForwarded = 'FORWARDED';
   static const outcomeDelivered = 'DELIVERED';
-  static const outcomeRecipientOffline = 'RECIPIENT_OFFLINE';
   static const outcomePeerPersisted = 'PEER_PERSISTED';
   static const outcomePeerDelivered = 'PEER_DELIVERED';
   static const outcomePeerUnavailable = 'PEER_UNAVAILABLE';
@@ -308,8 +305,6 @@ abstract final class EngineContract {
   static const outcomePermanentFailure = 'PERMANENT_FAILURE';
 
   static const contactTransportPolicyPeerOnly = 'PEER_ONLY';
-  static const contactTransportPolicyPeerWithRelayFallback = 'PEER_WITH_RELAY_FALLBACK';
-  static const contactTransportPolicyRelayOnly = 'RELAY_ONLY';
 
   static const pairingOutcomeOfferReceived = 'OFFER_RECEIVED';
   static const pairingOutcomeRejectionReceived = 'REJECTION_RECEIVED';

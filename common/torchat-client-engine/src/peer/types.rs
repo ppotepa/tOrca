@@ -22,6 +22,7 @@ pub enum PeerDeliveryTag {
     Message { message_id: String },
     Receipt { message_id: String },
     ReadReceipt { receipt_id: String },
+    RelationshipRemovalAck { removal_id: String },
     Ephemeral,
     Probe,
     EndpointUpdate,
@@ -36,6 +37,9 @@ impl PeerDeliveryTag {
             Self::Message { message_id } => Some(format!("message:{message_id}")),
             Self::Receipt { message_id } => Some(format!("receipt:{message_id}")),
             Self::ReadReceipt { receipt_id } => Some(format!("read-receipt:{receipt_id}")),
+            Self::RelationshipRemovalAck { removal_id } => {
+                Some(format!("relationship-removal-ack:{removal_id}"))
+            }
             Self::Ephemeral
             | Self::Probe
             | Self::EndpointUpdate

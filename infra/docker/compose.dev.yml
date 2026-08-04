@@ -5,34 +5,17 @@ services:
       dockerfile: infra/docker/Dockerfile.server
     environment:
       TORCHAT_BIND: 0.0.0.0:8080
-      TORCHAT_DATABASE_URL: postgres://torchat:${TORCHAT_DATABASE_PASSWORD:?TORCHAT_DATABASE_PASSWORD is required}@postgres:5432/torchat
-      RUST_LOG: info
-      TORCHAT_ONION_URL: ${TORCHAT_ONION_URL:-}
-      TORCHAT_PAIRING_SECRET: ${TORCHAT_PAIRING_SECRET:?TORCHAT_PAIRING_SECRET is required}
-      TORCHAT_DEV_RESERVED_PAIRING_NICKNAME: Torka
-      TORCHAT_DEV_RESERVED_PAIRING_CODE: ${TORCHAT_TORKA_PAIRING_CODE:-42424242}
     ports:
       - "127.0.0.1:${TORCHAT_HTTP_PORT:-8080}:8080"
-    depends_on:
-      postgres:
-        condition: service_healthy
     read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: "none"
     tmpfs:
       - /tmp:size=64m,noexec,nosuid,nodev
-
-  postgres:
-    image: postgres:17-alpine
-    environment:
-      POSTGRES_DB: torchat
-      POSTGRES_USER: torchat
-      POSTGRES_PASSWORD: ${TORCHAT_DATABASE_PASSWORD:?TORCHAT_DATABASE_PASSWORD is required}
-    volumes:
-      - postgres_dev:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U torchat -d torchat"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
 
   tor:
     build:
@@ -60,7 +43,6 @@ services:
     environment:
       TORCHAT_ONION_URL: ${TORCHAT_ONION_URL:-}
       TORCHAT_NICKNAME: Torka
-      TORCHAT_TORKA_PAIRING_CODE: ${TORCHAT_TORKA_PAIRING_CODE:-42424242}
     depends_on:
       tor:
         condition: service_healthy
@@ -85,7 +67,6 @@ services:
     entrypoint: ["python3", "/usr/local/bin/torka-integration"]
     environment:
       TORCHAT_ONION_URL: ${TORCHAT_ONION_URL:-}
-      TORCHAT_TORKA_PAIRING_CODE: ${TORCHAT_TORKA_PAIRING_CODE:-42424242}
       TORCHAT_INTEGRATION_TIMEOUT_SECONDS: ${TORCHAT_INTEGRATION_TIMEOUT_SECONDS:-240}
     depends_on:
       torka:
@@ -95,7 +76,6 @@ services:
     restart: "no"
 
 volumes:
-  postgres_dev:
   tor_dev:
   torka_dev:
   torka_integration_dev:

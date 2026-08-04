@@ -158,7 +158,7 @@ void main() {
     expect(message.state, MessageState.delivered);
 
     final inviteCode = data.pairingCode;
-    expect(inviteCode.code, '12345678');
+    expect(inviteCode.code, 'amber-birch-cobalt-dawn-ember-fjord');
 
     final inbox = data.pairingInboxItem;
     expect(inbox.id, 'pairing-1');
@@ -253,7 +253,7 @@ void main() {
   test(
     'auto-paired Torka starts a conversation even when the contact still has a fallback nickname',
     () async {
-      debugTorkaPairingCodeOverride = '42424242';
+      debugTorkaPairingCodeOverride = 'amber-birch-cobalt-dawn-ember-fjord';
       addTearDown(() {
         debugTorkaPairingCodeOverride = null;
       });
@@ -297,7 +297,7 @@ void main() {
   test(
     'existing fallback-named Torka contact is still recognized after controller restart',
     () async {
-      debugTorkaPairingCodeOverride = '42424242';
+      debugTorkaPairingCodeOverride = 'amber-birch-cobalt-dawn-ember-fjord';
       addTearDown(() {
         debugTorkaPairingCodeOverride = null;
       });
@@ -344,7 +344,7 @@ void main() {
         state.startupSteps
             .firstWhere((step) => step.kind == StartupStepKind.communication)
             .state,
-        StartupStepState.pending,
+        StartupStepState.ready,
       );
     },
   );
@@ -352,7 +352,7 @@ void main() {
   test(
     'manual pairing cancels the blocking Torka request before retrying',
     () async {
-      debugTorkaPairingCodeOverride = '42424242';
+      debugTorkaPairingCodeOverride = 'amber-birch-cobalt-dawn-ember-fjord';
       addTearDown(() {
         debugTorkaPairingCodeOverride = null;
       });
@@ -368,11 +368,11 @@ void main() {
       await controller.initialize();
       runtime.resetSubmitPairingMetrics();
 
-      await controller.submitPairingCode('87654321');
+      await controller.submitPairingCode('amber-birch-cobalt-dawn-ember-fjord');
 
       final state = container.read(appControllerProvider);
       expect(runtime.cancelPairingCalls, ['pairing-out']);
-      expect(runtime.lastSubmittedPairingCode, '87654321');
+      expect(runtime.lastSubmittedPairingCode, 'amber-birch-cobalt-dawn-ember-fjord');
       expect(runtime.submitPairingCalls, 1);
       expect(state.outbox, isNotEmpty);
       expect(state.outbox.last.status, InviteState.pending);
@@ -382,7 +382,7 @@ void main() {
   test(
     'Torka watchdog materializes the contact even when no runtime event arrives',
     () async {
-      debugTorkaPairingCodeOverride = '42424242';
+      debugTorkaPairingCodeOverride = 'amber-birch-cobalt-dawn-ember-fjord';
       debugTorkaWatchdogIntervalOverride = const Duration(milliseconds: 5);
       debugTorkaWatchdogMaxAttemptsOverride = 20;
       addTearDown(() {
@@ -429,7 +429,7 @@ void main() {
       final controller = container.read(appControllerProvider.notifier);
       await controller.initialize();
 
-      await controller.submitPairingCode('87654321');
+      await controller.submitPairingCode('amber-birch-cobalt-dawn-ember-fjord');
       expect(
         container.read(appControllerProvider).outbox.single.status,
         InviteState.pending,
@@ -470,14 +470,14 @@ void main() {
       );
       await Future<void>.delayed(Duration.zero);
 
-      await controller.submitPairingCode('87654321');
+      await controller.submitPairingCode('amber-birch-cobalt-dawn-ember-fjord');
 
       final state = container.read(appControllerProvider);
       expect(runtime.submitPairingCalls, 0);
       expect(state.outbox, isEmpty);
       expect(
         state.problem?.code,
-        UserProblemCode.pairingRequiresRelay,
+        UserProblemCode.connectionUnavailable,
       );
     },
   );
@@ -495,7 +495,7 @@ void main() {
 
     final controller = container.read(appControllerProvider.notifier);
     await controller.initialize();
-    await controller.submitPairingCode('87654321');
+    await controller.submitPairingCode('amber-birch-cobalt-dawn-ember-fjord');
 
     final state = container.read(appControllerProvider);
     expect(state.error, contains('nieprawidłowy albo wygasł'));
@@ -711,7 +711,7 @@ void main() {
               onShowInvite: () {},
               onUpdateContactSettings: (_, _, _, _, _) async {},
               fingerprint: 'SELF',
-              ownInvite: '12345678',
+              ownInvite: 'amber-birch-cobalt-dawn-ember-fjord',
               error: '',
             ),
           ),
@@ -869,14 +869,14 @@ void main() {
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
   });
 
-  testWidgets('pairing code dialog groups digits and shows readable timer', (
+  testWidgets('pairing code dialog groups words and shows readable timer', (
     tester,
   ) async {
     final expiresAt = DateTime.now().millisecondsSinceEpoch ~/ 1000 + 90;
     await tester.pumpWidget(
       MaterialApp(
         home: PairingCodeDialog(
-          initialCode: '12345678',
+          initialCode: 'amber-birch-cobalt-dawn-ember-fjord',
           initialExpiresAt: expiresAt,
           refresh: () async => null,
           onChanged: (_) {},
@@ -884,7 +884,7 @@ void main() {
       ),
     );
 
-    expect(find.text('1234 5678'), findsOneWidget);
+    expect(find.text('amber birch cobalt dawn ember fjord'), findsOneWidget);
     expect(find.textContaining('Ważny jeszcze 1:'), findsOneWidget);
   });
 
@@ -896,7 +896,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: PairingCodeDialog(
-          initialCode: '12345678',
+          initialCode: 'amber-birch-cobalt-dawn-ember-fjord',
           initialExpiresAt: expiresAt,
           refresh: () => completer.future,
           onChanged: (_) {},
@@ -920,12 +920,12 @@ void main() {
 
     completer.complete(
       InviteCode(
-        code: '87654321',
+        code: 'amber-birch-cobalt-dawn-ember-fjord',
         expiresAt: DateTime.now().millisecondsSinceEpoch ~/ 1000 + 60,
       ),
     );
     await tester.pump(const Duration(milliseconds: 500));
-    expect(find.text('8765 4321'), findsOneWidget);
+    expect(find.text('amber birch cobalt dawn ember fjord'), findsOneWidget);
   });
 
   testWidgets('pairing code dialog shows a timed contact approval', (
@@ -935,7 +935,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: PairingCodeDialog(
-          initialCode: '12345678',
+          initialCode: 'amber-birch-cobalt-dawn-ember-fjord',
           initialExpiresAt: expiresAt,
           refresh: () async => null,
           onChanged: (_) {},
@@ -962,7 +962,7 @@ void main() {
     );
     expect(find.text('Akceptuj'), findsOneWidget);
     expect(find.text('Odrzuć'), findsOneWidget);
-    expect(find.text('1234 5678'), findsNothing);
+    expect(find.text('amber birch cobalt dawn ember fjord'), findsNothing);
 
     await tester.tap(find.text('Akceptuj'));
     await tester.pump(const Duration(seconds: 2));
@@ -1076,7 +1076,7 @@ void main() {
     expect(find.text('--:--'), findsNothing);
   });
 
-  testWidgets('desktop fallback accepts only an eight digit invite code', (
+  testWidgets('desktop fallback accepts only a six word invite code', (
     tester,
   ) async {
     await tester.pumpWidget(
@@ -1088,7 +1088,10 @@ void main() {
     await tester.pump();
     expect(find.text('Kod musi zawierać dokładnie 8 cyfr.'), findsOneWidget);
 
-    await tester.enterText(find.byType(TextField), '1234 5678');
+    await tester.enterText(
+      find.byType(TextField),
+      'amber birch cobalt dawn ember fjord',
+    );
     await tester.tap(find.widgetWithText(FilledButton, 'Dodaj kontakt'));
     await tester.pump(const Duration(milliseconds: 500));
     // Without a connected runtime the page remains mounted and exposes the
@@ -1118,7 +1121,6 @@ class _EventRuntime implements ClientRuntime {
         torReady: true,
         peerListenerReady: true,
         onionServiceReady: true,
-        relayReady: true,
         generation: 1,
         detail: 'test runtime ready',
       );
@@ -1422,7 +1424,6 @@ class _StatefulRuntime implements ClientRuntime {
         torReady: true,
         peerListenerReady: emitPeerReady,
         onionServiceReady: emitPeerReady,
-        relayReady: true,
         generation: 1,
         detail: 'test runtime ready',
       );
@@ -1439,7 +1440,10 @@ class _StatefulRuntime implements ClientRuntime {
 
   @override
   Future<InviteCode?> refreshPairingCode() async =>
-      const InviteCode(code: '12345678', expiresAt: 1760000060);
+      const InviteCode(
+        code: 'amber-birch-cobalt-dawn-ember-fjord',
+        expiresAt: 1760000060,
+      );
 
   @override
   Future<RuntimeProfile> setNickname(String nickname) async => RuntimeProfile(

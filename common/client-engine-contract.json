@@ -170,9 +170,7 @@
     "CANCELLED"
   ],
   "messageTransportOutcomes": [
-    "FORWARDED",
     "DELIVERED",
-    "RECIPIENT_OFFLINE",
     "PEER_PERSISTED",
     "PEER_DELIVERED",
     "PEER_UNAVAILABLE",
@@ -182,9 +180,7 @@
     "PERMANENT_FAILURE"
   ],
   "contactTransportPolicies": [
-    "PEER_ONLY",
-    "PEER_WITH_RELAY_FALLBACK",
-    "RELAY_ONLY"
+    "PEER_ONLY"
   ],
   "pairingPeerOutcomes": [
     "OFFER_RECEIVED",

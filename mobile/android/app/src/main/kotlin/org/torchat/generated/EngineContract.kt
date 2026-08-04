@@ -89,7 +89,6 @@ object EngineContract {
     const val ITEMS = "items"
     const val LEVEL = "level"
     const val BODY = "body"
-    const val PREVIEW_TEXT = "previewText"
     const val TYPING = "typing"
     const val FOCUSED = "focused"
     const val IDLE = "idle"
@@ -301,9 +300,7 @@ object EngineContract {
     const val PAIRING_ACTION_ARCHIVE = "ARCHIVE"
     const val PAIRING_ACTION_CANCEL = "CANCEL"
 
-    const val OUTCOME_FORWARDED = "FORWARDED"
     const val OUTCOME_DELIVERED = "DELIVERED"
-    const val OUTCOME_RECIPIENT_OFFLINE = "RECIPIENT_OFFLINE"
     const val OUTCOME_PEER_PERSISTED = "PEER_PERSISTED"
     const val OUTCOME_PEER_DELIVERED = "PEER_DELIVERED"
     const val OUTCOME_PEER_UNAVAILABLE = "PEER_UNAVAILABLE"
@@ -313,8 +310,6 @@ object EngineContract {
     const val OUTCOME_PERMANENT_FAILURE = "PERMANENT_FAILURE"
 
     const val CONTACT_TRANSPORT_POLICY_PEER_ONLY = "PEER_ONLY"
-    const val CONTACT_TRANSPORT_POLICY_PEER_WITH_RELAY_FALLBACK = "PEER_WITH_RELAY_FALLBACK"
-    const val CONTACT_TRANSPORT_POLICY_RELAY_ONLY = "RELAY_ONLY"
 
     const val PAIRING_OUTCOME_OFFER_RECEIVED = "OFFER_RECEIVED"
     const val PAIRING_OUTCOME_REJECTION_RECEIVED = "REJECTION_RECEIVED"

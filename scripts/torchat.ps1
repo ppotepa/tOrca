@@ -16,6 +16,7 @@ param(
     [ValidateSet('if-changed','always','skip')][string]$InstallPolicy = 'if-changed',
     [ValidateSet('restart','start','skip')][string]$RunPolicy = 'restart',
     [ValidateSet('development','onion','strict')][string]$Readiness = 'development',
+    [ValidateSet('prompt','emulator','android-desktop')][string]$ClientMode = 'prompt',
 
     [Alias('DeviceAddress')][string]$Device = 'auto',
     [string]$PairAddress,
@@ -58,6 +59,8 @@ Examples:
   .\scripts\torchat.ps1 deploy all
   .\scripts\torchat.ps1 deploy android -Device auto
   .\scripts\torchat.ps1 deploy all -Device all
+  .\scripts\torchat.ps1 deploy all -ClientMode emulator
+  .\scripts\torchat.ps1 deploy all -ClientMode android-desktop
   .\scripts\torchat.ps1 deploy-clean
   .\scripts\torchat.ps1 run android -Device auto
   .\scripts\torchat.ps1 stack restart -OnionPolicy preserve
@@ -150,6 +153,23 @@ if ($Command -eq 'clean' -and $Target -eq 'all' -and -not $Confirm -and -not $Dr
 if ($Release) { $Configuration = 'release' }
 if ($ClientDataPolicy -eq 'clean') { $ClientDataPolicy = 'reset' }
 
+if ($Command -eq 'deploy' -and $Target -eq 'all' -and $ClientMode -eq 'prompt') {
+    $interactive = $false
+    try { $interactive = $null -ne $Host.UI.RawUI } catch { $interactive = $false }
+    if ($interactive -and -not $DryRun) {
+        Write-Host ''
+        Write-Host 'Client deployment target:' -ForegroundColor Cyan
+        Write-Host '  [1] Android emulator/device only'
+        Write-Host '  [2] Android APK + Windows desktop'
+        do { $choice = Read-Host 'Choose 1 or 2 (default 2)' } while ($choice -and $choice -notin @('1','2'))
+        $ClientMode = if ($choice -eq '1') { 'emulator' } else { 'android-desktop' }
+    } else {
+        # CI and redirected stdin must never block. The full client matrix is
+        # the safe default outside an interactive developer shell.
+        $ClientMode = 'android-desktop'
+    }
+}
+
 $allowedCommands = @('status','stack','build','deploy','run','stop','test','clean','logs','device')
 if ($allowedCommands -notcontains $Command) {
     Show-TorChatHelp
@@ -210,6 +230,7 @@ try {
         PairCode = $PairCode
         NoCache = [bool]$NoCache
         Confirm = [bool]$Confirm
+        ClientMode = $ClientMode
     }
     [void](Invoke-TorChatCommand -Context $context -EnvironmentState $environmentState -Command $Command -Target $Target -Options $options)
 } catch {

@@ -240,9 +240,7 @@ const generatedPairingAvailableActions = <String>[
 ];
 
 const generatedMessageTransportOutcomes = <String>[
-  'FORWARDED',
   'DELIVERED',
-  'RECIPIENT_OFFLINE',
   'PEER_PERSISTED',
   'PEER_DELIVERED',
   'PEER_UNAVAILABLE',
@@ -272,4 +270,3 @@ const generatedPeerConnectionStatuses = <String>[
   'CONNECTED',
   'BACKOFF',
 ];
-

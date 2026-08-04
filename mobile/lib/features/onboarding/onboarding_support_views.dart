@@ -401,10 +401,8 @@ class NicknameScreen extends StatelessWidget {
     body: SafeArea(
       child: Column(
         children: [
-          TransportStatusDock(
-            status: localizeTransportPhase(context.l10n, transport.phase),
+          ConnectionStatusLamp(
             phase: transport.phase,
-            latencyMs: transport.latencyMs,
             desktop: true,
           ),
           Expanded(

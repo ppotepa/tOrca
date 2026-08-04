@@ -93,35 +93,25 @@ if ($androidModule -match "Where-Object\s*\{\s*`$_\s*-notmatch\s*'\\\._adb-tls-c
 
 $bootstrapPath = Join-Path (Split-Path -Parent $scriptsRoot) 'infra\host\bootstrap-staging.sh'
 $bootstrap = Get-Content -LiteralPath $bootstrapPath -Raw
-foreach ($requiredPattern in @(
-    'secrets/pairing_secret',
-    'head -c 64',
-    'chmod 0600',
-    'chown'
-)) {
-    if ($bootstrap -match [regex]::Escape($requiredPattern)) { continue }
+foreach ($forbiddenPattern in @('pairing_secret', 'database_url', 'postgres', 'pg_isready')) {
+    if ($bootstrap -notmatch [regex]::Escape($forbiddenPattern)) { continue }
     [void]$failures.Add([pscustomobject]@{
         File = $bootstrapPath
         Line = 0
         Column = 0
-        Message = "Staging bootstrap is missing pairing-secret contract: $requiredPattern"
+        Message = "Staging bootstrap still contains removed database/relay secret contract: $forbiddenPattern"
     })
-    Write-Host "[FAIL] bootstrap-staging.sh missing $requiredPattern" -ForegroundColor Red
+    Write-Host "[FAIL] bootstrap-staging.sh contains $forbiddenPattern" -ForegroundColor Red
 }
 
 $composeHostPath = Join-Path (Split-Path -Parent $scriptsRoot) 'infra\docker\compose.host.yml'
 $composeHost = Get-Content -LiteralPath $composeHostPath -Raw
 foreach ($requiredPattern in @(
     'replicas:\s*1',
-    'TORCHAT_PAIRING_SECRET_FILE:\s*/run/secrets/pairing_secret',
-    'secrets:\s*- database_url\s*- pairing_secret',
-    'condition:\s*service_healthy',
-    'pg_isready -U torchat -d torchat',
+    'read_only:\s*true',
+    'logging:\s*\n\s*driver:\s*"none"',
     'test -s /var/lib/tor/hidden_service/hostname',
-    'TORCHAT_SECURE_ROOT:\?TORCHAT_SECURE_ROOT is required',
-    'driver:\s*json-file',
-    'max-size:\s*10m',
-    'max-file:\s*"7"'
+    'TORCHAT_SECURE_ROOT:\?TORCHAT_SECURE_ROOT is required'
 )) {
     if ($composeHost -match $requiredPattern) { continue }
     [void]$failures.Add([pscustomobject]@{
@@ -131,6 +121,16 @@ foreach ($requiredPattern in @(
         Message = "Host Compose is missing deployment/secret/health contract: $requiredPattern"
     })
     Write-Host "[FAIL] compose.host.yml missing $requiredPattern" -ForegroundColor Red
+}
+foreach ($forbiddenPattern in @('postgres', 'database_url', 'pairing_secret', 'pg_isready')) {
+    if ($composeHost -notmatch [regex]::Escape($forbiddenPattern)) { continue }
+    [void]$failures.Add([pscustomobject]@{
+        File = $composeHostPath
+        Line = 0
+        Column = 0
+        Message = "Host Compose still contains removed database contract: $forbiddenPattern"
+    })
+    Write-Host "[FAIL] compose.host.yml contains $forbiddenPattern" -ForegroundColor Red
 }
 
 if ($failures.Count -gt 0) {

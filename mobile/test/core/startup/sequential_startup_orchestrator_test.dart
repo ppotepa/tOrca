@@ -11,12 +11,10 @@ void main() {
     startup.observeTransport(
       const RuntimeTorStatus(phase: TransportPhase.connected),
     );
-    startup.observeRelayReady(true);
     startup.observePeerListenerReady();
     startup.observePeerEndpoint(true);
 
     await startup.waitForTor(generation);
-    await startup.waitForRelay(generation);
     await startup.waitForPeerListener(generation);
     await startup.waitForOnionService(generation);
 
@@ -28,7 +26,7 @@ void main() {
   test('new generation cancels a waiter from the previous warmup', () async {
     final startup = SequentialStartupOrchestrator();
     final firstGeneration = startup.begin();
-    final oldWait = startup.waitForRelay(
+    final oldWait = startup.waitForTor(
       firstGeneration,
       timeout: const Duration(seconds: 2),
     );
@@ -42,13 +40,13 @@ void main() {
     final startup = SequentialStartupOrchestrator();
     startup.begin();
 
-    final steps = startup.stepsFor(SequentialStartupPhase.relay);
+    final steps = startup.stepsFor(SequentialStartupPhase.onionService);
     final running = steps
         .where((step) => step.state == StartupStepState.running)
         .toList();
 
     expect(running, hasLength(1));
-    expect(running.single.kind, StartupStepKind.relay);
+    expect(running.single.kind, StartupStepKind.onionService);
     expect(
       steps.firstWhere((step) => step.kind == StartupStepKind.engine).state,
       StartupStepState.ready,
@@ -67,7 +65,7 @@ void main() {
       steps
           .firstWhere((step) => step.kind == StartupStepKind.onionService)
           .state,
-      StartupStepState.ready,
+      StartupStepState.running,
     );
   });
 

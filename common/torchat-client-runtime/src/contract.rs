@@ -168,7 +168,6 @@ pub enum RuntimeEvent {
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum TransportComponent {
     Engine,
-    Relay,
     Peer,
 }
 
@@ -191,7 +190,6 @@ pub struct StartupReadinessSnapshot {
     pub tor_ready: bool,
     pub peer_listener_ready: bool,
     pub onion_service_ready: bool,
-    pub relay_ready: bool,
     pub generation: u64,
     pub detail: String,
 }

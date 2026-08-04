@@ -10,7 +10,7 @@ pub enum FaultPoint {
     AfterOutboxBeforeMlsAnchor,
     AfterMlsAnchorBeforeSqlCommit,
     AfterSqlCommitBeforeAnchorFinalize,
-    AfterRelayForwarded,
+    AfterPeerPersisted,
     AfterPeerPersistedAck,
     AfterPeerDeliveredAck,
     BeforeRelationshipRemovalAck,
