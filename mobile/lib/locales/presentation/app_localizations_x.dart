@@ -3,14 +3,42 @@ import 'package:flutter/widgets.dart';
 import '../generated/app_localizations.dart';
 
 extension AppLocalizationsContext on BuildContext {
-  AppLocalizations get l10n =>
-      AppLocalizations.of(this) ?? lookupAppLocalizations(const Locale('pl'));
+  AppLocalizations get l10n => AppLocalizations.of(this)!;
 }
 
 extension AppLocalizationsUiCopy on AppLocalizations {
   bool get _isPolish => localeName.toLowerCase().startsWith('pl');
 
   String get uiUnknownUser => _isPolish ? 'Użytkownik' : 'User';
+  String get uiOperationFailed => problemOperationFailed;
+  String get uiPairingRefreshFailed => _isPolish
+      ? 'Nie udało się odświeżyć kodu.'
+      : 'The pairing code could not be refreshed.';
+  String get uiPairingFinalizing => pairingAcceptedDescription;
+  String get uiPairingWaitingForMls => _isPolish
+      ? 'Zaproszenie zaakceptowano. Kontakt pojawi się po zakończeniu bezpiecznej wymiany.'
+      : 'The invitation was accepted. The contact will appear after the secure exchange completes.';
+  String get uiImageCacheLoadFailed => _isPolish
+      ? 'Nie udało się odczytać magazynu obrazów.'
+      : 'The image store could not be read.';
+  String get uiImagePreferenceSaveFailed => _isPolish
+      ? 'Nie udało się zapisać ustawienia pobierania obrazów.'
+      : 'The image download preference could not be saved.';
+  String get uiImageCacheClearFailed => _isPolish
+      ? 'Nie udało się wyczyścić pamięci obrazów.'
+      : 'The image cache could not be cleared.';
+  String get uiMainWorkspaceSemantics =>
+      _isPolish ? 'Główna przestrzeń TorChat' : 'TorChat main workspace';
+  String get uiChats => _isPolish ? 'Czaty' : 'Chats';
+  String get uiContacts => _isPolish ? 'Kontakty' : 'Contacts';
+  String uiUnreadContactsSemantics(int count) => _isPolish
+      ? '$count kontaktów z nieprzeczytanymi wiadomościami'
+      : '$count contacts with unread messages';
+  String get uiStateReady => _isPolish ? 'gotowe' : 'ready';
+  String get uiStateFailed => _isPolish ? 'błąd' : 'failed';
+  String get uiStateDegraded => _isPolish ? 'ograniczone' : 'degraded';
+  String get uiStateStarting => _isPolish ? 'uruchamianie' : 'starting';
+  String get uiStateError => _isPolish ? 'błąd' : 'error';
 
   String uiPairingAccepted(String name) => _isPolish
       ? '$name przyjął Twoje zaproszenie.'
@@ -36,7 +64,6 @@ extension AppLocalizationsUiCopy on AppLocalizations {
       : 'Reset local state by deploying with the reset option.';
 
   String get uiEditNickname => _isPolish ? 'Edytuj nick' : 'Edit nickname';
-
   String get uiSave => _isPolish ? 'Zapisz' : 'Save';
 
   String get uiSettingsSaveFailed => _isPolish
