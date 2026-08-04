@@ -146,6 +146,9 @@ class MainShell extends ConsumerWidget {
     final selectedPresence = selectedContact == null
         ? const ContactPresenceSnapshot(contactId: '')
         : presence.snapshot(selectedContact!.id);
+    final localizedError = problem == null
+        ? error
+        : localizeProblem(context.l10n, problem!);
     return tab == MobileTab.chats
         ? ReleaseChatView(
             selected: selectedContact,
@@ -162,9 +165,7 @@ class MainShell extends ConsumerWidget {
             onLoadOlderMessages: () =>
                 onLoadOlderMessages(selectedConversation ?? ''),
             onBack: onBack,
-            error: problem == null
-                ? error
-                : localizeProblem(context.l10n, problem!),
+            error: localizedError,
             showConversationListWhenEmpty: !desktop,
             canSend:
                 selectedConversation != null &&
@@ -206,9 +207,7 @@ class MainShell extends ConsumerWidget {
             onUpdateContactSettings: onUpdateContactSettings,
             fingerprint: fingerprint,
             ownInvite: ownInvite,
-            error: problem == null
-                ? error
-                : localizeProblem(context.l10n, problem!),
+            error: localizedError,
             showContactList: !desktop,
           );
   }
@@ -226,7 +225,7 @@ class MainShell extends ConsumerWidget {
           if (desktop) {
             return Scaffold(
               body: Semantics(
-                label: 'Główna przestrzeń TorChat',
+                label: context.l10n.uiMainWorkspaceSemantics,
                 container: true,
                 child: Column(
                   children: [
@@ -271,7 +270,7 @@ class MainShell extends ConsumerWidget {
                             mainAxisSize: MainAxisSize.min,
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('TorChat'),
+                              Text(context.l10n.appTitle),
                               Text(
                                 '@$nickname',
                                 maxLines: 1,
@@ -331,15 +330,15 @@ class MainShell extends ConsumerWidget {
                       NavigationDestination(
                         icon: CounterBadge(
                           count: unreadContactCount,
-                          semanticLabel:
-                              '$unreadContactCount kontaktów z nieprzeczytanymi wiadomościami',
+                          semanticLabel: context.l10n
+                              .uiUnreadContactsSemantics(unreadContactCount),
                           child: const ThemedIcon(Icons.chat_bubble_outline),
                         ),
-                        label: 'Czaty',
+                        label: context.l10n.uiChats,
                       ),
-                      const NavigationDestination(
-                        icon: ThemedIcon(Icons.people_outline),
-                        label: 'Kontakty',
+                      NavigationDestination(
+                        icon: const ThemedIcon(Icons.people_outline),
+                        label: context.l10n.uiContacts,
                       ),
                     ],
                   )
