@@ -42,6 +42,76 @@ void main() {
     expect(store.current?.profile.nickname, 'Alice');
   });
 
+  test('newer engine projection wins over a synthetic generation', () {
+    final store = ApplicationStateStore();
+    store.hydrate(
+      const ApplicationSnapshot(
+        generation: 20,
+        projectionStoreId: 'engine-store',
+        projectionRevision: 4,
+      ),
+    );
+
+    final accepted = store.hydrate(
+      const ApplicationSnapshot(
+        generation: 3,
+        projectionStoreId: 'engine-store',
+        projectionRevision: 5,
+        contacts: [
+          ContactRecord(
+            id: 'bob',
+            nickname: 'Bob',
+            fingerprint: 'AA',
+            publicKey: 'key',
+            verified: true,
+          ),
+        ],
+      ),
+    );
+
+    expect(accepted, isTrue);
+    expect(store.current?.projectionRevision, 5);
+    expect(store.current?.contacts.single.id, 'bob');
+  });
+
+  test('older engine projection loses despite a newer generation', () {
+    final store = ApplicationStateStore();
+    store.hydrate(
+      const ApplicationSnapshot(
+        generation: 3,
+        projectionStoreId: 'engine-store',
+        projectionRevision: 5,
+      ),
+    );
+
+    final accepted = store.hydrate(
+      const ApplicationSnapshot(
+        generation: 30,
+        projectionStoreId: 'engine-store',
+        projectionRevision: 4,
+      ),
+    );
+
+    expect(accepted, isFalse);
+    expect(store.current?.projectionRevision, 5);
+  });
+
+  test('authoritative projection replaces a legacy higher generation', () {
+    final store = ApplicationStateStore();
+    store.hydrate(const ApplicationSnapshot(generation: 100));
+
+    final accepted = store.hydrate(
+      const ApplicationSnapshot(
+        generation: 1,
+        projectionStoreId: 'engine-store',
+        projectionRevision: 1,
+      ),
+    );
+
+    expect(accepted, isTrue);
+    expect(store.current?.projectionStoreId, 'engine-store');
+  });
+
   test('store marks retained shell stale without deleting visible data', () {
     final store = ApplicationStateStore();
     store.hydrate(

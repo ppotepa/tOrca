@@ -68,6 +68,9 @@ impl ClientEngineActor {
                     .verify_welcome(&envelope.sender, &self.identity.installation_id())
                     .map_err(EngineError::InvalidCommand)?;
                 let peer_endpoint = payload.welcome_peer_endpoint().cloned();
+                let peer_capability = payload.welcome_peer_capability().map(|(id, secret)| {
+                    (id.to_owned(), secret.to_owned())
+                });
                 if let Some(endpoint) = &peer_endpoint {
                     endpoint
                         .validate(self.clock.now_ms() / 1_000)
@@ -162,6 +165,26 @@ impl ClientEngineActor {
                 );
                 match committed {
                     Ok(mut runtime_events) => {
+                        if let Some((capability_id, secret)) = peer_capability {
+                            let secret = URL_SAFE_NO_PAD.decode(secret).map_err(|_| {
+                                EngineError::InvalidCommand(
+                                    "invalid Welcome capability secret".to_owned(),
+                                )
+                            })?;
+                            self.database.put_peer_endpoint_capability(
+                                &sender.installation_id,
+                                &capability_id,
+                                &secret,
+                                peer_endpoint.as_ref().map_or(1, |value| value.sequence),
+                                self.clock.now_ms() / 1_000,
+                                peer_endpoint.as_ref().and_then(|value| value.expires_at),
+                            )?;
+                            self.database.put_contact_endpoint_capability(
+                                &sender.installation_id,
+                                &pending_invite.local_capability_id,
+                                &pending_invite.local_capability_secret,
+                            )?;
+                        }
                         let (_, mut reconcile_events) = self.with_runtime(|runtime| {
                             runtime.reconcile_outbox_pairing_contact(&sender.installation_id)
                         })?;

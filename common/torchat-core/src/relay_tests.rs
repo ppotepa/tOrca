@@ -23,6 +23,8 @@ fn signed_welcome_round_trip_rejects_tampering() {
         welcome,
         ratchet_tree,
         peer_endpoint,
+        peer_capability_id,
+        peer_capability_secret,
         signature,
         version,
     } = decoded
@@ -38,6 +40,8 @@ fn signed_welcome_round_trip_rejects_tampering() {
         welcome,
         ratchet_tree,
         peer_endpoint,
+        peer_capability_id,
+        peer_capability_secret,
         signature,
     };
     assert!(

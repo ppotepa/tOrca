@@ -638,7 +638,7 @@ void main() {
     expect(state.activeInviteCount, 1);
   });
 
-  test('runtime repository exposes v2 data-change event names', () async {
+  test('runtime repository exposes data-change event names', () async {
     final repository = RuntimeRepository(
       _EventRuntime(const DataChangedEvent('invite_state_changed')),
     );

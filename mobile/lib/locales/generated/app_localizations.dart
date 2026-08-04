@@ -1064,12 +1064,6 @@ abstract class AppLocalizations {
   /// **'P2P'**
   String get routeP2P;
 
-  /// No description provided for @routeP2PFallback.
-  ///
-  /// In en, this message translates to:
-  /// **'P2P + relay fallback'**
-  String get routeP2PFallback;
-
   /// No description provided for @routeRelay.
   ///
   /// In en, this message translates to:
@@ -2216,12 +2210,6 @@ abstract class AppLocalizations {
   /// **'P2P onion'**
   String get contactRouteP2pOnion;
 
-  /// No description provided for @contactRouteRelayFallback.
-  ///
-  /// In en, this message translates to:
-  /// **'live relay fallback (P2P inactive)'**
-  String get contactRouteRelayFallback;
-
   /// No description provided for @contactRouteP2pOffline.
   ///
   /// In en, this message translates to:
@@ -2323,12 +2311,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'P2P only'**
   String get contactPolicyP2pOnly;
-
-  /// No description provided for @contactPolicyFallback.
-  ///
-  /// In en, this message translates to:
-  /// **'P2P + live relay fallback'**
-  String get contactPolicyFallback;
 
   /// No description provided for @contactsNewContact.
   ///

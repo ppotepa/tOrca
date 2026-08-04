@@ -14,4 +14,9 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "001_base_schema.sql",
         sql: include_str!("../../../sql/migrations/001_base_schema.sql"),
     },
+    Migration {
+        version: 2,
+        name: "002_pairing_capability_bootstrap.sql",
+        sql: include_str!("../../../sql/migrations/002_pairing_capability_bootstrap.sql"),
+    },
 ];

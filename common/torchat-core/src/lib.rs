@@ -55,6 +55,10 @@ pub struct ContactInvite {
     pub expires_at: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub peer_endpoint: Option<peer_protocol::PeerEndpointBundle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peer_capability_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peer_capability_secret: Option<String>,
     pub signature: Option<String>,
 }
 
@@ -91,6 +95,8 @@ impl ContactInvite {
             invite_id,
             expires_at,
             peer_endpoint: None,
+            peer_capability_id: None,
+            peer_capability_secret: None,
             signature: None,
         }
     }
@@ -188,6 +194,35 @@ impl ContactInvite {
             {
                 return Err("invite peer endpoint does not match invite identity".into());
             }
+        }
+        match (
+            invite.peer_capability_id.as_deref(),
+            invite.peer_capability_secret.as_deref(),
+        ) {
+            (Some(id), Some(secret)) => {
+                if id.len() != 16 || !id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                    return Err("invite capability ID is invalid".into());
+                }
+                let secret = URL_SAFE_NO_PAD
+                    .decode(secret)
+                    .map_err(|_| "invite capability secret is invalid")?;
+                if secret.len() < 16 {
+                    return Err("invite capability secret is too short".into());
+                }
+                let endpoint = invite
+                    .peer_endpoint
+                    .as_ref()
+                    .ok_or("invite capability has no peer endpoint")?;
+                if !endpoint
+                    .capabilities
+                    .iter()
+                    .any(|value| value == &format!("contact_endpoint_v1:{id}"))
+                {
+                    return Err("invite capability is not advertised by endpoint".into());
+                }
+            }
+            (None, None) => {}
+            _ => return Err("invite capability credentials are incomplete".into()),
         }
         Ok(invite)
     }

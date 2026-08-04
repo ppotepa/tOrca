@@ -72,6 +72,10 @@ pub enum RelayPayloadV1 {
         ratchet_tree: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         peer_endpoint: Option<PeerEndpointBundle>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        peer_capability_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        peer_capability_secret: Option<String>,
         signature: String,
     },
     WelcomeApplied {
@@ -130,6 +134,8 @@ impl RelayPayloadV1 {
             welcome,
             ratchet_tree,
             None,
+            None,
+            None,
         )
     }
 
@@ -141,6 +147,8 @@ impl RelayPayloadV1 {
         welcome: &[u8],
         ratchet_tree: &[u8],
         peer_endpoint: Option<PeerEndpointBundle>,
+        peer_capability_id: Option<String>,
+        peer_capability_secret: Option<String>,
     ) -> Self {
         let sender = ContactCard::from_identity(identity, nickname.trim());
         let welcome = URL_SAFE_NO_PAD.encode(welcome);
@@ -152,6 +160,8 @@ impl RelayPayloadV1 {
             &welcome,
             &ratchet_tree,
             peer_endpoint.as_ref(),
+            peer_capability_id.as_deref(),
+            peer_capability_secret.as_deref(),
         ));
         Self::Welcome {
             version: PROTOCOL_VERSION,
@@ -161,6 +171,8 @@ impl RelayPayloadV1 {
             welcome,
             ratchet_tree,
             peer_endpoint,
+            peer_capability_id,
+            peer_capability_secret,
             signature,
         }
     }
@@ -222,6 +234,8 @@ impl RelayPayloadV1 {
             welcome,
             ratchet_tree,
             peer_endpoint,
+            peer_capability_id,
+            peer_capability_secret,
             signature,
             ..
         } = self
@@ -244,6 +258,8 @@ impl RelayPayloadV1 {
                 welcome,
                 ratchet_tree,
                 peer_endpoint.as_ref(),
+                peer_capability_id.as_deref(),
+                peer_capability_secret.as_deref(),
             ),
             signature,
         ) {
@@ -420,6 +436,17 @@ impl RelayPayloadV1 {
         }
         Ok(endpoint.clone())
     }
+
+    pub fn welcome_peer_capability(&self) -> Option<(&str, &str)> {
+        match self {
+            Self::Welcome {
+                peer_capability_id: Some(id),
+                peer_capability_secret: Some(secret),
+                ..
+            } => Some((id, secret)),
+            _ => None,
+        }
+    }
 }
 
 fn welcome_signing_bytes(
@@ -429,6 +456,8 @@ fn welcome_signing_bytes(
     welcome: &str,
     ratchet_tree: &str,
     peer_endpoint: Option<&PeerEndpointBundle>,
+    peer_capability_id: Option<&str>,
+    peer_capability_secret: Option<&str>,
 ) -> Vec<u8> {
     let mut output = b"torchat-welcome-v1".to_vec();
     for value in [
@@ -449,6 +478,18 @@ fn welcome_signing_bytes(
         .unwrap_or_default();
     output.extend_from_slice(&(endpoint.len() as u32).to_be_bytes());
     output.extend_from_slice(&endpoint);
+    // Preserve the old signature bytes for capability-less Welcome payloads
+    // that may still be in flight. Fresh pairings sign both values here.
+    if peer_capability_id.is_some() || peer_capability_secret.is_some() {
+        for value in [
+            peer_capability_id.unwrap_or_default(),
+            peer_capability_secret.unwrap_or_default(),
+        ] {
+            output.extend_from_slice(&(value.len() as u32).to_be_bytes());
+            output.extend_from_slice(value.as_bytes());
+        }
+    }
+
     output
 }
 

@@ -556,9 +556,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get routeP2P => 'P2P';
 
   @override
-  String get routeP2PFallback => 'P2P + relay fallback';
-
-  @override
   String get routeRelay => 'relay';
 
   @override
@@ -1176,9 +1173,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get contactRouteP2pOnion => 'P2P onion';
 
   @override
-  String get contactRouteRelayFallback => 'live relay fallback (P2P inactive)';
-
-  @override
   String get contactRouteP2pOffline => 'P2P waiting / offline';
 
   @override
@@ -1228,9 +1222,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get contactPolicyP2pOnly => 'P2P only';
-
-  @override
-  String get contactPolicyFallback => 'P2P + live relay fallback';
 
   @override
   String get contactsNewContact => 'New contact';

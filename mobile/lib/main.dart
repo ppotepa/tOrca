@@ -195,7 +195,6 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
     }
     final request = inbox.firstOrNullWhere(
       (item) =>
-          item.received &&
           item.origin == PairingOrigin.inbox &&
           item.can(PairingAvailableAction.accept) &&
           !_resolvedIncomingPairingIds.contains(item.id) &&
@@ -263,13 +262,30 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
     if (!mounted || previous == null) return;
     final previousById = {for (final item in previous) item.id: item};
     for (final item in current) {
-      if (item.origin != PairingOrigin.outbox || item.received) continue;
       final old = previousById[item.id];
-      if (old == null || old.status != InviteState.pending) continue;
+      if (old == null || old.status == item.status) continue;
+
+      final isFinalized = item.status == InviteState.completed;
+      final isOutgoingAccepted =
+          item.origin == PairingOrigin.outbox &&
+          !item.received &&
+          old.status == InviteState.pending &&
+          item.status == InviteState.accepted;
+      final isOutgoingFailure =
+          item.origin == PairingOrigin.outbox &&
+          !item.received &&
+          old.status == InviteState.pending &&
+          (item.status == InviteState.rejected ||
+              item.status == InviteState.expired ||
+              item.status == InviteState.cancelled);
+      if (!isFinalized && !isOutgoingAccepted && !isOutgoingFailure) continue;
 
       final message = switch (item.status) {
-        InviteState.accepted || InviteState.completed =>
-          '${item.peer?.displayName ?? 'Użytkownik'} przyjął Twoje zaproszenie.',
+        InviteState.accepted =>
+          '${item.peer?.displayName ?? 'Użytkownik'} przyjął zaproszenie. '
+              'Kończenie parowania…',
+        InviteState.completed =>
+          'Dodano kontakt ${item.peer?.displayName ?? 'Użytkownik'}.',
         InviteState.rejected =>
           '${item.peer?.displayName ?? 'Użytkownik'} odrzucił Twoje zaproszenie.',
         InviteState.expired => 'Zaproszenie wygasło bez odpowiedzi.',
@@ -280,8 +296,10 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
       final key = 'pairing:${item.id}:${item.status.name}';
       final notifications = ref.read(uiNotificationCenterProvider.notifier);
       switch (item.status) {
-        case InviteState.accepted || InviteState.completed:
+        case InviteState.completed:
           notifications.showSuccess(message, deduplicationKey: key);
+        case InviteState.accepted:
+          notifications.showInfo(message, deduplicationKey: key);
         case InviteState.rejected || InviteState.expired:
           notifications.showWarning(message, deduplicationKey: key);
         case InviteState.cancelled:
@@ -289,6 +307,21 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
         default:
           break;
       }
+    }
+  }
+
+  void _showNewContactToast(
+    List<ContactRecord>? previous,
+    List<ContactRecord> current,
+  ) {
+    if (!mounted || previous == null) return;
+    final previousIds = previous.map((contact) => contact.id).toSet();
+    for (final contact in current) {
+      if (previousIds.contains(contact.id)) continue;
+      ref.read(uiNotificationCenterProvider.notifier).showSuccess(
+            'Dodano kontakt ${contact.displayName}.',
+            deduplicationKey: 'contact-added:${contact.id}',
+          );
     }
   }
 
@@ -333,11 +366,6 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
     if (_pairingCodeDialogOpen || _incomingPairingDialogOpen) return;
     _pairingCodeDialogOpen = true;
     final controller = ref.read(appControllerProvider.notifier);
-    final knownInboxIds = ref
-        .read(appControllerProvider)
-        .inbox
-        .map((item) => item.id)
-        .toSet();
     try {
       await showDialog<bool>(
         context: context,
@@ -351,7 +379,7 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
             final inbox = ref.read(appControllerProvider).inbox;
             return inbox.firstOrNullWhere(
               (item) =>
-                  !knownInboxIds.contains(item.id) &&
+                  item.origin == PairingOrigin.inbox &&
                   !_resolvedIncomingPairingIds.contains(item.id) &&
                   item.can(PairingAvailableAction.accept),
             );
@@ -562,32 +590,18 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
     final state = ref.watch(appControllerProvider);
     ref.listen<List<PairingItem>>(
       appControllerProvider.select((value) => value.inbox),
-      (_, inbox) => _queueIncomingPairingPrompt(inbox),
+      (previous, inbox) {
+        _queueIncomingPairingPrompt(inbox);
+        _showPairingOutcomeToast(previous, inbox);
+      },
     );
     ref.listen<List<PairingItem>>(
       appControllerProvider.select((value) => value.outbox),
       _showPairingOutcomeToast,
     );
     ref.listen<List<ContactRecord>>(
-      applicationSnapshotProvider.select(
-        (value) => value.valueOrNull?.contacts ?? const <ContactRecord>[],
-      ),
-      (previous, current) {
-        if (!mounted || previous == null) return;
-        final previousIds = previous.map((contact) => contact.id).toSet();
-        for (final contact in current) {
-          if (previousIds.contains(contact.id)) continue;
-          final name = contact.displayName.trim().isEmpty
-              ? 'Nowy kontakt'
-              : contact.displayName;
-          ref
-              .read(uiNotificationCenterProvider.notifier)
-              .showSuccess(
-                'Dodano kontakt $name.',
-                deduplicationKey: 'contact-added:${contact.id}',
-              );
-        }
-      },
+      appControllerProvider.select((value) => value.contacts),
+      _showNewContactToast,
     );
     final snapshot = ref.watch(applicationSnapshotProvider).valueOrNull;
     final messageSnapshot = ref
@@ -650,9 +664,12 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
       );
     }
 
-    final contacts = snapshot?.contacts ?? const <ContactRecord>[];
-    final conversations =
-        snapshot?.conversations ?? const <ConversationSummary>[];
+    // The controller state is the single UI projection. The stream snapshot
+    // is retained for identity/profile compatibility, but using a separate
+    // contact list here made Welcome commits visible in state and invisible
+    // in the desktop shell until a restart.
+    final contacts = state.contacts;
+    final conversations = state.conversations;
     final pendingPairings = <String, PairingItem>{};
     for (final item in [...state.inbox, ...state.outbox]) {
       if (item.status == InviteState.pending ||

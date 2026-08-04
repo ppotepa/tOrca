@@ -1316,6 +1316,8 @@ mod tests {
                     invite_id: invite_id.to_owned(),
                     recipient_installation_id: None,
                     snapshot,
+                    local_capability_id: "1234567890abcdef".to_owned(),
+                    local_capability_secret: vec![9; 16],
                     expires_at: unix_secs() + 60,
                 })
                 .expect("invite state persists");
@@ -1329,6 +1331,12 @@ mod tests {
                 .snapshot,
             vec![1, 2]
         );
+        let stored = database
+            .pending_local_invite_mls("invite-a", unix_secs())
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.local_capability_id, "1234567890abcdef");
+        assert_eq!(stored.local_capability_secret, vec![9; 16]);
         assert_eq!(
             database
                 .pending_local_invite_mls("invite-b", unix_secs())
