@@ -36,8 +36,8 @@ import org.torchat.generated.EngineContract
 import org.torchat.security.LocalSecretStore
 import org.torchat.security.TorRuntime
 import java.io.File
-import java.util.concurrent.ConcurrentLinkedDeque
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ConcurrentLinkedDeque
 import java.util.LinkedHashSet
 
 /** Owns Tor, engine lifecycle and notifications outside the Flutter UI. */
@@ -84,7 +84,10 @@ class TorChatForegroundService : Service() {
             },
         )
         publishNetworkState()
-        startForeground(NOTIFICATION_ID, notification("Uruchamianie TorChat…"))
+        startForeground(
+            NOTIFICATION_ID,
+            notification(getString(R.string.foreground_starting)),
+        )
         processStarted.complete(Unit)
         startupLogger.write(
             level = "info",
@@ -203,7 +206,7 @@ class TorChatForegroundService : Service() {
             host
         }.onSuccess { host ->
             starting = false
-            updateNotification("TorChat lokalnie gotowy · uruchamianie Tor")
+            updateNotification(getString(R.string.foreground_local_ready))
             scope.launch { startTor(host) }
         }.onFailure { error ->
             starting = false
@@ -222,7 +225,7 @@ class TorChatForegroundService : Service() {
             completeExceptionally(engineReady, error)
             completeExceptionally(localDataReady, error)
             publishRuntimeError(error.message ?: "TorChat engine failed")
-            updateNotification("Błąd lokalnego engine TorChat")
+            updateNotification(getString(R.string.foreground_engine_failed))
             stopSelf(startId)
         }
     }
@@ -251,25 +254,22 @@ class TorChatForegroundService : Service() {
                             EngineContract.TRANSPORT_PHASE_BOOTSTRAPPING
                         },
                         label = if (progress >= 100) {
-                            "Tor gotowy"
+                            "Tor ready"
                         } else {
                             "Tor bootstrap: $progress%"
                         },
                         detail = summary,
                         progress = progress.coerceIn(0, 100),
                     )
-                    // Publish each live status exactly once. Replaying every
-                    // buffered status after Tor becomes ready made the UI
-                    // move backwards from Done to Starting/Connecting. The
-                    // engine already receives the live stream; buffering is
-                    // only needed when it was not attached yet.
                     if (engineReady.isCompleted) {
                         pendingTorStatuses.clear()
                     } else {
                         pendingTorStatuses.add(snapshot)
                     }
                     publishTorStatusFact(snapshot)
-                    updateNotification("Tor bootstrap: $progress%")
+                    updateNotification(
+                        getString(R.string.foreground_tor_bootstrap, progress),
+                    )
                 }
             }
             val socks5Url = "socks5h://127.0.0.1:${config.socksPort}"
@@ -296,9 +296,6 @@ class TorChatForegroundService : Service() {
             torRetryJob = null
         }.onFailure { error ->
             Log.e("TorChat-Tor", "Tor startup failed; local UI remains usable", error)
-            // TorRuntime stops and releases a failed native service. Clear the
-            // reference so the retry worker can create a fresh control
-            // connection instead of being blocked by `runtime != null`.
             runtime = null
             startupLogger.write(
                 level = "error",
@@ -310,31 +307,22 @@ class TorChatForegroundService : Service() {
                 durationMs = System.currentTimeMillis() - startedAt,
                 errorCode = error.javaClass.simpleName,
             )
-            // Keep TOR_READY pending across transient bootstrap failures so
-            // the retry worker can eventually complete it. It is completed
-            // exceptionally only when the service is actually destroyed.
             publish(
                 mapOf(
                     EngineContract.TYPE to EngineContract.TOR_STATUS,
                     EngineContract.PHASE to EngineContract.TRANSPORT_PHASE_DEGRADED,
-                    EngineContract.LABEL to "Tor niedostępny · ponawianie w tle",
+                    EngineContract.LABEL to "Tor unavailable; retrying in background",
                     EngineContract.DETAIL to (error.message ?: "Tor startup failed"),
                     EngineContract.PROGRESS to 0,
                     EngineContract.RETRY_ATTEMPT to 1,
                 ),
             )
-            updateNotification("Tor niedostępny · aplikacja lokalna działa")
+            updateNotification(getString(R.string.foreground_tor_unavailable))
             scheduleTorRetry(host)
         }
         torStarting = false
     }
 
-    /**
-     * A transient Tor bootstrap failure must not permanently strand Android
-     * in warming-up. Keep the engine and local data alive, then retry Tor with
-     * bounded backoff. Relay/onion readiness is only published after a
-     * successful bootstrap, so this cannot create a false READY state.
-     */
     private fun scheduleTorRetry(host: AndroidEngineHost) {
         if (torRetryJob?.isActive == true) return
         torRetryJob = scope.launch {
@@ -594,11 +582,13 @@ class TorChatForegroundService : Service() {
                 val title = when (kind) {
                     "message_received" -> getString(R.string.notification_new_message_title)
                     "pairing_request" -> getString(R.string.notification_pairing_request_title)
+                    "pairing_completed" -> getString(R.string.notification_pairing_completed_title)
                     else -> getString(R.string.app_name)
                 }
                 val text = when (kind) {
                     "message_received" -> getString(R.string.notification_private_message_body)
                     "pairing_request" -> getString(R.string.notification_pairing_request_body)
+                    "pairing_completed" -> getString(R.string.notification_pairing_completed_body)
                     else -> getString(R.string.app_name)
                 }
                 postAlert(
@@ -707,7 +697,7 @@ class TorChatForegroundService : Service() {
     private fun notification(text: String): Notification =
         NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_tor)
-            .setContentTitle("TorChat")
+            .setContentTitle(getString(R.string.app_name))
             .setContentText(text)
             .setOngoing(true)
             .setContentIntent(
@@ -725,17 +715,17 @@ class TorChatForegroundService : Service() {
         manager.createNotificationChannel(
             NotificationChannel(
                 CHANNEL_ID,
-                "TorChat connection",
+                getString(R.string.notification_channel_connection),
                 NotificationManager.IMPORTANCE_LOW,
             ),
         )
         manager.createNotificationChannel(
             NotificationChannel(
                 ALERT_CHANNEL_ID,
-                "TorChat messages",
+                getString(R.string.notification_channel_messages),
                 NotificationManager.IMPORTANCE_HIGH,
             ).apply {
-                description = "Nowe wiadomości i zaproszenia"
+                description = getString(R.string.notification_channel_messages_description)
                 enableVibration(true)
                 setSound(
                     android.provider.Settings.System.DEFAULT_NOTIFICATION_URI,
@@ -788,16 +778,7 @@ class TorChatForegroundService : Service() {
         @Volatile private var onionReady = CompletableDeferred<Unit>()
         @Volatile var eventListener: ((Map<String, Any?>) -> Unit)? = null
         @Volatile var activeEngineHost: AndroidEngineHost? = null
-        // Reattach must replay every recent event, not only the last event per
-        // type. The previous map silently discarded updates for parallel
-        // conversations and made the UI appear stale until navigation.
         private val runtimeEventBuffer = ConcurrentLinkedDeque<Map<String, Any?>>()
-        /**
-         * Readiness is state, not a replayable history.  Keeping the latest
-         * value per component prevents Activity reattach from ending on an
-         * old reconnect/error event after the service stayed alive in the
-         * background.
-         */
         private val runtimeLatestStatus = ConcurrentHashMap<String, Map<String, Any?>>()
 
         fun runtimeSnapshot(): List<Map<String, Any?>> {
@@ -858,7 +839,7 @@ class TorChatForegroundService : Service() {
             )
             if (!preferences.getBoolean("flutter.torchat.notifications.enabled", true)) return
 
-            val pairing = kind.equals("pairing", ignoreCase = true)
+            val pairing = kind.startsWith("pairing_", ignoreCase = true)
             val categoryEnabled = if (pairing) {
                 preferences.getBoolean("flutter.torchat.notifications.pairing", true)
             } else {
@@ -887,8 +868,12 @@ class TorChatForegroundService : Service() {
             val vibration =
                 preferences.getBoolean("flutter.torchat.notifications.vibration", true)
             val preview = preferences.getBoolean("flutter.torchat.notifications.preview", false)
-            val visibleTitle = if (preview) title else "TorChat"
-            val visibleText = if (preview) text else "Nowa prywatna wiadomość"
+            val visibleTitle = if (preview) title else context.getString(R.string.app_name)
+            val visibleText = if (preview) {
+                text
+            } else {
+                context.getString(R.string.notification_private_message_body)
+            }
             ensureIncomingNotificationChannel(context)
 
             val openIntent = Intent(context, MainActivity::class.java).apply {
@@ -933,10 +918,12 @@ class TorChatForegroundService : Service() {
                 manager.createNotificationChannel(
                     NotificationChannel(
                         ALERT_CHANNEL_ID,
-                        "TorChat messages",
+                        context.getString(R.string.notification_channel_messages),
                         NotificationManager.IMPORTANCE_HIGH,
                     ).apply {
-                        description = "Nowe wiadomości i zaproszenia"
+                        description = context.getString(
+                            R.string.notification_channel_messages_description,
+                        )
                         enableVibration(true)
                         setSound(
                             android.provider.Settings.System.DEFAULT_NOTIFICATION_URI,
@@ -951,7 +938,7 @@ class TorChatForegroundService : Service() {
                 manager.createNotificationChannel(
                     NotificationChannel(
                         CHANNEL_ID,
-                        "TorChat connection",
+                        context.getString(R.string.notification_channel_connection),
                         NotificationManager.IMPORTANCE_LOW,
                     ),
                 )
@@ -967,7 +954,6 @@ class TorChatForegroundService : Service() {
         suspend fun awaitTorReady() = torReady.await()
 
         suspend fun awaitOnionReady() = onionReady.await()
-
     }
 }
 

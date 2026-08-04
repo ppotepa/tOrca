@@ -1,7 +1,7 @@
 import '../../core/connection/connection_component.dart';
 import '../../core/models/domain.dart';
 import '../../core/presence/contact_presence_snapshot.dart';
-import '../../locales/generated/app_localizations.dart';
+import '../generated/app_localizations.dart';
 
 String localizeTransportPhase(AppLocalizations l10n, TransportPhase phase) =>
     switch (phase) {
@@ -104,6 +104,18 @@ String localizePeerConnectionStatus(
   PeerConnectionStatus.authenticating => l10n.contactPeerAuthenticating,
   PeerConnectionStatus.backoff => l10n.contactPeerBackoff,
   PeerConnectionStatus.offline => l10n.contactPeerOffline,
+};
+
+String localizeContactPeerLink(
+  AppLocalizations l10n,
+  ContactPeerLink status,
+) => switch (status) {
+  ContactPeerLink.connected => l10n.contactPeerConnected,
+  ContactPeerLink.connecting => l10n.contactPeerConnecting,
+  ContactPeerLink.authenticating => l10n.contactPeerAuthenticating,
+  ContactPeerLink.backoff => l10n.contactPeerBackoff,
+  ContactPeerLink.offline => l10n.contactPeerOffline,
+  ContactPeerLink.unknown => l10n.contactAvailabilityUnknown,
 };
 
 String localizeTransportPolicy(

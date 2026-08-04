@@ -71,11 +71,11 @@ PreparedImageAttachment _prepareImageAttachment(
   int maximumBytes,
 ) {
   if (source.isEmpty) {
-    throw const FormatException('Wybrany obraz jest pusty.');
+    throw const FormatException('The selected image is empty.');
   }
   final decoded = image.decodeImage(source);
   if (decoded == null) {
-    throw const FormatException('Nieobsługiwany lub uszkodzony obraz.');
+    throw const FormatException('The selected image is unsupported or corrupted.');
   }
 
   var working = image
@@ -111,7 +111,7 @@ PreparedImageAttachment _prepareImageAttachment(
   }
 
   throw StateError(
-    'Nie udało się zmniejszyć obrazu do ${maximumBytes ~/ 1024} KiB.',
+    'The image could not be reduced to ${maximumBytes ~/ 1024} KiB.',
   );
 }
 

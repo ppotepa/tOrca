@@ -29,9 +29,6 @@ class ImageAttachmentPreferences {
 
   static Future<bool> automaticDownloadEnabled() async {
     final preferences = await SharedPreferences.getInstance();
-    // Image payloads are already part of the end-to-end encrypted message.
-    // "Download" only materializes that payload in the encrypted local cache,
-    // so automatic delivery is the safe and expected default.
     return preferences.getBool(imageAutoDownloadPreferenceKey) ?? true;
   }
 
@@ -42,7 +39,7 @@ class ImageAttachmentPreferences {
       value,
     );
     if (!saved) {
-      throw StateError('Nie udało się zapisać ustawienia obrazów.');
+      throw StateError('The image download preference could not be saved.');
     }
   }
 }
@@ -61,7 +58,7 @@ class EncryptedImageStore {
 
   static const _keyName = 'torchat.attachmentStoreKey.v1';
   static const _extension = '.tca';
-  static const _magic = <int>[0x54, 0x43, 0x49, 0x4d, 0x47, 0x31]; // TCIMG1
+  static const _magic = <int>[0x54, 0x43, 0x49, 0x4d, 0x47, 0x31];
   static const _secureStorage = FlutterSecureStorage();
 
   final ImageStoreDirectoryProvider _directoryProvider;
@@ -80,13 +77,10 @@ class EncryptedImageStore {
       final payload = await file.readAsBytes();
       return await _decrypt(payload, messageId);
     } catch (_) {
-      // A restored backup may contain files encrypted with an unavailable
-      // platform key. Treat such files as disposable cache, never as chat
-      // history, and let the inline encrypted message repopulate them.
       try {
         await file.delete();
       } catch (_) {
-        // Cache cleanup is best effort. The failed read still returns null.
+        // Cache cleanup is best effort.
       }
       return null;
     }
@@ -94,10 +88,10 @@ class EncryptedImageStore {
 
   Future<void> put(String messageId, Uint8List bytes) => _serialized(() async {
     if (messageId.trim().isEmpty) {
-      throw const FormatException('Identyfikator wiadomości jest pusty.');
+      throw const FormatException('The message identifier is empty.');
     }
     if (bytes.isEmpty) {
-      throw const FormatException('Obraz jest pusty.');
+      throw const FormatException('The image is empty.');
     }
     final file = await _file(messageId);
     final encrypted = await _encrypt(bytes, messageId);
@@ -176,11 +170,11 @@ class EncryptedImageStore {
 
   Future<Uint8List> _decrypt(Uint8List payload, String messageId) async {
     if (payload.length < _magic.length + 2) {
-      throw const FormatException('Uszkodzony magazyn obrazów.');
+      throw const FormatException('The image store payload is corrupted.');
     }
     for (var index = 0; index < _magic.length; index += 1) {
       if (payload[index] != _magic[index]) {
-        throw const FormatException('Nieobsługiwana wersja magazynu obrazów.');
+        throw const FormatException('The image store version is unsupported.');
       }
     }
     var offset = _magic.length;
@@ -188,7 +182,7 @@ class EncryptedImageStore {
     final macLength = payload[offset++];
     final metadataLength = offset + nonceLength + macLength;
     if (nonceLength < 8 || macLength < 12 || metadataLength >= payload.length) {
-      throw const FormatException('Uszkodzony zaszyfrowany obraz.');
+      throw const FormatException('The encrypted image payload is corrupted.');
     }
     final nonce = payload.sublist(offset, offset + nonceLength);
     offset += nonceLength;

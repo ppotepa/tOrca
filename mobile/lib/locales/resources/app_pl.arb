@@ -7,390 +7,456 @@
   "languagePolish": "Polski",
   "languageEnglish": "English",
   "languagePolishNative": "Polski",
-  "languageEnglishNative": "English"
-  ,"languageSettingsTitle": "Język"
-  ,"languageSettingsDescription": "Wybierz język używany przez TorChat."
-  ,"notificationNewMessageTitle": "Nowa wiadomość"
-  ,"notificationPairingRequestTitle": "Nowa prośba kontaktu"
-  ,"notificationPrivateMessageBody": "Nowa zaszyfrowana wiadomość"
-  ,"notificationPairingRequestBody": "Masz nową prośbę o rozmowę."
-  ,"settingsTitle": "Ustawienia"
-  ,"settingsApplicationSection": "APLIKACJA"
-  ,"settingsFamilyTitle": "Rodzina"
-  ,"settingsFamilyDescription": "Classic: klasyczny, Retro: styl retro"
-  ,"settingsClassic": "Classic"
-  ,"settingsRetro": "Retro"
-  ,"settingsTerminalPalette": "Paleta terminalowa"
-  ,"settingsBrightness": "Tryb jasności"
-  ,"settingsSystem": "System"
-  ,"settingsLight": "Jasny"
-  ,"settingsDark": "Ciemny"
-  ,"settingsReduceMotion": "Ogranicz animacje"
-  ,"settingsReduceMotionDescription": "Wyłącza animacje i płynne przejścia w całej aplikacji"
-  ,"settingsWindowsAutostart": "Uruchamiaj z systemem Windows"
-  ,"settingsWindowsAutostartDescription": "Uruchamia TorChat automatycznie po zalogowaniu"
-  ,"settingsSaving": "Zapisywanie…"
-  ,"settingsLastSeen": "Ostatnio widziany"
-  ,"settingsLastSeenDescription": "Udostępnia czas ostatniej aktywności kontaktom"
-  ,"settingsTorConnection": "Połączenie Tor"
-  ,"settingsUserProfile": "Profil użytkownika"
-  ,"settingsSavingProfile": "Zapisywanie profilu…"
-  ,"settingsResetDemoData": "Reset danych demo"
-  ,"settingsRequiresConfirmation": "Wymaga potwierdzenia"
-  ,"settingsClearLocalState": "Wyczyść lokalny stan"
-  ,"settingsClearLocalStateDescription": "Usuwa wszystkie dane testowe i lokalne wpisy"
-  ,"settingsNotifications": "Powiadomienia"
-  ,"settingsNotificationsDescription": "Nadrzędny przełącznik wszystkich alertów"
-  ,"settingsNewMessages": "Nowe wiadomości"
-  ,"settingsNewMessagesDescription": "Powiadamiaj o wiadomościach poza otwartą rozmową"
-  ,"settingsContactInvitations": "Zaproszenia do kontaktów"
-  ,"settingsContactInvitationsDescription": "Powiadamiaj wyłącznie o nowych prośbach pairing"
-  ,"settingsNotificationSound": "Dźwięk"
-  ,"settingsNotificationSoundDescription": "Systemowy dźwięk powiadomienia TorChat"
-  ,"settingsNotificationVibration": "Wibracja"
-  ,"settingsNotificationVibrationDescription": "Wibracja dla zdarzeń przychodzących"
-  ,"settingsMessagePreview": "Podgląd treści"
-  ,"settingsMessagePreviewDescription": "Wyłączone domyślnie dla prywatności"
-  ,"settingsReadReceipts": "Potwierdzenia odczytu"
-  ,"settingsReadReceiptsDescription": "Informuj kontakt, że wiadomość została odczytana"
-  ,"settingsTypingIndicator": "Informacja „pisze…”"
-  ,"settingsTypingIndicatorDescription": "Udostępnia chwilową aktywność podczas pisania"
-  ,"settingsOnlineStatus": "Status online"
-  ,"settingsOnlineStatusDescription": "Udostępnia tylko bieżącą obecność bez historii"
-  ,"settingsNotificationsSection": "POWIADOMIENIA"
-  ,"settingsChatPrivacySection": "PRYWATNOŚĆ CZATU"
-  ,"settingsIdentitySection": "TOŻSAMOŚĆ"
-  ,"settingsLocalDataSection": "DANE LOKALNE"
-  ,"accountTitle": "Konto"
-  ,"accountIdentitySection": "TOŻSAMOŚĆ"
-  ,"accountLocalProfile": "Lokalny profil urządzenia"
-  ,"accountInstallationId": "ID instalacji: {id}"
-  ,"accountActionsSection": "AKCJE"
-  ,"accountInviteCode": "Mój kod zaproszenia"
-  ,"accountInviteLoading": "Pobieranie kodu…"
-  ,"accountInviteSubtitle": "Kod jest widoczny tylko w osobnym oknie"
-  ,"accountSettings": "Ustawienia"
-  ,"accountSettingsSubtitle": "Otwórz ustawienia aplikacji"
-  ,"imageCacheSection": "OBRAZY I CACHE"
-  ,"imageCacheClearTitle": "Wyczyścić cache obrazów?"
-  ,"imageCacheClearDescription": "Usuwa wyłącznie lokalne zaszyfrowane kopie obrazów. Wiadomości i historia rozmów pozostaną bez zmian."
-  ,"cancel": "Anuluj"
-  ,"clear": "Wyczyść"
-  ,"imageAutoDownload": "Automatycznie pobieraj obrazy"
-  ,"imageAutoDownloadDescription": "Zapisuje przychodzące obrazy w lokalnym magazynie AES-GCM"
-  ,"encryptedCache": "Zaszyfrowany cache"
-  ,"calculatingUsage": "Obliczanie użycia…"
-  ,"imageFilesCount": "{count} plików · {size}"
-  ,"imageCacheClearing": "Czyszczenie…"
-  ,"imageCacheClearButton": "Wyczyść cache obrazów"
-  ,"imageCacheCleared": "Cache obrazów został wyczyszczony."
-  ,"nicknameSaving": "Zapisywanie nicku…"
-  ,"nicknameReady": "TorChat jest gotowy"
-  ,"nicknameDescription": "Relay i onion tego urządzenia są aktywne. Ustaw lokalną nazwę użytkownika."
-  ,"nicknameLabel": "Nick"
-  ,"nicknameSave": "Zapisz nick"
-  ,"retry": "Spróbuj ponownie"
-  ,"warmupTitle": "Rozgrzewanie TorChat"
-  ,"warmupSubtitle": "Prywatne wiadomości przez Tor"
-  ,"communicationReady": "Gotowość komunikacji"
-  ,"inviteScanTitle": "Zeskanuj kod parowania"
-  ,"addContactTitle": "Dodaj kontakt"
-  ,"processingCode": "Przetwarzanie kodu…"
-  ,"desktopCodeInstructions": "Desktop nie używa kamery. Wpisz 8-cyfrowy kod wyświetlony na drugim urządzeniu."
-  ,"pairingCodeLabel": "Kod parowania"
-  ,"pairingDialogTitle": "Twój kod parowania"
-  ,"pairingRefreshing": "Odświeżanie kodu…"
-  ,"pairingRefreshingAction": "Odświeżanie…"
-  ,"pairingExpiredRefreshing": "Kod wygasł · odświeżanie…"
-  ,"pairingValidFor": "Ważny jeszcze {time}"
-  ,"@pairingValidFor": {"description": "Pozostały czas ważności kodu parowania", "placeholders": {"time": {"type": "String"}}}
-  ,"pairingRefreshCode": "Odśwież kod"
-  ,"close": "Zamknij"
-  ,"incomingPairingTitle": "Nowe zaproszenie do kontaktów"
-  ,"pairingCompletedTitle": "Kontakt został dodany"
-  ,"pairingCompletedDescription": "Bezpieczne połączenie zostało potwierdzone po obu stronach."
-  ,"newContact": "Nowy kontakt"
-  ,"pairingSavingDecision": "Zapisywanie decyzji…"
-  ,"pairingAcceptedDescription": "Zaproszenie zaakceptowane. Finalizacja kontaktu przebiega w tle."
-  ,"pairingWaitingDecision": "Zaproszenie oczekuje na Twoją decyzję. Nie zostanie automatycznie odrzucone przez licznik interfejsu."
-  ,"securityDetails": "Szczegóły bezpieczeństwa"
-  ,"contactFingerprint": "Fingerprint klucza kontaktu"
-  ,"accepting": "Akceptowanie…"
-  ,"reject": "Odrzuć"
-  ,"accept": "Akceptuj"
-  ,"checkingInvitations": "Sprawdzanie nowych zaproszeń…"
-  ,"waitingForCode": "Oczekiwanie na użycie kodu…"
-  ,"contactsAddTitle": "Dodaj kontakt"
-  ,"contactsAddDescription": "Wpisz kod parowania albo zeskanuj QR"
-  ,"myPairingCode": "Mój kod parowania"
-  ,"pairingCodeHint": "Wpisz ośmiocyfrowy kod kontaktu"
-  ,"processingPairingCode": "Przetwarzanie kodu…"
-  ,"pairingCodeInputHint": "Wpisz 8-cyfrowy kod parowania"
-  ,"sendCode": "Wyślij kod"
-  ,"yourFingerprint": "Twój fingerprint"
-  ,"yourFingerprintSemantics": "Twój fingerprint: {fingerprint}"
-  ,"@yourFingerprintSemantics": {"description": "Etykieta accessibility lokalnego fingerprintu", "placeholders": {"fingerprint": {"type": "String"}}}
-  ,"loadingContacts": "Ładowanie kontaktów…"
-  ,"contactsTitle": "Kontakty"
-  ,"contactDetails": "Szczegóły kontaktu"
-  ,"contactStatusActive": "aktywny w aplikacji"
-  ,"contactStatusIdle": "bezczynny"
-  ,"contactStatusOffline": "offline"
-  ,"connectionCenterTitle": "Centrum połączeń"
-  ,"connectionInfrastructure": "Infrastruktura aplikacji"
-  ,"connectionCommunicationReadiness": "Gotowość komunikacji"
-  ,"connectionActivity": "Aktywność w aplikacji"
-  ,"connectionDirectSessions": "Bezpośrednie sesje kontaktów"
-  ,"connectionDirectSessionsDetail": "Sesje z konkretnymi kontaktami powstają po onboardingu i nie blokują startu aplikacji."
-  ,"connectionContactPresence": "Obecność kontaktów"
-  ,"connectionContactPresenceDetail": "Kontakty zgłaszające aktywną obecność w runtime."
-  ,"connectionLocalConversationSummaries": "Lokalne podsumowania rozmów"
-  ,"connectionLocalConversationSummariesDetail": "Lista rozmów pochodzi z atomowego snapshotu; wiadomości są ładowane dopiero po otwarciu."
-  ,"connectionMessageQueue": "Kolejka wiadomości"
-  ,"connectionQueueClean": "czysta"
-  ,"connectionQueueCounts": "{queued} oczekuje · {failed} błędów"
-  ,"@connectionQueueCounts": {"description":"Licznik kolejki wiadomości","placeholders":{"queued":{"type":"int"},"failed":{"type":"int"}}}
-  ,"connectionMessageQueueDetail": "Wiadomości pozostają w trwałej kolejce do czasu potwierdzenia dostawy."
-  ,"connectionLastError": "Ostatni błąd"
-  ,"contactActivityTyping": "pisze…"
-  ,"contactActivityOnline": "aktywny w aplikacji"
-  ,"contactActivityAway": "bezczynny"
-  ,"contactActivityUnknown": "status nieznany"
-  ,"contactActivityLastSeen": "ostatnio widziany {label}"
-  ,"contactActivityJustNow": "przed chwilą"
-  ,"contactActivityMinutesAgo": "{count, plural, =1{minutę temu} few{{count} minuty temu} many{{count} minut temu} other{{count} min temu}}"
-  ,"contactActivityHoursAgo": "{count, plural, =1{godzinę temu} few{{count} godziny temu} many{{count} godzin temu} other{{count} godz. temu}}"
-  ,"contactActivityDaysAgo": "{count, plural, =1{1 dzień temu} few{{count} dni temu} many{{count} dni temu} other{{count} dni temu}}"
-  ,"contactStatusUnknown": "status nieznany"
-  ,"contactStatusChecking": "sprawdzanie"
-  ,"routeP2P": "P2P"
-  ,"routeRelay": "relay"
-  ,"messageReply": "Odpowiedz"
-  ,"messageCopy": "Kopiuj wiadomość"
-  ,"messageRetry": "Spróbuj ponownie"
-  ,"messageDeleteLocal": "Usuń tylko na tym urządzeniu"
-  ,"messageRetrying": "Ponawianie…"
-  ,"messageDeleting": "Usuwanie…"
-  ,"messageStateQueued": "w kolejce"
-  ,"messageStateSending": "wysyłanie…"
-  ,"messageStateSent": "wysłano"
-  ,"messageStateDelivered": "dostarczono"
-  ,"messageStateRead": "odczytano"
-  ,"messageStateFailed": "błąd wysyłania"
-  ,"chatStarting": "Uruchamianie rozmowy…"
-  ,"chatLoading": "Ładowanie rozmowy…"
-  ,"chatBack": "Wróć"
-  ,"chatSearchHint": "Szukaj lokalnie w rozmowie…"
-  ,"chatContactViewing": "Kontakt ma otwartą tę rozmowę"
-  ,"chatCloseSearch": "Zamknij wyszukiwanie"
-  ,"chatSearch": "Szukaj"
-  ,"chatOptions": "Opcje rozmowy"
-  ,"chatCopyFingerprint": "Kopiuj fingerprint"
-  ,"chatLoadingOlder": "Ładowanie starszych wiadomości…"
-  ,"chatUnseenMessages": "{count, plural, =0{Brak nowych wiadomości} =1{1 nowa wiadomość} few{{count} nowe wiadomości} many{{count} nowych wiadomości} other{{count} nowych wiadomości}}"
-  ,"@chatUnseenMessages": {"description": "Liczba nieprzeczytanych wiadomości", "placeholders": {"count": {"type": "int"}}}
-  ,"chatScrollToBottom": "Przewiń na dół"
-  ,"chatPrivateCommunication": "Prywatna komunikacja przez Tor"
-  ,"chatCounts": "{contacts} kontaktów · {conversations} rozmów"
-  ,"@chatCounts": {"description": "Liczniki na ekranie rozmów", "placeholders": {"contacts": {"type": "int"}, "conversations": {"type": "int"}}}
-  ,"chatRecentConversations": "Ostatnie rozmowy"
-  ,"chatVerifyContact": "Zweryfikuj tożsamość kontaktu w szczegółach, aby rozpocząć rozmowę."
-  ,"chatConversationStarted": "To początek rozmowy z {name}."
-  ,"@chatConversationStarted": {"description": "Pusty stan rozmowy", "placeholders": {"name": {"type": "String"}}}
-  ,"chatSecureConnectionStarting": "Nawiązywanie bezpiecznego połączenia"
-  ,"chatWaitingForSecureConnection": "Rozmowa oczekuje na bezpieczne połączenie."
-  ,"chatRemoveAttachment": "Usuń załącznik"
-  ,"chatCancelReply": "Anuluj odpowiedź"
-  ,"chatPreparingImages": "Przygotowywanie obrazów…"
-  ,"chatAddImages": "Dodaj obrazy do wiadomości"
-  ,"chatComposeHint": "Napisz wiadomość…"
-  ,"chatNotReady": "Rozmowa nie jest jeszcze gotowa"
-  ,"statusTransportConnected": "Połączono z relayem przez Tor"
-  ,"statusTransportStarting": "Uruchamianie Tor"
-  ,"statusTransportBootstrapping": "Uruchamianie obwodu Tor"
-  ,"statusTransportConnecting": "Łączenie z relayem onion"
-  ,"statusTransportDegraded": "Relay działa w trybie ograniczonym"
-  ,"statusTransportReconnecting": "Ponowne łączenie z relayem"
-  ,"statusTransportOffline": "Tor offline"
-  ,"statusTransportError": "Sprawdzanie połączenia Tor"
-  ,"statusComponentEngine": "Silnik aplikacji"
-  ,"statusComponentLocalData": "Dane lokalne"
-  ,"statusComponentTor": "Sieć Tor"
-  ,"statusComponentRelay": "Relay TorChat"
-  ,"statusComponentPeerListener": "Lokalny listener P2P"
-  ,"statusComponentOnionService": "Onion tego urządzenia"
-  ,"statusComponentEngineDescription": "Wspólny silnik komunikatora"
-  ,"statusComponentLocalDataDescription": "Tożsamość i zaszyfrowana baza lokalna"
-  ,"statusComponentTorDescription": "Proces Tor i lokalny endpoint SOCKS"
-  ,"statusComponentRelayDescription": "Połączenie sterujące z relayem onion"
-  ,"statusComponentPeerListenerDescription": "Lokalny serwer przyjmujący połączenia peer"
-  ,"statusComponentOnionServiceDescription": "Adres onion publikowany dla tego urządzenia"
-  ,"desktopChats": "Czaty"
-  ,"desktopConversationCount": "{count} rozmów"
-  ,"@desktopConversationCount": {"description": "Licznik rozmów na desktopie", "placeholders": {"count": {"type": "int"}}}
-  ,"desktopSearch": "Szukaj…"
-  ,"desktopNoConversations": "Nie masz jeszcze rozmów."
-  ,"desktopNoConversationMatches": "Brak rozmów pasujących do wyszukiwania."
-  ,"desktopContacts": "Kontakty"
-  ,"desktopFilteredContactsEmpty": "Brak kontaktów dla wybranego filtra."
-  ,"desktopContactCount": "{count} zapisanych"
-  ,"@desktopContactCount": {"description": "Licznik kontaktów na desktopie", "placeholders": {"count": {"type": "int"}}}
-  ,"desktopSearchContacts": "Szukaj kontaktów…"
-  ,"desktopAll": "Wszyscy"
-  ,"desktopOnline": "Online"
-  ,"commonYes": "Tak"
-  ,"commonNo": "Nie"
-  ,"desktopContactDetails": "Szczegóły kontaktu"
-  ,"desktopCloseDetails": "Zamknij szczegóły"
-  ,"desktopContactSection": "KONTAKT"
-  ,"desktopIdentityVerified": "Tożsamość zweryfikowana"
-  ,"desktopIdentityUnverified": "Tożsamość niezweryfikowana"
-  ,"desktopVerifyIdentity": "Zweryfikuj tożsamość"
-  ,"desktopPresenceSection": "OBECNOŚĆ"
-  ,"desktopStatus": "Status"
-  ,"desktopLastSeen": "Ostatnio widziany"
-  ,"desktopObserved": "Obserwowany"
-  ,"desktopObservationExpiry": "Ważność obserwacji"
-  ,"desktopConversationFocus": "Fokus rozmowy"
-  ,"desktopConnectionSection": "POŁĄCZENIE"
-  ,"desktopP2pConnection": "Połączenie P2P"
-  ,"desktopProbeLatency": "Opóźnienie probe"
-  ,"desktopNextProbe": "Następny probe"
-  ,"desktopLastP2pConnection": "Ostatnie połączenie P2P"
-  ,"desktopRoute": "Trasa"
-  ,"desktopEndpoint": "Endpoint"
-  ,"desktopPolicy": "Polityka"
-  ,"desktopInformationSection": "INFORMACJE"
-  ,"desktopInstallationId": "Installation ID"
-  ,"desktopLastP2p": "Ostatnie P2P"
-  ,"desktopBackToConversations": "Wróć do listy rozmów"
-  ,"statusProbeEngine": "Silnik"
-  ,"statusProbeRelay": "Tor relay"
-  ,"statusProbePeer": "Tor P2P"
-  ,"startupEngine": "Wspólny silnik"
-  ,"startupLocalData": "Dane lokalne"
-  ,"startupTor": "Sieć Tor"
-  ,"startupPeerListener": "Lokalny serwer P2P"
-  ,"startupOnionService": "Usługa onion P2P"
-  ,"startupRelay": "Tor relay"
-  ,"startupCommunication": "Gotowość komunikacji"
-  ,"startupEngineDescription": "Uruchamianie wspólnego silnika Rust"
-  ,"startupLocalDataDescription": "Otwieranie zaszyfrowanej bazy i tożsamości"
-  ,"startupTorDescription": "Uruchamianie procesu Tor i przygotowanie SOCKS"
-  ,"startupPeerListenerDescription": "Nasłuchiwanie lokalnego serwera peer"
-  ,"startupOnionServiceDescription": "Publikowanie adresu urządzenia w Tor"
-  ,"startupRelayDescription": "Połączenie z serwerem sterującym"
-  ,"startupCommunicationDescription": "Kolejki i odbieranie wiadomości"
-  ,"contactSemantics": "Kontakt {name}"
-  ,"@contactSemantics": {"description": "Etykieta dostępności kontaktu", "placeholders": {"name": {"type": "String"}}}
-  ,"contactSemanticsHint": "Naciśnij, aby rozpocząć rozmowę. Przytrzymaj, aby otworzyć menu."
-  ,"contactStartConversation": "Rozpocznij rozmowę"
-  ,"contactDetails": "Szczegóły kontaktu"
-  ,"contactEnableNotifications": "Włącz powiadomienia"
-  ,"contactMute": "Wycisz kontakt"
-  ,"contactCopyFingerprint": "Kopiuj fingerprint"
-  ,"contactEndRelationship": "Zakończ relację"
-  ,"conversationsLoading": "Ładowanie rozmów…"
-  ,"conversationRename": "Zmień nazwę lokalną"
-  ,"conversationUnpin": "Odepnij"
-  ,"conversationPin": "Przypnij"
-  ,"conversationEnableNotifications": "Włącz powiadomienia"
-  ,"conversationMute": "Wycisz"
-  ,"conversationClearHistory": "Wyczyść lokalną historię"
-  ,"conversationArchive": "Archiwizuj lokalnie"
-  ,"conversationLocalName": "Lokalna nazwa rozmowy"
-  ,"conversationName": "Nazwa"
-  ,"conversationNameLocalOnly": "Nazwa pozostaje tylko na tym urządzeniu."
-  ,"commonCancel": "Anuluj"
-  ,"commonSave": "Zapisz"
-  ,"commonCopy": "Kopiuj"
-  ,"conversationRestore": "Przywróć"
-  ,"conversationClearHistoryTitle": "Wyczyścić lokalną historię?"
-  ,"conversationClearHistoryDescription": "Wiadomości zostaną usunięte wyłącznie z tego urządzenia. Kontakt nie otrzyma informacji o tej operacji."
-  ,"conversationClear": "Wyczyść"
-  ,"conversationHistoryCleared": "Lokalna historia została wyczyszczona."
-  ,"problemPairingWelcomeStale": "Tego zaproszenia nie można już dokończyć. Poproś kontakt o wygenerowanie nowego kodu parowania."
-  ,"problemPairingCodeInvalid": "Kod parowania jest nieprawidłowy albo wygasł. Poproś kontakt o nowy kod."
-  ,"problemPairingRequiresRelay": "Parowanie wymaga dostępnego relay; dane lokalne pozostają dostępne offline."
-  ,"problemNicknameRequired": "Najpierw ustaw nazwę użytkownika na tym urządzeniu."
-  ,"problemInviteCodeUnavailable": "Relay nie zwrócił kodu zaproszenia. Spróbuj ponownie."
-  ,"problemPairingGatewayUnavailable": "Usługa parowania jest chwilowo niedostępna. Spróbuj ponownie za chwilę."
-  ,"problemSecureConnectionPending": "Bezpieczne połączenie nie jest jeszcze gotowe."
-  ,"problemConnectionUnavailable": "Połączenie jest chwilowo niedostępne."
-  ,"problemOperationFailed": "Nie udało się wykonać operacji."
-  ,"paletteArcade": "Arcade"
-  ,"paletteMocha": "Mocha"
-  ,"paletteGruvbox": "Gruvbox"
-  ,"paletteNord": "Nord"
-  ,"shellAccount": "Konto"
-  ,"shellSettings": "Ustawienia"
-  ,"contactsLocalAlias": "Lokalny alias"
-  ,"contactsSaving": "Zapisywanie…"
-  ,"commonClose": "Zamknij"
-  ,"relationshipEndTitle": "Zakończyć relację?"
-  ,"relationshipEndDescription": "Kontakt {name} utraci możliwość wysyłania wiadomości. Ponowne dodanie będzie wymagało nowego kodu."
-  ,"@relationshipEndDescription": {"description": "Ostrzeżenie przed zakończeniem relacji", "placeholders": {"name": {"type": "String"}}}
-  ,"relationshipKeepHistory": "Zachowaj historię na tym urządzeniu"
-  ,"relationshipKeepHistoryDescription": "Historia pozostanie lokalna i nie przywróci relacji."
-  ,"imageDownload": "Pobierz obraz"
-  ,"imageSaveToGallery": "Zapisz w galerii"
-  ,"imageRemoveFromCache": "Usuń z zaszyfrowanego cache"
-  ,"commonRetry": "Spróbuj ponownie"
-  ,"commonDeleteLocal": "Usuń tylko na tym urządzeniu"
-  ,"connectionDiagnosticsCopied": "Diagnostyka skopiowana."
-  ,"connectionCopyDiagnostics": "Kopiuj diagnostykę"
-  ,"connectionRetry": "Ponów połączenie"
-  ,"connectionRetrying": "Ponawianie…"
-  ,"commonContact": "Kontakt"
-  ,"commonImage": "Obraz"
-  ,"chatWaitingForMessage": "Oczekiwanie na wiadomość"
-  ,"contactsRotate": "Rotuj"
-  ,"contactsRevoke": "Unieważnij"
-  ,"contactsNoDeadLetters": "Brak dead-letterów"
-  ,"contactsDeadLetterRetry": "Ponawianie dead-letterów"
-  ,"contactsNoError": "Brak błędu"
-  ,"contactsSavingSettings": "Zapisywanie ustawień…"
-  ,"contactsEstablishedByPairingCode": "Relacja ustanowiona przez zaakceptowany kod"
-  ,"contactsP2pThroughTor": "P2P przez Tor"
-  ,"contactsDirectConnection": "Połączenie bezpośrednie"
-  ,"contactsCurrentRoute": "Aktualna trasa"
-  ,"contactsPresence": "Obecność"
-  ,"contactsViewingConversation": "Ogląda rozmowę"
-  ,"contactsLastProbe": "Ostatni probe"
-  ,"contactsNoData": "brak danych"
-  ,"contactsProbeLatency": "Latency probe"
-  ,"contactsP2pCapability": "Capability endpointu P2P"
-  ,"contactsCapabilityUnavailable": "Status capability niedostępny"
-  ,"contactRouteRelay": "relay"
-  ,"contactRouteP2pOnion": "P2P onion"
-  ,"contactRouteP2pOffline": "P2P oczekuje / offline"
-  ,"contactEndpointVerified": "endpoint zweryfikowany"
-  ,"contactEndpointPending": "oczekuje na wymianę endpointu"
-  ,"contactEndpointInvalid": "endpoint nieprawidłowy"
-  ,"contactEndpointMissing": "endpoint niedostępny"
-  ,"contactAvailabilityActive": "aktywny w aplikacji"
-  ,"contactAvailabilityIdle": "bezczynny"
-  ,"contactAvailabilityChecking": "sprawdzanie"
-  ,"contactAvailabilityOffline": "offline"
-  ,"contactAvailabilityUnknown": "status nieznany"
-  ,"contactPeerConnected": "połączono"
-  ,"contactPeerConnecting": "łączenie"
-  ,"contactPeerAuthenticating": "uwierzytelnianie"
-  ,"contactPeerBackoff": "oczekiwanie na ponowienie"
-  ,"contactPeerOffline": "offline"
-  ,"contactPeerUnknown": "nieznany"
-  ,"contactPolicyP2pOnly": "Tylko P2P"
-  ,"contactsNewContact": "Nowy kontakt"
-  ,"contactsWaitingForSecureConversation": "Oczekiwanie na ustanowienie szyfrowanej rozmowy"
-  ,"contactsTransportPolicy": "Polityka transportu"
-  ,"onboardingNicknameLabel": "Nick"
-  ,"onboardingSaveNickname": "Zapisz nick"
-  ,"appTagline": "Prywatne wiadomości przez Tor"
-  ,"timeJustNow": "przed chwilą"
-  ,"timeMinutesAgo": "{count, plural, =1{minutę temu} few{{count} minuty temu} many{{count} minut temu} other{{count} min temu}}"
-  ,"@timeMinutesAgo": {"description": "Liczba minut od zdarzenia", "placeholders": {"count": {"type": "int"}}}
-  ,"timeHoursAgo": "{count, plural, =1{godzinę temu} few{{count} godziny temu} many{{count} godzin temu} other{{count} godz. temu}}"
-  ,"@timeHoursAgo": {"description": "Liczba godzin od zdarzenia", "placeholders": {"count": {"type": "int"}}}
-  ,"timeDaysAgo": "{count, plural, =1{wczoraj} few{{count} dni temu} many{{count} dni temu} other{{count} dni temu}}"
-  ,"@timeDaysAgo": {"description": "Liczba dni od zdarzenia", "placeholders": {"count": {"type": "int"}}}
+  "languageEnglishNative": "English",
+  "languageSettingsTitle": "Język",
+  "languageSettingsDescription": "Wybierz język używany przez TorChat.",
+  "notificationNewMessageTitle": "Nowa wiadomość",
+  "notificationPairingRequestTitle": "Nowa prośba kontaktu",
+  "notificationPrivateMessageBody": "Nowa zaszyfrowana wiadomość",
+  "notificationPairingRequestBody": "Masz nową prośbę o rozmowę.",
+  "settingsTitle": "Ustawienia",
+  "settingsApplicationSection": "APLIKACJA",
+  "settingsFamilyTitle": "Rodzina",
+  "settingsFamilyDescription": "Classic: klasyczny, Retro: styl retro",
+  "settingsClassic": "Classic",
+  "settingsRetro": "Retro",
+  "settingsTerminalPalette": "Paleta terminalowa",
+  "settingsBrightness": "Tryb jasności",
+  "settingsSystem": "System",
+  "settingsLight": "Jasny",
+  "settingsDark": "Ciemny",
+  "settingsReduceMotion": "Ogranicz animacje",
+  "settingsReduceMotionDescription": "Wyłącza animacje i płynne przejścia w całej aplikacji",
+  "settingsWindowsAutostart": "Uruchamiaj z systemem Windows",
+  "settingsWindowsAutostartDescription": "Uruchamia TorChat automatycznie po zalogowaniu",
+  "settingsSaving": "Zapisywanie…",
+  "settingsLastSeen": "Ostatnio widziany",
+  "settingsLastSeenDescription": "Udostępnia czas ostatniej aktywności kontaktom",
+  "settingsTorConnection": "Połączenie Tor",
+  "settingsUserProfile": "Profil użytkownika",
+  "settingsSavingProfile": "Zapisywanie profilu…",
+  "settingsResetDemoData": "Reset danych demo",
+  "settingsRequiresConfirmation": "Wymaga potwierdzenia",
+  "settingsClearLocalState": "Wyczyść lokalny stan",
+  "settingsClearLocalStateDescription": "Usuwa wszystkie dane testowe i lokalne wpisy",
+  "settingsNotifications": "Powiadomienia",
+  "settingsNotificationsDescription": "Nadrzędny przełącznik wszystkich alertów",
+  "settingsNewMessages": "Nowe wiadomości",
+  "settingsNewMessagesDescription": "Powiadamiaj o wiadomościach poza otwartą rozmową",
+  "settingsContactInvitations": "Zaproszenia do kontaktów",
+  "settingsContactInvitationsDescription": "Powiadamiaj wyłącznie o nowych prośbach pairing",
+  "settingsNotificationSound": "Dźwięk",
+  "settingsNotificationSoundDescription": "Systemowy dźwięk powiadomienia TorChat",
+  "settingsNotificationVibration": "Wibracja",
+  "settingsNotificationVibrationDescription": "Wibracja dla zdarzeń przychodzących",
+  "settingsMessagePreview": "Podgląd treści",
+  "settingsMessagePreviewDescription": "Wyłączone domyślnie dla prywatności",
+  "settingsReadReceipts": "Potwierdzenia odczytu",
+  "settingsReadReceiptsDescription": "Informuj kontakt, że wiadomość została odczytana",
+  "settingsTypingIndicator": "Informacja „pisze…”",
+  "settingsTypingIndicatorDescription": "Udostępnia chwilową aktywność podczas pisania",
+  "settingsOnlineStatus": "Status online",
+  "settingsOnlineStatusDescription": "Udostępnia tylko bieżącą obecność bez historii",
+  "settingsNotificationsSection": "POWIADOMIENIA",
+  "settingsChatPrivacySection": "PRYWATNOŚĆ CZATU",
+  "settingsIdentitySection": "TOŻSAMOŚĆ",
+  "settingsLocalDataSection": "DANE LOKALNE",
+  "accountTitle": "Konto",
+  "accountIdentitySection": "TOŻSAMOŚĆ",
+  "accountLocalProfile": "Lokalny profil urządzenia",
+  "accountInstallationId": "ID instalacji: {id}",
+  "accountActionsSection": "AKCJE",
+  "accountInviteCode": "Mój kod zaproszenia",
+  "accountInviteLoading": "Pobieranie kodu…",
+  "accountInviteSubtitle": "Kod jest widoczny tylko w osobnym oknie",
+  "accountSettings": "Ustawienia",
+  "accountSettingsSubtitle": "Otwórz ustawienia aplikacji",
+  "imageCacheSection": "OBRAZY I CACHE",
+  "imageCacheClearTitle": "Wyczyścić cache obrazów?",
+  "imageCacheClearDescription": "Usuwa wyłącznie lokalne zaszyfrowane kopie obrazów. Wiadomości i historia rozmów pozostaną bez zmian.",
+  "cancel": "Anuluj",
+  "clear": "Wyczyść",
+  "imageAutoDownload": "Automatycznie pobieraj obrazy",
+  "imageAutoDownloadDescription": "Zapisuje przychodzące obrazy w lokalnym magazynie AES-GCM",
+  "encryptedCache": "Zaszyfrowany cache",
+  "calculatingUsage": "Obliczanie użycia…",
+  "imageFilesCount": "{count} plików · {size}",
+  "imageCacheClearing": "Czyszczenie…",
+  "imageCacheClearButton": "Wyczyść cache obrazów",
+  "imageCacheCleared": "Cache obrazów został wyczyszczony.",
+  "nicknameSaving": "Zapisywanie nicku…",
+  "nicknameReady": "TorChat jest gotowy",
+  "nicknameDescription": "Relay i onion tego urządzenia są aktywne. Ustaw lokalną nazwę użytkownika.",
+  "nicknameLabel": "Nick",
+  "nicknameSave": "Zapisz nick",
+  "retry": "Spróbuj ponownie",
+  "warmupTitle": "Rozgrzewanie TorChat",
+  "warmupSubtitle": "Prywatne wiadomości przez Tor",
+  "communicationReady": "Gotowość komunikacji",
+  "inviteScanTitle": "Zeskanuj kod parowania",
+  "addContactTitle": "Dodaj kontakt",
+  "processingCode": "Przetwarzanie kodu…",
+  "desktopCodeInstructions": "Desktop nie używa kamery. Wpisz 8-cyfrowy kod wyświetlony na drugim urządzeniu.",
+  "pairingCodeLabel": "Kod parowania",
+  "pairingDialogTitle": "Twój kod parowania",
+  "pairingRefreshing": "Odświeżanie kodu…",
+  "pairingRefreshingAction": "Odświeżanie…",
+  "pairingExpiredRefreshing": "Kod wygasł · odświeżanie…",
+  "pairingValidFor": "Ważny jeszcze {time}",
+  "@pairingValidFor": {"description": "Pozostały czas ważności kodu parowania", "placeholders": {"time": {"type": "String"}}},
+  "pairingRefreshCode": "Odśwież kod",
+  "close": "Zamknij",
+  "incomingPairingTitle": "Nowe zaproszenie do kontaktów",
+  "pairingCompletedTitle": "Kontakt został dodany",
+  "pairingCompletedDescription": "Bezpieczne połączenie zostało potwierdzone po obu stronach.",
+  "newContact": "Nowy kontakt",
+  "pairingSavingDecision": "Zapisywanie decyzji…",
+  "pairingAcceptedDescription": "Zaproszenie zaakceptowane. Finalizacja kontaktu przebiega w tle.",
+  "pairingWaitingDecision": "Zaproszenie oczekuje na Twoją decyzję. Nie zostanie automatycznie odrzucone przez licznik interfejsu.",
+  "securityDetails": "Szczegóły bezpieczeństwa",
+  "contactFingerprint": "Fingerprint klucza kontaktu",
+  "accepting": "Akceptowanie…",
+  "reject": "Odrzuć",
+  "accept": "Akceptuj",
+  "checkingInvitations": "Sprawdzanie nowych zaproszeń…",
+  "waitingForCode": "Oczekiwanie na użycie kodu…",
+  "contactsAddTitle": "Dodaj kontakt",
+  "contactsAddDescription": "Wpisz kod parowania albo zeskanuj QR",
+  "myPairingCode": "Mój kod parowania",
+  "pairingCodeHint": "Wpisz ośmiocyfrowy kod kontaktu",
+  "processingPairingCode": "Przetwarzanie kodu…",
+  "pairingCodeInputHint": "Wpisz 8-cyfrowy kod parowania",
+  "sendCode": "Wyślij kod",
+  "yourFingerprint": "Twój fingerprint",
+  "yourFingerprintSemantics": "Twój fingerprint: {fingerprint}",
+  "@yourFingerprintSemantics": {"description": "Etykieta accessibility lokalnego fingerprintu", "placeholders": {"fingerprint": {"type": "String"}}},
+  "loadingContacts": "Ładowanie kontaktów…",
+  "contactsTitle": "Kontakty",
+  "contactDetails": "Szczegóły kontaktu",
+  "contactStatusActive": "aktywny w aplikacji",
+  "contactStatusIdle": "bezczynny",
+  "contactStatusOffline": "offline",
+  "connectionCenterTitle": "Centrum połączeń",
+  "connectionInfrastructure": "Infrastruktura aplikacji",
+  "connectionCommunicationReadiness": "Gotowość komunikacji",
+  "connectionActivity": "Aktywność w aplikacji",
+  "connectionDirectSessions": "Bezpośrednie sesje kontaktów",
+  "connectionDirectSessionsDetail": "Sesje z konkretnymi kontaktami powstają po onboardingu i nie blokują startu aplikacji.",
+  "connectionContactPresence": "Obecność kontaktów",
+  "connectionContactPresenceDetail": "Kontakty zgłaszające aktywną obecność w runtime.",
+  "connectionLocalConversationSummaries": "Lokalne podsumowania rozmów",
+  "connectionLocalConversationSummariesDetail": "Lista rozmów pochodzi z atomowego snapshotu; wiadomości są ładowane dopiero po otwarciu.",
+  "connectionMessageQueue": "Kolejka wiadomości",
+  "connectionQueueClean": "czysta",
+  "connectionQueueCounts": "{queued} oczekuje · {failed} błędów",
+  "@connectionQueueCounts": {"description":"Licznik kolejki wiadomości","placeholders":{"queued":{"type":"int"},"failed":{"type":"int"}}},
+  "connectionMessageQueueDetail": "Wiadomości pozostają w trwałej kolejce do czasu potwierdzenia dostawy.",
+  "connectionLastError": "Ostatni błąd",
+  "contactActivityTyping": "pisze…",
+  "contactActivityOnline": "aktywny w aplikacji",
+  "contactActivityAway": "bezczynny",
+  "contactActivityUnknown": "status nieznany",
+  "contactActivityLastSeen": "ostatnio widziany {label}",
+  "contactActivityJustNow": "przed chwilą",
+  "contactActivityMinutesAgo": "{count, plural, =1{minutę temu} few{{count} minuty temu} many{{count} minut temu} other{{count} min temu}}",
+  "contactActivityHoursAgo": "{count, plural, =1{godzinę temu} few{{count} godziny temu} many{{count} godzin temu} other{{count} godz. temu}}",
+  "contactActivityDaysAgo": "{count, plural, =1{1 dzień temu} few{{count} dni temu} many{{count} dni temu} other{{count} dni temu}}",
+  "contactStatusUnknown": "status nieznany",
+  "contactStatusChecking": "sprawdzanie",
+  "routeP2P": "P2P",
+  "routeRelay": "relay",
+  "messageReply": "Odpowiedz",
+  "messageCopy": "Kopiuj wiadomość",
+  "messageRetry": "Spróbuj ponownie",
+  "messageDeleteLocal": "Usuń tylko na tym urządzeniu",
+  "messageRetrying": "Ponawianie…",
+  "messageDeleting": "Usuwanie…",
+  "messageStateQueued": "w kolejce",
+  "messageStateSending": "wysyłanie…",
+  "messageStateSent": "wysłano",
+  "messageStateDelivered": "dostarczono",
+  "messageStateRead": "odczytano",
+  "messageStateFailed": "błąd wysyłania",
+  "chatStarting": "Uruchamianie rozmowy…",
+  "chatLoading": "Ładowanie rozmowy…",
+  "chatBack": "Wróć",
+  "chatSearchHint": "Szukaj lokalnie w rozmowie…",
+  "chatContactViewing": "Kontakt ma otwartą tę rozmowę",
+  "chatCloseSearch": "Zamknij wyszukiwanie",
+  "chatSearch": "Szukaj",
+  "chatOptions": "Opcje rozmowy",
+  "chatCopyFingerprint": "Kopiuj fingerprint",
+  "chatLoadingOlder": "Ładowanie starszych wiadomości…",
+  "chatUnseenMessages": "{count, plural, =0{Brak nowych wiadomości} =1{1 nowa wiadomość} few{{count} nowe wiadomości} many{{count} nowych wiadomości} other{{count} nowych wiadomości}}",
+  "@chatUnseenMessages": {"description": "Liczba nieprzeczytanych wiadomości", "placeholders": {"count": {"type": "int"}}},
+  "chatScrollToBottom": "Przewiń na dół",
+  "chatPrivateCommunication": "Prywatna komunikacja przez Tor",
+  "chatCounts": "{contacts} kontaktów · {conversations} rozmów",
+  "@chatCounts": {"description": "Liczniki na ekranie rozmów", "placeholders": {"contacts": {"type": "int"}, "conversations": {"type": "int"}}},
+  "chatRecentConversations": "Ostatnie rozmowy",
+  "chatVerifyContact": "Zweryfikuj tożsamość kontaktu w szczegółach, aby rozpocząć rozmowę.",
+  "chatConversationStarted": "To początek rozmowy z {name}.",
+  "@chatConversationStarted": {"description": "Pusty stan rozmowy", "placeholders": {"name": {"type": "String"}}},
+  "chatSecureConnectionStarting": "Nawiązywanie bezpiecznego połączenia",
+  "chatWaitingForSecureConnection": "Rozmowa oczekuje na bezpieczne połączenie.",
+  "chatRemoveAttachment": "Usuń załącznik",
+  "chatCancelReply": "Anuluj odpowiedź",
+  "chatPreparingImages": "Przygotowywanie obrazów…",
+  "chatAddImages": "Dodaj obrazy do wiadomości",
+  "chatComposeHint": "Napisz wiadomość…",
+  "chatNotReady": "Rozmowa nie jest jeszcze gotowa",
+  "statusTransportConnected": "Połączono z relayem przez Tor",
+  "statusTransportStarting": "Uruchamianie Tor",
+  "statusTransportBootstrapping": "Uruchamianie obwodu Tor",
+  "statusTransportConnecting": "Łączenie z relayem onion",
+  "statusTransportDegraded": "Relay działa w trybie ograniczonym",
+  "statusTransportReconnecting": "Ponowne łączenie z relayem",
+  "statusTransportOffline": "Tor offline",
+  "statusTransportError": "Sprawdzanie połączenia Tor",
+  "statusComponentEngine": "Silnik aplikacji",
+  "statusComponentLocalData": "Dane lokalne",
+  "statusComponentTor": "Sieć Tor",
+  "statusComponentRelay": "Relay TorChat",
+  "statusComponentPeerListener": "Lokalny listener P2P",
+  "statusComponentOnionService": "Onion tego urządzenia",
+  "statusComponentEngineDescription": "Wspólny silnik komunikatora",
+  "statusComponentLocalDataDescription": "Tożsamość i zaszyfrowana baza lokalna",
+  "statusComponentTorDescription": "Proces Tor i lokalny endpoint SOCKS",
+  "statusComponentRelayDescription": "Połączenie sterujące z relayem onion",
+  "statusComponentPeerListenerDescription": "Lokalny serwer przyjmujący połączenia peer",
+  "statusComponentOnionServiceDescription": "Adres onion publikowany dla tego urządzenia",
+  "desktopChats": "Czaty",
+  "desktopConversationCount": "{count} rozmów",
+  "@desktopConversationCount": {"description": "Licznik rozmów na desktopie", "placeholders": {"count": {"type": "int"}}},
+  "desktopSearch": "Szukaj…",
+  "desktopNoConversations": "Nie masz jeszcze rozmów.",
+  "desktopNoConversationMatches": "Brak rozmów pasujących do wyszukiwania.",
+  "desktopContacts": "Kontakty",
+  "desktopFilteredContactsEmpty": "Brak kontaktów dla wybranego filtra.",
+  "desktopContactCount": "{count} zapisanych",
+  "@desktopContactCount": {"description": "Licznik kontaktów na desktopie", "placeholders": {"count": {"type": "int"}}},
+  "desktopSearchContacts": "Szukaj kontaktów…",
+  "desktopAll": "Wszyscy",
+  "desktopOnline": "Online",
+  "commonYes": "Tak",
+  "commonNo": "Nie",
+  "desktopContactDetails": "Szczegóły kontaktu",
+  "desktopCloseDetails": "Zamknij szczegóły",
+  "desktopContactSection": "KONTAKT",
+  "desktopIdentityVerified": "Tożsamość zweryfikowana",
+  "desktopIdentityUnverified": "Tożsamość niezweryfikowana",
+  "desktopVerifyIdentity": "Zweryfikuj tożsamość",
+  "desktopPresenceSection": "OBECNOŚĆ",
+  "desktopStatus": "Status",
+  "desktopLastSeen": "Ostatnio widziany",
+  "desktopObserved": "Obserwowany",
+  "desktopObservationExpiry": "Ważność obserwacji",
+  "desktopConversationFocus": "Fokus rozmowy",
+  "desktopConnectionSection": "POŁĄCZENIE",
+  "desktopP2pConnection": "Połączenie P2P",
+  "desktopProbeLatency": "Opóźnienie probe",
+  "desktopNextProbe": "Następny probe",
+  "desktopLastP2pConnection": "Ostatnie połączenie P2P",
+  "desktopRoute": "Trasa",
+  "desktopEndpoint": "Endpoint",
+  "desktopPolicy": "Polityka",
+  "desktopInformationSection": "INFORMACJE",
+  "desktopInstallationId": "Installation ID",
+  "desktopLastP2p": "Ostatnie P2P",
+  "desktopBackToConversations": "Wróć do listy rozmów",
+  "statusProbeEngine": "Silnik",
+  "statusProbeRelay": "Tor relay",
+  "statusProbePeer": "Tor P2P",
+  "startupEngine": "Wspólny silnik",
+  "startupLocalData": "Dane lokalne",
+  "startupTor": "Sieć Tor",
+  "startupPeerListener": "Lokalny serwer P2P",
+  "startupOnionService": "Usługa onion P2P",
+  "startupRelay": "Tor relay",
+  "startupCommunication": "Gotowość komunikacji",
+  "startupEngineDescription": "Uruchamianie wspólnego silnika Rust",
+  "startupLocalDataDescription": "Otwieranie zaszyfrowanej bazy i tożsamości",
+  "startupTorDescription": "Uruchamianie procesu Tor i przygotowanie SOCKS",
+  "startupPeerListenerDescription": "Nasłuchiwanie lokalnego serwera peer",
+  "startupOnionServiceDescription": "Publikowanie adresu urządzenia w Tor",
+  "startupRelayDescription": "Połączenie z serwerem sterującym",
+  "startupCommunicationDescription": "Kolejki i odbieranie wiadomości",
+  "contactSemantics": "Kontakt {name}",
+  "@contactSemantics": {"description": "Etykieta dostępności kontaktu", "placeholders": {"name": {"type": "String"}}},
+  "contactSemanticsHint": "Naciśnij, aby rozpocząć rozmowę. Przytrzymaj, aby otworzyć menu.",
+  "contactStartConversation": "Rozpocznij rozmowę",
+  "contactDetails": "Szczegóły kontaktu",
+  "contactEnableNotifications": "Włącz powiadomienia",
+  "contactMute": "Wycisz kontakt",
+  "contactCopyFingerprint": "Kopiuj fingerprint",
+  "contactEndRelationship": "Zakończ relację",
+  "conversationsLoading": "Ładowanie rozmów…",
+  "conversationRename": "Zmień nazwę lokalną",
+  "conversationUnpin": "Odepnij",
+  "conversationPin": "Przypnij",
+  "conversationEnableNotifications": "Włącz powiadomienia",
+  "conversationMute": "Wycisz",
+  "conversationClearHistory": "Wyczyść lokalną historię",
+  "conversationArchive": "Archiwizuj lokalnie",
+  "conversationLocalName": "Lokalna nazwa rozmowy",
+  "conversationName": "Nazwa",
+  "conversationNameLocalOnly": "Nazwa pozostaje tylko na tym urządzeniu.",
+  "commonCancel": "Anuluj",
+  "commonSave": "Zapisz",
+  "commonCopy": "Kopiuj",
+  "conversationRestore": "Przywróć",
+  "conversationClearHistoryTitle": "Wyczyścić lokalną historię?",
+  "conversationClearHistoryDescription": "Wiadomości zostaną usunięte wyłącznie z tego urządzenia. Kontakt nie otrzyma informacji o tej operacji.",
+  "conversationClear": "Wyczyść",
+  "conversationHistoryCleared": "Lokalna historia została wyczyszczona.",
+  "problemPairingWelcomeStale": "Tego zaproszenia nie można już dokończyć. Poproś kontakt o wygenerowanie nowego kodu parowania.",
+  "problemPairingCodeInvalid": "Kod parowania jest nieprawidłowy albo wygasł. Poproś kontakt o nowy kod.",
+  "problemPairingRequiresRelay": "Parowanie wymaga dostępnego relay; dane lokalne pozostają dostępne offline.",
+  "problemNicknameRequired": "Najpierw ustaw nazwę użytkownika na tym urządzeniu.",
+  "problemInviteCodeUnavailable": "Relay nie zwrócił kodu zaproszenia. Spróbuj ponownie.",
+  "problemPairingGatewayUnavailable": "Usługa parowania jest chwilowo niedostępna. Spróbuj ponownie za chwilę.",
+  "problemSecureConnectionPending": "Bezpieczne połączenie nie jest jeszcze gotowe.",
+  "problemConnectionUnavailable": "Połączenie jest chwilowo niedostępne.",
+  "problemOperationFailed": "Nie udało się wykonać operacji.",
+  "paletteArcade": "Arcade",
+  "paletteMocha": "Mocha",
+  "paletteGruvbox": "Gruvbox",
+  "paletteNord": "Nord",
+  "shellAccount": "Konto",
+  "shellSettings": "Ustawienia",
+  "contactsLocalAlias": "Lokalny alias",
+  "contactsSaving": "Zapisywanie…",
+  "commonClose": "Zamknij",
+  "relationshipEndTitle": "Zakończyć relację?",
+  "relationshipEndDescription": "Kontakt {name} utraci możliwość wysyłania wiadomości. Ponowne dodanie będzie wymagało nowego kodu.",
+  "@relationshipEndDescription": {"description": "Ostrzeżenie przed zakończeniem relacji", "placeholders": {"name": {"type": "String"}}},
+  "relationshipKeepHistory": "Zachowaj historię na tym urządzeniu",
+  "relationshipKeepHistoryDescription": "Historia pozostanie lokalna i nie przywróci relacji.",
+  "imageDownload": "Pobierz obraz",
+  "imageSaveToGallery": "Zapisz w galerii",
+  "imageRemoveFromCache": "Usuń z zaszyfrowanego cache",
+  "commonRetry": "Spróbuj ponownie",
+  "commonDeleteLocal": "Usuń tylko na tym urządzeniu",
+  "connectionDiagnosticsCopied": "Diagnostyka skopiowana.",
+  "connectionCopyDiagnostics": "Kopiuj diagnostykę",
+  "connectionRetry": "Ponów połączenie",
+  "connectionRetrying": "Ponawianie…",
+  "commonContact": "Kontakt",
+  "commonImage": "Obraz",
+  "chatWaitingForMessage": "Oczekiwanie na wiadomość",
+  "contactsRotate": "Rotuj",
+  "contactsRevoke": "Unieważnij",
+  "contactsNoDeadLetters": "Brak dead-letterów",
+  "contactsDeadLetterRetry": "Ponawianie dead-letterów",
+  "contactsNoError": "Brak błędu",
+  "contactsSavingSettings": "Zapisywanie ustawień…",
+  "contactsEstablishedByPairingCode": "Relacja ustanowiona przez zaakceptowany kod",
+  "contactsP2pThroughTor": "P2P przez Tor",
+  "contactsDirectConnection": "Połączenie bezpośrednie",
+  "contactsCurrentRoute": "Aktualna trasa",
+  "contactsPresence": "Obecność",
+  "contactsViewingConversation": "Ogląda rozmowę",
+  "contactsLastProbe": "Ostatni probe",
+  "contactsNoData": "brak danych",
+  "contactsProbeLatency": "Latency probe",
+  "contactsP2pCapability": "Capability endpointu P2P",
+  "contactsCapabilityUnavailable": "Status capability niedostępny",
+  "contactRouteRelay": "relay",
+  "contactRouteP2pOnion": "P2P onion",
+  "contactRouteP2pOffline": "P2P oczekuje / offline",
+  "contactEndpointVerified": "endpoint zweryfikowany",
+  "contactEndpointPending": "oczekuje na wymianę endpointu",
+  "contactEndpointInvalid": "endpoint nieprawidłowy",
+  "contactEndpointMissing": "endpoint niedostępny",
+  "contactAvailabilityActive": "aktywny w aplikacji",
+  "contactAvailabilityIdle": "bezczynny",
+  "contactAvailabilityChecking": "sprawdzanie",
+  "contactAvailabilityOffline": "offline",
+  "contactAvailabilityUnknown": "status nieznany",
+  "contactPeerConnected": "połączono",
+  "contactPeerConnecting": "łączenie",
+  "contactPeerAuthenticating": "uwierzytelnianie",
+  "contactPeerBackoff": "oczekiwanie na ponowienie",
+  "contactPeerOffline": "offline",
+  "contactPeerUnknown": "nieznany",
+  "contactPolicyP2pOnly": "Tylko P2P",
+  "contactsNewContact": "Nowy kontakt",
+  "contactsWaitingForSecureConversation": "Oczekiwanie na ustanowienie szyfrowanej rozmowy",
+  "contactsTransportPolicy": "Polityka transportu",
+  "onboardingNicknameLabel": "Nick",
+  "onboardingSaveNickname": "Zapisz nick",
+  "appTagline": "Prywatne wiadomości przez Tor",
+  "timeJustNow": "przed chwilą",
+  "timeMinutesAgo": "{count, plural, =1{minutę temu} few{{count} minuty temu} many{{count} minut temu} other{{count} min temu}}",
+  "@timeMinutesAgo": {"description": "Liczba minut od zdarzenia", "placeholders": {"count": {"type": "int"}}},
+  "timeHoursAgo": "{count, plural, =1{godzinę temu} few{{count} godziny temu} many{{count} godzin temu} other{{count} godz. temu}}",
+  "@timeHoursAgo": {"description": "Liczba godzin od zdarzenia", "placeholders": {"count": {"type": "int"}}},
+  "timeDaysAgo": "{count, plural, =1{wczoraj} few{{count} dni temu} many{{count} dni temu} other{{count} dni temu}}",
+  "@timeDaysAgo": {"description": "Liczba dni od zdarzenia", "placeholders": {"count": {"type": "int"}}},
+  "uiPairingRefreshFailed": "Nie udało się odświeżyć kodu.",
+  "uiPairingWaitingForMls": "Zaproszenie zaakceptowano. Kontakt pojawi się po zakończeniu bezpiecznej wymiany.",
+  "uiImageCacheLoadFailed": "Nie udało się odczytać magazynu obrazów.",
+  "uiImagePreferenceSaveFailed": "Nie udało się zapisać ustawienia pobierania obrazów.",
+  "uiImageCacheClearFailed": "Nie udało się wyczyścić pamięci obrazów.",
+  "uiMainWorkspaceSemantics": "Główna przestrzeń TorChat",
+  "uiUnreadContactsSemantics": "{count} kontaktów z nieprzeczytanymi wiadomościami",
+  "@uiUnreadContactsSemantics": {"placeholders": {"count": {"type": "int"}}},
+  "uiUnreadCountSemantics": "{count} nieprzeczytanych",
+  "@uiUnreadCountSemantics": {"placeholders": {"count": {"type": "int"}}},
+  "uiStateReady": "gotowe",
+  "uiStateFailed": "błąd",
+  "uiStateDegraded": "ograniczone",
+  "uiStateStarting": "uruchamianie",
+  "uiStateError": "błąd",
+  "uiConnectionSummaryDetail": "Stan infrastruktury komunikacyjnej aplikacji.",
+  "uiAttachmentLimitExceeded": "Wiadomość może zawierać maksymalnie {max} obrazów.",
+  "@uiAttachmentLimitExceeded": {"placeholders": {"max": {"type": "int"}}},
+  "uiAttachmentPreparationFailed": "Nie udało się przygotować wybranego obrazu.",
+  "uiImageSavedToGallery": "Obraz zapisano w galerii.",
+  "uiImageSaveFailed": "Nie udało się zapisać obrazu w galerii.",
+  "uiSentImage": "Wysłany obraz",
+  "uiImageFrom": "Obraz od {name}",
+  "@uiImageFrom": {"placeholders": {"name": {"type": "String"}}},
+  "uiDownloadEncryptedImage": "Pobierz do zaszyfrowanego magazynu",
+  "uiOpenImagePreview": "Otwórz podgląd obrazu",
+  "uiYou": "Ty",
+  "uiCorruptedImage": "obraz uszkodzony",
+  "uiImageReadFailed": "Nie udało się odczytać obrazu.",
+  "uiRelationshipEndedByYou": "Zakończono relację z kontaktem {name}.",
+  "@uiRelationshipEndedByYou": {"placeholders": {"name": {"type": "String"}}},
+  "uiRelationshipEndedByContact": "{name} zakończył relację.",
+  "@uiRelationshipEndedByContact": {"placeholders": {"name": {"type": "String"}}},
+  "uiContactCapabilitySequence": "Sekwencja",
+  "uiCapabilityMissing": "brak",
+  "uiCapabilityPending": "oczekująca",
+  "uiCapabilityActive": "aktywna",
+  "uiCapabilityRotating": "odnawianie",
+  "uiCapabilityRevoked": "unieważniona",
+  "uiCapabilityExpired": "wygasła",
+  "uiContactTransportDiagnostics": "Diagnostyka transportu DEV",
+  "uiDeadLetterUnavailable": "Diagnostyka niedostarczonych operacji jest niedostępna.",
+  "uiFingerprintUnavailable": "Fingerprint niedostępny",
+  "uiFingerprintCopied": "Fingerprint skopiowany.",
+  "uiNoContacts": "Brak kontaktów.",
+  "uiRelationshipRemoved": "Relacja z {name} została zakończona.",
+  "@uiRelationshipRemoved": {"placeholders": {"name": {"type": "String"}}},
+  "uiPendingPairings": "Oczekujące parowania",
+  "uiExpandNavigation": "Rozwiń nawigację",
+  "uiCollapseNavigation": "Zwiń nawigację",
+  "uiShowDetails": "Pokaż szczegóły",
+  "uiHideDetails": "Ukryj szczegóły",
+  "uiShowApp": "Pokaż TorChat",
+  "uiExitApp": "Zakończ",
+  "uiPairingAccepted": "{name} przyjął Twoje zaproszenie.",
+  "@uiPairingAccepted": {"placeholders": {"name": {"type": "String"}}},
+  "uiPairingRejected": "{name} odrzucił Twoje zaproszenie.",
+  "@uiPairingRejected": {"placeholders": {"name": {"type": "String"}}},
+  "uiPairingExpired": "Zaproszenie wygasło bez odpowiedzi.",
+  "uiPairingCancelled": "Zaproszenie zostało anulowane.",
+  "uiContactAdded": "Dodano kontakt {name}.",
+  "@uiContactAdded": {"placeholders": {"name": {"type": "String"}}},
+  "uiResetLocalStateInstructions": "Reset lokalnego stanu wykonaj przez wdrożenie z opcją resetu.",
+  "uiEditNickname": "Edytuj nick",
+  "uiSettingsSaveFailed": "Nie udało się zapisać ustawienia.",
+  "uiWindowsAutostartNotConfirmed": "System Windows nie potwierdził zmiany autostartu."
 }

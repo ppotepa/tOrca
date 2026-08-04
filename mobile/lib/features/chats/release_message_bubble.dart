@@ -34,6 +34,7 @@ class ReleaseMessageBubble extends ConsumerStatefulWidget {
   final ValueChanged<String> onRetry;
   final ValueChanged<String> onDelete;
   final ValueChanged<ChatMessage> onReply;
+
   @override
   ConsumerState<ReleaseMessageBubble> createState() =>
       _ReleaseMessageBubbleState();
@@ -44,6 +45,7 @@ class _ReleaseMessageBubbleState extends ConsumerState<ReleaseMessageBubble> {
   bool _loading = false;
   bool _saving = false;
   bool _cached = false;
+
   ChatMessage get message => widget.message;
 
   @override
@@ -51,6 +53,7 @@ class _ReleaseMessageBubbleState extends ConsumerState<ReleaseMessageBubble> {
     super.initState();
     unawaited(_loadImage());
   }
+
   @override
   void didUpdateWidget(covariant ReleaseMessageBubble oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -61,6 +64,7 @@ class _ReleaseMessageBubbleState extends ConsumerState<ReleaseMessageBubble> {
       unawaited(_loadImage());
     }
   }
+
   Future<void> _loadImage({bool force = false}) async {
     final messageId = message.id;
     final messageText = message.text;
@@ -94,6 +98,7 @@ class _ReleaseMessageBubbleState extends ConsumerState<ReleaseMessageBubble> {
       }
     }
   }
+
   Future<void> _removeFromCache() async {
     await EncryptedImageStore.instance.remove(message.id);
     if (!mounted) return;
@@ -102,6 +107,7 @@ class _ReleaseMessageBubbleState extends ConsumerState<ReleaseMessageBubble> {
       _cached = false;
     });
   }
+
   Future<void> _saveToGallery() async {
     final bytes = _imageBytes;
     if (bytes == null || _saving) return;
@@ -109,19 +115,15 @@ class _ReleaseMessageBubbleState extends ConsumerState<ReleaseMessageBubble> {
     try {
       await ImageGalleryService.saveJpeg(bytes, messageId: message.id);
       if (mounted) {
-        ref
-            .read(uiNotificationCenterProvider.notifier)
-            .showSuccess(
-              'Obraz zapisano w galerii.',
+        ref.read(uiNotificationCenterProvider.notifier).showSuccess(
+              context.l10n.uiImageSavedToGallery,
               deduplicationKey: 'image-saved:${message.id}',
             );
       }
     } catch (error) {
       if (mounted) {
-        ref
-            .read(uiNotificationCenterProvider.notifier)
-            .showError(
-              _cleanError(error),
+        ref.read(uiNotificationCenterProvider.notifier).showError(
+              context.l10n.uiImageSaveFailed,
               deduplicationKey:
                   'image-save-error:${message.id}:${error.runtimeType}',
             );
@@ -130,6 +132,7 @@ class _ReleaseMessageBubbleState extends ConsumerState<ReleaseMessageBubble> {
       if (mounted) setState(() => _saving = false);
     }
   }
+
   @override
   Widget build(BuildContext context) {
     final removed = RelationshipRemovedMessage.tryDecode(message.text);
@@ -158,16 +161,16 @@ class _ReleaseMessageBubbleState extends ConsumerState<ReleaseMessageBubble> {
     final foreground = mine ? chat.outgoingForeground : chat.incomingForeground;
     final background = mine ? chat.outgoingBubble : chat.incomingBubble;
     final imageLabel = mine
-        ? 'Wysłany obraz'
-        : 'Obraz od ${widget.contactName}';
+        ? context.l10n.uiSentImage
+        : context.l10n.uiImageFrom(widget.contactName);
 
     return Semantics(
       container: true,
       button: decoded != null && _imageBytes != null,
       label: imageLabel,
       hint: _imageBytes == null
-          ? 'Pobierz do zaszyfrowanego magazynu'
-          : 'Otwórz podgląd obrazu',
+          ? context.l10n.uiDownloadEncryptedImage
+          : context.l10n.uiOpenImagePreview,
       child: Align(
         alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
         child: GestureDetector(
@@ -176,7 +179,7 @@ class _ReleaseMessageBubbleState extends ConsumerState<ReleaseMessageBubble> {
               : () => _showPreview(
                   context,
                   _imageBytes!,
-                  contactName: mine ? 'Ty' : widget.contactName,
+                  contactName: mine ? context.l10n.uiYou : widget.contactName,
                 ),
           onLongPress: () => _showActions(context),
           child: MessageDeliverySurface(
@@ -201,7 +204,7 @@ class _ReleaseMessageBubbleState extends ConsumerState<ReleaseMessageBubble> {
                     Padding(
                       padding: const EdgeInsets.fromLTRB(12, 7, 12, 6),
                       child: Text(
-                        mine ? 'Ty' : widget.contactName,
+                        mine ? context.l10n.uiYou : widget.contactName,
                         style: Theme.of(context).textTheme.labelSmall?.copyWith(
                           color: foreground.withValues(alpha: .82),
                           fontWeight: FontWeight.w700,
@@ -227,7 +230,7 @@ class _ReleaseMessageBubbleState extends ConsumerState<ReleaseMessageBubble> {
                         Flexible(
                           child: Text(
                             decoded == null
-                                ? 'obraz uszkodzony'
+                                ? context.l10n.uiCorruptedImage
                                 : '${decoded.width}×${decoded.height} · '
                                       '${decoded.bytes.lengthInBytes ~/ 1024} KiB',
                             overflow: TextOverflow.ellipsis,
@@ -247,7 +250,7 @@ class _ReleaseMessageBubbleState extends ConsumerState<ReleaseMessageBubble> {
                         ),
                         const SizedBox(width: 4),
                         Text(
-                          _stateLabel(message.state),
+                          _stateLabel(context, message.state),
                           style: Theme.of(context).textTheme.labelSmall
                               ?.copyWith(
                                 color: message.state == MessageState.failed
@@ -266,6 +269,7 @@ class _ReleaseMessageBubbleState extends ConsumerState<ReleaseMessageBubble> {
       ),
     );
   }
+
   Widget _imageContent(
     BuildContext context,
     DecodedImageMessage? decoded,
@@ -281,7 +285,7 @@ class _ReleaseMessageBubbleState extends ConsumerState<ReleaseMessageBubble> {
             const SizedBox(width: 10),
             Flexible(
               child: Text(
-                'Nie udało się odczytać obrazu.',
+                context.l10n.uiImageReadFailed,
                 style: TextStyle(color: foreground),
               ),
             ),
@@ -328,6 +332,7 @@ class _ReleaseMessageBubbleState extends ConsumerState<ReleaseMessageBubble> {
       ),
     );
   }
+
   Future<void> _showPreview(
     BuildContext context,
     Uint8List bytes, {
@@ -436,52 +441,48 @@ class _RelationshipRemovedEvent extends StatelessWidget {
   final RelationshipRemovedMessage removed;
 
   @override
-  Widget build(BuildContext context) => Semantics(
-    container: true,
-    label: message.outgoing
-        ? 'Zakończono relację z kontaktem $contactName'
-        : '$contactName zakończył relację',
-    child: Center(
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 12),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-          color: context.statusTheme.warning.withValues(alpha: .10),
-          border: Border.all(
-            color: context.statusTheme.warning.withValues(alpha: .55),
+  Widget build(BuildContext context) {
+    final label = message.outgoing
+        ? context.l10n.uiRelationshipEndedByYou(contactName)
+        : context.l10n.uiRelationshipEndedByContact(contactName);
+    return Semantics(
+      container: true,
+      label: label,
+      child: Center(
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: context.statusTheme.warning.withValues(alpha: .10),
+            border: Border.all(
+              color: context.statusTheme.warning.withValues(alpha: .55),
+            ),
+            borderRadius: context.effectsTheme.pixelated
+                ? BorderRadius.zero
+                : BorderRadius.circular(10),
           ),
-          borderRadius: context.effectsTheme.pixelated
-              ? BorderRadius.zero
-              : BorderRadius.circular(10),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ThemedIcon(
-              Icons.person_remove_outlined,
-              size: 18,
-              color: context.statusTheme.warning,
-            ),
-            const SizedBox(width: 9),
-            Flexible(
-              child: Text(
-                message.outgoing
-                    ? 'Zakończono relację z kontaktem $contactName.'
-                    : '$contactName zakończył relację.',
-                style: Theme.of(context).textTheme.bodySmall,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ThemedIcon(
+                Icons.person_remove_outlined,
+                size: 18,
+                color: context.statusTheme.warning,
               ),
-            ),
-          ],
+              const SizedBox(width: 9),
+              Flexible(
+                child: Text(
+                  label,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
-    ),
-  );
+    );
+  }
 }
-
-String _cleanError(Object error) => error
-    .toString()
-    .replaceFirst('Exception: ', '')
-    .replaceFirst('Bad state: ', '');
 
 IconData _stateIcon(MessageState state) => switch (state) {
   MessageState.queued => Icons.hourglass_bottom,
@@ -491,11 +492,11 @@ IconData _stateIcon(MessageState state) => switch (state) {
   MessageState.failed => Icons.error_outline,
 };
 
-String _stateLabel(MessageState state) => switch (state) {
-  MessageState.queued => 'w kolejce',
-  MessageState.sending => 'wysyłanie',
-  MessageState.sent => 'wysłano',
-  MessageState.delivered => 'dostarczono',
-  MessageState.read => 'dostarczono · odczytano',
-  MessageState.failed => 'błąd',
+String _stateLabel(BuildContext context, MessageState state) => switch (state) {
+  MessageState.queued => context.l10n.uiMessageQueued,
+  MessageState.sending => context.l10n.uiMessageSending,
+  MessageState.sent => context.l10n.uiMessageSent,
+  MessageState.delivered => context.l10n.uiMessageDelivered,
+  MessageState.read => context.l10n.uiMessageRead,
+  MessageState.failed => context.l10n.uiMessageFailed,
 };

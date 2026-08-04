@@ -13,8 +13,11 @@ import '../../core/models/domain.dart';
 import '../../core/presence/contact_presence_snapshot.dart';
 import '../../core/presence/contact_presence_store.dart';
 import '../../locales/presentation/app_localizations_x.dart';
+import '../../locales/presentation/state_problem_localizer.dart';
 import '../../locales/presentation/status_localizer.dart';
 import '../../shared/async/busy_action_button.dart';
+
+enum _StatusTone { success, warning, error, neutral }
 
 class ConnectionCenterSheet extends ConsumerWidget {
   const ConnectionCenterSheet({super.key});
@@ -57,6 +60,11 @@ class ConnectionCenterSheet extends ConsumerWidget {
               value.availability == ContactAvailability.idle,
         )
         .length;
+    final localizedError = localizeStateProblem(
+      l10n,
+      problem: state.problem,
+      diagnosticError: state.error,
+    );
 
     return SafeArea(
       child: Padding(
@@ -72,13 +80,8 @@ class ConnectionCenterSheet extends ConsumerWidget {
               ),
               const SizedBox(height: 4),
               Text(
-                summary.status,
+                localizeTransportPhase(l10n, summary.phase),
                 style: Theme.of(context).textTheme.titleSmall,
-              ),
-              const SizedBox(height: 2),
-              Text(
-                summary.detail,
-                style: Theme.of(context).textTheme.bodySmall,
               ),
               const SizedBox(height: 20),
               Text(
@@ -92,12 +95,17 @@ class ConnectionCenterSheet extends ConsumerWidget {
                 icon: Icons.forum_outlined,
                 title: l10n.connectionCommunicationReadiness,
                 state: readiness.communicationReady
-                    ? 'ready'
+                    ? l10n.uiStateReady
                     : readiness.failed
-                    ? 'failed'
+                    ? l10n.uiStateFailed
                     : readiness.degraded
-                    ? 'degraded'
-                    : 'starting',
+                    ? l10n.uiStateDegraded
+                    : l10n.uiStateStarting,
+                tone: readiness.communicationReady
+                    ? _StatusTone.success
+                    : readiness.failed
+                    ? _StatusTone.error
+                    : _StatusTone.warning,
                 detail: readiness.communicationReady
                     ? l10n.startupCommunicationDescription
                     : localizeStartupStepDescription(
@@ -115,21 +123,26 @@ class ConnectionCenterSheet extends ConsumerWidget {
                 icon: Icons.cable_outlined,
                 title: l10n.connectionDirectSessions,
                 state: '$directSessions/${contacts.length}',
-                detail:
-                    l10n.connectionDirectSessionsDetail,
+                tone: directSessions > 0
+                    ? _StatusTone.success
+                    : _StatusTone.neutral,
+                detail: l10n.connectionDirectSessionsDetail,
               ),
               _StatusTile(
                 icon: Icons.people_alt_outlined,
                 title: l10n.connectionContactPresence,
                 state: '$activeContacts/${contacts.length}',
+                tone: activeContacts > 0
+                    ? _StatusTone.success
+                    : _StatusTone.neutral,
                 detail: l10n.connectionContactPresenceDetail,
               ),
               _StatusTile(
                 icon: Icons.forum_outlined,
                 title: l10n.connectionLocalConversationSummaries,
                 state: '${conversations.length}',
-                detail:
-                    l10n.connectionLocalConversationSummariesDetail,
+                tone: _StatusTone.neutral,
+                detail: l10n.connectionLocalConversationSummariesDetail,
               ),
               _StatusTile(
                 icon: Icons.queue_outlined,
@@ -137,15 +150,20 @@ class ConnectionCenterSheet extends ConsumerWidget {
                 state: queued == 0 && failed == 0
                     ? l10n.connectionQueueClean
                     : l10n.connectionQueueCounts(queued, failed),
-                detail:
-                    l10n.connectionMessageQueueDetail,
+                tone: failed > 0
+                    ? _StatusTone.error
+                    : queued > 0
+                    ? _StatusTone.warning
+                    : _StatusTone.success,
+                detail: l10n.connectionMessageQueueDetail,
               ),
-              if (state.error.isNotEmpty)
+              if (localizedError != null)
                 _StatusTile(
                   icon: Icons.error_outline,
                   title: l10n.connectionLastError,
-                  state: 'error',
-                  detail: state.error,
+                  state: l10n.uiStateError,
+                  tone: _StatusTone.error,
+                  detail: localizedError,
                 ),
               const SizedBox(height: 12),
               Wrap(
@@ -226,21 +244,34 @@ class _ConnectionComponentTile extends StatelessWidget {
   final ConnectionComponentStatus status;
 
   @override
-  Widget build(BuildContext context) => _StatusTile(
-    icon: _icon(status.component),
-    title: localizeConnectionComponentTitle(
-      context.l10n,
-      status.component,
-    ),
-    state: status.state.name,
-    detail: status.detail.isEmpty
-        ? localizeConnectionComponentDescription(
-            context.l10n,
-            status.component,
-          )
-        : status.detail,
-    trailing: status.progress == null ? null : '${status.progress}%',
-  );
+  Widget build(BuildContext context) {
+    final stateName = status.state.name.toLowerCase();
+    final tone = stateName.contains('ready')
+        ? _StatusTone.success
+        : stateName.contains('failed') || stateName.contains('error')
+        ? _StatusTone.error
+        : _StatusTone.warning;
+    final localizedState = switch (tone) {
+      _StatusTone.success => context.l10n.uiStateReady,
+      _StatusTone.error => context.l10n.uiStateFailed,
+      _StatusTone.warning => context.l10n.uiStateStarting,
+      _StatusTone.neutral => context.l10n.uiStateStarting,
+    };
+    return _StatusTile(
+      icon: _icon(status.component),
+      title: localizeConnectionComponentTitle(
+        context.l10n,
+        status.component,
+      ),
+      state: localizedState,
+      tone: tone,
+      detail: localizeConnectionComponentDescription(
+        context.l10n,
+        status.component,
+      ),
+      trailing: status.progress == null ? null : '${status.progress}%',
+    );
+  }
 
   IconData _icon(ConnectionComponent component) => switch (component) {
     ConnectionComponent.engine => Icons.memory_outlined,
@@ -257,6 +288,7 @@ class _StatusTile extends StatelessWidget {
     required this.title,
     required this.state,
     required this.detail,
+    required this.tone,
     this.trailing,
   });
 
@@ -264,17 +296,18 @@ class _StatusTile extends StatelessWidget {
   final String title;
   final String state;
   final String detail;
+  final _StatusTone tone;
   final String? trailing;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final normalized = state.toLowerCase();
-    final color = normalized.contains('ready') || normalized == 'czysta'
-        ? scheme.primary
-        : normalized.contains('error') || normalized.contains('failed')
-        ? scheme.error
-        : scheme.tertiary;
+    final color = switch (tone) {
+      _StatusTone.success => scheme.primary,
+      _StatusTone.error => scheme.error,
+      _StatusTone.warning => scheme.tertiary,
+      _StatusTone.neutral => scheme.onSurfaceVariant,
+    };
     return ListTile(
       contentPadding: EdgeInsets.zero,
       leading: Icon(icon, color: color),

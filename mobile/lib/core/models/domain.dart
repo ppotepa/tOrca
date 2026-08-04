@@ -135,7 +135,7 @@ List<StartupStep> transitionStartupStep(
       else if (nextState == StartupStepState.error && index > target)
         steps[index].copyWith(
           state: StartupStepState.blocked,
-          detail: 'Zablokowano przez wcześniejszy błąd',
+          detail: 'blocked_by_previous_error',
         )
       else if (nextState == StartupStepState.running && index > target)
         steps[index].copyWith(state: StartupStepState.pending, detail: '')
@@ -155,11 +155,12 @@ extension ConversationStateDisplay on ConversationState {
     ConversationState.offline => EngineContract.conversationStateOffline,
   };
 
+  @Deprecated('Localize ConversationState in the presentation layer.')
   String get presenceLabel => switch (this) {
     ConversationState.active => 'online',
     ConversationState.offline => 'offline',
-    ConversationState.failed => 'niedostępny',
-    _ => 'łączenie',
+    ConversationState.failed => 'unavailable',
+    _ => 'connecting',
   };
 
   bool get isOnline => this == ConversationState.active;
@@ -464,12 +465,16 @@ class ContactRecord {
   final String? lastSeenAt;
   final ContactTransportPolicy transportPolicy;
 
-  String get displayName =>
-      localAlias?.trim().isNotEmpty == true ? localAlias!.trim() : nickname;
+  String get displayName {
+    final alias = localAlias?.trim() ?? '';
+    if (alias.isNotEmpty) return alias;
+    final name = nickname.trim();
+    return name.isNotEmpty ? name : id;
+  }
 
   factory ContactRecord.fromMap(Map<String, dynamic> map) => ContactRecord(
     id: _string(map, EngineContract.installationId),
-    nickname: _string(map, EngineContract.nickname, defaultValue: 'Nieznany'),
+    nickname: _string(map, EngineContract.nickname),
     fingerprint: _string(map, EngineContract.fingerprint),
     publicKey: _string(map, EngineContract.publicKey),
     verified: _string(map, EngineContract.verification) == 'VERIFIED',
@@ -640,11 +645,7 @@ class ConversationSummary {
       ConversationSummary(
         id: _string(map, EngineContract.id),
         contactId: _string(map, EngineContract.contactInstallationId),
-        preview: _string(
-          map,
-          EngineContract.lastMessagePreview,
-          defaultValue: 'Nowa rozmowa',
-        ),
+        preview: _string(map, EngineContract.lastMessagePreview),
         unread: _int(map, EngineContract.unreadCount),
         state: _conversationState(_optionalString(map, EngineContract.status)),
         lastMessageAt: _timestamp(map[EngineContract.lastMessageAt]),
@@ -760,10 +761,6 @@ class PairingItem {
   final ContactRecord? peer;
   final int expiresAt;
   final bool received;
-
-  /// The collection from which this item was read. This is deliberately
-  /// separate from the wire-level `received` flag: old/partial payloads must
-  /// never be able to turn an inbox item into an outbox toast.
   final PairingOrigin origin;
 
   factory PairingItem.fromMap(

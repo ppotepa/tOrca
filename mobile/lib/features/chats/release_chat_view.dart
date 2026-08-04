@@ -128,9 +128,6 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
       }
       _activeConversationId = conversationId;
       _restoreGeneration += 1;
-      // Invalidate a pending restore from the previous conversation before
-      // starting the new one. The old post-frame callback is generation
-      // guarded and cannot mutate the new conversation.
       _restoreInFlight = false;
       _initialScrollApplied = false;
       _nearBottom = true;
@@ -157,10 +154,6 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
         .toList(growable: false);
     if (added.isEmpty) return;
 
-    // The repository provides the complete active-conversation projection.
-    // Never keep a window size derived from the number of rows that happened
-    // to exist when the chat was first opened: that made a chat opened with
-    // one message display only the newest row forever.
     if (mounted) {
       final followLatest =
           added.any((message) => message.outgoing) || _nearBottom;
@@ -215,12 +208,15 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
     return contactId;
   }
 
-  List<ChatMessage> get _visibleMessages {
+  List<ChatMessage> _visibleMessages(AppLocalizations l10n) {
     final query = _search.text.trim().toLowerCase();
     if (query.isNotEmpty) {
       return widget.messages
           .where((message) {
-            if (isImageMessageBody(message.text)) return query == 'obraz';
+            if (isImageMessageBody(message.text)) {
+              return query == l10n.uiImageSearchKeyword ||
+                  query == l10n.commonImage.toLowerCase();
+            }
             return message.text.toLowerCase().contains(query);
           })
           .toList(growable: false);
@@ -388,29 +384,26 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
       if (prepared == null || !mounted) return;
       final remaining = maxComposerAttachments - _draftAttachments.length;
       if (prepared.length > remaining) {
-        throw StateError(
-          'Wiadomość może zawierać maksymalnie $maxComposerAttachments obrazów.',
-        );
+        setState(() {
+          _attachmentError =
+              context.l10n.uiAttachmentLimitExceeded(maxComposerAttachments);
+        });
+        return;
       }
       setState(() {
         _draftAttachments.addAll(
           prepared.map(
             (attachment) => ComposerAttachment(
               attachment: attachment,
-              // The prepared JPEG is already bounded to 50 KiB; reusing it
-              // keeps the draft lightweight and avoids a second decode.
               previewBytes: attachment.bytes,
             ),
           ),
         );
       });
-    } catch (error) {
+    } catch (_) {
       if (mounted) {
         setState(() {
-          _attachmentError = error
-              .toString()
-              .replaceFirst('Exception: ', '')
-              .replaceFirst('Bad state: ', '');
+          _attachmentError = context.l10n.uiAttachmentPreparationFailed;
         });
       }
     } finally {
@@ -591,7 +584,7 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
                   Positioned.fill(
                     child: _MessageTimeline(
                       controller: _scroll,
-                      messages: _visibleMessages,
+                      messages: _visibleMessages(context.l10n),
                       contact: contact,
                       canSend: widget.canSend,
                       onRetry: widget.onRetryMessage,
@@ -705,11 +698,6 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
                   widget.conversations.length,
                 ),
               ),
-              // The compact/mobile shell renders the conversation home in
-              // this widget instead of mounting the desktop sidebar.  Keep
-              // the list independent from the back-navigation flag: that
-              // flag only controls the app bar, and must never hide chats on
-              // narrow windows.
               if (recent.isNotEmpty) ...[
                 const SizedBox(height: 24),
                 Align(
@@ -757,9 +745,9 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      trailing: Row(
+                      trailing: const Row(
                         mainAxisSize: MainAxisSize.min,
-                        children: [const ThemedIcon(Icons.chevron_right)],
+                        children: [ThemedIcon(Icons.chevron_right)],
                       ),
                       onTap: () => widget.onOpenConversation(conversation.id),
                     ),
@@ -819,7 +807,7 @@ class _MessageTimeline extends StatelessWidget {
                   children: [
                     Semantics(
                       label: context.l10n.chatSecureConnectionStarting,
-                      child: SizedBox.square(
+                      child: const SizedBox.square(
                         dimension: 28,
                         child: CircularProgressIndicator(strokeWidth: 2.5),
                       ),
@@ -841,8 +829,6 @@ class _MessageTimeline extends StatelessWidget {
         constraints: const BoxConstraints(maxWidth: 1080),
         child: ListView.builder(
           controller: controller,
-          // Keep image bubbles close to the viewport so their encrypted
-          // payloads are materialized lazily instead of for the whole chat.
           cacheExtent: 320,
           padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
           itemCount: messages.length,

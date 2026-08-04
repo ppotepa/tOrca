@@ -17,13 +17,13 @@ Future<List<PreparedImageAttachment>?> pickPreparedImageAttachments() async {
   );
   if (result == null || result.files.isEmpty) return null;
   if (result.files.length > 4) {
-    throw StateError('Możesz wybrać maksymalnie 4 obrazy naraz.');
+    throw StateError('At most 4 images can be selected at once.');
   }
   final prepared = <PreparedImageAttachment>[];
   for (final file in result.files) {
     final source = await _readBytes(file);
     if (source.lengthInBytes > maximumSourceImageBytes) {
-      throw StateError('Obraz źródłowy może mieć maksymalnie 20 MiB.');
+      throw StateError('A source image can be at most 20 MiB.');
     }
     prepared.add(await prepareImageAttachment(source));
   }
@@ -41,7 +41,7 @@ Future<Uint8List> _readBytes(PlatformFile file) async {
   if (memory != null) return memory;
   final path = file.path;
   if (path == null || path.isEmpty) {
-    throw StateError('Nie udało się odczytać wybranego obrazu.');
+    throw StateError('The selected image could not be read.');
   }
   return File(path).readAsBytes();
 }

@@ -3,10 +3,16 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../../app/app_controller.dart';
 import '../../app/app_theme.dart';
 import '../../app/desktop_autostart.dart';
 import '../../app/notifications/ui_notification_center.dart';
 import '../../app/ui_operation_registry.dart';
+import '../../locales/presentation/app_localizations_x.dart';
+import '../../locales/presentation/language_picker.dart';
+import '../../locales/presentation/status_localizer.dart';
+import '../../locales/presentation/theme_localizer.dart';
 import '../../shared/async/async_operation_state.dart';
 import '../../shared/async/busy_surface.dart';
 import '../../shared/widgets/action_section.dart';
@@ -14,16 +20,14 @@ import '../../shared/widgets/action_tile.dart';
 import '../../shared/widgets/callout_card.dart';
 import '../../shared/widgets/info_tile.dart';
 import '../../shared/widgets/themed_switch_list_tile.dart';
-import '../../locales/presentation/app_localizations_x.dart';
-import '../../locales/presentation/language_picker.dart';
-import '../../locales/presentation/theme_localizer.dart';
 import 'image_storage_settings_section.dart';
 
 class SettingsView extends ConsumerStatefulWidget {
   const SettingsView({
     super.key,
     required this.nickname,
-    required this.torStatus,
+    @Deprecated('Tor status is read from the typed controller state.')
+    this.torStatus = '',
     required this.themePreferences,
     required this.onThemeFamilyChanged,
     required this.onBrightnessChanged,
@@ -34,6 +38,7 @@ class SettingsView extends ConsumerStatefulWidget {
   });
 
   final String nickname;
+  @Deprecated('Tor status is read from the typed controller state.')
   final String torStatus;
   final TorChatThemePreferences themePreferences;
   final ValueChanged<TorChatThemeFamily> onThemeFamilyChanged;
@@ -106,6 +111,13 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     });
   }
 
+  void _showSettingsError({required String deduplicationKey}) {
+    ref.read(uiNotificationCenterProvider.notifier).showError(
+          context.l10n.uiSettingsSaveFailed,
+          deduplicationKey: deduplicationKey,
+        );
+  }
+
   Future<void> _set(
     String key,
     bool previous,
@@ -119,16 +131,11 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     try {
       final store = await SharedPreferences.getInstance();
       final saved = await store.setBool(key, value);
-      if (!saved) throw StateError('Nie udało się zapisać ustawienia.');
-    } catch (error) {
+      if (!saved) throw const _SettingsPersistenceException();
+    } catch (_) {
       if (!mounted) return;
       setState(() => assign(previous));
-      ref
-          .read(uiNotificationCenterProvider.notifier)
-          .showError(
-            error.toString(),
-            deduplicationKey: 'setting:$key:${error.runtimeType}',
-          );
+      _showSettingsError(deduplicationKey: 'setting:$key:save-failed');
     } finally {
       if (mounted) setState(() => _saving.remove(key));
     }
@@ -142,17 +149,12 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     });
     try {
       await ref.read(themeControllerProvider.notifier).setReducedMotion(value);
-    } catch (error) {
+    } catch (_) {
       if (!mounted) return;
       setState(() {
         _themePreferences = _themePreferences.copyWith(reducedMotion: previous);
       });
-      ref
-          .read(uiNotificationCenterProvider.notifier)
-          .showError(
-            error.toString(),
-            deduplicationKey: 'setting:reduced-motion:${error.runtimeType}',
-          );
+      _showSettingsError(deduplicationKey: 'setting:reduced-motion:failed');
     } finally {
       if (mounted) setState(() => _saving.remove(_reducedMotionKey));
     }
@@ -167,19 +169,19 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     try {
       await DesktopAutostart.setEnabled(value);
       final actual = await DesktopAutostart.isEnabled();
-      if (actual != value) {
-        throw StateError('System Windows nie potwierdził zmiany autostartu.');
-      }
+      if (actual != value) throw const _AutostartConfirmationException();
       if (mounted) setState(() => _autostart = actual);
-    } catch (error) {
+    } on _AutostartConfirmationException {
       if (!mounted) return;
       setState(() => _autostart = previous);
-      ref
-          .read(uiNotificationCenterProvider.notifier)
-          .showError(
-            error.toString(),
-            deduplicationKey: 'setting:autostart:${error.runtimeType}',
+      ref.read(uiNotificationCenterProvider.notifier).showError(
+            context.l10n.uiWindowsAutostartNotConfirmed,
+            deduplicationKey: 'setting:autostart:not-confirmed',
           );
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _autostart = previous);
+      _showSettingsError(deduplicationKey: 'setting:autostart:failed');
     } finally {
       if (mounted) setState(() => _saving.remove(_autostartOperationKey));
     }
@@ -196,6 +198,9 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
+    final torPhase = ref.watch(
+      appControllerProvider.select((state) => state.connectionSummary.phase),
+    );
     final nicknameSave = ref.watch(
       uiOperationProvider(UiOperationKey.nicknameSave),
     );
@@ -210,7 +215,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 InfoTile(
-                  leading: ThemedIcon(Icons.palette_outlined),
+                  leading: const ThemedIcon(Icons.palette_outlined),
                   title: l10n.settingsFamilyTitle,
                   subtitle: l10n.settingsFamilyDescription,
                 ),
@@ -242,7 +247,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
                   const SizedBox(height: 12),
                   InfoTile(
                     leading: const ThemedIcon(Icons.terminal_outlined),
-                  title: l10n.settingsTerminalPalette,
+                    title: l10n.settingsTerminalPalette,
                     subtitle: localizeRetroPalette(
                       l10n,
                       _themePreferences.retroPalette,
@@ -445,7 +450,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
           ActionTile(
             leading: const ThemedIcon(Icons.eco_outlined),
             title: l10n.settingsTorConnection,
-            subtitle: widget.torStatus,
+            subtitle: localizeTransportPhase(l10n, torPhase),
             onTap: widget.onOpenTor,
           ),
           const Divider(),
@@ -497,7 +502,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     bool enabled = true,
   }) => BusySurface(
     state: _preferenceState(key),
-    label: 'Zapisywanie…',
+    label: context.l10n.settingsSaving,
     child: ThemedSwitchListTile(
       contentPadding: EdgeInsets.zero,
       title: Text(title),
@@ -508,4 +513,12 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
           : null,
     ),
   );
+}
+
+final class _SettingsPersistenceException implements Exception {
+  const _SettingsPersistenceException();
+}
+
+final class _AutostartConfirmationException implements Exception {
+  const _AutostartConfirmationException();
 }

@@ -10,6 +10,7 @@ mobile/.flutter-plugins-dependencies
 mobile/.packages
 mobile/build/
 mobile/coverage/
+mobile/lib/locales/generated/*.dart
 
 # Android / Gradle
 .gradle/

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -8,6 +9,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../locales/domain/app_locale_preference.dart';
+import '../locales/generated/app_localizations.dart';
+import '../locales/presentation/app_localizations_x.dart';
 import 'desktop_navigation_intent.dart';
 
 const _windowWidthKey = 'torchat.desktop.window.width';
@@ -16,6 +20,7 @@ const _windowXKey = 'torchat.desktop.window.x';
 const _windowYKey = 'torchat.desktop.window.y';
 const _singleInstancePort = 49631;
 const _activationMessage = 'activate';
+const _localePreferenceKey = 'torchat.locale.preference';
 
 bool get isDesktopPlatform =>
     Platform.isWindows || Platform.isLinux || Platform.isMacOS;
@@ -39,18 +44,28 @@ class DesktopWindowLifecycle with WindowListener, TrayListener {
     return _initialization ??= instance._initialize();
   }
 
+  static Future<void> refreshLocale(AppLocalePreference preference) async {
+    if (!isDesktopPlatform || Platform.environment['FLUTTER_TEST'] == 'true') {
+      return;
+    }
+    if (!await initialize()) return;
+    await instance._applyLocale(preference);
+  }
+
   Future<bool> _initialize() async {
     if (!await _acquireSingleInstance()) return false;
 
     try {
       await windowManager.ensureInitialized();
     } on MissingPluginException {
-      // A non-Flutter desktop host/test can construct the runtime before the
-      // window plugin is attached. Do not block engine or data warmup on UI
-      // chrome; the real desktop host will initialize it on the next launch.
       return true;
     }
     final preferences = await SharedPreferences.getInstance();
+    final localePreference = AppLocalePreference.fromStorage(
+          preferences.getString(_localePreferenceKey),
+        ) ??
+        AppLocalePreference.system;
+    final l10n = await _loadLocalizations(localePreference);
     final storedWidth = preferences.getDouble(_windowWidthKey);
     final storedHeight = preferences.getDouble(_windowHeightKey);
     final storedX = preferences.getDouble(_windowXKey);
@@ -64,7 +79,7 @@ class DesktopWindowLifecycle with WindowListener, TrayListener {
       size: size,
       minimumSize: const Size(900, 640),
       center: storedX == null || storedY == null,
-      title: 'TorChat',
+      title: l10n.appTitle,
       backgroundColor: Colors.transparent,
     );
 
@@ -74,7 +89,7 @@ class DesktopWindowLifecycle with WindowListener, TrayListener {
       }
       await windowManager.setPreventClose(true);
       windowManager.addListener(this);
-      await _initializeTray();
+      await _initializeTray(l10n);
       await windowManager.show();
       await windowManager.focus();
     });
@@ -107,14 +122,13 @@ class DesktopWindowLifecycle with WindowListener, TrayListener {
         await socket.flush();
         await socket.close();
       } on Object {
-        // The first instance may still be starting. The second instance exits
-        // rather than starting a competing Tor and storage runtime.
+        // The first instance may still be starting.
       }
       return false;
     }
   }
 
-  Future<void> _initializeTray() async {
+  Future<void> _initializeTray(AppLocalizations l10n) async {
     if (_trayReady) return;
     final executableDirectory = File(Platform.resolvedExecutable).parent.path;
     final iconPath = Platform.isWindows
@@ -122,19 +136,40 @@ class DesktopWindowLifecycle with WindowListener, TrayListener {
         : 'windows/runner/resources/app_icon.ico';
 
     await trayManager.setIcon(iconPath);
-    await trayManager.setToolTip('TorChat');
+    await _setLocalizedTray(l10n);
+    trayManager.addListener(this);
+    _trayReady = true;
+  }
+
+  Future<void> _applyLocale(AppLocalePreference preference) async {
+    final l10n = await _loadLocalizations(preference);
+    await windowManager.setTitle(l10n.appTitle);
+    if (_trayReady) await _setLocalizedTray(l10n);
+  }
+
+  Future<void> _setLocalizedTray(AppLocalizations l10n) async {
+    await trayManager.setToolTip(l10n.appTitle);
     await trayManager.setContextMenu(
       Menu(
         items: [
-          MenuItem(key: 'show', label: 'Pokaż TorChat'),
-          MenuItem(key: 'settings', label: 'Ustawienia'),
+          MenuItem(key: 'show', label: l10n.uiShowApp),
+          MenuItem(key: 'settings', label: l10n.settingsTitle),
           MenuItem.separator(),
-          MenuItem(key: 'exit', label: 'Zakończ'),
+          MenuItem(key: 'exit', label: l10n.uiExitApp),
         ],
       ),
     );
-    trayManager.addListener(this);
-    _trayReady = true;
+  }
+
+  Future<AppLocalizations> _loadLocalizations(
+    AppLocalePreference preference,
+  ) async {
+    final requested = preference.locale ?? PlatformDispatcher.instance.locale;
+    final locale = AppLocalizations.supportedLocales.firstWhere(
+      (candidate) => candidate.languageCode == requested.languageCode,
+      orElse: () => const Locale('en'),
+    );
+    return AppLocalizations.delegate.load(locale);
   }
 
   Future<void> showWindow() async {

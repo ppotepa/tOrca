@@ -17,6 +17,7 @@ class TorChatApplication : Application(), Application.ActivityLifecycleCallbacks
 
     override fun onCreate() {
         super.onCreate()
+        NativeLocaleManager.applyStoredPreference(this)
         AndroidNotificationPolicy.initialize(this)
         registerActivityLifecycleCallbacks(this)
         log("process_created")
