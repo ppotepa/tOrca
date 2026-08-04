@@ -102,7 +102,7 @@ class MessageBubble extends ConsumerWidget {
                   children: [
                     if (startsGroup)
                       _BubbleHeader(
-                        label: mine ? 'Ty' : contactName,
+                        label: mine ? l10n.uiYou : contactName,
                         foreground: foreground,
                       ),
                     Padding(
