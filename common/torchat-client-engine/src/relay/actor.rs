@@ -86,9 +86,11 @@ impl SharedRelayActor {
         if self.commands.is_some() {
             return Ok(());
         }
+        let socks5 = self.connection.socks5_url.clone().ok_or_else(|| {
+            RuntimeError::Unavailable("Tor SOCKS endpoint is not ready".to_owned())
+        })?;
         let relay_url = Url::parse(&self.connection.relay_onion_url)
             .map_err(|e| RuntimeError::InvalidCommand(e.to_string()))?;
-        let socks5 = self.connection.socks5_url.clone();
         let (command_tx, mut command_rx) = tokio::sync::mpsc::unbounded_channel();
         let (event_tx, event_rx) = std_mpsc::channel();
         thread::spawn(move || {
@@ -102,7 +104,7 @@ impl SharedRelayActor {
                 return;
             };
             runtime.block_on(async move {
-                let mut client = match super::rendezvous::PairingRendezvousClient::connect(relay_url, socks5.as_deref()).await {
+                let mut client = match super::rendezvous::PairingRendezvousClient::connect(relay_url, Some(&socks5)).await {
                     Ok(client) => client,
                     Err(error) => {
                         let _ = event_tx.send(RendezvousEvent::Error(format!("rendezvous connect failed: {error}")));
@@ -137,21 +139,35 @@ impl SharedRelayActor {
 
     fn send_frame(&mut self, frame: RendezvousClientFrame) -> RuntimeResult<()> {
         self.start_rendezvous()?;
-        self.commands
+        let result = self
+            .commands
             .as_ref()
             .ok_or_else(|| RuntimeError::Unavailable("rendezvous worker unavailable".into()))?
-            .send(frame)
-            .map_err(|_| RuntimeError::Unavailable("rendezvous connection closed".into()))
+            .send(frame);
+        if result.is_err() {
+            self.commands = None;
+            self.events = None;
+            return Err(RuntimeError::Unavailable(
+                "rendezvous connection closed".into(),
+            ));
+        }
+        Ok(())
     }
 
     fn receive_frame(&mut self) -> RuntimeResult<RendezvousServerFrame> {
-        match self.events
+        match self
+            .events
             .as_ref()
             .ok_or_else(|| RuntimeError::Unavailable("rendezvous worker unavailable".into()))?
             .recv_timeout(Duration::from_secs(30))
-            .map_err(|e| RuntimeError::Unavailable(format!("rendezvous response timeout: {e}")))? {
+            .map_err(|e| RuntimeError::Unavailable(format!("rendezvous response timeout: {e}")))?
+        {
             RendezvousEvent::Frame(frame) => Ok(frame),
-            RendezvousEvent::Error(error) => Err(RuntimeError::Unavailable(error)),
+            RendezvousEvent::Error(error) => {
+                self.commands = None;
+                self.events = None;
+                Err(RuntimeError::Unavailable(error))
+            }
         }
     }
 
@@ -233,6 +249,13 @@ impl SharedRelayActor {
 
 impl EngineRelay for SharedRelayActor {
     fn set_socks5_url(&mut self, socks5_url: Option<String>) {
+        if self.connection.socks5_url != socks5_url {
+            // The rendezvous worker captures the SOCKS endpoint at startup.
+            // Drop it when Tor rotates/restarts so the next pairing attempt
+            // reconnects through the current endpoint.
+            self.commands = None;
+            self.events = None;
+        }
         self.connection.socks5_url = socks5_url;
     }
 
@@ -309,6 +332,8 @@ impl EngineRelay for SharedRelayActor {
     fn poll_event(&mut self) -> Option<RelayEvent> {
         let event = self.events.as_ref()?.try_recv().ok()?;
         let RendezvousEvent::Frame(frame) = event else {
+            self.commands = None;
+            self.events = None;
             return None;
         };
         match frame {

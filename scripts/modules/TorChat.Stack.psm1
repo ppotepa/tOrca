@@ -191,9 +191,19 @@ function Test-TorChatOnionReachability {
         $exitCode = $LASTEXITCODE
         $text = ($output | Out-String).Trim()
         if ($exitCode -eq 0) {
-            try {
-                $payload = $text | ConvertFrom-Json
-                if ($payload.status -eq 'ok') {
+            # The relay health endpoint intentionally returns the minimal
+            # text body `ok`; older relay images returned {"status":"ok"}.
+            # Keep the onion probe compatible with both representations.
+            $isHealthy = $text -eq 'ok'
+            if (-not $isHealthy) {
+                try {
+                    $payload = $text | ConvertFrom-Json
+                    $isHealthy = $payload.status -eq 'ok'
+                } catch {
+                    $isHealthy = $false
+                }
+            }
+            if ($isHealthy) {
                     $consecutiveSuccesses++
                     if ($consecutiveSuccesses -ge 2) {
                         return [pscustomobject]@{
@@ -204,13 +214,9 @@ function Test-TorChatOnionReachability {
                         }
                     }
                     $lastFailure = 'first successful probe; confirming circuit stability'
-                } else {
-                    $consecutiveSuccesses = 0
-                    $lastFailure = "unexpected status '$($payload.status)'"
-                }
-            } catch {
+            } else {
                 $consecutiveSuccesses = 0
-                $lastFailure = "invalid JSON response: $text"
+                $lastFailure = "unexpected health response: $text"
             }
         } else {
             $consecutiveSuccesses = 0

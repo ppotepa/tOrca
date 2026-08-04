@@ -303,7 +303,7 @@ def main():
                     code = invite.get("code") if isinstance(invite, dict) else None
                     if code:
                         log(f"pairing code (valid until rotation): {code}")
-                next_code_refresh = now + 90
+                    next_code_refresh = now + 90
                 except Exception as error:
                     next_code_refresh = now + 60
                     log(f"pairing code refresh deferred: {error}")
