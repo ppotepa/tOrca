@@ -8,7 +8,6 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.os.LocaleList
 import android.util.Log
 import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
@@ -16,8 +15,8 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -35,6 +34,7 @@ class MainActivity : FlutterActivity() {
     private var pendingNotificationOpen: Map<String, Any?>? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        NativeLocaleManager.applyStoredPreference(this)
         super.onCreate(savedInstanceState)
         val serviceIntent = Intent(this, TorChatForegroundService::class.java)
         val resetDev = BuildConfig.DEBUG && intent.getBooleanExtra("reset_dev_state", false)
@@ -58,13 +58,6 @@ class MainActivity : FlutterActivity() {
         handleNotificationIntent(intent)
     }
 
-    /**
-     * Some Android/OEM builds can defer the start requested from onCreate
-     * while restoring the Flutter activity or showing a runtime permission
-     * dialog. Re-assert the idempotent foreground-service start when the
-     * activity becomes visible; the service owns the single engine session and
-     * ignores duplicate starts while it is already running.
-     */
     override fun onStart() {
         super.onStart()
         val serviceIntent = Intent(this, TorChatForegroundService::class.java)
@@ -110,16 +103,12 @@ class MainActivity : FlutterActivity() {
                     result.notImplemented()
                     return@setMethodCallHandler
                 }
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    val languageTag = call.argument<String>("languageTag")
-                    getSystemService(android.app.LocaleManager::class.java)
-                        .applicationLocales = if (languageTag.isNullOrBlank()) {
-                        LocaleList.getEmptyLocaleList()
-                    } else {
-                        LocaleList.forLanguageTags(languageTag)
-                    }
-                }
+                val languageTag = call.argument<String>("languageTag")
+                NativeLocaleManager.setApplicationLocale(this, languageTag)
                 result.success(null)
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                    recreate()
+                }
             }
         MethodChannel(engine.dartExecutor.binaryMessenger, "org.torchat/audio")
             .setMethodCallHandler { call, result ->
@@ -196,11 +185,6 @@ class MainActivity : FlutterActivity() {
     }
 
     private suspend fun readyEngineHost(): AndroidEngineHost {
-        // Once the foreground service has published its host, the Rust actor and
-        // event pump are already live.  Do not wait on a secondary readiness
-        // latch here: it can belong to a service generation that is being
-        // restarted, turning a local profile command into an artificial 10 s
-        // timeout before it ever reaches the engine.
         TorChatForegroundService.activeEngineHost?.let { return it }
         TorChatForegroundService.awaitLocalReady()
         return TorChatForegroundService.activeEngineHost
@@ -223,7 +207,9 @@ class MainActivity : FlutterActivity() {
             )
             EngineContract.SET_NICKNAME -> runAsync(result) {
                 val nickname = call.argument<String>(EngineContract.NICKNAME)?.trim().orEmpty()
-                require(nickname.length in 2..32) { "Nick musi miec od 2 do 32 znakow" }
+                require(nickname.length in 2..32) {
+                    "Nickname must be between 2 and 32 characters"
+                }
                 readyEngineHost().submitCommandAndAwait(
                     engineCommand(EngineContract.COMMAND_SET_NICKNAME)
                         .put(EngineContract.NICKNAME, nickname),
@@ -520,10 +506,6 @@ class MainActivity : FlutterActivity() {
             try {
                 result.success(withContext(Dispatchers.IO) { block() })
             } catch (cancelled: CancellationException) {
-                // The Flutter result belongs to this Activity instance. When
-                // Android recreates it there is no live receiver to notify;
-                // rethrow to preserve structured concurrency without turning
-                // a normal lifecycle transition into a runtime error.
                 throw cancelled
             } catch (error: Throwable) {
                 result.error("RUNTIME", error.message, null)
