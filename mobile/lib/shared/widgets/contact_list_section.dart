@@ -17,7 +17,7 @@ class ContactListSection extends ConsumerWidget {
     required this.contacts,
     required this.onSelect,
     this.subtitle,
-    this.emptyMessage = 'Brak kontaktów.',
+    this.emptyMessage,
     this.asCard = true,
     this.showHeader = true,
     this.contactSubtitleBuilder,
@@ -33,7 +33,7 @@ class ContactListSection extends ConsumerWidget {
   final String? subtitle;
   final List<ContactRecord> contacts;
   final ValueChanged<ContactRecord> onSelect;
-  final String emptyMessage;
+  final String? emptyMessage;
   final bool asCard;
   final bool showHeader;
   final String Function(ContactRecord contact)? contactSubtitleBuilder;
@@ -55,7 +55,10 @@ class ContactListSection extends ConsumerWidget {
       ],
       Expanded(
         child: contacts.isEmpty
-            ? EmptyState(icon: Icons.people_outline, message: emptyMessage)
+            ? EmptyState(
+                icon: Icons.people_outline,
+                message: emptyMessage ?? context.l10n.uiNoContacts,
+              )
             : ListView.separated(
                 itemCount: contacts.length,
                 separatorBuilder: (_, _) => const SizedBox(height: 5),
@@ -162,7 +165,7 @@ class ContactListSection extends ConsumerWidget {
           ref
               .read(uiNotificationCenterProvider.notifier)
               .showSuccess(
-                'Fingerprint skopiowany.',
+                context.l10n.uiFingerprintCopied,
                 deduplicationKey: 'fingerprint-copied:${contact.id}',
               );
         }
