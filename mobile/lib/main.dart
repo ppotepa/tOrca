@@ -23,6 +23,7 @@ import 'features/invites/invite_scanner.dart';
 import 'features/onboarding/connection_warmup_screen.dart';
 import 'features/onboarding/nickname_onboarding_screen.dart';
 import 'features/onboarding/onboarding_views.dart';
+import 'features/pairing/pairing_ui_coordinator.dart';
 import 'features/shell/main_shell.dart';
 import 'features/chats/composer_draft.dart';
 import 'locales/application/locale_controller.dart';
@@ -108,10 +109,7 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
   final _nickname = TextEditingController();
   bool _onboardingUnlocked = false;
   bool _runningUnlocked = false;
-  bool _incomingPairingDialogOpen = false;
-  bool _pairingCodeDialogOpen = false;
-  final Set<String> _scheduledIncomingPairingIds = <String>{};
-  final Set<String> _resolvedIncomingPairingIds = <String>{};
+  final PairingUiCoordinator _pairingUi = PairingUiCoordinator();
   String _reattachedNickname = '';
   Timer? _backgroundDebounce;
   StreamSubscription<DesktopNavigationIntent>? _desktopNavigationSubscription;
@@ -186,25 +184,21 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
   }
 
   void _queueIncomingPairingPrompt(List<PairingItem> inbox) {
-    if (!mounted ||
-        !_runningUnlocked ||
-        _pairingCodeDialogOpen ||
-        _incomingPairingDialogOpen) {
+    if (!mounted || !_runningUnlocked || _pairingUi.codeSurfaceOpen) {
       return;
     }
     final request = inbox.firstOrNullWhere(
       (item) =>
           item.origin == PairingOrigin.inbox &&
           item.can(PairingAvailableAction.accept) &&
-          !_resolvedIncomingPairingIds.contains(item.id) &&
-          !_scheduledIncomingPairingIds.contains(item.id),
+          _pairingUi.canSchedule(item),
     );
     if (request == null) return;
 
-    _scheduledIncomingPairingIds.add(request.id);
+    _pairingUi.schedule(request.id);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || _pairingCodeDialogOpen || _incomingPairingDialogOpen) {
-        _scheduledIncomingPairingIds.remove(request.id);
+      if (!mounted || _pairingUi.codeSurfaceOpen) {
+        _pairingUi.unschedule(request.id);
         return;
       }
       unawaited(_showIncomingPairingPrompt(request));
@@ -212,11 +206,11 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
   }
 
   Future<void> _showIncomingPairingPrompt(PairingItem request) async {
-    if (!mounted || _pairingCodeDialogOpen || _incomingPairingDialogOpen) {
-      _scheduledIncomingPairingIds.remove(request.id);
+    if (!mounted || _pairingUi.codeSurfaceOpen) {
+      _pairingUi.unschedule(request.id);
       return;
     }
-    _incomingPairingDialogOpen = true;
+    _pairingUi.beginIncoming(request.id);
     final controller = ref.read(appControllerProvider.notifier);
     try {
       await showDialog<void>(
@@ -226,7 +220,8 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
           request: request,
           onAccept: () async {
             await controller.acceptPairing(request.id);
-            _resolvedIncomingPairingIds.add(request.id);
+            _pairingUi.beginProcessing();
+            _pairingUi.resolve(request.id);
             await controller.refreshData(
               forcePairing: true,
               allowAutoTorka: false,
@@ -234,7 +229,8 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
           },
           onReject: () async {
             await controller.rejectPairing(request.id);
-            _resolvedIncomingPairingIds.add(request.id);
+            _pairingUi.beginProcessing();
+            _pairingUi.resolve(request.id);
             await controller.refreshData(
               forcePairing: true,
               allowAutoTorka: false,
@@ -243,8 +239,7 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
         ),
       );
     } finally {
-      _incomingPairingDialogOpen = false;
-      _scheduledIncomingPairingIds.remove(request.id);
+      _pairingUi.closeSurface();
       if (mounted) {
         _queueIncomingPairingPrompt(ref.read(appControllerProvider).inbox);
       }
@@ -365,8 +360,8 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
   }
 
   Future<void> _showInvite() async {
-    if (_pairingCodeDialogOpen || _incomingPairingDialogOpen) return;
-    _pairingCodeDialogOpen = true;
+    if (_pairingUi.codeSurfaceOpen || _pairingUi.incomingSurfaceOpen) return;
+    _pairingUi.beginCodeSurface();
     final controller = ref.read(appControllerProvider.notifier);
     try {
       await showDialog<bool>(
@@ -381,13 +376,12 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
             final inbox = ref.read(appControllerProvider).inbox;
             return inbox.firstOrNullWhere(
               (item) =>
-                  item.requiresLocalDecision &&
-                  !_resolvedIncomingPairingIds.contains(item.id),
+                  item.requiresLocalDecision && !_pairingUi.isResolved(item.id),
             );
           },
           onAccept: (request) async {
             await controller.acceptPairing(request.id);
-            _resolvedIncomingPairingIds.add(request.id);
+            _pairingUi.resolve(request.id);
             final peerId = request.peer?.id;
             if (peerId == null || peerId.isEmpty) return false;
             for (var attempt = 0; attempt < 15; attempt += 1) {
@@ -402,21 +396,18 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
           },
           onReject: (request) async {
             await controller.rejectPairing(request.id);
-            _resolvedIncomingPairingIds.add(request.id);
+            _pairingUi.resolve(request.id);
           },
         ),
       );
     } finally {
-      _pairingCodeDialogOpen = false;
+      _pairingUi.endCodeSurface();
       if (mounted) {
         // The code dialog is the active pairing surface. Reconcile once more
         // before handing control back to the global incoming prompt so an
         // invite submitted while the dialog was open cannot be lost between
         // the polling interval and the dialog teardown.
-        await controller.refreshData(
-          forcePairing: true,
-          allowAutoTorka: false,
-        );
+        await controller.refreshData(forcePairing: true, allowAutoTorka: false);
         _queueIncomingPairingPrompt(ref.read(appControllerProvider).inbox);
       }
     }
