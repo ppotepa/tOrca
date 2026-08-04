@@ -95,7 +95,10 @@ extension AppLocalizationsUiCopy on AppLocalizations {
   String get uiContactCapabilityId => 'ID';
   String get uiContactCapabilitySequence => _isPolish ? 'Sekwencja' : 'Sequence';
   String uiCapabilityStatus(CapabilityStatus status) => switch (status) {
+    CapabilityStatus.missing => _isPolish ? 'brak' : 'missing',
+    CapabilityStatus.pending => _isPolish ? 'oczekująca' : 'pending',
     CapabilityStatus.active => _isPolish ? 'aktywna' : 'active',
+    CapabilityStatus.rotating => _isPolish ? 'odnawianie' : 'rotating',
     CapabilityStatus.revoked => _isPolish ? 'unieważniona' : 'revoked',
     CapabilityStatus.expired => _isPolish ? 'wygasła' : 'expired',
   };
