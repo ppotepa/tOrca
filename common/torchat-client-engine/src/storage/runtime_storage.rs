@@ -795,6 +795,21 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
             RuntimeError::Storage("pairing inbox item missing capability".to_owned())
         })?;
         if let Some(pair_key) = item.pair_key.as_deref() {
+            let superseded = self
+                .tx()
+                .query_row(
+                    "SELECT 1 FROM pairing_outbox
+                     WHERE pair_key = ?1 AND pairing_id < ?2
+                       AND state IN ('PENDING', 'ACCEPTED') LIMIT 1",
+                    params![pair_key, item.pairing_id],
+                    |_| Ok(()),
+                )
+                .optional()
+                .map_err(storage_error)?
+                .is_some();
+            if superseded {
+                return Ok(());
+            }
             // A crossed invite is one device relationship, not two pending
             // UI rows. Preserve the incoming request as the actionable side
             // and retire any local outgoing attempt for the same pair.
@@ -893,6 +908,45 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
     }
 
     fn put_pairing_outbox(&mut self, item: PairingItem) -> RuntimeResult<()> {
+        if let Some(pair_key) = item.pair_key.as_deref() {
+            let superseded = self
+                .tx()
+                .query_row(
+                    "SELECT 1 FROM pairing_inbox
+                     WHERE pair_key = ?1 AND pairing_id < ?2
+                       AND state IN ('PENDING', 'ACCEPTED') LIMIT 1",
+                    params![pair_key, item.pairing_id],
+                    |_| Ok(()),
+                )
+                .optional()
+                .map_err(storage_error)?
+                .is_some();
+            if superseded {
+                return Ok(());
+            }
+            // The inbox and outbox are two local views of one relationship.
+            // Retire competing active rows before the unique outbox upsert.
+            self.tx()
+                .execute(
+                    "UPDATE pairing_inbox
+                     SET state = 'ARCHIVED', updated_at = unixepoch()
+                     WHERE pair_key = ?1
+                       AND pairing_id <> ?2
+                       AND state IN ('PENDING', 'ACCEPTED')",
+                    params![pair_key, item.pairing_id],
+                )
+                .map_err(storage_error)?;
+            self.tx()
+                .execute(
+                    "UPDATE pairing_outbox
+                     SET state = 'CANCELLED', updated_at = unixepoch()
+                     WHERE pair_key = ?1
+                       AND pairing_id <> ?2
+                       AND state IN ('PENDING', 'ACCEPTED')",
+                    params![pair_key, item.pairing_id],
+                )
+                .map_err(storage_error)?;
+        }
         self.tx()
             .execute(
                 super::sqlite::sql_catalog::runtime_storage::UPSERT_PAIRING_OUTBOX,

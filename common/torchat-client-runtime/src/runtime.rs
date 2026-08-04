@@ -1486,6 +1486,18 @@ mod tests {
             Ok(self.inbox.clone())
         }
         fn put_pairing_inbox(&mut self, item: PairingItem) -> RuntimeResult<()> {
+            if let Some(pair_key) = item.pair_key.as_deref() {
+                if self.outbox.iter().any(|value| {
+                    value.pair_key.as_deref() == Some(pair_key)
+                        && value.pairing_id < item.pairing_id
+                }) {
+                    return Ok(());
+                }
+                self.outbox.retain(|value| {
+                    value.pair_key.as_deref() != Some(pair_key)
+                        || value.pairing_id == item.pairing_id
+                });
+            }
             upsert_pairing(&mut self.inbox, item);
             Ok(())
         }
@@ -1493,6 +1505,18 @@ mod tests {
             Ok(self.outbox.clone())
         }
         fn put_pairing_outbox(&mut self, item: PairingItem) -> RuntimeResult<()> {
+            if let Some(pair_key) = item.pair_key.as_deref() {
+                if self.inbox.iter().any(|value| {
+                    value.pair_key.as_deref() == Some(pair_key)
+                        && value.pairing_id < item.pairing_id
+                }) {
+                    return Ok(());
+                }
+                self.inbox.retain(|value| {
+                    value.pair_key.as_deref() != Some(pair_key)
+                        || value.pairing_id == item.pairing_id
+                });
+            }
             upsert_pairing(&mut self.outbox, item);
             Ok(())
         }
