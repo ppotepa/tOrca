@@ -25,9 +25,7 @@ class ConnectionWarmupScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
-    final statuses = [
-      ...connection.components,
-    ];
+    final statuses = [...connection.components];
 
     return Scaffold(
       body: SafeArea(
@@ -70,18 +68,16 @@ class ConnectionWarmupScreen extends StatelessWidget {
                             ),
                             const SizedBox(height: 8),
                             Text(
-                              summary.status,
+                              localizeTransportPhase(l10n, summary.phase),
                               style: Theme.of(context).textTheme.titleSmall,
                               textAlign: TextAlign.center,
                             ),
-                            if (summary.detail.isNotEmpty) ...[
-                              const SizedBox(height: 4),
-                              Text(
-                                summary.detail,
-                                style: Theme.of(context).textTheme.bodySmall,
-                                textAlign: TextAlign.center,
-                              ),
-                            ],
+                            const SizedBox(height: 4),
+                            Text(
+                              l10n.uiConnectionSummaryDetail,
+                              style: Theme.of(context).textTheme.bodySmall,
+                              textAlign: TextAlign.center,
+                            ),
                             const SizedBox(height: 24),
                             for (
                               var index = 0;
@@ -93,7 +89,7 @@ class ConnectionWarmupScreen extends StatelessWidget {
                                 title: index == statuses.length - 1
                                     ? l10n.communicationReady
                                     : localizeConnectionComponentTitle(
-                                        context.l10n,
+                                        l10n,
                                         statuses[index].component,
                                       ),
                                 last: index == statuses.length - 1,
@@ -167,12 +163,10 @@ class _WarmupRow extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  status.detail.isEmpty
-                      ? localizeConnectionComponentDescription(
-                          context.l10n,
-                          status.component,
-                        )
-                      : status.detail,
+                  localizeConnectionComponentDescription(
+                    context.l10n,
+                    status.component,
+                  ),
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
                 if (status.progress case final progress?) ...[
