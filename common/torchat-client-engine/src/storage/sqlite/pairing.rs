@@ -1,6 +1,23 @@
 use super::*;
 
 impl ClientDatabase {
+    pub fn bind_pairing_outbox_pair_key(
+        &self,
+        invite_id: &str,
+        pair_key: &str,
+    ) -> EngineResult<()> {
+        self.connection
+            .execute(
+                "UPDATE pairing_outbox
+                 SET pair_key = ?1, updated_at = unixepoch()
+                 WHERE state IN ('PENDING', 'ACCEPTED')
+                   AND instr(CAST(payload AS TEXT), ?2) > 0",
+                params![pair_key, invite_id],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
     pub fn put_pending_local_invite_mls(
         &self,
         record: &PendingLocalInviteMlsRecord,

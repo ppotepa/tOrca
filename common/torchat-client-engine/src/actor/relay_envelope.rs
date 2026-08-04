@@ -90,6 +90,10 @@ impl ClientEngineActor {
                 let (invite_id, welcome, tree) = payload
                     .decode_welcome()
                     .map_err(EngineError::InvalidCommand)?;
+                self.database.bind_pairing_outbox_pair_key(
+                    &invite_id,
+                    &pairing_pair_key(&self.identity.installation_id(), &sender.installation_id),
+                )?;
                 // A relay reconnect can replay a Welcome which has already
                 // been committed.  MLS key packages are intentionally
                 // one-time material, so accepting that duplicate would fail
