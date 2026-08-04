@@ -1,1067 +1,441 @@
 use std::{
-    pin::Pin,
-    sync::mpsc::{self as std_mpsc, Receiver as StdReceiver, Sender as StdSender, TryRecvError},
-    task::{Context as TaskContext, Poll},
+    collections::HashMap,
+    sync::mpsc as std_mpsc,
     thread,
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use futures_util::{SinkExt, StreamExt};
-use reqwest::{
-    StatusCode, Url,
-    blocking::{Client, Response},
-};
-use serde::{Deserialize, Serialize};
-use tokio::{
-    io::{AsyncRead, AsyncWrite, ReadBuf},
-    net::TcpStream,
-    sync::mpsc::{self, Sender},
-    time::{Instant, sleep, timeout},
-};
-use tokio_socks::tcp::Socks5Stream;
-use tokio_tungstenite::{
-    WebSocketStream, client_async,
-    tungstenite::{Message, handshake::client::generate_key, http::Request},
-};
-use torchat_client_runtime::{
-    ContactRecord, InviteCode, InviteState, PairingItem, RuntimeError, RuntimeResult,
-    VerificationState,
-};
+use reqwest::Url;
+use torchat_client_runtime::{InviteCode, InviteState, PairingItem, RuntimeError, RuntimeResult};
 use torchat_core::{
-    Identity, is_valid_onion_address,
-    relay::{ContactCard, RelayClientFrame, RelayEnvelope, RelayServerFrame},
+    ContactInvite, Identity,
+    relay::RelayPayloadV1,
+    rendezvous::{RendezvousClientFrame, RendezvousServerFrame},
+    rendezvous_crypto,
 };
 use uuid::Uuid;
 
+enum RendezvousEvent {
+    Frame(RendezvousServerFrame),
+    Error(String),
+}
+
 use super::{EngineRelay, RelayEvent};
 
-type RelayStream = WebSocketStream<RelaySocket>;
-// Relay HTTP calls currently run on the engine actor. Keep their failure
-// budget short so an unavailable or warming onion cannot starve local
-// commands (profile, contacts, conversations, and P2P state) for minutes.
-// The actor owns retry/backoff, so availability is recovered by a later
-// attempt rather than by one long blocking request.
-// Tor onion circuits regularly take longer than a LAN/WebSocket budget would
-// allow, especially immediately after bootstrap, after mobile network changes,
-// or while a peer/relay onion is still warming. Keep the relay responsive, but
-// do not tear it down so aggressively that healthy onion sessions flap.
-const RELAY_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-const RELAY_REQUEST_TIMEOUT: Duration = Duration::from_secs(45);
-const RELAY_READY_TIMEOUT: Duration = Duration::from_secs(15);
-
-enum RelaySocket {
-    Direct(TcpStream),
-    Socks(Socks5Stream<TcpStream>),
-}
-impl AsyncRead for RelaySocket {
-    fn poll_read(
-        mut self: Pin<&mut Self>,
-        cx: &mut TaskContext<'_>,
-        buf: &mut ReadBuf<'_>,
-    ) -> Poll<std::io::Result<()>> {
-        match &mut *self {
-            Self::Direct(stream) => Pin::new(stream).poll_read(cx, buf),
-            Self::Socks(stream) => Pin::new(stream).poll_read(cx, buf),
-        }
-    }
+fn unix_now() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
 }
 
-impl AsyncWrite for RelaySocket {
-    fn poll_write(
-        mut self: Pin<&mut Self>,
-        cx: &mut TaskContext<'_>,
-        buf: &[u8],
-    ) -> Poll<std::io::Result<usize>> {
-        match &mut *self {
-            Self::Direct(stream) => Pin::new(stream).poll_write(cx, buf),
-            Self::Socks(stream) => Pin::new(stream).poll_write(cx, buf),
-        }
-    }
-
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<std::io::Result<()>> {
-        match &mut *self {
-            Self::Direct(stream) => Pin::new(stream).poll_flush(cx),
-            Self::Socks(stream) => Pin::new(stream).poll_flush(cx),
-        }
-    }
-
-    fn poll_shutdown(
-        mut self: Pin<&mut Self>,
-        cx: &mut TaskContext<'_>,
-    ) -> Poll<std::io::Result<()>> {
-        match &mut *self {
-            Self::Direct(stream) => Pin::new(stream).poll_shutdown(cx),
-            Self::Socks(stream) => Pin::new(stream).poll_shutdown(cx),
-        }
-    }
-}
-#[derive(Clone)]
-enum WriterCommand {
-    Envelope {
-        message_id: Uuid,
-        recipient: String,
-        ciphertext: String,
-    },
-    Shutdown,
-}
+/// Compatibility shell for the old engine wiring. Relay sessions and
+/// application envelopes were deliberately removed: direct contacts use the
+/// peer transport and pairing uses `PairingRendezvousClient`.
 pub struct SharedRelayActor {
     pub connection: super::RelayConnectionConfig,
     pub writer: super::RelayWriterConfig,
     pub heartbeat: super::RelayHeartbeatConfig,
-    session_token: Option<String>,
-    identity: Identity,
-    writer_commands: Option<Sender<WriterCommand>>,
-    event_receiver: Option<StdReceiver<RelayEvent>>,
+    _identity: Identity,
+    commands: Option<tokio::sync::mpsc::UnboundedSender<RendezvousClientFrame>>,
+    events: Option<std_mpsc::Receiver<RendezvousEvent>>,
+    owner_tokens: HashMap<Uuid, String>,
+    joiner_tokens: HashMap<Uuid, String>,
+    invite_pairings: HashMap<String, Uuid>,
+    rendezvous_private_keys: HashMap<String, [u8; 32]>,
+    pairing_private_keys: HashMap<Uuid, [u8; 32]>,
+    pairing_peer_keys: HashMap<Uuid, [u8; 32]>,
 }
 
 impl SharedRelayActor {
     pub fn new(relay_onion_url: Url, socks5_url: Option<String>, identity: Identity) -> Self {
         Self {
             connection: super::RelayConnectionConfig {
-                connect_timeout: RELAY_CONNECT_TIMEOUT,
-                ready_timeout: RELAY_READY_TIMEOUT,
+                connect_timeout: Duration::from_secs(10),
+                ready_timeout: Duration::from_secs(15),
                 socks5_url,
                 relay_onion_url: relay_onion_url.to_string(),
             },
             writer: super::RelayWriterConfig {
-                control_channel_capacity: 64,
-                data_channel_capacity: 256,
+                control_channel_capacity: 32,
+                data_channel_capacity: 32,
             },
             heartbeat: super::RelayHeartbeatConfig {
                 ping_interval: Duration::from_secs(25),
-                pong_timeout: Duration::from_secs(150),
+                pong_timeout: Duration::from_secs(60),
             },
-            session_token: None,
-            identity,
-            writer_commands: None,
-            event_receiver: None,
+            _identity: identity,
+            commands: None,
+            events: None,
+            owner_tokens: HashMap::new(),
+            joiner_tokens: HashMap::new(),
+            invite_pairings: HashMap::new(),
+            rendezvous_private_keys: HashMap::new(),
+            pairing_private_keys: HashMap::new(),
+            pairing_peer_keys: HashMap::new(),
         }
     }
 
-    fn build_client(connection: &super::RelayConnectionConfig) -> RuntimeResult<Client> {
-        let mut builder = Client::builder()
-            .connect_timeout(connection.connect_timeout)
-            .timeout(RELAY_REQUEST_TIMEOUT);
-        if let Some(proxy) = &connection.socks5_url {
-            builder = builder.proxy(
-                reqwest::Proxy::all(proxy)
-                    .map_err(|error| RuntimeError::Unavailable(error.to_string()))?,
-            );
-        }
-        builder
-            .build()
-            .map_err(|error| RuntimeError::Unavailable(error.to_string()))
+    fn removed<T>() -> RuntimeResult<T> {
+        Err(RuntimeError::Unavailable(
+            "legacy relay control plane was removed; use rendezvous pairing".to_owned(),
+        ))
     }
 
-    // reqwest::blocking::Client owns an internal Tokio runtime. The engine
-    // actor itself runs on Tokio, so creating and dropping that client on an
-    // actor worker panics (`Cannot drop a runtime ...`). Keep every blocking
-    // HTTP request, including the client drop, on a scoped OS thread instead.
-    fn run_http<T>(operation: impl FnOnce() -> RuntimeResult<T> + Send) -> RuntimeResult<T>
-    where
-        T: Send,
-    {
-        thread::scope(|scope| match scope.spawn(operation).join() {
-            Ok(result) => result,
-            Err(_) => Err(RuntimeError::Unavailable(
-                "relay HTTP worker panicked".to_owned(),
-            )),
-        })
-    }
-
-    fn base_url(&self) -> RuntimeResult<Url> {
-        let base_url = Url::parse(&self.connection.relay_onion_url)
-            .map_err(|error| RuntimeError::Unavailable(error.to_string()))?;
-        validate_relay_url(&base_url)?;
-        Ok(base_url)
-    }
-
-    fn ensure_session_token(&mut self) -> RuntimeResult<String> {
-        if let Some(token) = &self.session_token {
-            return Ok(token.clone());
-        }
-        let base_url = self.base_url()?;
-        let public_key = self.identity.public_key();
-        let connection = self.connection.clone();
-        let identity = &self.identity;
-        let session: SessionResponse = Self::run_http(|| {
-            let client = Self::build_client(&connection)?;
-            let challenge: ChallengeResponse = client
-                .post(
-                    base_url
-                        .join("/v1/bootstrap/challenge")
-                        .map_err(http_error)?,
-                )
-                .json(&serde_json::json!({
-                    "public_key": public_key,
-                    "client_nonce": uuid::Uuid::new_v4().to_string(),
-                    "protocol_version": torchat_core::PROTOCOL_VERSION,
-                }))
-                .send()
-                .map_err(http_error)?
-                .relay_status()?
-                .json()
-                .map_err(http_error)?;
-            client
-                .post(base_url.join("/v1/installations").map_err(http_error)?)
-                .json(&RegisterRequest {
-                    challenge_id: challenge.challenge_id,
-                    public_key,
-                    proof: identity.sign(challenge.challenge.as_bytes()),
-                })
-                .send()
-                .map_err(http_error)?
-                .relay_status()?
-                .json()
-                .map_err(http_error)
-        })?;
-        self.session_token = Some(session.session_token.clone());
-        Ok(session.session_token)
-    }
-
-    /// Establish only the authenticated HTTP control-plane session.
-    ///
-    /// Relay-control commands run on short-lived blocking workers. They must
-    /// not start a second `/v1/events` writer because the server permits one
-    /// live WebSocket per installation and would replace the actor's primary
-    /// event connection. The long-lived event writer is created only by the
-    /// actor bootstrap path through `EngineRelay::ensure_session`.
-    pub(crate) fn ensure_http_session(&mut self) -> RuntimeResult<()> {
-        self.ensure_session_token().map(|_| ())
-    }
-
-    fn ensure_writer(&mut self, token: &str) -> RuntimeResult<()> {
-        if self
-            .writer_commands
-            .as_ref()
-            .is_some_and(|commands| !commands.is_closed())
-        {
+    fn start_rendezvous(&mut self) -> RuntimeResult<()> {
+        if self.commands.is_some() {
             return Ok(());
         }
-        self.writer_commands = None;
-        self.event_receiver = None;
-        let command_capacity = self
-            .writer
-            .control_channel_capacity
-            .saturating_add(self.writer.data_channel_capacity)
-            .max(1);
-        let (command_tx, command_rx) = mpsc::channel(command_capacity);
+        let relay_url = Url::parse(&self.connection.relay_onion_url)
+            .map_err(|e| RuntimeError::InvalidCommand(e.to_string()))?;
+        let socks5 = self.connection.socks5_url.clone();
+        let (command_tx, mut command_rx) = tokio::sync::mpsc::unbounded_channel();
         let (event_tx, event_rx) = std_mpsc::channel();
-        let connection = self.connection.clone();
-        let heartbeat = self.heartbeat.clone();
-        let installation_id = self.identity.installation_id();
-        let token = token.to_owned();
         thread::spawn(move || {
-            let runtime = match tokio::runtime::Builder::new_current_thread()
+            let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
-            {
-                Ok(value) => value,
-                Err(error) => {
-                    eprintln!("[TorChat-Engine] relay runtime init failed: {error}");
-                    return;
-                }
+            else {
+                let _ = event_tx.send(RendezvousEvent::Error(
+                    "rendezvous runtime unavailable".to_owned(),
+                ));
+                return;
             };
-            runtime.block_on(run_writer_loop(
-                connection,
-                heartbeat,
-                installation_id,
-                token,
-                command_rx,
-                event_tx,
-            ));
+            runtime.block_on(async move {
+                let mut client = match super::rendezvous::PairingRendezvousClient::connect(relay_url, socks5.as_deref()).await {
+                    Ok(client) => client,
+                    Err(error) => {
+                        let _ = event_tx.send(RendezvousEvent::Error(format!("rendezvous connect failed: {error}")));
+                        return;
+                    }
+                };
+                loop {
+                    tokio::select! {
+                        Some(command) = command_rx.recv() => {
+                            if let Err(error) = client.send(command).await {
+                                let _ = event_tx.send(RendezvousEvent::Error(format!("rendezvous send failed: {error}")));
+                                break;
+                            }
+                        }
+                        result = client.next() => {
+                            match result {
+                                Ok(frame) => { if event_tx.send(RendezvousEvent::Frame(frame)).is_err() { break; } }
+                                Err(error) => {
+                                    let _ = event_tx.send(RendezvousEvent::Error(format!("rendezvous receive failed: {error}")));
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
         });
-        self.writer_commands = Some(command_tx);
-        self.event_receiver = Some(event_rx);
+        self.commands = Some(command_tx);
+        self.events = Some(event_rx);
         Ok(())
     }
 
-    fn shutdown_writer(&mut self) {
-        if let Some(commands) = self.writer_commands.take() {
-            let _ = commands.try_send(WriterCommand::Shutdown);
-        }
-        self.event_receiver = None;
+    fn send_frame(&mut self, frame: RendezvousClientFrame) -> RuntimeResult<()> {
+        self.start_rendezvous()?;
+        self.commands
+            .as_ref()
+            .ok_or_else(|| RuntimeError::Unavailable("rendezvous worker unavailable".into()))?
+            .send(frame)
+            .map_err(|_| RuntimeError::Unavailable("rendezvous connection closed".into()))
     }
 
-    fn enqueue_writer_command(&mut self, command: WriterCommand) -> RuntimeResult<()> {
-        let token = self.ensure_session_token()?;
-        self.ensure_writer(&token)?;
-        if let Some(commands) = &self.writer_commands
-            && commands.try_send(command.clone()).is_ok()
-        {
-            return Ok(());
-        }
-        self.writer_commands = None;
-        self.ensure_writer(&token)?;
-        self.writer_commands
+    fn receive_frame(&mut self) -> RuntimeResult<RendezvousServerFrame> {
+        match self.events
             .as_ref()
-            .ok_or_else(|| RuntimeError::Unavailable("relay writer is unavailable".to_owned()))?
-            .try_send(command)
-            .map_err(|error| {
-                RuntimeError::Unavailable(format!("relay writer queue is unavailable: {error}"))
-            })
+            .ok_or_else(|| RuntimeError::Unavailable("rendezvous worker unavailable".into()))?
+            .recv_timeout(Duration::from_secs(30))
+            .map_err(|e| RuntimeError::Unavailable(format!("rendezvous response timeout: {e}")))? {
+            RendezvousEvent::Frame(frame) => Ok(frame),
+            RendezvousEvent::Error(error) => Err(RuntimeError::Unavailable(error)),
+        }
+    }
+
+    pub fn submit_pairing_code_with_offer(
+        &mut self,
+        code: &str,
+        pairing_id: Uuid,
+        offer: String,
+    ) -> RuntimeResult<PairingItem> {
+        self.start_rendezvous()?;
+        let request_id = Uuid::new_v4();
+        self.send_frame(RendezvousClientFrame::ResolvePairingCode {
+            request_id,
+            display_code: code.to_owned(),
+        })?;
+        let (slot_handle, _owner_key) = match self.receive_frame()? {
+            RendezvousServerFrame::PairingSlotResolved {
+                request_id: received,
+                slot_handle,
+                owner_rendezvous_public_key,
+                ..
+            } if received == request_id => (slot_handle, owner_rendezvous_public_key),
+            RendezvousServerFrame::Error { code, .. } => {
+                return Err(RuntimeError::Unavailable(code));
+            }
+            _ => {
+                return Err(RuntimeError::Unavailable(
+                    "unexpected rendezvous response".into(),
+                ));
+            }
+        };
+        if let Ok(RelayPayloadV1::PairingOffer { invite, .. }) = RelayPayloadV1::decode(&offer) {
+            if let Ok(invite) = ContactInvite::parse(&invite) {
+                self.invite_pairings.insert(invite.invite_id, pairing_id);
+            }
+        }
+        let mut joiner_key = [0_u8; 32];
+        getrandom::fill(&mut joiner_key).map_err(|e| RuntimeError::Unavailable(e.to_string()))?;
+        self.pairing_private_keys.insert(pairing_id, joiner_key);
+        self.pairing_peer_keys.insert(pairing_id, _owner_key);
+        let encrypted_offer = rendezvous_crypto::seal(joiner_key, _owner_key, offer.as_bytes())
+            .map_err(RuntimeError::Unavailable)?;
+        self.send_frame(RendezvousClientFrame::BeginPairing {
+            request_id: Uuid::new_v4(),
+            pairing_id,
+            slot_handle,
+            joiner_rendezvous_public_key: rendezvous_crypto::public_key(joiner_key),
+            encrypted_offer,
+        })?;
+        let (started, token) = match self.receive_frame()? {
+            RendezvousServerFrame::PairingStarted {
+                pairing_id: started,
+                joiner_side_token,
+                ..
+            } => (started, joiner_side_token),
+            RendezvousServerFrame::Error { code, .. } => {
+                return Err(RuntimeError::Unavailable(code));
+            }
+            _ => {
+                return Err(RuntimeError::Unavailable(
+                    "unexpected rendezvous response".into(),
+                ));
+            }
+        };
+        self.joiner_tokens.insert(started, token);
+        Ok(PairingItem {
+            pairing_id: started.to_string(),
+            sender: None,
+            capability: None,
+            expires_at: unix_now() + 180,
+            state: InviteState::Pending,
+            received: false,
+            available_actions: Vec::new(),
+            offer_invite_id: None,
+            offer_payload: None,
+        })
     }
 }
 
 impl EngineRelay for SharedRelayActor {
     fn set_socks5_url(&mut self, socks5_url: Option<String>) {
-        self.shutdown_writer();
         self.connection.socks5_url = socks5_url;
-        self.session_token = None;
     }
 
-    fn invalidate_session(&mut self) {
-        self.shutdown_writer();
-        self.session_token = None;
-    }
-
-    fn shutdown(&mut self) {
-        self.shutdown_writer();
-        self.session_token = None;
-    }
+    fn shutdown(&mut self) {}
 
     fn ensure_session(&mut self) -> RuntimeResult<()> {
-        let token = self.ensure_session_token()?;
-        self.ensure_writer(&token)
-    }
-
-    fn update_profile(&mut self, nickname: &str) -> RuntimeResult<()> {
-        let token = self.ensure_session_token()?;
-        let base_url = self.base_url()?;
-        let connection = self.connection.clone();
-        let nickname = nickname.to_owned();
-        Self::run_http(|| {
-            Self::build_client(&connection)?
-                .put(base_url.join("/v1/profile").map_err(http_error)?)
-                .bearer_auth(token)
-                .json(&UpdateProfileRequest { nickname })
-                .send()
-                .map_err(http_error)?
-                .relay_status()?;
-            Ok(())
-        })
+        Ok(())
     }
 
     fn send_envelope(
         &mut self,
-        message_id: Uuid,
-        recipient: &str,
+        message_id: uuid::Uuid,
+        _recipient: &str,
         ciphertext: &str,
     ) -> RuntimeResult<()> {
-        self.enqueue_writer_command(WriterCommand::Envelope {
-            message_id,
-            recipient: recipient.to_owned(),
-            ciphertext: ciphertext.to_owned(),
-        })
+        let payload = RelayPayloadV1::decode(ciphertext).map_err(RuntimeError::InvalidCommand)?;
+        match payload {
+            RelayPayloadV1::PairingRejected { .. } => {
+                let token = self
+                    .owner_tokens
+                    .get(&message_id)
+                    .or_else(|| self.joiner_tokens.get(&message_id))
+                    .cloned()
+                    .ok_or_else(|| {
+                        RuntimeError::Unavailable("pairing side token missing".into())
+                    })?;
+                self.send_frame(RendezvousClientFrame::RejectPairing {
+                    pairing_id: message_id,
+                    side_token: token,
+                })
+            }
+            RelayPayloadV1::WelcomeApplied { invite_id, .. } => {
+                let pairing_id = self
+                    .invite_pairings
+                    .get(&invite_id)
+                    .copied()
+                    .unwrap_or(message_id);
+                let token = self
+                    .joiner_tokens
+                    .get(&pairing_id)
+                    .cloned()
+                    .ok_or_else(|| {
+                        RuntimeError::Unavailable("pairing side token missing".into())
+                    })?;
+                self.send_frame(RendezvousClientFrame::PairingCommitted {
+                    pairing_id,
+                    side_token: token,
+                })
+            }
+            _ => {
+                let token = self.owner_tokens.get(&message_id).cloned().ok_or_else(|| {
+                    RuntimeError::Unavailable("pairing owner token missing".into())
+                })?;
+                let private_key = self.pairing_private_keys.get(&message_id).copied().ok_or_else(|| {
+                    RuntimeError::Unavailable("rendezvous private key missing".into())
+                })?;
+                let peer_key = self
+                    .pairing_peer_keys
+                    .get(&message_id)
+                    .copied()
+                    .ok_or_else(|| RuntimeError::Unavailable("pairing peer key missing".into()))?;
+                let encrypted_response =
+                    rendezvous_crypto::seal(private_key, peer_key, ciphertext.as_bytes())
+                        .map_err(RuntimeError::Unavailable)?;
+                self.send_frame(RendezvousClientFrame::AcceptPairing {
+                    pairing_id: message_id,
+                    side_token: token,
+                    encrypted_response,
+                })
+            }
+        }
     }
 
     fn poll_event(&mut self) -> Option<RelayEvent> {
-        let receiver = self.event_receiver.as_ref()?;
-        match receiver.try_recv() {
-            Ok(event) => Some(event),
-            Err(TryRecvError::Empty) => None,
-            Err(TryRecvError::Disconnected) => {
-                self.writer_commands = None;
-                self.event_receiver = None;
-                None
+        let event = self.events.as_ref()?.try_recv().ok()?;
+        let RendezvousEvent::Frame(frame) = event else {
+            return None;
+        };
+        match frame {
+            RendezvousServerFrame::PairingRequested {
+                pairing_id,
+                slot_handle,
+                owner_side_token,
+                joiner_rendezvous_public_key,
+                encrypted_offer,
+                ..
+            } => {
+                self.owner_tokens.insert(pairing_id, owner_side_token);
+                self.pairing_peer_keys
+                    .insert(pairing_id, joiner_rendezvous_public_key);
+                let private_key = self
+                    .rendezvous_private_keys
+                    .get(&slot_handle)
+                    .copied()?;
+                self.pairing_private_keys.insert(pairing_id, private_key);
+                let offer = rendezvous_crypto::open(
+                    private_key,
+                    joiner_rendezvous_public_key,
+                    &encrypted_offer,
+                )
+                .ok()?;
+                Some(RelayEvent::Envelope(envelope_for_payload(
+                    pairing_id,
+                    String::from_utf8(offer).ok()?,
+                )))
             }
+            RendezvousServerFrame::PairingAccepted {
+                pairing_id,
+                encrypted_response,
+            } => {
+                let private_key = self.pairing_private_keys.get(&pairing_id).copied()?;
+                let peer_key = self.pairing_peer_keys.get(&pairing_id).copied()?;
+                let response =
+                    rendezvous_crypto::open(private_key, peer_key, &encrypted_response).ok()?;
+                Some(RelayEvent::Envelope(envelope_for_payload(
+                    pairing_id,
+                    String::from_utf8(response).ok()?,
+                )))
+            }
+            RendezvousServerFrame::PairingRejected { pairing_id } => {
+                Some(RelayEvent::PairingAvailable { pairing_id })
+            }
+            _ => None,
         }
     }
 
     fn refresh_pairing_code(&mut self) -> RuntimeResult<InviteCode> {
-        let token = self.ensure_session_token()?;
-        let base_url = self.base_url()?;
-        let connection = self.connection.clone();
-        let response: PairingCodeResponse = Self::run_http(|| {
-            Self::build_client(&connection)?
-                .post(
-                    base_url
-                        .join("/v1/pairing-codes/refresh")
-                        .map_err(http_error)?,
-                )
-                .bearer_auth(token)
-                .send()
-                .map_err(http_error)?
-                .relay_status()?
-                .json()
-                .map_err(http_error)
+        self.start_rendezvous()?;
+        let request_id = Uuid::new_v4();
+        let mut rendezvous_key = [0_u8; 32];
+        getrandom::fill(&mut rendezvous_key)
+            .map_err(|e| RuntimeError::Unavailable(e.to_string()))?;
+        self.send_frame(RendezvousClientFrame::CreatePairingSlot {
+            request_id,
+            rendezvous_public_key: rendezvous_crypto::public_key(rendezvous_key),
+            requested_ttl_seconds: 120,
         })?;
-        Ok(InviteCode {
-            code: response.code,
-            expires_at: response.expires_at,
-        })
+        match self.receive_frame()? {
+            RendezvousServerFrame::PairingSlotCreated {
+                request_id: received,
+                slot_handle,
+                display_code,
+                expires_at_unix,
+                ..
+            } if received == request_id => {
+                self.rendezvous_private_keys.insert(slot_handle, rendezvous_key);
+                Ok(InviteCode { code: display_code, expires_at: expires_at_unix })
+            },
+            RendezvousServerFrame::Error { code, .. } => Err(RuntimeError::Unavailable(code)),
+            _ => Self::removed(),
+        }
     }
 
-    fn submit_pairing_code(&mut self, code: &str) -> RuntimeResult<PairingItem> {
-        let token = self.ensure_session_token()?;
-        let base_url = self.base_url()?;
-        let connection = self.connection.clone();
-        let code = code.to_owned();
-        let response: PairingRequestResponse = Self::run_http(|| {
-            Self::build_client(&connection)?
-                .post(base_url.join("/v1/pairing-requests").map_err(http_error)?)
-                .bearer_auth(token)
-                .json(&CreatePairingRequest { code })
-                .send()
-                .map_err(http_error)?
-                .relay_status()?
-                .json()
-                .map_err(http_error)
-        })?;
-        Ok(PairingItem {
-            pairing_id: response.pairing_id.to_string(),
-            sender: response.sender.map(|sender| ContactRecord {
-                installation_id: sender.installation_id,
-                nickname: sender.nickname,
-                public_key: sender.public_key,
-                fingerprint: sender.fingerprint,
-                local_alias: None,
-                muted: false,
-                blocked: false,
-                verification: VerificationState::Unverified,
-                peer_endpoint_status: torchat_client_runtime::PeerEndpointStatus::Missing,
-                peer_connection_status: torchat_client_runtime::PeerConnectionStatus::Offline,
-                last_peer_connected_at: None,
-                last_seen_at: None,
-                transport_policy: Default::default(),
-                dev: None,
-            }),
-            capability: None,
-            expires_at: response.expires_at,
-            state: response.state,
-            received: false,
-            available_actions: torchat_client_runtime::pairing_available_actions(
-                response.state,
-                false,
-            ),
-            offer_invite_id: None,
-            offer_payload: None,
-        })
+    fn submit_pairing_code(&mut self, _code: &str) -> RuntimeResult<PairingItem> {
+        Self::removed()
     }
 
-    fn pairing_inbox(&mut self) -> RuntimeResult<Vec<PairingItem>> {
-        let token = self.ensure_session_token()?;
-        let base_url = self.base_url()?;
-        let connection = self.connection.clone();
-        let response: Vec<PairingInboxItemResponse> = Self::run_http(|| {
-            Self::build_client(&connection)?
-                .get(
-                    base_url
-                        .join("/v1/pairing-requests/inbox")
-                        .map_err(http_error)?,
-                )
-                .bearer_auth(token)
-                .send()
-                .map_err(http_error)?
-                .relay_status()?
-                .json()
-                .map_err(http_error)
-        })?;
-        Ok(response
-            .into_iter()
-            .map(|item| PairingItem {
-                pairing_id: item.pairing_id.to_string(),
-                sender: Some(ContactRecord {
-                    installation_id: item.sender.installation_id,
-                    nickname: item.sender.nickname,
-                    public_key: item.sender.public_key,
-                    fingerprint: item.sender.fingerprint,
-                    local_alias: None,
-                    muted: false,
-                    blocked: false,
-                    verification: VerificationState::Unverified,
-                    peer_endpoint_status: torchat_client_runtime::PeerEndpointStatus::Missing,
-                    peer_connection_status: torchat_client_runtime::PeerConnectionStatus::Offline,
-                    last_peer_connected_at: None,
-                    last_seen_at: None,
-                    transport_policy: Default::default(),
-                    dev: None,
-                }),
-                capability: Some(item.capability),
-                expires_at: item.expires_at,
-                state: item.state,
-                received: true,
-                available_actions: torchat_client_runtime::pairing_available_actions(
-                    item.state, true,
-                ),
-                offer_invite_id: item.offer_invite_id,
-                offer_payload: item.offer_payload,
-            })
-            .collect())
-    }
-
-    fn acknowledge_pairing(&mut self, pairing_id: &str) -> RuntimeResult<()> {
-        let token = self.ensure_session_token()?;
-        let pairing_id = Uuid::parse_str(pairing_id)
-            .map_err(|error| RuntimeError::InvalidParams(error.to_string()))?;
-        let base_url = self.base_url()?;
-        let connection = self.connection.clone();
-        Self::run_http(|| {
-            Self::build_client(&connection)?
-                .post(
-                    base_url
-                        .join(&format!("/v1/pairing-requests/{pairing_id}/ack"))
-                        .map_err(http_error)?,
-                )
-                .json(&serde_json::json!({}))
-                .bearer_auth(token)
-                .send()
-                .map_err(http_error)?
-                .relay_status()?;
-            Ok(())
-        })
+    fn submit_pairing_code_with_offer(
+        &mut self,
+        code: &str,
+        pairing_id: Uuid,
+        offer: String,
+    ) -> RuntimeResult<PairingItem> {
+        SharedRelayActor::submit_pairing_code_with_offer(self, code, pairing_id, offer)
     }
 
     fn cancel_pairing(&mut self, pairing_id: &str) -> RuntimeResult<()> {
-        let token = self.ensure_session_token()?;
-        let pairing_id = Uuid::parse_str(pairing_id)
-            .map_err(|error| RuntimeError::InvalidParams(error.to_string()))?;
-        let base_url = self.base_url()?;
-        let connection = self.connection.clone();
-        Self::run_http(|| {
-            Self::build_client(&connection)?
-                .delete(
-                    base_url
-                        .join(&format!("/v1/pairing-requests/{pairing_id}"))
-                        .map_err(http_error)?,
-                )
-                .bearer_auth(token)
-                .send()
-                .map_err(http_error)?
-                .relay_status()?;
-            Ok(())
-        })
-    }
-
-    fn confirm_contact(
-        &mut self,
-        capability: &str,
-        peer_installation_id: &str,
-    ) -> RuntimeResult<()> {
-        let token = self.ensure_session_token()?;
-        let base_url = self.base_url()?;
-        let connection = self.connection.clone();
-        let capability = capability.to_owned();
-        let peer_installation_id = peer_installation_id.to_owned();
-        Self::run_http(|| {
-            Self::build_client(&connection)?
-                .post(base_url.join("/v1/contacts/confirm").map_err(http_error)?)
-                .bearer_auth(token)
-                .json(&ConfirmContactRequest {
-                    capability,
-                    peer_installation_id,
-                })
-                .send()
-                .map_err(http_error)?
-                .relay_status()?;
-            Ok(())
-        })
-    }
-}
-
-async fn run_writer_loop(
-    connection: super::RelayConnectionConfig,
-    heartbeat: super::RelayHeartbeatConfig,
-    installation_id: String,
-    token: String,
-    mut commands: mpsc::Receiver<WriterCommand>,
-    event_tx: StdSender<RelayEvent>,
-) {
-    let mut pending = None;
-    let mut reconnect_attempt = 0_u32;
-    loop {
-        let relay = match connect_relay(&connection, &token).await {
-            Ok(value) => value,
-            Err(error) => {
-                reconnect_attempt = reconnect_attempt.saturating_add(1);
-                let reconnect_delay = relay_reconnect_delay(reconnect_attempt);
-                let _ = event_tx.send(RelayEvent::Disconnected {
-                    detail: error.to_string(),
-                });
-                let _ = event_tx.send(RelayEvent::Backoff {
-                    attempt: reconnect_attempt,
-                    retry_in_ms: reconnect_delay.as_millis() as u64,
-                    detail: error.to_string(),
-                });
-                eprintln!("[TorChat-Engine] relay connect failed: {error}");
-                if matches!(commands.try_recv(), Ok(WriterCommand::Shutdown)) {
-                    return;
-                }
-                sleep(reconnect_delay).await;
-                continue;
-            }
-        };
-        reconnect_attempt = 0;
-        let _ = event_tx.send(RelayEvent::Connected);
-        let (mut writer, mut reader) = relay.split();
-        let mut heartbeat_tick = tokio::time::interval(heartbeat.ping_interval);
-        let mut last_pong_at = Instant::now();
-        let disconnected_detail = loop {
-            if last_pong_at.elapsed() >= heartbeat.pong_timeout {
-                break "relay pong timeout".to_owned();
-            }
-            if let Some(command) = pending.take()
-                && let Err(command) =
-                    send_writer_command(&mut writer, &installation_id, command).await
-            {
-                pending = Some(command);
-                break "relay send failed".to_owned();
-            }
-            tokio::select! {
-                _ = heartbeat_tick.tick() => {
-                    if writer.send(relay_ping_message()).await.is_err() {
-                        break "relay ping failed".to_owned();
-                    }
-                    if writer.send(Message::Ping(Vec::new().into())).await.is_err() {
-                        break "relay ping failed".to_owned();
-                    }
-                }
-                command = commands.recv() => {
-                    let Some(command) = command else {
-                        return;
-                    };
-                    if matches!(command, WriterCommand::Shutdown) {
-                        return;
-                    }
-                    if let Err(command) = send_writer_command(&mut writer, &installation_id, command).await {
-                        pending = Some(command);
-                        break "relay send failed".to_owned();
-                    }
-                }
-                incoming = reader.next() => {
-                    let Some(incoming) = incoming else {
-                        break "relay closed".to_owned();
-                    };
-                    let Ok(message) = incoming else {
-                        break "relay receive failed".to_owned();
-                    };
-                    if relay_message_confirms_liveness(&message) {
-                        last_pong_at = Instant::now();
-                    }
-                    match message {
-                        Message::Text(text) => match serde_json::from_str::<RelayServerFrame>(&text) {
-                            Ok(RelayServerFrame::Pong) => {
-                            }
-                            Ok(RelayServerFrame::PairingAvailable { pairing_id }) => {
-                                let _ = event_tx.send(RelayEvent::PairingAvailable { pairing_id });
-                            }
-                            Ok(RelayServerFrame::Envelope(envelope)) => {
-                                let _ = event_tx.send(RelayEvent::Envelope(envelope));
-                            }
-                            Ok(RelayServerFrame::Forwarded { message_id }) => {
-                                let _ = event_tx.send(RelayEvent::MessageTransportOutcome {
-                                    message_id,
-                                    outcome: torchat_client_runtime::MessageTransportOutcome::Forwarded,
-                                });
-                            }
-                            Ok(RelayServerFrame::DeliveryReceipt { message_id }) => {
-                                let _ = event_tx.send(RelayEvent::MessageTransportOutcome {
-                                    message_id,
-                                    outcome: torchat_client_runtime::MessageTransportOutcome::Delivered,
-                                });
-                            }
-                            Ok(RelayServerFrame::RecipientOffline { message_id }) => {
-                                let _ = event_tx.send(RelayEvent::MessageTransportOutcome {
-                                    message_id,
-                                    outcome: torchat_client_runtime::MessageTransportOutcome::RecipientOffline,
-                                });
-                            }
-                            Ok(RelayServerFrame::Error { code }) => {
-                                eprintln!("[TorChat-Engine] relay server error: {code}");
-                            }
-                            Ok(RelayServerFrame::Ready { .. }) => {}
-                            Err(error) => {
-                                eprintln!("[TorChat-Engine] invalid relay frame: {error}");
-                            }
-                        },
-                        Message::Ping(payload) => {
-                            if writer.send(Message::Pong(payload)).await.is_err() {
-                                break "relay pong failed".to_owned();
-                            }
-                        }
-                        Message::Pong(_) => {
-                        }
-                        Message::Close(_) => break "relay closed".to_owned(),
-                        _ => {}
-                    }
-                }
-            }
-        };
-        let _ = event_tx.send(RelayEvent::Disconnected {
-            detail: disconnected_detail.clone(),
-        });
-        reconnect_attempt = reconnect_attempt.saturating_add(1);
-        let reconnect_delay = relay_reconnect_delay(reconnect_attempt);
-        let _ = event_tx.send(RelayEvent::Backoff {
-            attempt: reconnect_attempt,
-            retry_in_ms: reconnect_delay.as_millis() as u64,
-            detail: disconnected_detail,
-        });
-        sleep(reconnect_delay).await;
-    }
-}
-
-fn relay_reconnect_delay(attempt: u32) -> Duration {
-    let seconds = 2_u64.saturating_pow(attempt.saturating_sub(1).min(5));
-    Duration::from_secs(seconds.min(60))
-}
-
-async fn send_writer_command(
-    writer: &mut futures_util::stream::SplitSink<RelayStream, Message>,
-    installation_id: &str,
-    command: WriterCommand,
-) -> Result<(), WriterCommand> {
-    match &command {
-        WriterCommand::Envelope {
-            message_id,
-            recipient,
-            ciphertext,
-        } => {
-            let frame = RelayClientFrame::Envelope(RelayEnvelope {
-                version: torchat_core::PROTOCOL_VERSION,
-                message_id: *message_id,
-                sender: installation_id.to_owned(),
-                recipient: recipient.clone(),
-                ciphertext: ciphertext.clone(),
+        let pairing_id =
+            Uuid::parse_str(pairing_id).map_err(|e| RuntimeError::InvalidCommand(e.to_string()))?;
+        if let Some(token) = self.joiner_tokens.get(&pairing_id).cloned() {
+            return self.send_frame(RendezvousClientFrame::CancelPairing {
+                pairing_id,
+                side_token: token,
             });
-            let payload = match serde_json::to_string(&frame) {
-                Ok(value) => value,
-                Err(_) => return Err(command),
-            };
-            if writer.send(Message::Text(payload.into())).await.is_err() {
-                return Err(command);
-            }
         }
-        WriterCommand::Shutdown => {}
-    }
-    Ok(())
-}
-
-async fn connect_relay(
-    connection: &super::RelayConnectionConfig,
-    token: &str,
-) -> RuntimeResult<RelayStream> {
-    let base_url = Url::parse(&connection.relay_onion_url)
-        .map_err(|error| RuntimeError::Unavailable(error.to_string()))?;
-    validate_relay_url(&base_url)?;
-    let host = base_url
-        .host_str()
-        .ok_or_else(|| RuntimeError::Unavailable("relay URL has no host".to_owned()))?
-        .to_owned();
-    let port = base_url
-        .port_or_known_default()
-        .ok_or_else(|| RuntimeError::Unavailable("relay URL has no port".to_owned()))?;
-
-    let socket = if let Some(proxy) = &connection.socks5_url {
-        let proxy_url =
-            Url::parse(proxy).map_err(|error| RuntimeError::Unavailable(error.to_string()))?;
-        let proxy_host = proxy_url
-            .host_str()
-            .ok_or_else(|| RuntimeError::Unavailable("SOCKS5 proxy has no host".to_owned()))?;
-        let proxy_port = proxy_url
-            .port_or_known_default()
-            .ok_or_else(|| RuntimeError::Unavailable("SOCKS5 proxy has no port".to_owned()))?;
-        RelaySocket::Socks(
-            timeout(
-                connection.connect_timeout,
-                Socks5Stream::connect((proxy_host, proxy_port), (host.as_str(), port)),
-            )
-            .await
-            .map_err(http_error)?
-            .map_err(http_error)?,
-        )
-    } else {
-        RelaySocket::Direct(
-            timeout(
-                connection.connect_timeout,
-                TcpStream::connect((host.as_str(), port)),
-            )
-            .await
-            .map_err(http_error)?
-            .map_err(http_error)?,
-        )
-    };
-
-    let mut ws_url = base_url.clone();
-    ws_url
-        .set_scheme(if ws_url.scheme() == "https" {
-            "wss"
-        } else {
-            "ws"
-        })
-        .map_err(|_| RuntimeError::Unavailable("invalid websocket scheme".to_owned()))?;
-    ws_url.set_path("/v1/events");
-    let request = Request::builder()
-        .uri(ws_url.as_str())
-        .header("Host", format!("{host}:{port}"))
-        .header("Authorization", format!("Bearer {token}"))
-        .header("Upgrade", "websocket")
-        .header("Connection", "Upgrade")
-        .header("Sec-WebSocket-Key", generate_key())
-        .header("Sec-WebSocket-Version", "13")
-        .body(())
-        .map_err(http_error)?;
-    let (mut stream, _) = timeout(connection.connect_timeout, client_async(request, socket))
-        .await
-        .map_err(http_error)?
-        .map_err(http_error)?;
-    let ready = timeout(connection.ready_timeout, stream.next())
-        .await
-        .map_err(http_error)?
-        .ok_or_else(|| RuntimeError::Unavailable("relay closed before ready".to_owned()))?
-        .map_err(http_error)?;
-    let Message::Text(ready) = ready else {
-        return Err(RuntimeError::Unavailable(
-            "relay returned non-text ready frame".to_owned(),
-        ));
-    };
-    match serde_json::from_str::<RelayServerFrame>(&ready).map_err(http_error)? {
-        RelayServerFrame::Ready { .. } => Ok(stream),
-        _ => Err(RuntimeError::Unavailable(
-            "relay did not return ready".to_owned(),
-        )),
-    }
-}
-
-fn relay_ping_message() -> Message {
-    let payload =
-        serde_json::to_string(&RelayClientFrame::Ping).expect("relay ping frame must serialize");
-    Message::Text(payload.into())
-}
-
-fn relay_message_confirms_liveness(message: &Message) -> bool {
-    matches!(
-        message,
-        Message::Text(_) | Message::Ping(_) | Message::Pong(_) | Message::Binary(_)
-    )
-}
-
-fn validate_relay_url(base_url: &Url) -> RuntimeResult<()> {
-    let host = base_url
-        .host_str()
-        .ok_or_else(|| RuntimeError::Unavailable("relay URL has no host".to_owned()))?;
-    if !is_valid_onion_address(host)
-        || !matches!(base_url.scheme(), "http" | "https")
-        || !base_url.username().is_empty()
-        || base_url.password().is_some()
-        || base_url.port().is_some()
-        || base_url.path() != "/"
-        || base_url.query().is_some()
-        || base_url.fragment().is_some()
-    {
-        return Err(RuntimeError::Unavailable(
-            "relay URL must be an exact v3 onion URL".to_owned(),
-        ));
-    }
-    if base_url.scheme() == "http" && !base_url.as_str().starts_with("http://") {
-        return Err(RuntimeError::Unavailable("invalid relay URL".to_owned()));
-    }
-    Ok(())
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct ChallengeResponse {
-    challenge_id: Uuid,
-    challenge: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct SessionResponse {
-    session_token: String,
-}
-
-#[derive(Clone, Debug, Serialize)]
-struct RegisterRequest {
-    challenge_id: Uuid,
-    public_key: String,
-    proof: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct PairingCodeResponse {
-    code: String,
-    expires_at: i64,
-}
-
-#[derive(Clone, Debug, Serialize)]
-struct CreatePairingRequest {
-    code: String,
-}
-
-#[derive(Clone, Debug, Serialize)]
-struct UpdateProfileRequest {
-    nickname: String,
-}
-
-#[derive(Clone, Debug, Serialize)]
-struct ConfirmContactRequest {
-    capability: String,
-    peer_installation_id: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct PairingRequestResponse {
-    pairing_id: Uuid,
-    expires_at: i64,
-    #[serde(default)]
-    state: InviteState,
-    #[serde(default)]
-    sender: Option<ContactCard>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct PairingInboxItemResponse {
-    pairing_id: Uuid,
-    sender: ContactCard,
-    capability: String,
-    expires_at: i64,
-    #[serde(default)]
-    state: InviteState,
-    #[serde(default)]
-    offer_invite_id: Option<String>,
-    #[serde(default)]
-    offer_payload: Option<String>,
-}
-
-fn http_error(error: impl std::fmt::Display) -> RuntimeError {
-    RuntimeError::Unavailable(format!("relay transport error: {error}"))
-}
-
-trait RelayResponseExt {
-    fn relay_status(self) -> RuntimeResult<Response>;
-}
-
-impl RelayResponseExt for Response {
-    fn relay_status(self) -> RuntimeResult<Response> {
-        let status = self.status();
-        if status.is_success() {
-            return Ok(self);
-        }
-        let message = self
-            .json::<RelayErrorResponse>()
-            .map(|body| body.error)
-            .unwrap_or_else(|_| {
-                status
-                    .canonical_reason()
-                    .unwrap_or("relay request failed")
-                    .to_owned()
+        if let Some(token) = self.owner_tokens.get(&pairing_id).cloned() {
+            return self.send_frame(RendezvousClientFrame::CancelPairing {
+                pairing_id,
+                side_token: token,
             });
-        Err(relay_status_error(status, message))
-    }
-}
-
-fn relay_status_error(status: StatusCode, message: String) -> RuntimeError {
-    let message = format!("relay HTTP {}: {message}", status.as_u16());
-    match status {
-        StatusCode::BAD_REQUEST | StatusCode::UNPROCESSABLE_ENTITY => {
-            RuntimeError::InvalidParams(message)
         }
-        StatusCode::NOT_FOUND => RuntimeError::NotFound(message),
-        StatusCode::CONFLICT => RuntimeError::Conflict(message),
-        StatusCode::REQUEST_TIMEOUT | StatusCode::GATEWAY_TIMEOUT => RuntimeError::Timeout(message),
-        _ => RuntimeError::Unavailable(message),
+        Self::removed()
     }
 }
 
-#[derive(Deserialize)]
-struct RelayErrorResponse {
-    error: String,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn relay_statuses_preserve_domain_error_categories() {
-        assert_eq!(
-            relay_status_error(StatusCode::BAD_REQUEST, "invalid code".to_owned()),
-            RuntimeError::InvalidParams("relay HTTP 400: invalid code".to_owned()),
-        );
-        assert_eq!(
-            relay_status_error(StatusCode::NOT_FOUND, "expired code".to_owned()),
-            RuntimeError::NotFound("relay HTTP 404: expired code".to_owned()),
-        );
-        assert_eq!(
-            relay_status_error(StatusCode::CONFLICT, "already pending".to_owned()),
-            RuntimeError::Conflict("relay HTTP 409: already pending".to_owned()),
-        );
-        assert_eq!(
-            relay_status_error(StatusCode::TOO_MANY_REQUESTS, "try later".to_owned()),
-            RuntimeError::Unavailable("relay HTTP 429: try later".to_owned()),
-        );
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn blocking_http_client_is_dropped_outside_the_actor_runtime() {
-        let result = SharedRelayActor::run_http(|| {
-            let client = Client::builder()
-                .build()
-                .map_err(|error| RuntimeError::Unavailable(error.to_string()))?;
-            drop(client);
-            Ok(())
-        });
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn relay_ping_message_uses_application_ping_frame() {
-        let message = relay_ping_message();
-        let Message::Text(payload) = message else {
-            panic!("relay ping must use a text frame");
-        };
-        let decoded: RelayClientFrame =
-            serde_json::from_str(payload.as_ref()).expect("relay ping payload must decode");
-        assert!(matches!(decoded, RelayClientFrame::Ping));
-    }
-
-    #[test]
-    fn incoming_relay_traffic_counts_as_liveness() {
-        assert!(relay_message_confirms_liveness(&Message::Text("{}".into())));
-        assert!(relay_message_confirms_liveness(&Message::Ping(
-            vec![1].into()
-        )));
-        assert!(relay_message_confirms_liveness(&Message::Pong(
-            vec![2].into()
-        )));
-        assert!(!relay_message_confirms_liveness(&Message::Close(None)));
-    }
-
-    #[test]
-    fn default_relay_timeouts_are_tor_tolerant() {
-        let actor = SharedRelayActor::new(
-            Url::parse("http://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.onion")
-                .expect("test relay URL must parse"),
-            Some("socks5://127.0.0.1:9050".to_owned()),
-            Identity::generate(),
-        );
-
-        assert_eq!(actor.connection.connect_timeout, Duration::from_secs(10));
-        assert_eq!(actor.connection.ready_timeout, Duration::from_secs(15));
-        assert_eq!(actor.heartbeat.pong_timeout, Duration::from_secs(150));
-    }
-
-    #[test]
-    fn pairing_request_response_can_include_peer_hint() {
-        let decoded: PairingRequestResponse = serde_json::from_value(serde_json::json!({
-            "pairing_id": Uuid::nil(),
-            "expires_at": 1,
-            "state": "PENDING",
-            "sender": {
-                "installation_id": "installation-torka",
-                "nickname": "Torka",
-                "public_key": "public-key",
-                "fingerprint": "fingerprint"
-            }
-        }))
-        .expect("response should decode");
-
-        assert_eq!(
-            decoded
-                .sender
-                .as_ref()
-                .map(|value| value.installation_id.as_str()),
-            Some("installation-torka")
-        );
+fn envelope_for_payload(
+    message_id: Uuid,
+    ciphertext: String,
+) -> torchat_core::relay::RelayEnvelope {
+    let (sender, recipient) = match RelayPayloadV1::decode(&ciphertext) {
+        Ok(RelayPayloadV1::Welcome {
+            sender, recipient, ..
+        })
+        | Ok(RelayPayloadV1::WelcomeApplied {
+            sender, recipient, ..
+        }) => (sender.installation_id, recipient),
+        _ => (String::new(), String::new()),
+    };
+    torchat_core::relay::RelayEnvelope {
+        version: torchat_core::PROTOCOL_VERSION,
+        message_id,
+        sender,
+        recipient,
+        ciphertext,
     }
 }

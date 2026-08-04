@@ -6,13 +6,21 @@ use crate::{InviteState, pairing_rules::PairingAction};
 /// The runtime owns persistence and transport orchestration; this module owns
 /// only input normalization so the workflow can be tested independently.
 pub(crate) fn normalize_pairing_code(code: &str) -> RuntimeResult<String> {
+    let words = code.trim().split('-').map(str::trim).collect::<Vec<_>>();
+    if words.len() == 6
+        && words.iter().all(|word| {
+            (3..=12).contains(&word.len()) && word.chars().all(|c| c.is_ascii_lowercase())
+        })
+    {
+        return Ok(words.join("-"));
+    }
     let normalized = code
         .chars()
         .filter(|value| value.is_ascii_digit())
         .collect::<String>();
     if normalized.len() != 8 {
         return Err(RuntimeError::InvalidParams(
-            "pairing code must contain exactly eight digits".to_owned(),
+            "pairing code must contain six words or exactly eight legacy digits".to_owned(),
         ));
     }
     Ok(normalized)
@@ -462,14 +470,17 @@ mod tests {
     use crate::{ContactRecord, InviteState, PairingItem};
 
     #[test]
-    fn normalizes_formatted_eight_digit_code() {
-        assert_eq!(normalize_pairing_code("12-34 5678").unwrap(), "12345678");
+    fn normalizes_six_word_code() {
+        assert_eq!(
+            normalize_pairing_code("amber-birch-cobalt-dawn-ember-fjord").unwrap(),
+            "amber-birch-cobalt-dawn-ember-fjord"
+        );
     }
 
     #[test]
-    fn rejects_codes_with_wrong_digit_count() {
-        assert!(normalize_pairing_code("1234567").is_err());
-        assert!(normalize_pairing_code("123456789").is_err());
+    fn rejects_codes_with_wrong_word_count() {
+        assert!(normalize_pairing_code("amber-birch-cobalt").is_err());
+        assert!(normalize_pairing_code("amber-birch-cobalt-dawn-ember-fjord-gale").is_err());
     }
 
     #[test]
@@ -498,7 +509,7 @@ mod tests {
                 verification: crate::VerificationState::Unverified,
                 peer_endpoint_status: crate::PeerEndpointStatus::Missing,
                 peer_connection_status: crate::PeerConnectionStatus::Offline,
-                transport_policy: crate::ContactTransportPolicy::PeerWithRelayFallback,
+                transport_policy: crate::ContactTransportPolicy::PeerOnly,
                 last_peer_connected_at: None,
                 last_seen_at: None,
                 dev: None,

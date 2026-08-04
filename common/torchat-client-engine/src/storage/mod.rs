@@ -14,9 +14,9 @@ pub use runtime_storage::SqliteRuntimeStorage;
 pub use sqlite::{
     CapabilityDeliveryRecord, ClientDatabase, DeliveryReceiptRecord, InboundEnvelopeStoreResult,
     InboundPeerEnvelopeRecord, MlsCheckpointRecord, OutboundDeliveryRecord, PairingResponseRecord,
-    PeerEndpointBootstrapRecord, PendingApplicationEnvelopeRecord,
-    PendingContactConfirmationRecord, PendingLocalInviteMlsRecord, PendingPeerEndpointInboxRecord,
-    PendingWelcomeRecord, ReceivedEnvelopeRecord, RelationshipRemovalAckOutboxRecord,
-    RelationshipRemovalOutboxRecord, RetryDeadline, RetryKind, StoredMessageRecord,
+    PendingApplicationEnvelopeRecord, PendingContactConfirmationRecord,
+    PendingLocalInviteMlsRecord, PendingPeerEndpointInboxRecord, PendingWelcomeRecord,
+    ReceivedEnvelopeRecord, RelationshipRemovalAckOutboxRecord, RelationshipRemovalOutboxRecord,
+    RetryDeadline, RetryKind, StoredMessageRecord,
 };
 pub use transaction::SqliteTransaction;

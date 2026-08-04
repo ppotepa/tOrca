@@ -67,34 +67,6 @@ pub(crate) mod pairing {
         include_str!("../../../sql/queries/pairing/invite_used_1.sql");
     pub(crate) const CONSUME_INVITE: &str =
         include_str!("../../../sql/commands/pairing/consume_invite_1.sql");
-    pub(crate) const PUT_PENDING_CONTACT_CONFIRMATION: &str =
-        include_str!("../../../sql/commands/pairing/put_pending_contact_confirmation_1.sql");
-    pub(crate) const PUT_PENDING_PAIRING_ACKNOWLEDGEMENT: &str =
-        include_str!("../../../sql/commands/pairing/put_pending_pairing_acknowledgement_1.sql");
-    pub(crate) const DUE_PENDING_PAIRING_ACKNOWLEDGEMENTS: &str =
-        include_str!("../../../sql/queries/pairing/due_pending_pairing_acknowledgements_1.sql");
-    pub(crate) const CLAIM_PENDING_PAIRING_ACKNOWLEDGEMENT: &str = include_str!(
-        "../../../sql/commands/pairing/claim_pending_pairing_acknowledgement_attempt_1.sql"
-    );
-    pub(crate) const COMPLETE_PENDING_PAIRING_ACKNOWLEDGEMENT: &str = include_str!(
-        "../../../sql/commands/pairing/complete_pending_pairing_acknowledgement_1.sql"
-    );
-    pub(crate) const NEXT_PENDING_PAIRING_ACKNOWLEDGEMENT_RETRY: &str = include_str!(
-        "../../../sql/queries/pairing/next_pending_pairing_acknowledgement_retry_deadline_ms_1.sql"
-    );
-    pub(crate) const DUE_PENDING_CONTACT_CONFIRMATIONS: &str =
-        include_str!("../../../sql/queries/pairing/due_pending_contact_confirmations_1.sql");
-    pub(crate) const CLAIM_PENDING_CONTACT_CONFIRMATION: &str = include_str!(
-        "../../../sql/commands/pairing/claim_pending_contact_confirmation_attempt_1.sql"
-    );
-    pub(crate) const COMPLETE_PENDING_CONTACT_CONFIRMATION: &str =
-        include_str!("../../../sql/commands/pairing/complete_pending_contact_confirmation_1.sql");
-    pub(crate) const RECORD_PENDING_CONTACT_CONFIRMATION_ERROR: &str = include_str!(
-        "../../../sql/commands/pairing/record_pending_contact_confirmation_error_1.sql"
-    );
-    pub(crate) const NEXT_PENDING_CONTACT_CONFIRMATION_RETRY: &str = include_str!(
-        "../../../sql/queries/pairing/next_pending_contact_confirmation_retry_deadline_ms_1.sql"
-    );
     pub(crate) const PUT_PENDING_LOCAL_INVITE_MLS: &str =
         include_str!("../../../sql/commands/pairing/put_pending_local_invite_mls_1.sql");
     pub(crate) const PENDING_LOCAL_INVITE_MLS: &str =
@@ -208,21 +180,6 @@ pub(crate) mod peer_endpoints {
         include_str!("../../../sql/queries/peer_endpoints/pending_endpoint_updates_1.sql");
     pub(crate) const COMPLETE_UPDATES: &str =
         include_str!("../../../sql/commands/peer_endpoints/complete_endpoint_updates_1.sql");
-    pub(crate) const PUT_BOOTSTRAP: &str =
-        include_str!("../../../sql/commands/peer_endpoints/put_peer_endpoint_bootstrap_1.sql");
-    pub(crate) const DUE_BOOTSTRAPS: &str =
-        include_str!("../../../sql/queries/peer_endpoints/due_peer_endpoint_bootstraps_1.sql");
-    pub(crate) const CLAIM_BOOTSTRAP: &str = include_str!(
-        "../../../sql/commands/peer_endpoints/claim_peer_endpoint_bootstrap_attempt_1.sql"
-    );
-    pub(crate) const COMPLETE_BOOTSTRAP: &str =
-        include_str!("../../../sql/commands/peer_endpoints/complete_peer_endpoint_bootstrap_1.sql");
-    pub(crate) const NEXT_BOOTSTRAP_RETRY: &str = include_str!(
-        "../../../sql/queries/peer_endpoints/next_peer_endpoint_bootstrap_retry_deadline_ms_1.sql"
-    );
-    pub(crate) const RECORD_BOOTSTRAP_ERROR: &str = include_str!(
-        "../../../sql/commands/peer_endpoints/record_peer_endpoint_bootstrap_error_1.sql"
-    );
 }
 
 pub(crate) mod runtime_storage {
@@ -256,10 +213,6 @@ pub(crate) mod runtime_storage {
         include_str!("../../../sql/commands/runtime/runtime_1332.sql");
     pub(crate) const EXPEDITE_PAIRING_RETRIES: &str =
         include_str!("../../../sql/commands/runtime/runtime_1340.sql");
-    pub(crate) const EXPEDITE_CONFIRMATION_RETRIES: &str =
-        include_str!("../../../sql/commands/runtime/runtime_1347.sql");
-    pub(crate) const EXPEDITE_ENDPOINT_RETRIES: &str =
-        include_str!("../../../sql/commands/runtime/runtime_1354.sql");
     pub(crate) const EXPEDITE_CAPABILITY_RETRIES: &str =
         include_str!("../../../sql/commands/runtime/runtime_1361.sql");
     pub(crate) const GET_MESSAGE: &str =
@@ -292,10 +245,6 @@ pub(crate) mod runtime_storage {
         include_str!("../../../sql/commands/relationships/remove_relationship_with_id_11.sql");
     pub(crate) const DELETE_ENDPOINT_UPDATES: &str =
         include_str!("../../../sql/commands/relationships/remove_relationship_with_id_12.sql");
-    pub(crate) const DELETE_PEER_BOOTSTRAP: &str =
-        include_str!("../../../sql/commands/relationships/remove_relationship_with_id_13.sql");
-    pub(crate) const DELETE_PENDING_CONFIRMATIONS: &str =
-        include_str!("../../../sql/commands/relationships/remove_relationship_with_id_14.sql");
     pub(crate) const DELETE_PENDING_ENDPOINT_INBOX: &str =
         include_str!("../../../sql/commands/relationships/remove_relationship_with_id_15.sql");
     pub(crate) const DELETE_INBOUND_PEER_ENVELOPES: &str =

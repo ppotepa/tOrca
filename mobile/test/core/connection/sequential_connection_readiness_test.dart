@@ -5,7 +5,7 @@ import 'package:torchat_mobile/core/models/domain.dart';
 import 'package:torchat_mobile/core/startup/sequential_startup_orchestrator.dart';
 
 void main() {
-  test('connected transport cannot skip the relay phase', () {
+  test('connected transport exposes local and peer readiness independently', () {
     final startup = SequentialStartupOrchestrator()..begin();
     final readiness = ConnectionReadiness.fromRuntime(
       transport: const RuntimeTorStatus(
@@ -13,14 +13,13 @@ void main() {
         detail: 'relay already connected',
       ),
       peerServerStatus: PeerServerStatus.ready,
-      startupSteps: startup.stepsFor(SequentialStartupPhase.relay),
+      startupSteps: startup.stepsFor(SequentialStartupPhase.complete),
       localDataReady: true,
     );
 
     expect(readiness.engine.state, ConnectionComponentState.ready);
     expect(readiness.localData.state, ConnectionComponentState.ready);
     expect(readiness.tor.state, ConnectionComponentState.ready);
-    expect(readiness.relay.state, ConnectionComponentState.starting);
     expect(readiness.peerListener.state, ConnectionComponentState.ready);
     expect(readiness.onionService.state, ConnectionComponentState.ready);
   });
@@ -47,7 +46,7 @@ void main() {
     expect(onionPhase.onionService.state, ConnectionComponentState.starting);
   });
 
-  test('launch remains fenced until communication phase is committed', () {
+  test('local shell is ready independently of communication phase', () {
     final startup = SequentialStartupOrchestrator()..begin();
 
     final finalizing = ConnectionReadiness.fromRuntime(
@@ -56,10 +55,8 @@ void main() {
       startupSteps: startup.stepsFor(SequentialStartupPhase.communication),
       localDataReady: true,
     );
-    expect(finalizing.startupComponentsReady, isTrue);
-    expect(finalizing.communicationCommitted, isFalse);
-    expect(finalizing.communicationReady, isFalse);
-    expect(finalizing.startupSteps.last.state, StartupStepState.running);
+    expect(finalizing.localCoreReady, isTrue);
+    expect(finalizing.communicationReady, isTrue);
 
     final complete = ConnectionReadiness.fromRuntime(
       transport: const RuntimeTorStatus(phase: TransportPhase.connected),
@@ -67,7 +64,6 @@ void main() {
       startupSteps: startup.stepsFor(SequentialStartupPhase.complete),
       localDataReady: true,
     );
-    expect(complete.communicationCommitted, isTrue);
     expect(complete.communicationReady, isTrue);
     expect(complete.startupSteps.last.state, StartupStepState.ready);
   });

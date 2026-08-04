@@ -398,7 +398,7 @@ impl<'db> SqliteRuntimeStorage<'db> {
                     value.conversation_id,
                     value.original_sender,
                     value.received_at,
-                    value.relay_payload,
+                    value.wire_ciphertext,
                     value.state,
                     i64::from(value.attempt_count),
                     value.next_attempt_at,
@@ -413,17 +413,17 @@ impl<'db> SqliteRuntimeStorage<'db> {
     pub fn persist_outbound_encryption(
         &mut self,
         message_id: &str,
-        relay_payload: &[u8],
+        wire_ciphertext: &[u8],
         conversation_id: &str,
         snapshot: &[u8],
     ) -> RuntimeResult<()> {
         use sha2::Digest as _;
-        let ciphertext_hash = sha2::Sha256::digest(relay_payload).to_vec();
+        let ciphertext_hash = sha2::Sha256::digest(wire_ciphertext).to_vec();
         let changed = self
             .tx()
             .execute(
                 super::sqlite::sql_catalog::runtime_storage::PERSIST_OUTBOUND_ENCRYPTION,
-                params![message_id, relay_payload, ciphertext_hash],
+                params![message_id, wire_ciphertext, ciphertext_hash],
             )
             .map_err(storage_error)?;
         if changed != 1 {
@@ -616,8 +616,6 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
             super::sqlite::sql_catalog::runtime_storage::DELETE_MLS,
             super::sqlite::sql_catalog::runtime_storage::DELETE_CONTACT_ENDPOINT,
             super::sqlite::sql_catalog::runtime_storage::DELETE_ENDPOINT_UPDATES,
-            super::sqlite::sql_catalog::runtime_storage::DELETE_PEER_BOOTSTRAP,
-            super::sqlite::sql_catalog::runtime_storage::DELETE_PENDING_CONFIRMATIONS,
             super::sqlite::sql_catalog::runtime_storage::DELETE_PENDING_ENDPOINT_INBOX,
             super::sqlite::sql_catalog::runtime_storage::DELETE_INBOUND_PEER_ENVELOPES,
             super::sqlite::sql_catalog::runtime_storage::DELETE_RECEIVED_ENVELOPES,
@@ -1099,14 +1097,14 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                 [message.id.as_str()],
                 |row| {
                     Ok((
-                        row.get::<_, Option<Vec<u8>>>("relay_payload")?,
+                        row.get::<_, Option<Vec<u8>>>("wire_ciphertext")?,
                         row.get::<_, Option<Vec<u8>>>("ciphertext_hash")?,
                     ))
                 },
             )
             .optional()
             .map_err(storage_error)?;
-        let (relay_payload, ciphertext_hash) = existing.unwrap_or((None, None));
+        let (wire_ciphertext, ciphertext_hash) = existing.unwrap_or((None, None));
         self.tx()
             .execute(
                 super::sqlite::sql_catalog::runtime_storage::UPSERT_MESSAGE,
@@ -1118,7 +1116,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
                     encode_reply(message.reply_to)?,
                     message.state.as_str(),
                     message.created_at,
-                    relay_payload,
+                    wire_ciphertext,
                     ciphertext_hash,
                     i64::from(message.attempt_count),
                     message.last_attempt_at,
@@ -1238,18 +1236,6 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
         self.tx()
             .execute(
                 super::sqlite::sql_catalog::runtime_storage::EXPEDITE_PAIRING_RETRIES,
-                [],
-            )
-            .map_err(storage_error)?;
-        self.tx()
-            .execute(
-                super::sqlite::sql_catalog::runtime_storage::EXPEDITE_CONFIRMATION_RETRIES,
-                [],
-            )
-            .map_err(storage_error)?;
-        self.tx()
-            .execute(
-                super::sqlite::sql_catalog::runtime_storage::EXPEDITE_ENDPOINT_RETRIES,
                 [],
             )
             .map_err(storage_error)?;

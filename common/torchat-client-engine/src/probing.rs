@@ -14,7 +14,6 @@ use tokio::time::{Duration, Instant};
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum ProbeKind {
     Engine,
-    Relay,
     OnionService,
     ContactPeer,
     ContactPresence,
@@ -37,7 +36,7 @@ pub fn pseudonymous_target_id(target_id: &str) -> String {
         .collect()
 }
 
-/// Adapter implemented by a concrete probe (contact, relay, onion service or
+/// Adapter implemented by a concrete probe (contact, onion service or
 /// engine health check).  Implementations only describe their target and
 /// cadence; execution remains owned by the engine coordinator.
 pub trait Probe {
@@ -97,10 +96,6 @@ impl ProbeKey {
 
     pub fn engine() -> Self {
         Self::new(ProbeKind::Engine, None)
-    }
-
-    pub fn relay() -> Self {
-        Self::new(ProbeKind::Relay, None)
     }
 
     pub fn onion_service() -> Self {

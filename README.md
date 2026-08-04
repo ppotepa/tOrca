@@ -20,7 +20,7 @@ The current release scope covers:
 - private contacts and 1:1 conversations;
 - text messages, replies, delivery receipts and read receipts;
 - per-contact P2P onion delivery with capability authentication;
-- live relay fallback when allowed by the contact transport policy;
+- direct onion P2P delivery with local durable retry;
 - local SQLCipher-compatible persistence;
 - Windows and Android clients sharing the Rust runtime and Flutter UI.
 
@@ -34,18 +34,16 @@ conversation on both sides. No additional `Verify contact` action is required.
 
 Client devices own identities, private keys, MLS state, contact relationships
 and conversation history. The relay is untrusted infrastructure: it handles
-pairing, session control and live forwarding of opaque encrypted envelopes, but
-must not receive plaintext messages or client private keys.
+pairing only. It forwards opaque pairing blobs while both devices are active,
+but must not receive plaintext messages or client private keys.
 
-PostgreSQL stores relay control-plane state only. It is not a message-history
-database and the relay is not an offline ciphertext mailbox.
+The relay is an ephemeral rendezvous broker. It stores only active pairing
+slots and bridges in process memory; it has no database or offline mailbox.
 
-Contact delivery uses the configured transport policy:
+Contact delivery always uses direct P2P:
 
 ```text
 Client A -> local Tor -> contact onion endpoint -> Client B
-                          |
-                          +-> live onion relay fallback, when permitted
 ```
 
 A connected peer link does not by itself mean that the contact is active in the
@@ -65,7 +63,7 @@ Rust domain runtime
     |
 SQLCipher-compatible SQLite + MLS state
     |
-Tor peer transport and relay control plane
+Tor peer transport and ephemeral pairing rendezvous
 ```
 
 The actor serializes state transitions. The runtime owns domain rules. Storage
@@ -75,7 +73,6 @@ it does not implement a second messaging, pairing or probing state machine.
 SQL is kept as parameterized files:
 
 - SQLite uses `?1`, `?2`, ...;
-- PostgreSQL uses `$1`, `$2`, ...;
 - queries, commands and migrations have separate roots;
 - `include_str!` embeds SQL at compile time;
 - actor and UI code do not access raw database connections.
@@ -92,9 +89,8 @@ require a stable `command_id` so retries remain idempotent.
 - `common/torchat-client-engine-ffi` — native ABI for platform hosts.
 - `mobile` — Flutter UI and Android host integration.
 - `desktop` — Windows host and runtime bridge.
-- `server/torchat-server` — untrusted relay and pairing control plane.
-- `server/torchat-server/sql` — PostgreSQL queries, commands and migrations.
-- `infra` — Docker, Tor and PostgreSQL deployment configuration.
+- `server/torchat-server` — in-memory untrusted pairing rendezvous broker.
+- `infra` — Docker and Tor deployment configuration.
 - `scripts` — development, deployment and validation entrypoints.
 
 ## Development

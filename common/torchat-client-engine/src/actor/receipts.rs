@@ -99,24 +99,6 @@ impl ClientEngineActor {
                     receipt_id: record.receipt_id.clone(),
                 },
             ) {
-                let policy = self.contact_transport_policy(&record.contact_installation_id)?;
-                if matches!(
-                    policy,
-                    ContactTransportPolicy::PeerWithRelayFallback
-                        | ContactTransportPolicy::RelayOnly
-                ) && self
-                    .queue_relay_envelope(
-                        envelope_id,
-                        &record.contact_installation_id,
-                        &String::from_utf8_lossy(&payload),
-                        PendingRelayDelivery::ReadReceipt {
-                            receipt_id: record.receipt_id.clone(),
-                        },
-                    )
-                    .is_ok()
-                {
-                    continue;
-                }
                 self.database.requeue_read_receipt(
                     &record.receipt_id,
                     self.clock.now_ms() + retry_backoff_ms(record.attempt_count),
@@ -136,23 +118,16 @@ impl ClientEngineActor {
         sequence: u64,
         ciphertext: String,
     ) -> EngineResult<()> {
-        let policy = self.contact_transport_policy(&receipt.recipient_installation_id)?;
-        let peer_result = if matches!(policy, ContactTransportPolicy::RelayOnly) {
-            Err(EngineError::Transport(
-                "peer route disabled by contact policy".to_owned(),
-            ))
-        } else {
-            self.queue_peer_payload(
-                envelope_id,
-                &receipt.recipient_installation_id,
-                &receipt.conversation_id,
-                sequence,
-                ciphertext.clone().into_bytes(),
-                PeerDeliveryTag::Receipt {
-                    message_id: receipt.message_id.clone(),
-                },
-            )
-        };
+        let peer_result = self.queue_peer_payload(
+            envelope_id,
+            &receipt.recipient_installation_id,
+            &receipt.conversation_id,
+            sequence,
+            ciphertext.clone().into_bytes(),
+            PeerDeliveryTag::Receipt {
+                message_id: receipt.message_id.clone(),
+            },
+        );
         if let Err(error) = peer_result {
             self.handle_failed_peer_receipt_delivery(
                 &receipt.recipient_installation_id,
@@ -169,37 +144,6 @@ impl ClientEngineActor {
         message_id: &str,
         error: &str,
     ) -> EngineResult<()> {
-        let policy = self.contact_transport_policy(installation_id)?;
-        let payload = self
-            .database
-            .delivery_receipt(message_id)?
-            .and_then(|receipt| receipt.relay_payload)
-            .ok_or_else(|| {
-                EngineError::Storage("delivery receipt payload is missing".to_owned())
-            })?;
-        let payload = String::from_utf8(payload).map_err(|decode_error| {
-            EngineError::Storage(format!(
-                "stored delivery receipt payload is invalid UTF-8: {decode_error}"
-            ))
-        })?;
-        let envelope_id = uuid::Uuid::parse_str(message_id)
-            .map_err(|parse_error| EngineError::InvalidCommand(parse_error.to_string()))?;
-        if matches!(
-            policy,
-            ContactTransportPolicy::PeerWithRelayFallback | ContactTransportPolicy::RelayOnly
-        ) && self
-            .queue_relay_envelope(
-                envelope_id,
-                installation_id,
-                &payload,
-                PendingRelayDelivery::Receipt {
-                    message_id: message_id.to_owned(),
-                },
-            )
-            .is_ok()
-        {
-            return Ok(());
-        }
         let receipt = self.database.delivery_receipt(message_id)?;
         let attempt = receipt
             .as_ref()
@@ -263,7 +207,7 @@ impl ClientEngineActor {
             .delivery_receipt(&effect.message_id)?
             .ok_or_else(|| EngineError::Storage("delivery receipt is missing".to_owned()))?;
         let in_flight_until = self.clock.now_ms() + 60_000;
-        if let Some(existing) = stored.relay_payload {
+        if let Some(existing) = stored.wire_ciphertext {
             if !self
                 .database
                 .claim_receipt_attempt(&effect.message_id, in_flight_until, None)?

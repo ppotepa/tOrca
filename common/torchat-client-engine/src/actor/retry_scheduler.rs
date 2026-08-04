@@ -20,15 +20,6 @@ impl ClientEngineActor {
                 .flush_pending_receipt_effects()
                 .map(|_| "receipt flush"),
             RetryKind::PendingWelcome => self.retry_pending_welcomes().map(|_| "welcome flush"),
-            RetryKind::PeerEndpointBootstrap => self
-                .retry_peer_endpoint_bootstraps()
-                .map(|_| "peer endpoint bootstrap flush"),
-            RetryKind::ContactConfirmation => self
-                .retry_pending_contact_confirmations()
-                .map(|_| "contact confirmation flush"),
-            RetryKind::PairingAcknowledgement => self
-                .retry_pending_pairing_acknowledgements()
-                .map(|_| "pairing acknowledgement flush"),
             RetryKind::ReadReceipt => self
                 .flush_pending_read_receipts()
                 .map(|_| "read receipt flush"),
@@ -88,20 +79,9 @@ impl ClientEngineActor {
 
     fn retry_is_runnable(&self, kind: RetryKind) -> bool {
         let _policy = super::RetryPolicy::for_kind(kind);
-        let control_plane_required = matches!(
-            kind,
-            RetryKind::PairingResponse
-                | RetryKind::PendingWelcome
-                | RetryKind::PeerEndpointBootstrap
-                | RetryKind::ContactConfirmation
-                | RetryKind::RelationshipRemoval
-                | RetryKind::RelationshipRemovalAck
-        );
-        if control_plane_required {
-            return self.network_online
-                && self.socks5_url.is_some()
-                && self.connection_state == ConnectionState::Connected;
-        }
+        // No retry depends on a globally connected relay. Pairing retries use
+        // the short-lived V1 rendezvous connection; messages, receipts and
+        // relationship updates use direct peer transport.
         self.network_online && self.socks5_url.is_some()
     }
 

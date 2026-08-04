@@ -34,7 +34,7 @@ function Collect-TorChatDiagnostics {
         }
         if ($dockerReady) {
             Invoke-TorChatDiagnosticCapture -Path (Join-Path $root 'docker-ps.txt') -Action { docker @($compose.Arguments + @('ps','-a')) }
-            foreach ($service in @('postgres','server','tor','torka')) {
+            foreach ($service in @('server','tor','torka')) {
                 Invoke-TorChatDiagnosticCapture -Path (Join-Path $root "docker-$service.log") -Action { docker @($compose.Arguments + @('logs','--timestamps','--no-color','--tail','2000',$service)) }
             }
             Invoke-TorChatDiagnosticCapture -Path (Join-Path $root 'docker-info.txt') -Action { docker info }
@@ -115,7 +115,7 @@ function Protect-TorChatDiagnosticText {
     )
     $protected = [regex]::Replace(
         $protected,
-        '(?im)^\s*(TORCHAT_(?:DATABASE_KEY|IDENTITY_PRIVATE_KEY|PAIRING_SECRET|SESSION_TOKEN|CAPABILITY|PROOF)|DATABASE_URL|POSTGRES_PASSWORD)\s*=\s*.*$',
+        '(?im)^\s*(TORCHAT_(?:DATABASE_KEY|IDENTITY_PRIVATE_KEY|PAIRING_SECRET|SESSION_TOKEN|CAPABILITY|PROOF)|DATABASE_URL)\s*=\s*.*$',
         '$1=<redacted>'
     )
     $protected = [regex]::Replace(

@@ -333,7 +333,6 @@ class WindowsRuntime extends Object
             kind: NotificationKind.fromWire(notification[EngineContract.kind]),
             conversationId: notification[EngineContract.conversationId]
                 ?.toString(),
-            previewText: notification[EngineContract.previewText]?.toString(),
           ),
         );
       case EngineLogLine(:final log):

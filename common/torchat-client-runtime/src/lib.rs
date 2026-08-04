@@ -88,7 +88,7 @@ mod tests {
             fixture.message_send_effect.recipient_installation_id,
             "installation-bob"
         );
-        assert_eq!(fixture.message_transport_outcomes.len(), 5);
+        assert_eq!(fixture.message_transport_outcomes.len(), 3);
         assert_eq!(
             fixture.pairing_preparation.recipient_installation_id,
             "installation-bob"

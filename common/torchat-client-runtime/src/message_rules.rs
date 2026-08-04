@@ -16,13 +16,13 @@ pub fn message_state_after_transport_outcome(
 ) -> Option<MessageState> {
     use MessageState::{Delivered, Failed, Queued, Read, Sending, Sent};
     use MessageTransportOutcome::{
-        Delivered as OutcomeDelivered, Forwarded, PeerAuthenticationFailed, PeerDelivered,
-        PeerPersisted, PeerRejected, PeerUnavailable, PermanentFailure, RecipientOffline,
+        Delivered as OutcomeDelivered, PeerAuthenticationFailed, PeerDelivered, PeerPersisted,
+        PeerRejected, PeerUnavailable, PermanentFailure,
         RetryableFailure,
     };
 
     match outcome {
-        Forwarded | PeerPersisted => match current {
+        PeerPersisted => match current {
             Sending => Some(Sent),
             Sent => Some(Sent),
             Delivered => Some(Delivered),
@@ -34,7 +34,7 @@ pub fn message_state_after_transport_outcome(
             Read => Some(Read),
             Queued | Failed => None,
         },
-        RecipientOffline | PeerUnavailable | RetryableFailure => match current {
+        PeerUnavailable | RetryableFailure => match current {
             Queued | Sending | Sent => Some(Queued),
             Delivered | Read | Failed => None,
         },
@@ -68,25 +68,25 @@ mod tests {
     }
 
     #[test]
-    fn forwarded_is_the_only_transport_outcome_that_creates_sent() {
+    fn peer_persisted_is_the_transport_outcome_that_creates_sent() {
         assert_eq!(
             message_state_after_transport_outcome(
                 &MessageState::Sending,
-                MessageTransportOutcome::Forwarded,
+                MessageTransportOutcome::PeerPersisted,
             ),
             Some(MessageState::Sent)
         );
         assert_eq!(
             message_state_after_transport_outcome(
                 &MessageState::Sending,
-                MessageTransportOutcome::RecipientOffline,
+                MessageTransportOutcome::PeerUnavailable,
             ),
             Some(MessageState::Queued)
         );
     }
 
     #[test]
-    fn receipt_can_race_forwarded_without_downgrading_delivery() {
+    fn receipt_can_race_peer_persisted_without_downgrading_delivery() {
         assert_eq!(
             message_state_after_transport_outcome(
                 &MessageState::Sending,
@@ -97,16 +97,16 @@ mod tests {
         assert_eq!(
             message_state_after_transport_outcome(
                 &MessageState::Delivered,
-                MessageTransportOutcome::Forwarded
+                MessageTransportOutcome::PeerPersisted
             ),
             Some(MessageState::Delivered)
         );
     }
 
     #[test]
-    fn live_only_relay_failures_return_message_to_local_queue() {
+    fn peer_unavailable_failures_return_message_to_local_queue() {
         for outcome in [
-            MessageTransportOutcome::RecipientOffline,
+            MessageTransportOutcome::PeerUnavailable,
             MessageTransportOutcome::RetryableFailure,
         ] {
             assert_eq!(

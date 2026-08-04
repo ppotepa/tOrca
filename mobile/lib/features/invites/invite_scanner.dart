@@ -118,7 +118,7 @@ class _ManualInviteCodePageState extends ConsumerState<ManualInviteCodePage> {
   }
 
   Future<void> _submit() async {
-    final code = pairingCodeDigits(_controller.text);
+    final code = pairingCode(_controller.text);
     if (code == null) {
       setState(() => _error = 'Kod musi zawierać dokładnie 8 cyfr.');
       return;
@@ -171,8 +171,8 @@ class _ManualInviteCodePageState extends ConsumerState<ManualInviteCodePage> {
                     controller: _controller,
                     enabled: !operation.busy,
                     autofocus: true,
-                    maxLength: 9,
-                    keyboardType: TextInputType.number,
+                    maxLength: 80,
+                    keyboardType: TextInputType.text,
                     inputFormatters: const [PairingCodeInputFormatter()],
                     textInputAction: TextInputAction.done,
                     onSubmitted: (_) {

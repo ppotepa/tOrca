@@ -6,7 +6,6 @@ enum SequentialStartupPhase {
   engine,
   localData,
   tor,
-  relay,
   peerListener,
   onionService,
   communication,
@@ -29,7 +28,6 @@ class SequentialStartupOrchestrator {
   int _revision = 0;
   RuntimeTorStatus _transport = const RuntimeTorStatus();
   bool _runtimeReady = false;
-  bool _relayReady = false;
   bool _peerListenerReady = false;
   bool _onionServiceReady = false;
   Object? _failure;
@@ -49,7 +47,6 @@ class SequentialStartupOrchestrator {
     _revision += 1;
     _transport = transport;
     _runtimeReady = runtimeReady;
-    _relayReady = false;
     _peerListenerReady = false;
     _onionServiceReady = false;
     _failure = null;
@@ -72,14 +69,6 @@ class SequentialStartupOrchestrator {
 
   void observeTransport(RuntimeTorStatus transport) {
     _transport = transport;
-    _changed();
-  }
-
-  /// Relay readiness is a separate component from Tor SOCKS readiness. Tor
-  /// can be fully bootstrapped while the authenticated relay WebSocket is
-  /// still connecting or retrying.
-  void observeRelayReady(bool ready) {
-    _relayReady = ready;
     _changed();
   }
 
@@ -112,19 +101,6 @@ class SequentialStartupOrchestrator {
     timeout,
     'Tor did not become ready',
     () => _transport.phase == TransportPhase.connected,
-  );
-
-  Future<void> waitForRelay(
-    int generation, {
-    // A cold onion circuit can legitimately require several guarded retries.
-    // Keep one UI deadline wider than the engine's complete retry ladder; the
-    // engine remains the owner of individual request timeouts and backoff.
-    Duration timeout = const Duration(minutes: 5),
-  }) => _waitFor(
-    generation,
-    timeout,
-    'Relay did not become ready',
-    () => _relayReady,
   );
 
   Future<void> waitForPeerListener(
@@ -264,20 +240,12 @@ class SequentialStartupOrchestrator {
           StartupStepKind.tor,
           StartupStepKind.peerListener,
         },
-        SequentialStartupPhase.relay => const {
-          StartupStepKind.engine,
-          StartupStepKind.localData,
-          StartupStepKind.tor,
-          StartupStepKind.peerListener,
-          StartupStepKind.onionService,
-        },
         SequentialStartupPhase.communication => const {
           StartupStepKind.engine,
           StartupStepKind.localData,
           StartupStepKind.tor,
           StartupStepKind.peerListener,
           StartupStepKind.onionService,
-          StartupStepKind.relay,
         },
         SequentialStartupPhase.complete => StartupStepKind.values.toSet(),
       };
@@ -288,7 +256,6 @@ class SequentialStartupOrchestrator {
     SequentialStartupPhase.tor => StartupStepKind.tor,
     SequentialStartupPhase.peerListener => StartupStepKind.peerListener,
     SequentialStartupPhase.onionService => StartupStepKind.onionService,
-    SequentialStartupPhase.relay => StartupStepKind.relay,
     SequentialStartupPhase.communication => StartupStepKind.communication,
     SequentialStartupPhase.complete => null,
   };
@@ -298,7 +265,6 @@ class SequentialStartupOrchestrator {
     SequentialStartupPhase.localData =>
       'Odczytywanie zaszyfrowanych danych lokalnych',
     SequentialStartupPhase.tor => 'Oczekiwanie na gotowość sieci Tor',
-    SequentialStartupPhase.relay => 'Łączenie z relayem onion',
     SequentialStartupPhase.peerListener =>
       'Uruchamianie lokalnego listenera P2P',
     SequentialStartupPhase.onionService => 'Publikowanie lokalnej usługi onion',
@@ -311,7 +277,6 @@ class SequentialStartupOrchestrator {
     StartupStepKind.engine => 'Wspólny engine jest gotowy',
     StartupStepKind.localData => 'Tożsamość i dane lokalne są gotowe',
     StartupStepKind.tor => 'Sieć Tor jest gotowa',
-    StartupStepKind.relay => 'Relay onion jest połączony',
     StartupStepKind.peerListener => 'Lokalny listener P2P działa',
     StartupStepKind.onionService => 'Lokalny adres onion jest opublikowany',
     StartupStepKind.communication => 'TorChat jest gotowy do komunikacji',

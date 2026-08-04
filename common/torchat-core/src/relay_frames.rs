@@ -24,9 +24,7 @@ pub enum RelayServerFrame {
     Ready { installation_id: String },
     PairingAvailable { pairing_id: Uuid },
     Envelope(RelayEnvelope),
-    Forwarded { message_id: Uuid },
     DeliveryReceipt { message_id: Uuid },
-    RecipientOffline { message_id: Uuid },
     Error { code: String },
     Pong,
 }

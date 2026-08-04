@@ -2,38 +2,25 @@ pub mod actor;
 pub mod connection;
 pub mod error;
 pub mod heartbeat;
+pub mod rendezvous;
 pub mod writer;
 
-use torchat_client_runtime::{
-    InviteCode, MessageTransportOutcome, PairingItem, RuntimeError, RuntimeResult,
-};
+use torchat_client_runtime::{InviteCode, PairingItem, RuntimeError, RuntimeResult};
 use torchat_core::relay::RelayEnvelope;
 
 pub use actor::SharedRelayActor;
 pub use connection::RelayConnectionConfig;
 pub use error::RelayUnavailableReason;
 pub use heartbeat::RelayHeartbeatConfig;
+pub use rendezvous::{PairingRendezvousClient, PairingSlot, PairingStarted, ResolvedSlot};
 pub use writer::RelayWriterConfig;
 
 #[derive(Clone, Debug)]
 pub enum RelayEvent {
-    Connected,
     PairingAvailable {
         pairing_id: uuid::Uuid,
     },
-    Backoff {
-        attempt: u32,
-        retry_in_ms: u64,
-        detail: String,
-    },
-    Disconnected {
-        detail: String,
-    },
     Envelope(RelayEnvelope),
-    MessageTransportOutcome {
-        message_id: uuid::Uuid,
-        outcome: MessageTransportOutcome,
-    },
 }
 
 pub trait EngineRelay: Send {
@@ -41,7 +28,6 @@ pub trait EngineRelay: Send {
     fn invalidate_session(&mut self) {}
     fn shutdown(&mut self);
     fn ensure_session(&mut self) -> RuntimeResult<()>;
-    fn update_profile(&mut self, nickname: &str) -> RuntimeResult<()>;
     fn send_envelope(
         &mut self,
         message_id: uuid::Uuid,
@@ -51,14 +37,13 @@ pub trait EngineRelay: Send {
     fn poll_event(&mut self) -> Option<RelayEvent>;
     fn refresh_pairing_code(&mut self) -> RuntimeResult<InviteCode>;
     fn submit_pairing_code(&mut self, code: &str) -> RuntimeResult<PairingItem>;
-    fn pairing_inbox(&mut self) -> RuntimeResult<Vec<PairingItem>>;
-    fn acknowledge_pairing(&mut self, pairing_id: &str) -> RuntimeResult<()>;
-    fn cancel_pairing(&mut self, pairing_id: &str) -> RuntimeResult<()>;
-    fn confirm_contact(
+    fn submit_pairing_code_with_offer(
         &mut self,
-        capability: &str,
-        peer_installation_id: &str,
-    ) -> RuntimeResult<()>;
+        code: &str,
+        pairing_id: uuid::Uuid,
+        offer: String,
+    ) -> RuntimeResult<PairingItem>;
+    fn cancel_pairing(&mut self, pairing_id: &str) -> RuntimeResult<()>;
 }
 
 #[derive(Default)]
@@ -72,12 +57,6 @@ impl EngineRelay for NoopEngineRelay {
     fn shutdown(&mut self) {}
 
     fn ensure_session(&mut self) -> RuntimeResult<()> {
-        Err(RuntimeError::Unavailable(
-            RelayUnavailableReason::ActorNotAttached.to_string(),
-        ))
-    }
-
-    fn update_profile(&mut self, _nickname: &str) -> RuntimeResult<()> {
         Err(RuntimeError::Unavailable(
             RelayUnavailableReason::ActorNotAttached.to_string(),
         ))
@@ -110,29 +89,18 @@ impl EngineRelay for NoopEngineRelay {
         ))
     }
 
-    fn pairing_inbox(&mut self) -> RuntimeResult<Vec<PairingItem>> {
-        Err(RuntimeError::Unavailable(
-            RelayUnavailableReason::ActorNotAttached.to_string(),
-        ))
-    }
-
-    fn acknowledge_pairing(&mut self, _pairing_id: &str) -> RuntimeResult<()> {
+    fn submit_pairing_code_with_offer(
+        &mut self,
+        _code: &str,
+        _pairing_id: uuid::Uuid,
+        _offer: String,
+    ) -> RuntimeResult<PairingItem> {
         Err(RuntimeError::Unavailable(
             RelayUnavailableReason::ActorNotAttached.to_string(),
         ))
     }
 
     fn cancel_pairing(&mut self, _pairing_id: &str) -> RuntimeResult<()> {
-        Err(RuntimeError::Unavailable(
-            RelayUnavailableReason::ActorNotAttached.to_string(),
-        ))
-    }
-
-    fn confirm_contact(
-        &mut self,
-        _capability: &str,
-        _peer_installation_id: &str,
-    ) -> RuntimeResult<()> {
         Err(RuntimeError::Unavailable(
             RelayUnavailableReason::ActorNotAttached.to_string(),
         ))

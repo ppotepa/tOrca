@@ -113,7 +113,7 @@ impl ClientEngineActor {
                         conversation_id: peer.clone(),
                         original_sender: peer.clone(),
                         received_at,
-                        relay_payload: None,
+                        wire_ciphertext: None,
                         state: "PENDING".to_owned(),
                         attempt_count: 0,
                         next_attempt_at: 0,
@@ -359,7 +359,7 @@ impl ClientEngineActor {
                     ..
                 } => {
                     // This is the application-level acknowledgement for the
-                    // durable offer. Relay Forwarded only proves relay
+                    // durable offer. A peer persistence ACK only proves peer
                     // acceptance, not that the peer installed the secret.
                     self.database
                         .complete_capability_deliveries_for_contact(&peer)?;

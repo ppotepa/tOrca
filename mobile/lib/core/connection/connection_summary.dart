@@ -25,7 +25,7 @@ class ConnectionSummary {
       );
     }
 
-    if (readiness.relay.ready && !readiness.onionService.ready) {
+    if (readiness.localCoreReady && !readiness.onionService.ready) {
       return ConnectionSummary(
         status: 'Relay połączony · P2P się rozgrzewa',
         detail: readiness.onionService.detail,
@@ -36,12 +36,12 @@ class ConnectionSummary {
     }
 
     if (readiness.localCoreReady &&
-        readiness.relay.state == ConnectionComponentState.failed) {
+        readiness.onionService.state == ConnectionComponentState.failed) {
       return ConnectionSummary(
         status: 'Offline · dane lokalne dostępne',
-        detail: readiness.relay.detail.isEmpty
+        detail: readiness.onionService.detail.isEmpty
             ? 'Relay jest niedostępny. Wiadomości pozostają w kolejce.'
-            : readiness.relay.detail,
+            : readiness.onionService.detail,
         phase: TransportPhase.offline,
         peerServerStatus: readiness.peerServerStatus,
         latencyMs: transport.latencyMs,
@@ -63,7 +63,7 @@ class ConnectionSummary {
 
     final active = readiness.components.firstWhere(
       (item) => !item.ready,
-      orElse: () => readiness.relay,
+      orElse: () => readiness.onionService,
     );
     return ConnectionSummary(
       status: 'Warming up: ${active.component.name}',

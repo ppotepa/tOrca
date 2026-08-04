@@ -1,29 +1,31 @@
 import 'package:flutter/services.dart';
 
 String normalizePairingCode(String value) =>
-    value.replaceAll(RegExp(r'\D'), '');
+    value.trim().toLowerCase().split(RegExp(r'[\s-]+')).where((word) => word.isNotEmpty).join('-');
 
-String? pairingCodeDigits(String value) {
-  final digits = normalizePairingCode(value);
-  return digits.length == 8 ? digits : null;
+String? pairingCode(String value) {
+  final words = normalizePairingCode(value).split('-');
+  if (words.length != 6 ||
+      words.any((word) => word.length < 3 || word.length > 12 ||
+          !RegExp(r'^[a-z]+$').hasMatch(word))) {
+    return null;
+  }
+  return words.join('-');
 }
 
-bool isPairingCode(String value) => pairingCodeDigits(value) != null;
+bool isPairingCode(String value) => pairingCode(value) != null;
 
 String? firstPairingCode(Iterable<String?> values) {
   for (final value in values) {
     if (value == null) continue;
-    final digits = pairingCodeDigits(value);
+    final digits = pairingCode(value);
     if (digits != null) return digits;
   }
   return null;
 }
 
 String formatInviteCode(String code) {
-  final digits = normalizePairingCode(code);
-  return RegExp(
-    r'.{1,4}',
-  ).allMatches(digits).map((match) => match.group(0)!).join(' ');
+  return normalizePairingCode(code).replaceAll('-', ' ');
 }
 
 String formatCountdown(int seconds) {
@@ -40,9 +42,14 @@ class PairingCodeInputFormatter extends TextInputFormatter {
     TextEditingValue oldValue,
     TextEditingValue newValue,
   ) {
-    final digits = normalizePairingCode(newValue.text);
-    final limited = digits.length > 8 ? digits.substring(0, 8) : digits;
-    final formatted = formatInviteCode(limited);
+    final words = newValue.text
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z\s-]'), '')
+        .split(RegExp(r'[\s-]+'))
+        .where((word) => word.isNotEmpty)
+        .take(6)
+        .join('-');
+    final formatted = formatInviteCode(words);
     return TextEditingValue(
       text: formatted,
       selection: TextSelection.collapsed(offset: formatted.length),

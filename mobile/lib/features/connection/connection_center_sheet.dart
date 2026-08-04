@@ -246,7 +246,6 @@ class _ConnectionComponentTile extends StatelessWidget {
     ConnectionComponent.engine => Icons.memory_outlined,
     ConnectionComponent.localData => Icons.storage_outlined,
     ConnectionComponent.tor => Icons.hub_outlined,
-    ConnectionComponent.relay => Icons.cloud_sync_outlined,
     ConnectionComponent.peerListener => Icons.cell_tower_outlined,
     ConnectionComponent.onionService => Icons.security_outlined,
   };

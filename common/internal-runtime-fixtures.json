@@ -34,7 +34,7 @@
     "createdAt": 1760000000000
   },
   "pairingCode": {
-    "code": "12345678",
+    "code": "amber-birch-cobalt-dawn-ember-fjord",
     "expiresAt": 1760000060
   },
   "pairingInboxItem": {
@@ -139,9 +139,7 @@
     "body": "hello"
   },
   "messageTransportOutcomes": [
-    "FORWARDED",
     "DELIVERED",
-    "RECIPIENT_OFFLINE",
     "RETRYABLE_FAILURE",
     "PERMANENT_FAILURE"
   ],

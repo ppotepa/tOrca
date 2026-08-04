@@ -185,13 +185,11 @@ class MainShell extends ConsumerWidget {
                       int.tryParse(selectedContact!.lastSeenAt ?? ''),
             headerStatus: desktop
                 ? null
-                : TransportStatusDock(
+                : ConnectionStatusLamp(
                     embeddedInHeader: true,
                     phase: phase,
                     peerStatus: peerServerStatus,
                     readiness: readiness,
-                    transportStatuses: transportStatuses,
-                    latencyMs: latencyMs,
                     onOpenConnectionCenter: _openConnectionCenter,
                   ),
           )
@@ -231,12 +229,10 @@ class MainShell extends ConsumerWidget {
                 container: true,
                 child: Column(
                   children: [
-                    TransportStatusDock(
+                    ConnectionStatusLamp(
                       phase: phase,
                       peerStatus: peerServerStatus,
                       readiness: readiness,
-                      transportStatuses: transportStatuses,
-                      latencyMs: latencyMs,
                       onOpenConnectionCenter: _openConnectionCenter,
                     ),
                     Expanded(
@@ -285,13 +281,11 @@ class MainShell extends ConsumerWidget {
                           ),
                         ),
                         const SizedBox(width: 8),
-                        TransportStatusDock(
+                        ConnectionStatusLamp(
                           embeddedInHeader: true,
                           phase: phase,
                           peerStatus: peerServerStatus,
                           readiness: readiness,
-                          transportStatuses: transportStatuses,
-                          latencyMs: latencyMs,
                           onOpenConnectionCenter: _openConnectionCenter,
                         ),
                       ],

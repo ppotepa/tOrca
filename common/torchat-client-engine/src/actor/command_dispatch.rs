@@ -44,7 +44,6 @@ impl ClientEngineActor {
                     tor_ready: self.socks5_url.is_some(),
                     peer_listener_ready: self.peer_transport.is_some(),
                     onion_service_ready: self.local_peer_endpoint.is_some(),
-                    relay_ready: self.connection_state == ConnectionState::Connected,
                     generation: self.connection_generation,
                     detail: self.tor_status.detail.clone(),
                 })?,
@@ -70,9 +69,10 @@ impl ClientEngineActor {
                     self.with_runtime(|runtime| runtime.pairing_outbox())?;
                 Ok((json_response(result)?, runtime_events, None))
             }
-            EngineCommand::PairingInbox => Err(EngineError::Unsupported(
-                "pairing inbox is dispatched through the relay-control worker".to_owned(),
-            )),
+            EngineCommand::PairingInbox => {
+                let (inbox, _) = self.with_runtime(|runtime| runtime.local_pairing_lists())?;
+                Ok((json_response(inbox)?, Vec::new(), None))
+            }
             EngineCommand::ListContacts => {
                 Ok((json_response(self.list_contacts()?)?, Vec::new(), None))
             }
@@ -103,8 +103,6 @@ impl ClientEngineActor {
                     self.database.expedite_peer_deliveries(&installation_id)?;
                     self.flush_pending_send_effects()?;
                 } else {
-                    self.queue_relay_endpoint_bootstraps()?;
-                    self.retry_pending_contact_confirmations()?;
                 }
                 Ok((ResponsePayload::Empty, Vec::new(), None))
             }
@@ -143,7 +141,6 @@ impl ClientEngineActor {
                 let capability_id = self
                     .database
                     .ensure_contact_endpoint_capability(&installation_id)?;
-                let _ = self.queue_relay_endpoint_bootstraps();
                 let _ = self.send_capability_offer(&installation_id);
                 let (_, _, sequence, status) = self
                     .database
@@ -201,11 +198,48 @@ impl ClientEngineActor {
                     None,
                 ))
             }
-            EngineCommand::SetNickname { .. }
-            | EngineCommand::RefreshPairingCode
-            | EngineCommand::SubmitPairingCode { .. } => Err(EngineError::Unsupported(
-                "relay control command must be dispatched through the relay worker".to_owned(),
-            )),
+            EngineCommand::SetNickname { nickname } => {
+                let (profile, runtime_events) = self.with_runtime_idempotent(
+                    idempotency,
+                    |runtime| runtime.commit_nickname(nickname),
+                    |profile| json_response(profile),
+                )?;
+                Ok((json_response(profile)?, runtime_events, None))
+            }
+            EngineCommand::RefreshPairingCode => {
+                let code = self.relay.refresh_pairing_code().map_err(runtime_error)?;
+                let (value, runtime_events) = self.with_runtime_idempotent(
+                    idempotency,
+                    |runtime| {
+                        runtime.prepare_refresh_pairing_code()?;
+                        runtime.commit_pairing_code(code.clone())?;
+                        Ok(code.clone())
+                    },
+                    |value| json_response(value),
+                )?;
+                Ok((json_response(value)?, runtime_events, None))
+            }
+            EngineCommand::SubmitPairingCode { code } => {
+                let (normalized, mut runtime_events) =
+                    self.with_runtime(|runtime| runtime.prepare_submit_pairing_code(code))?;
+                let pairing_id = uuid::Uuid::new_v4();
+                let invite = self.build_contact_invite(None)?;
+                let payload =
+                    RelayPayloadV1::pairing_offer(pairing_id.to_string(), String::new(), invite)
+                        .encode()
+                        .map_err(EngineError::InvalidCommand)?;
+                let item = self
+                    .relay
+                    .submit_pairing_code_with_offer(&normalized, pairing_id, payload)
+                    .map_err(runtime_error)?;
+                let (value, mut commit_events) = self.with_runtime_idempotent(
+                    idempotency,
+                    |runtime| runtime.commit_submitted_pairing(item.clone()),
+                    |value| json_response(value),
+                )?;
+                runtime_events.append(&mut commit_events);
+                Ok((json_response(value)?, runtime_events, None))
+            }
             EngineCommand::AcceptPairing { pairing_id } => {
                 let (preparation, mut runtime_events): (PairingPreparation, _) =
                     self.with_runtime(|runtime| runtime.prepare_accept_pairing(&pairing_id))?;
@@ -239,9 +273,20 @@ impl ClientEngineActor {
                 self.deliver_send_effect(effect)?;
                 Ok((ResponsePayload::Empty, runtime_events, None))
             }
-            EngineCommand::CancelPairing { .. } => Err(EngineError::Unsupported(
-                "relay control command must be dispatched through the relay worker".to_owned(),
-            )),
+            EngineCommand::CancelPairing { pairing_id } => {
+                self.relay
+                    .cancel_pairing(&pairing_id)
+                    .map_err(runtime_error)?;
+                let (_, mut runtime_events) =
+                    self.with_runtime(|runtime| runtime.prepare_cancel_pairing(&pairing_id))?;
+                let (_, confirm_events) = self.with_runtime_idempotent(
+                    idempotency,
+                    |runtime| runtime.confirm_pairing_cancelled(&pairing_id),
+                    |_| Ok(ResponsePayload::Empty),
+                )?;
+                runtime_events.extend(confirm_events);
+                Ok((ResponsePayload::Empty, runtime_events, None))
+            }
             EngineCommand::ArchivePairing { pairing_id } => {
                 let (_, runtime_events) = self.with_runtime_idempotent(
                     idempotency,
@@ -416,7 +461,7 @@ impl ClientEngineActor {
                         json_response(connected)?,
                         runtime_events,
                         Some(
-                            self.connection_snapshot("connect requested; relay already connected"),
+                            self.connection_snapshot("connect requested; local transport ready"),
                         ),
                     ));
                 }
@@ -424,18 +469,13 @@ impl ClientEngineActor {
                 // Connect is the local runtime boundary. Never perform an
                 // onion HTTP/WebSocket request on the command path: doing so
                 // starves profile/storage queries behind Tor's circuit
-                // timeout. The actor retry scheduler owns relay bootstrap.
+                // timeout. Pairing opens the rendezvous connection lazily.
                 self.connect_requested = true;
-                self.relay_retry_at = None;
-                self.relay_retry_attempt = 0;
                 self.connection_state = if self.socks5_url.is_some() {
                     ConnectionState::Connecting
                 } else {
                     ConnectionState::WaitingForTor
                 };
-                if self.socks5_url.is_some() && self.network_online {
-                    self.schedule_relay_bootstrap_now();
-                }
                 let (connected, runtime_events) = self.with_runtime(|runtime| runtime.connect())?;
                 self.flush_pending_send_effects()?;
                 self.flush_pending_receipt_effects()?;

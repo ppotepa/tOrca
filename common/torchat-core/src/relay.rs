@@ -1,6 +1,5 @@
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use crate::{
     Identity, PROTOCOL_VERSION, fingerprint_from_public_key, peer_protocol::PeerEndpointBundle,

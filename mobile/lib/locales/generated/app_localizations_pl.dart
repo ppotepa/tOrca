@@ -1247,9 +1247,6 @@ class AppLocalizationsPl extends AppLocalizations {
   String get contactPolicyFallback => 'P2P + live relay fallback';
 
   @override
-  String get contactPolicyRelayOnly => 'Tylko relay';
-
-  @override
   String get contactsNewContact => 'Nowy kontakt';
 
   @override

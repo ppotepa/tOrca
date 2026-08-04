@@ -1,5 +1,5 @@
 UPDATE delivery_receipts
-                 SET relay_payload = COALESCE(relay_payload, ?1),
+                 SET wire_ciphertext = COALESCE(wire_ciphertext, ?1),
                      state = 'SENT',
                      attempt_count = attempt_count + 1,
                      next_attempt_at = ?2,

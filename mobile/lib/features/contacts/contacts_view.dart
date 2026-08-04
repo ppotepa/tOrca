@@ -115,8 +115,8 @@ class ContactsView extends ConsumerWidget {
             onSubmitted: (_) {
               if (!submit.busy) onSearch();
             },
-            keyboardType: TextInputType.number,
-            maxLength: 9,
+            keyboardType: TextInputType.text,
+            maxLength: 80,
             inputFormatters: const [PairingCodeInputFormatter()],
             decoration: InputDecoration(
               counterText: '',
@@ -134,7 +134,10 @@ class ContactsView extends ConsumerWidget {
           ),
         ),
         const SizedBox(height: 8),
-        Text(l10n.yourFingerprint, style: Theme.of(context).textTheme.labelLarge),
+        Text(
+          l10n.yourFingerprint,
+          style: Theme.of(context).textTheme.labelLarge,
+        ),
         Semantics(
           label: l10n.yourFingerprintSemantics(fingerprint),
           child: ExcludeSemantics(
@@ -192,9 +195,6 @@ class ContactsView extends ConsumerWidget {
                   };
                   final route = switch (contact.transportPolicy) {
                     ContactTransportPolicy.peerOnly => l10n.routeP2P,
-                    ContactTransportPolicy.peerWithRelayFallback =>
-                      l10n.routeP2PFallback,
-                    ContactTransportPolicy.relayOnly => l10n.routeRelay,
                   };
                   return '$status · $route';
                 },
@@ -293,7 +293,9 @@ class ContactsView extends ConsumerWidget {
                         '${presence.observedAt ?? context.l10n.contactsNoData}',
                       ),
                       if (presence.latencyMs != null)
-                        Text('${context.l10n.contactsProbeLatency}: ${presence.latencyMs} ms'),
+                        Text(
+                          '${context.l10n.contactsProbeLatency}: ${presence.latencyMs} ms',
+                        ),
                       const SizedBox(height: 12),
                       const Divider(),
                       Text(
@@ -309,7 +311,9 @@ class ContactsView extends ConsumerWidget {
                             return const LinearProgressIndicator();
                           }
                           if (snapshot.hasError || !snapshot.hasData) {
-                            return Text(context.l10n.contactsCapabilityUnavailable);
+                            return Text(
+                              context.l10n.contactsCapabilityUnavailable,
+                            );
                           }
                           final capability = snapshot.data!;
                           return Column(
@@ -401,7 +405,10 @@ class ContactsView extends ConsumerWidget {
                         const SizedBox(height: 6),
                         _DiagnosticLine(
                           label: 'Polityka',
-                          value: localizeTransportPolicy(context.l10n, contact.transportPolicy),
+                          value: localizeTransportPolicy(
+                            context.l10n,
+                            contact.transportPolicy,
+                          ),
                         ),
                         _DiagnosticLine(
                           label: 'Efektywna trasa',
@@ -409,7 +416,10 @@ class ContactsView extends ConsumerWidget {
                         ),
                         _DiagnosticLine(
                           label: 'Stan endpointu',
-                          value: localizePeerEndpointStatus(context.l10n, contact.peerEndpointStatus),
+                          value: localizePeerEndpointStatus(
+                            context.l10n,
+                            contact.peerEndpointStatus,
+                          ),
                         ),
                         _DiagnosticLine(
                           label: 'Stan sesji P2P',
@@ -495,7 +505,9 @@ class ContactsView extends ConsumerWidget {
                           for (final policy in ContactTransportPolicy.values)
                             DropdownMenuItem(
                               value: policy,
-                              child: Text(localizeTransportPolicy(context.l10n, policy)),
+                              child: Text(
+                                localizeTransportPolicy(context.l10n, policy),
+                              ),
                             ),
                         ],
                         onChanged: saveState.busy
@@ -709,7 +721,9 @@ class _PendingPairingSection extends StatelessWidget {
             child: ListTile(
               dense: true,
               leading: const ThemedIcon(Icons.hourglass_top),
-              title: Text(item.peer?.displayName ?? context.l10n.contactsNewContact),
+              title: Text(
+                item.peer?.displayName ?? context.l10n.contactsNewContact,
+              ),
               subtitle: Text(context.l10n.contactsWaitingForSecureConversation),
             ),
           ),
@@ -740,4 +754,3 @@ class _DiagnosticLine extends StatelessWidget {
     ),
   );
 }
-

@@ -7,7 +7,6 @@ class ConnectionReadiness {
     required this.engine,
     required this.localData,
     required this.tor,
-    required this.relay,
     required this.peerListener,
     required this.onionService,
     required this.communicationCommitted,
@@ -25,7 +24,6 @@ class ConnectionReadiness {
     final engineStep = _step(startupSteps, StartupStepKind.engine);
     final localDataStep = _step(startupSteps, StartupStepKind.localData);
     final torStep = _step(startupSteps, StartupStepKind.tor);
-    final relayStep = _step(startupSteps, StartupStepKind.relay);
     final peerListenerStep = _step(startupSteps, StartupStepKind.peerListener);
     final onionStep = _step(startupSteps, StartupStepKind.onionService);
     final communicationStep = _step(
@@ -87,10 +85,6 @@ class ConnectionReadiness {
         ),
         onionStep,
       ),
-      _gateByStartupStep(
-        _relayStatus(transport, transportStatuses[TransportComponent.relay]),
-        relayStep,
-      ),
     ];
     final sequential = sequentialConnectionStatuses(raw);
 
@@ -100,7 +94,6 @@ class ConnectionReadiness {
       tor: sequential[2],
       peerListener: sequential[3],
       onionService: sequential[4],
-      relay: sequential[5],
       communicationCommitted: communicationStep.state == StartupStepState.ready,
       communicationDetail: communicationStep.detail,
     );
@@ -109,7 +102,6 @@ class ConnectionReadiness {
   final ConnectionComponentStatus engine;
   final ConnectionComponentStatus localData;
   final ConnectionComponentStatus tor;
-  final ConnectionComponentStatus relay;
   final ConnectionComponentStatus peerListener;
   final ConnectionComponentStatus onionService;
   final bool communicationCommitted;
@@ -121,7 +113,6 @@ class ConnectionReadiness {
     tor,
     peerListener,
     onionService,
-    relay,
   ];
 
   bool get localCoreReady => engine.ready && localData.ready;
@@ -132,19 +123,17 @@ class ConnectionReadiness {
   bool canPerform(ConnectionOperation operation) => switch (operation) {
     ConnectionOperation.readLocalData => localCoreReady,
     ConnectionOperation.diagnose => localCoreReady,
-    ConnectionOperation.pair => localCoreReady && tor.ready && relay.ready,
+    ConnectionOperation.pair => localCoreReady && tor.ready && onionService.ready,
     ConnectionOperation.sendP2p => localCoreReady && peerListener.ready,
-    ConnectionOperation.sendRelayFallback => localCoreReady && relay.ready,
   };
 
   bool get startupComponentsReady =>
       localCoreReady &&
       tor.ready &&
-      relay.ready &&
       peerListener.ready &&
       onionService.ready;
 
-  bool get onboardingReady => startupComponentsReady && communicationCommitted;
+  bool get onboardingReady => localCoreReady;
 
   bool get communicationReady => onboardingReady;
 
@@ -188,11 +177,6 @@ class ConnectionReadiness {
       kind: StartupStepKind.tor,
       state: _toStartupState(tor.state),
       detail: tor.detail,
-    ),
-    StartupStep(
-      kind: StartupStepKind.relay,
-      state: _toStartupState(relay.state),
-      detail: relay.detail,
     ),
     StartupStep(
       kind: StartupStepKind.peerListener,
@@ -244,7 +228,6 @@ enum ConnectionOperation {
   diagnose,
   pair,
   sendP2p,
-  sendRelayFallback,
 }
 
 ConnectionComponentStatus _gateByStartupStep(
@@ -298,43 +281,6 @@ ConnectionComponentStatus _torStatus(RuntimeTorStatus transport) {
     attempt: transport.retryAttempt,
     errorCode: state == ConnectionComponentState.failed
         ? 'TOR_UNAVAILABLE'
-        : null,
-  );
-}
-
-ConnectionComponentStatus _relayStatus(
-  RuntimeTorStatus transport,
-  TransportStatusSnapshot? relay,
-) {
-  final state = switch (relay?.state) {
-    TransportProbeState.ready => ConnectionComponentState.ready,
-    TransportProbeState.idle => ConnectionComponentState.pending,
-    TransportProbeState.starting => ConnectionComponentState.starting,
-    TransportProbeState.degraded => ConnectionComponentState.degraded,
-    TransportProbeState.offline ||
-    TransportProbeState.error => ConnectionComponentState.failed,
-    null => switch (transport.phase) {
-      TransportPhase.starting ||
-      TransportPhase.bootstrapping => ConnectionComponentState.pending,
-      TransportPhase.connecting ||
-      TransportPhase.reconnecting => ConnectionComponentState.starting,
-      TransportPhase.connected => ConnectionComponentState.ready,
-      TransportPhase.degraded => ConnectionComponentState.degraded,
-      TransportPhase.offline ||
-      TransportPhase.error => ConnectionComponentState.failed,
-    },
-  };
-  return ConnectionComponentStatus(
-    component: ConnectionComponent.relay,
-    state: state,
-    detail: relay?.detail.isNotEmpty == true
-        ? relay!.detail
-        : transport.detail.isEmpty
-        ? transport.phase.name
-        : transport.detail,
-    attempt: relay?.retryAttempt ?? transport.retryAttempt,
-    errorCode: state == ConnectionComponentState.failed
-        ? 'RELAY_UNAVAILABLE'
         : null,
   );
 }

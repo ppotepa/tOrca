@@ -14,29 +14,7 @@ mountpoint -q "$(dirname "$(dirname "$SECURE_ROOT")")" || {
 }
 id "$SERVICE_USER" >/dev/null 2>&1 || useradd --system --create-home --shell /usr/sbin/nologin "$SERVICE_USER"
 install -d -m 0700 -o "$SERVICE_USER" -g "$SERVICE_USER" \
-  "$SECURE_ROOT/postgres" "$SECURE_ROOT/onion" "$SECURE_ROOT/secrets"
-
-if [[ ! -s "$SECURE_ROOT/secrets/postgres_password" ]]; then
-  umask 077
-  tr -dc 'A-Za-z0-9' </dev/urandom | head -c 48 >"$SECURE_ROOT/secrets/postgres_password"
-fi
-if [[ ! -s "$SECURE_ROOT/secrets/database_url" ]]; then
-  password=$(<"$SECURE_ROOT/secrets/postgres_password")
-  umask 077
-  printf 'postgres://torchat:%s@postgres:5432/torchat\n' "$password" >"$SECURE_ROOT/secrets/database_url"
-fi
-if [[ ! -s "$SECURE_ROOT/secrets/pairing_secret" ]]; then
-  umask 077
-  tr -dc 'A-Za-z0-9' </dev/urandom | head -c 64 >"$SECURE_ROOT/secrets/pairing_secret"
-fi
-chown "$SERVICE_USER:$SERVICE_USER" \
-  "$SECURE_ROOT/secrets/postgres_password" \
-  "$SECURE_ROOT/secrets/database_url" \
-  "$SECURE_ROOT/secrets/pairing_secret"
-chmod 0600 \
-  "$SECURE_ROOT/secrets/postgres_password" \
-  "$SECURE_ROOT/secrets/database_url" \
-  "$SECURE_ROOT/secrets/pairing_secret"
+  "$SECURE_ROOT/onion" "$SECURE_ROOT/secrets"
 
 install -m 0644 "$REPO_ROOT/infra/host/torchat-staging.service" /etc/systemd/system/torchat-staging.service
 systemctl daemon-reload

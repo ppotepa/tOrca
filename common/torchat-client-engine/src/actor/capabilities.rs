@@ -1,59 +1,6 @@
 use super::*;
 
 impl ClientEngineActor {
-    pub(super) fn queue_relay_endpoint_bootstraps(&mut self) -> EngineResult<()> {
-        if self.connection_state != ConnectionState::Connected {
-            return Ok(());
-        }
-        let Some(local_endpoint) = self.local_peer_endpoint.clone() else {
-            return Ok(());
-        };
-        let profile = self.runtime_profile()?;
-        let protocol_nickname =
-            protocol_nickname(&self.identity.installation_id(), &profile.nickname);
-        for contact in self.list_contacts()? {
-            let local_endpoint_for_contact =
-                self.local_endpoint_for_contact(&contact.installation_id, &local_endpoint)?;
-            let payload = RelayPayloadV1::peer_endpoint_bootstrap(
-                &self.identity,
-                &protocol_nickname,
-                contact.installation_id.clone(),
-                local_endpoint_for_contact.clone(),
-            )
-            .encode()
-            .map_err(EngineError::InvalidCommand)?;
-            self.database.put_peer_endpoint_bootstrap(
-                &contact.installation_id,
-                payload.as_bytes(),
-                local_endpoint_for_contact.sequence,
-            )?;
-            if let Err(error) = self.send_peer_endpoint_bootstrap(PeerEndpointBootstrapRecord {
-                contact_installation_id: contact.installation_id.clone(),
-                payload: payload.into_bytes(),
-                endpoint_sequence: local_endpoint_for_contact.sequence,
-                attempt_count: 0,
-                next_attempt_at: 0,
-                last_error: None,
-            }) {
-                self.database.record_peer_endpoint_bootstrap_error(
-                    &contact.installation_id,
-                    local_endpoint_for_contact.sequence,
-                    &format!("{}: {error}", super::retry_error_code(&error.to_string())),
-                )?;
-                self.pending_engine_events.push(EngineEvent::Log {
-                    log: EngineLogEvent {
-                        level: "warn".to_owned(),
-                        message: format!(
-                            "peer endpoint bootstrap enqueue failed contact={} error={error}",
-                            contact.installation_id
-                        ),
-                    },
-                });
-            }
-        }
-        Ok(())
-    }
-
     pub(super) fn local_endpoint_for_contact(
         &mut self,
         contact_installation_id: &str,
@@ -70,29 +17,6 @@ impl ClientEngineActor {
             endpoint.signature = self.identity.sign(&endpoint.signing_bytes());
         }
         Ok(endpoint)
-    }
-
-    pub(super) fn send_peer_endpoint_bootstrap(
-        &mut self,
-        record: PeerEndpointBootstrapRecord,
-    ) -> EngineResult<()> {
-        let installation_id = record.contact_installation_id.clone();
-        let recipient = installation_id.clone();
-        let sequence = record.endpoint_sequence;
-        let payload = String::from_utf8(record.payload).map_err(|error| {
-            EngineError::Storage(format!(
-                "stored peer endpoint bootstrap payload is invalid UTF-8: {error}"
-            ))
-        })?;
-        self.queue_relay_envelope(
-            uuid::Uuid::new_v4(),
-            &recipient,
-            &payload,
-            PendingRelayDelivery::PeerEndpointBootstrap {
-                installation_id,
-                sequence,
-            },
-        )
     }
 }
 
@@ -165,45 +89,6 @@ impl ClientEngineActor {
 }
 
 impl ClientEngineActor {
-    pub(super) fn retry_peer_endpoint_bootstraps(&mut self) -> EngineResult<()> {
-        if self.connection_state != ConnectionState::Connected {
-            return Ok(());
-        }
-        for record in self
-            .database
-            .due_peer_endpoint_bootstraps(self.clock.now_ms())?
-        {
-            let next_attempt_at = self.clock.now_ms() + retry_backoff_ms(record.attempt_count);
-            if !self.database.claim_peer_endpoint_bootstrap_attempt(
-                &record.contact_installation_id,
-                record.endpoint_sequence,
-                next_attempt_at,
-                None,
-            )? {
-                continue;
-            }
-            if let Err(error) = self.send_peer_endpoint_bootstrap(record.clone()) {
-                self.database.record_peer_endpoint_bootstrap_error(
-                    &record.contact_installation_id,
-                    record.endpoint_sequence,
-                    &format!("{}: {error}", super::retry_error_code(&error.to_string())),
-                )?;
-                self.pending_engine_events.push(EngineEvent::Log {
-                    log: EngineLogEvent {
-                        level: "warn".to_owned(),
-                        message: format!(
-                            "peer endpoint bootstrap retry failed contact={} error={error}",
-                            record.contact_installation_id
-                        ),
-                    },
-                });
-            }
-        }
-        Ok(())
-    }
-}
-
-impl ClientEngineActor {
     pub(super) fn send_capability_offer(
         &mut self,
         contact_installation_id: &str,
@@ -243,7 +128,7 @@ impl ClientEngineActor {
     }
 
     pub(super) fn send_capability_offers_for_contacts(&mut self) -> EngineResult<()> {
-        if self.connection_state != ConnectionState::Connected {
+        if !self.network_online || self.socks5_url.is_none() {
             return Ok(());
         }
         for contact in self.list_contacts()? {
@@ -281,7 +166,7 @@ impl ClientEngineActor {
     }
 
     pub(super) fn retry_capability_deliveries(&mut self) -> EngineResult<()> {
-        if self.connection_state != ConnectionState::Connected {
+        if !self.network_online || self.socks5_url.is_none() {
             return Ok(());
         }
         for record in self
@@ -295,17 +180,14 @@ impl ClientEngineActor {
             {
                 continue;
             }
-            let envelope_id =
-                uuid::Uuid::parse_str(&record.delivery_id).unwrap_or_else(|_| uuid::Uuid::new_v4());
-            if let Err(error) = self.queue_relay_envelope(
-                envelope_id,
+            let payload = std::str::from_utf8(&record.payload)
+                .map_err(|value| EngineError::Serialization(value.to_string()))?;
+            if let Err(error) = self.dispatch_ephemeral_payload(
                 &record.contact_installation_id,
-                std::str::from_utf8(&record.payload)
-                    .map_err(|value| EngineError::Serialization(value.to_string()))?,
-                PendingRelayDelivery::Ephemeral {
-                    installation_id: record.contact_installation_id.clone(),
-                    delivery_id: Some(record.delivery_id.clone()),
-                },
+                payload.to_owned(),
+                true,
+                true,
+                Some(record.delivery_id.clone()),
             ) {
                 self.database.record_capability_delivery_error(
                     &record.delivery_id,

@@ -17,7 +17,6 @@ void main() {
       status(ConnectionComponent.engine, ConnectionComponentState.ready),
       status(ConnectionComponent.localData, ConnectionComponentState.starting),
       status(ConnectionComponent.tor, ConnectionComponentState.ready),
-      status(ConnectionComponent.relay, ConnectionComponentState.ready),
       status(ConnectionComponent.peerListener, ConnectionComponentState.ready),
       status(ConnectionComponent.onionService, ConnectionComponentState.ready),
     ]);
@@ -35,7 +34,6 @@ void main() {
       status(ConnectionComponent.engine, ConnectionComponentState.ready),
       status(ConnectionComponent.localData, ConnectionComponentState.ready),
       status(ConnectionComponent.tor, ConnectionComponentState.ready),
-      status(ConnectionComponent.relay, ConnectionComponentState.starting),
       status(
         ConnectionComponent.peerListener,
         ConnectionComponentState.starting,
@@ -47,9 +45,8 @@ void main() {
       result.where((item) => item.state == ConnectionComponentState.starting),
       hasLength(1),
     );
-    expect(result[3].component, ConnectionComponent.relay);
+    expect(result[3].component, ConnectionComponent.peerListener);
     expect(result[4].state, ConnectionComponentState.pending);
-    expect(result[5].state, ConnectionComponentState.pending);
   });
 
   test('failure is preserved and blocks every later component', () {
@@ -57,7 +54,6 @@ void main() {
       status(ConnectionComponent.engine, ConnectionComponentState.ready),
       status(ConnectionComponent.localData, ConnectionComponentState.ready),
       status(ConnectionComponent.tor, ConnectionComponentState.failed),
-      status(ConnectionComponent.relay, ConnectionComponentState.ready),
       status(ConnectionComponent.peerListener, ConnectionComponentState.ready),
       status(ConnectionComponent.onionService, ConnectionComponentState.ready),
     ]);

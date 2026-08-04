@@ -43,7 +43,6 @@ import java.util.LinkedHashSet
 /** Owns Tor, engine lifecycle and notifications outside the Flutter UI. */
 class TorChatForegroundService : Service() {
     private lateinit var startupLogger: StartupPlatformLogger
-    private lateinit var relaySupervisor: RelaySupervisor
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var runtime: TorRuntime? = null
     private var secretStore: LocalSecretStore? = null
@@ -73,48 +72,6 @@ class TorChatForegroundService : Service() {
     override fun onCreate() {
         super.onCreate()
         startupLogger = StartupPlatformLogger(applicationContext)
-        relaySupervisor = RelaySupervisor(
-            scope = scope,
-            startupLogger = startupLogger,
-            onState = { state, attempt, detail ->
-                val phase = when (state) {
-                    "ready" -> EngineContract.TRANSPORT_PHASE_CONNECTED
-                    "retrying" -> EngineContract.TRANSPORT_PHASE_RECONNECTING
-                    else -> EngineContract.TRANSPORT_PHASE_CONNECTING
-                }
-                publish(
-                    mapOf(
-                        EngineContract.TYPE to EngineContract.TRANSPORT_STATUS_CHANGED,
-                        "component" to "relay",
-                        EngineContract.STATE to when (state) {
-                            // TransportProbeState is encoded in screaming
-                            // snake case.  Lower-case connection phases are
-                            // reserved for engine connection snapshots and
-                            // decode as ERROR on the Flutter side.
-                            "ready" -> "READY"
-                            "retrying" -> "DEGRADED"
-                            else -> "STARTING"
-                        },
-                        EngineContract.PHASE to phase,
-                        EngineContract.LABEL to when (state) {
-                            "ready" -> "Połączono z relayem przez Tor"
-                            "retrying" -> "Ponowne łączenie z relayem"
-                            else -> "Łączenie z relayem onion"
-                        },
-                        EngineContract.DETAIL to detail,
-                        EngineContract.PROGRESS to if (state == "ready") 100 else 85,
-                        EngineContract.RETRY_ATTEMPT to attempt,
-                    ),
-                )
-                updateNotification(
-                    when (state) {
-                        "ready" -> "TorChat działa przez Tor"
-                        "retrying" -> "Ponowne łączenie · próba $attempt"
-                        else -> "Łączenie z relayem · próba $attempt"
-                    },
-                )
-            },
-        )
         resetReadinessIfStopped()
         createNotificationChannel()
         getSystemService(ConnectivityManager::class.java)
@@ -336,8 +293,6 @@ class TorChatForegroundService : Service() {
                 pendingOnionAction = null
                 handlePlatformAction(action)
             }
-            relaySupervisor.start(host)
-            if (networkOnline) relaySupervisor.signalNetworkAvailable()
             torRetryJob = null
         }.onFailure { error ->
             Log.e("TorChat-Tor", "Tor startup failed; local UI remains usable", error)
@@ -447,7 +402,6 @@ class TorChatForegroundService : Service() {
                 .unregisterNetworkCallback(networkCallback)
         }
         runCatching { unregisterReceiver(powerModeReceiver) }
-        relaySupervisor.stop()
         torRetryJob?.cancel()
         torRetryJob = null
         publishEngineFact(engineAppVisibilityChangedFactJson(foreground = false))
@@ -469,13 +423,11 @@ class TorChatForegroundService : Service() {
         completeExceptionally(localDataReady, stopped)
         completeExceptionally(torReady, stopped)
         completeExceptionally(onionReady, stopped)
-        completeExceptionally(relayReady, stopped)
         scope.cancel()
         super.onDestroy()
     }
 
     private fun shutdownEngineHost() {
-        relaySupervisor.stop()
         runCatching { runBlocking { engineEventPump?.stop() } }
             .onFailure { error ->
                 Log.w("TorChat-Engine", "Engine event pump shutdown failed", error)
@@ -536,9 +488,6 @@ class TorChatForegroundService : Service() {
         ) == true
         if (previous == networkOnline) return
         publishEngineFact(engineNetworkChangedFactJson(networkOnline))
-        if (networkOnline && torReady.isCompleted) {
-            relaySupervisor.signalNetworkAvailable()
-        }
     }
 
     private fun publishPowerFacts() {
@@ -610,27 +559,6 @@ class TorChatForegroundService : Service() {
         val publishedEvents = mapEngineEventToPublishedEvents(event)
         publishedEvents.forEach(::publish)
         when (event.optString(EngineContract.TYPE)) {
-            EngineContract.EVENT_CONNECTION -> {
-                val status = publishedEvents.firstOrNull()
-                when (status?.get("state")?.toString().orEmpty()) {
-                    EngineContract.TRANSPORT_PHASE_CONNECTED -> {
-                        if (!relayReady.isCompleted) relayReady.complete(Unit)
-                        startupLogger.write(
-                            level = "info",
-                            component = "relay",
-                            eventCode = "relay_ready",
-                            stage = "RELAY_READY",
-                            message = "Relay connection is ready",
-                            state = "ready",
-                        )
-                        updateNotification("TorChat działa przez Tor")
-                    }
-                    EngineContract.TRANSPORT_PHASE_RECONNECTING ->
-                        updateNotification("Ponowne łączenie z relay...")
-                    EngineContract.TRANSPORT_PHASE_CONNECTING ->
-                        updateNotification("Łączenie z relay...")
-                }
-            }
             EngineContract.EVENT_LOG -> {
                 val log = event.optJSONObject(EngineContract.LOG)
                 val message = log?.optString(EngineContract.MESSAGE).orEmpty()
@@ -858,7 +786,6 @@ class TorChatForegroundService : Service() {
         @Volatile private var localDataReady = CompletableDeferred<Unit>()
         @Volatile private var torReady = CompletableDeferred<Unit>()
         @Volatile private var onionReady = CompletableDeferred<Unit>()
-        @Volatile private var relayReady = CompletableDeferred<Unit>()
         @Volatile var eventListener: ((Map<String, Any?>) -> Unit)? = null
         @Volatile var activeEngineHost: AndroidEngineHost? = null
         // Reattach must replay every recent event, not only the last event per
@@ -890,7 +817,6 @@ class TorChatForegroundService : Service() {
             "LOCAL_DATA_READY" to deferredState(localDataReady),
             "TOR_READY" to deferredState(torReady),
             "ONION_READY" to deferredState(onionReady),
-            "RELAY_READY" to deferredState(relayReady),
         )
 
         private fun deferredState(deferred: CompletableDeferred<Unit>): String = when {
@@ -908,7 +834,6 @@ class TorChatForegroundService : Service() {
             if (localDataReady.isCompleted) localDataReady = CompletableDeferred()
             if (torReady.isCompleted) torReady = CompletableDeferred()
             if (onionReady.isCompleted) onionReady = CompletableDeferred()
-            if (relayReady.isCompleted) relayReady = CompletableDeferred()
         }
 
         private fun completeExceptionally(
@@ -1043,7 +968,6 @@ class TorChatForegroundService : Service() {
 
         suspend fun awaitOnionReady() = onionReady.await()
 
-        suspend fun awaitRelayReady() = relayReady.await()
     }
 }
 

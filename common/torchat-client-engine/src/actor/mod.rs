@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, HashSet},
     sync::Arc,
 };
 
@@ -10,12 +10,11 @@ use tokio::sync::mpsc;
 use tokio::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 use torchat_client_runtime::{
-    ContactTransportPolicy, MessageSendEffect, MessageTransportOutcome, PairingPeerOutcome,
-    PairingPreparation, PairingSendKind, PeerConnectionStatus, PeerEndpointStatus, RuntimeClock,
-    RuntimeError, RuntimeIdentity, RuntimeProfile, RuntimeSendEffect, RuntimeSession,
-    RuntimeStatusPhase, RuntimeStorage, RuntimeTorStatus, RuntimeTransport,
-    StartupReadinessSnapshot, SystemRuntimeClock, WelcomeAcceptedResult, contact_card_from_invite,
-    contact_record_from_card,
+    MessageSendEffect, MessageTransportOutcome, PairingPeerOutcome, PairingPreparation,
+    PairingSendKind, PeerConnectionStatus, PeerEndpointStatus, RuntimeClock, RuntimeError,
+    RuntimeIdentity, RuntimeProfile, RuntimeSendEffect, RuntimeSession, RuntimeStatusPhase,
+    RuntimeStorage, RuntimeTorStatus, RuntimeTransport, StartupReadinessSnapshot,
+    SystemRuntimeClock, WelcomeAcceptedResult, contact_card_from_invite, contact_record_from_card,
 };
 use torchat_core::{
     ContactInvite, Identity,
@@ -42,9 +41,8 @@ use crate::{
     probing::{ProbeCoordinator, ProbeKey, ProbeKind, ProbeStatus, pseudonymous_target_id},
     relay::{EngineRelay, RelayEvent, SharedRelayActor},
     storage::{
-        CapabilityDeliveryRecord, DeliveryReceiptRecord, InboundEnvelopeStoreResult,
-        PairingResponseRecord, PeerEndpointBootstrapRecord, PendingApplicationEnvelopeRecord,
-        PendingContactConfirmationRecord, PendingLocalInviteMlsRecord,
+        DeliveryReceiptRecord, InboundEnvelopeStoreResult, PairingResponseRecord,
+        PendingApplicationEnvelopeRecord, PendingLocalInviteMlsRecord,
         PendingPeerEndpointInboxRecord, PendingWelcomeRecord, ReceivedEnvelopeRecord,
         RetryDeadline, RetryKind, SqliteRuntimeStorage,
     },
@@ -99,93 +97,10 @@ enum PendingRelayDelivery {
     Welcome {
         invite_id: String,
     },
-    Message {
-        message_id: String,
-    },
-    Receipt {
-        message_id: String,
-    },
-    ReadReceipt {
-        receipt_id: String,
-    },
     Ephemeral {
         installation_id: String,
         delivery_id: Option<String>,
     },
-    RelationshipRemovalAck {
-        removal_id: String,
-    },
-    PeerEndpointBootstrap {
-        installation_id: String,
-        sequence: u64,
-    },
-}
-
-enum RelayBootstrapOutcome {
-    Ready {
-        generation: u64,
-        relay: Box<SharedRelayActor>,
-    },
-    Failed {
-        generation: u64,
-        error: torchat_client_runtime::RuntimeError,
-    },
-}
-
-enum RelayControlResult {
-    Unit,
-    PairingCode(torchat_client_runtime::InviteCode),
-    PairingItem(Box<torchat_client_runtime::PairingItem>),
-    PairingInbox(Vec<torchat_client_runtime::PairingItem>),
-}
-
-enum RelayControlOperation {
-    Command(EngineCommand),
-    AcknowledgePairing {
-        pairing_id: String,
-    },
-    ConfirmContact {
-        pairing_id: String,
-        capability: String,
-        peer_installation_id: String,
-    },
-}
-
-struct RelayControlOutcome {
-    request_id: String,
-    respond: bool,
-    command_id: Option<String>,
-    command_descriptor: String,
-    operation: RelayControlOperation,
-    result: EngineResult<RelayControlResult>,
-}
-
-struct PendingRelayControl {
-    request_id: String,
-    respond: bool,
-    command_id: Option<String>,
-    command_descriptor: String,
-    operation: RelayControlOperation,
-}
-
-fn is_relay_control_command(command: &EngineCommand) -> bool {
-    matches!(
-        command,
-        EngineCommand::SetNickname { .. }
-            | EngineCommand::RefreshPairingCode
-            | EngineCommand::SubmitPairingCode { .. }
-            | EngineCommand::CancelPairing { .. }
-            | EngineCommand::PairingInbox
-    )
-}
-
-fn relay_control_coalesce_key(command: &EngineCommand) -> Option<&'static str> {
-    match command {
-        EngineCommand::SetNickname { .. } => Some("nickname"),
-        EngineCommand::RefreshPairingCode => Some("pairing_code_refresh"),
-        EngineCommand::PairingInbox => Some("pairing_inbox"),
-        _ => None,
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -218,7 +133,6 @@ pub struct ClientEngineActor {
     pub connection_state: ConnectionState,
     pub tor_status: RuntimeTorStatus,
     pub socks5_url: Option<String>,
-    relay_onion_url: reqwest::Url,
     pub relay: Box<dyn EngineRelay>,
     peer_transport: Option<PeerTransportHandle>,
     local_peer_endpoint: Option<PeerEndpointBundle>,
@@ -231,17 +145,7 @@ pub struct ClientEngineActor {
     /// Recreating it after every command/event starves relay polling whenever
     /// the actor is busy with peer traffic or UI requests.
     relay_poll_at: Instant,
-    relay_retry_at: Option<Instant>,
     probe_coordinator: ProbeCoordinator,
-    relay_retry_attempt: u32,
-    relay_bootstrap_in_flight: bool,
-    relay_control_queue: VecDeque<PendingRelayControl>,
-    relay_control_in_flight: bool,
-    relay_control_sender: Option<mpsc::Sender<RelayControlOutcome>>,
-    relay_control_rejected: u64,
-    relay_control_coalesced: u64,
-    pairing_inbox_retry_at: Option<Instant>,
-    pairing_inbox_retry_attempt: u32,
     connect_requested: bool,
     engine_session_id: String,
 }
@@ -271,8 +175,6 @@ impl RuntimeClock for SharedRuntimeClock {
 }
 
 const RELAY_POLL_INTERVAL: Duration = Duration::from_millis(100);
-pub(super) const MAX_RELAY_CONTROL_QUEUE: usize = 64;
-const RELAY_OUTCOME_CHANNEL_CAPACITY: usize = 64;
 const RETRY_BLOCKED_RECHECK: Duration = Duration::from_secs(5);
 const RETRY_OFFLINE_RECHECK: Duration = Duration::from_secs(30);
 
@@ -363,7 +265,6 @@ impl ClientEngineActor {
                 retry_attempt: 0,
             },
             socks5_url: initial_socks5_url.clone(),
-            relay_onion_url: relay_onion_url.clone(),
             relay: Box::new(SharedRelayActor::new(
                 relay_onion_url,
                 initial_socks5_url,
@@ -377,17 +278,7 @@ impl ClientEngineActor {
             device_idle: false,
             background_restricted: false,
             relay_poll_at: Instant::now() + RELAY_POLL_INTERVAL,
-            relay_retry_at: None,
             probe_coordinator: ProbeCoordinator::new(Instant::now() + Duration::from_secs(30)),
-            relay_retry_attempt: 0,
-            relay_bootstrap_in_flight: false,
-            relay_control_queue: VecDeque::new(),
-            relay_control_in_flight: false,
-            relay_control_sender: None,
-            relay_control_rejected: 0,
-            relay_control_coalesced: 0,
-            pairing_inbox_retry_at: None,
-            pairing_inbox_retry_attempt: 0,
             connect_requested: false,
             engine_session_id: uuid::Uuid::new_v4().to_string(),
         })
@@ -399,11 +290,6 @@ impl ClientEngineActor {
         events: mpsc::Sender<EngineEvent>,
         shutdown: CancellationToken,
     ) -> EngineResult<()> {
-        let (relay_bootstrap_outcomes, mut relay_bootstrap_outcome_rx) =
-            mpsc::channel(RELAY_OUTCOME_CHANNEL_CAPACITY);
-        let (relay_control_outcomes, mut relay_control_outcome_rx) =
-            mpsc::channel(RELAY_OUTCOME_CHANNEL_CAPACITY);
-        self.relay_control_sender = Some(relay_control_outcomes.clone());
         let (peer_transport, mut peer_events) =
             PeerTransportHandle::bind(self.identity.private_key_bytes()).await?;
         if let Some(endpoint) = self.local_peer_endpoint.clone() {
@@ -498,12 +384,6 @@ impl ClientEngineActor {
             let retry_wakeup_at = self.next_retry_wakeup_at(retry_deadline)?;
             let retry_sleep_deadline =
                 retry_wakeup_at.unwrap_or(relay_poll_at + Duration::from_secs(3600));
-            let relay_retry_wakeup_at = self
-                .relay_retry_at
-                .unwrap_or(relay_poll_at + Duration::from_secs(3600));
-            let pairing_inbox_retry_wakeup_at = self
-                .pairing_inbox_retry_at
-                .unwrap_or(relay_poll_at + Duration::from_secs(3600));
             tokio::select! {
                 _ = shutdown.cancelled() => {
                     self.advance_connection_generation();
@@ -537,23 +417,6 @@ impl ClientEngineActor {
                     let _ = self.queue_presence_heartbeats();
                     let now = Instant::now();
                     self.probe_coordinator.schedule_round(now, peer_probe_interval);
-                }
-                _ = tokio::time::sleep_until(relay_retry_wakeup_at), if self.relay_retry_at.is_some() && !self.relay_bootstrap_in_flight => {
-                    self.start_relay_bootstrap(relay_bootstrap_outcomes.clone());
-                }
-                _ = tokio::time::sleep_until(pairing_inbox_retry_wakeup_at), if self.pairing_inbox_retry_at.is_some() => {
-                    self.pairing_inbox_retry_at = None;
-                    self.enqueue_pairing_inbox_refresh();
-                }
-                outcome = relay_bootstrap_outcome_rx.recv(), if self.relay_bootstrap_in_flight => {
-                    if let Some(outcome) = outcome {
-                        self.finish_relay_bootstrap(outcome, &events).await;
-                    }
-                }
-                outcome = relay_control_outcome_rx.recv(), if self.relay_control_in_flight => {
-                    if let Some(outcome) = outcome {
-                        self.finish_relay_control(outcome, &events).await;
-                    }
                 }
                 _ = tokio::time::sleep_until(retry_sleep_deadline), if retry_wakeup_at.is_some() => {
                     self.run_retry_scheduler(
@@ -632,79 +495,6 @@ impl ClientEngineActor {
                             command_descriptor: command_descriptor.clone(),
                         }
                     });
-                    if is_relay_control_command(&envelope.command) {
-                        if let Some(key) = relay_control_coalesce_key(&envelope.command)
-                            && self.relay_control_queue.iter().any(|pending| {
-                                matches!(
-                                    &pending.operation,
-                                    RelayControlOperation::Command(command)
-                                        if relay_control_coalesce_key(command) == Some(key)
-                                )
-                            })
-                        {
-                            self.relay_control_coalesced =
-                                self.relay_control_coalesced.saturating_add(1);
-                            self.pending_engine_events.push(EngineEvent::Log {
-                                log: EngineLogEvent {
-                                    level: "info".to_owned(),
-                                    message: format!(
-                                        "relay_control_metrics depth={} rejected={} coalesced={}",
-                                        self.relay_control_queue.len(),
-                                        self.relay_control_rejected,
-                                        self.relay_control_coalesced
-                                    ),
-                                },
-                            });
-                            let _ = events
-                                .send(EngineEvent::Response {
-                                    request_id: envelope.request_id,
-                                    result: ResponseResult::Error {
-                                        code: "relay_control_coalesced".to_owned(),
-                                        message: "equivalent relay control request is already queued"
-                                            .to_owned(),
-                                    },
-                                })
-                                .await;
-                            continue;
-                        }
-                        if self.relay_control_queue.len() >= MAX_RELAY_CONTROL_QUEUE {
-                            self.relay_control_rejected =
-                                self.relay_control_rejected.saturating_add(1);
-                            self.pending_engine_events.push(EngineEvent::Log {
-                                log: EngineLogEvent {
-                                    level: "warn".to_owned(),
-                                    message: format!(
-                                        "relay_control_metrics depth={} rejected={} coalesced={}",
-                                        self.relay_control_queue.len(),
-                                        self.relay_control_rejected,
-                                        self.relay_control_coalesced
-                                    ),
-                                },
-                            });
-                            let _ = events
-                                .send(EngineEvent::Response {
-                                    request_id: envelope.request_id,
-                                    result: ResponseResult::Error {
-                                        code: "relay_control_queue_full".to_owned(),
-                                        message: "relay control queue is full; retry later".to_owned(),
-                                    },
-                                })
-                                .await;
-                            continue;
-                        }
-                        self.relay_control_queue.push_back(PendingRelayControl {
-                            request_id: envelope.request_id,
-                            respond: true,
-                            command_id,
-                            command_descriptor,
-                            operation: RelayControlOperation::Command(envelope.command),
-                        });
-                        self.start_next_relay_control(relay_control_outcomes.clone());
-                        if should_stop {
-                            break;
-                        }
-                        continue;
-                    }
                     match self.handle_command(envelope.command, idempotency.as_ref()) {
                         Ok((payload, runtime_events, connection_snapshot)) => {
                             if let Some(snapshot) = connection_snapshot {
@@ -866,9 +656,9 @@ impl ClientEngineActor {
             } => Some(removal_id.to_string()),
             _ => None,
         };
-        if capability_frame && self.connection_state != ConnectionState::Connected {
+        if capability_frame && (!self.network_online || self.socks5_url.is_none()) {
             return Err(EngineError::Transport(
-                "relay is not ready for capability bootstrap".to_owned(),
+                "Tor peer transport is not ready for capability bootstrap".to_owned(),
             ));
         }
         if !EPHEMERAL_MLS_DELIVERY_SAFE && !capability_frame {
@@ -948,80 +738,16 @@ impl ClientEngineActor {
         requires_ack: bool,
         removal_delivery_id: Option<String>,
     ) -> EngineResult<()> {
-        let policy = self.contact_transport_policy(installation_id)?;
-        // Capability control frames bootstrap the proof required by the P2P
-        // handshake. They must not be sent through that not-yet-authorized
-        // P2P channel. The relay only sees an opaque MLS ciphertext.
-        if capability_frame {
-            if self.connection_state != ConnectionState::Connected {
-                return Err(EngineError::Transport(
-                    "relay is not ready for capability bootstrap".to_owned(),
-                ));
-            }
-            let relay_envelope_id = uuid::Uuid::new_v4();
-            let delivery_id = requires_ack
-                .then(|| removal_delivery_id.unwrap_or_else(|| relay_envelope_id.to_string()));
-            if let Some(delivery_id) = &delivery_id {
-                self.database
-                    .put_capability_delivery(&CapabilityDeliveryRecord {
-                        delivery_id: delivery_id.clone(),
-                        contact_installation_id: installation_id.to_owned(),
-                        payload: payload.as_bytes().to_vec(),
-                        attempt_count: 0,
-                        next_attempt_at: self.clock.now_ms(),
-                        last_error: None,
-                        created_at: self.clock.now_ms(),
-                    })?;
-            }
-            return self.queue_relay_envelope(
-                relay_envelope_id,
-                installation_id,
-                &payload,
-                PendingRelayDelivery::Ephemeral {
-                    installation_id: installation_id.to_owned(),
-                    delivery_id,
-                },
-            );
-        }
-        let peer_result = if matches!(policy, ContactTransportPolicy::RelayOnly) {
-            Err(EngineError::Transport(
-                "peer route disabled by contact policy".to_owned(),
-            ))
-        } else {
-            let envelope_id = uuid::Uuid::new_v4();
-            self.queue_peer_payload(
-                envelope_id,
-                installation_id,
-                installation_id,
-                stable_message_sequence(envelope_id),
-                payload.clone().into_bytes(),
-                PeerDeliveryTag::Ephemeral,
-            )
-        };
-        if let Err(error) = peer_result {
-            if matches!(
-                policy,
-                ContactTransportPolicy::PeerWithRelayFallback | ContactTransportPolicy::RelayOnly
-            ) {
-                let relay_envelope_id = uuid::Uuid::new_v4();
-                if self
-                    .queue_relay_envelope(
-                        relay_envelope_id,
-                        installation_id,
-                        &payload,
-                        PendingRelayDelivery::Ephemeral {
-                            installation_id: installation_id.to_owned(),
-                            delivery_id: None,
-                        },
-                    )
-                    .is_ok()
-                {
-                    return Ok(());
-                }
-            }
-            return Err(error);
-        }
-        Ok(())
+        let _ = (capability_frame, requires_ack, removal_delivery_id);
+        let envelope_id = uuid::Uuid::new_v4();
+        self.queue_peer_payload(
+            envelope_id,
+            installation_id,
+            installation_id,
+            stable_message_sequence(envelope_id),
+            payload.into_bytes(),
+            PeerDeliveryTag::Ephemeral,
+        )
     }
 
     fn deliver_send_effect(&mut self, effect: RuntimeSendEffect) -> EngineResult<()> {
@@ -1101,11 +827,13 @@ impl ClientEngineActor {
             })?;
             let envelope_id = uuid::Uuid::new_v4();
             if self
-                .queue_relay_envelope(
+                .queue_peer_payload(
                     envelope_id,
                     &ack.contact_installation_id,
-                    &payload,
-                    PendingRelayDelivery::RelationshipRemovalAck {
+                    &ack.contact_installation_id,
+                    stable_message_sequence(envelope_id),
+                    payload.into_bytes(),
+                    PeerDeliveryTag::RelationshipRemovalAck {
                         removal_id: ack.removal_id.clone(),
                     },
                 )
@@ -1199,13 +927,6 @@ impl RuntimeTransport for EngineRuntimeTransport<'_> {
 
     fn status(&self) -> RuntimeTorStatus {
         self.status.clone()
-    }
-
-    fn update_profile(&mut self, nickname: &str) -> torchat_client_runtime::RuntimeResult<()> {
-        let _ = nickname;
-        Err(torchat_client_runtime::RuntimeError::Unavailable(
-            "relay HTTP effects must be executed outside RuntimeSession".to_owned(),
-        ))
     }
 
     fn refresh_pairing_code(
@@ -1403,13 +1124,10 @@ impl RetryPolicy {
         match kind {
             RetryKind::MessageSend | RetryKind::MessageAckDeadline => Self::DELIVERY,
             RetryKind::Receipt | RetryKind::ReadReceipt => Self::RECEIPT,
-            RetryKind::PendingWelcome
-            | RetryKind::PairingResponse
-            | RetryKind::ContactConfirmation
-            | RetryKind::PairingAcknowledgement => Self::PAIRING,
-            RetryKind::PeerEndpointBootstrap
-            | RetryKind::RelationshipRemoval
-            | RetryKind::RelationshipRemovalAck => Self::CONTROL_PLANE,
+            RetryKind::PendingWelcome | RetryKind::PairingResponse => Self::PAIRING,
+            RetryKind::RelationshipRemoval | RetryKind::RelationshipRemovalAck => {
+                Self::CONTROL_PLANE
+            }
         }
     }
 
@@ -1575,9 +1293,6 @@ mod retry_policy_tests {
             RetryKind::Receipt,
             RetryKind::PendingWelcome,
             RetryKind::PairingResponse,
-            RetryKind::PeerEndpointBootstrap,
-            RetryKind::ContactConfirmation,
-            RetryKind::PairingAcknowledgement,
             RetryKind::ReadReceipt,
             RetryKind::RelationshipRemoval,
             RetryKind::RelationshipRemovalAck,
@@ -1695,26 +1410,6 @@ fn error_code(error: &EngineError) -> &'static str {
     }
 }
 
-fn is_permanent_relay_bootstrap_error(error: &torchat_client_runtime::RuntimeError) -> bool {
-    use torchat_client_runtime::RuntimeError;
-
-    match error {
-        RuntimeError::InvalidCommand(_)
-        | RuntimeError::InvalidParams(_)
-        | RuntimeError::Crypto(_) => true,
-        RuntimeError::Transport(message) | RuntimeError::Unavailable(message) => {
-            let normalized = message.to_ascii_lowercase();
-            normalized.contains("invalid websocket scheme")
-                || normalized.contains("invalid onion")
-                || normalized.contains("invalid socks")
-                || normalized.contains("invalid bootstrap proof")
-                || normalized.contains("protocol version")
-        }
-        RuntimeError::NotFound(_) | RuntimeError::Conflict(_) | RuntimeError::Timeout(_) => false,
-        RuntimeError::Storage(_) => true,
-    }
-}
-
 fn relay_probe_state(
     phase: &torchat_client_runtime::RuntimeStatusPhase,
 ) -> torchat_client_runtime::TransportProbeState {
@@ -1769,7 +1464,7 @@ fn transport_status_event(
 mod tests {
     use super::{
         idempotency_descriptor, is_expected_peer_shutdown, peer_endpoint_requires_update,
-        protocol_nickname, relay_control_coalesce_key, runtime_phase_for_tor_ready,
+        protocol_nickname, runtime_phase_for_tor_ready,
     };
     use crate::EngineCommand;
     use crate::event::ConnectionState;
@@ -1790,24 +1485,6 @@ mod tests {
     #[test]
     fn protocol_nickname_uses_profile_when_present() {
         assert_eq!(protocol_nickname("abcdefgh12345678", " Alice "), "Alice");
-    }
-
-    #[test]
-    fn relay_control_coalescing_is_limited_to_refresh_like_commands() {
-        assert_eq!(
-            relay_control_coalesce_key(&EngineCommand::RefreshPairingCode),
-            Some("pairing_code_refresh")
-        );
-        assert_eq!(
-            relay_control_coalesce_key(&EngineCommand::PairingInbox),
-            Some("pairing_inbox")
-        );
-        assert_eq!(
-            relay_control_coalesce_key(&EngineCommand::SubmitPairingCode {
-                code: "ABC".to_owned()
-            }),
-            None
-        );
     }
 
     #[test]

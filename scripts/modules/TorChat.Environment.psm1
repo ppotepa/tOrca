@@ -80,15 +80,13 @@ function Get-TorChatEnvironmentState {
 
     if (Test-Path -LiteralPath $paths.RuntimeEnvironment) {
         foreach ($pair in (Read-TorChatEnvironmentFile -Path $paths.RuntimeEnvironment).GetEnumerator()) {
-            if ($pair.Key -in @('TORCHAT_ONION_URL','TORCHAT_DATABASE_PASSWORD','TORCHAT_PAIRING_SECRET')) {
+            if ($pair.Key -in @('TORCHAT_ONION_URL')) {
                 $values[$pair.Key] = $pair.Value
             }
         }
     }
 
-    if (-not $values['TORCHAT_DATABASE_PASSWORD']) { $values['TORCHAT_DATABASE_PASSWORD'] = New-TorChatSecret -Bytes 24 }
-    if (-not $values['TORCHAT_PAIRING_SECRET']) { $values['TORCHAT_PAIRING_SECRET'] = New-TorChatSecret -Bytes 32 }
-    if (-not $values['TORCHAT_TORKA_PAIRING_CODE']) { $values['TORCHAT_TORKA_PAIRING_CODE'] = '42424242' }
+    if (-not $values.ContainsKey('TORCHAT_TORKA_PAIRING_CODE')) { $values['TORCHAT_TORKA_PAIRING_CODE'] = '' }
     $values['TORCHAT_ENVIRONMENT'] = $Environment
 
     $state = [pscustomobject]@{ Paths = $paths; Values = $values }

@@ -70,7 +70,7 @@ impl ClientDatabase {
                         conversation_id: row.get("conversation_id")?,
                         original_sender: row.get("original_sender")?,
                         received_at: row.get("received_at")?,
-                        relay_payload: row.get("relay_payload")?,
+                        wire_ciphertext: row.get("wire_ciphertext")?,
                         state: row.get("state")?,
                         attempt_count: row.get::<_, i64>("attempt_count")? as u32,
                         next_attempt_at: row.get("next_attempt_at")?,
@@ -93,7 +93,7 @@ impl ClientDatabase {
                     value.conversation_id,
                     value.original_sender,
                     value.received_at,
-                    value.relay_payload,
+                    value.wire_ciphertext,
                     value.state,
                     i64::from(value.attempt_count),
                     value.next_attempt_at,
@@ -108,7 +108,7 @@ impl ClientDatabase {
     pub fn persist_receipt_encryption(
         &mut self,
         message_id: &str,
-        relay_payload: &[u8],
+        wire_ciphertext: &[u8],
         conversation_id: &str,
         snapshot: &[u8],
         next_attempt_at: i64,
@@ -120,7 +120,7 @@ impl ClientDatabase {
             .execute(
                 super::sql_catalog::receipts::PERSIST_RECEIPT_ENCRYPTION,
                 params![
-                    relay_payload,
+                    wire_ciphertext,
                     next_attempt_at,
                     last_error,
                     message_id,

@@ -106,15 +106,14 @@ def main():
     try:
         engine.command({"type": "bootstrap"}, timeout=30)
         engine.command({"type": "connect"}, timeout=30)
-        engine.wait_for_relay()
         command_until(
             engine,
             {"type": "set_nickname", "nickname": "IntegrationPeer"},
             deadline,
-            "relay profile update",
+            "local profile update",
         )
 
-        code = os.environ.get("TORCHAT_TORKA_PAIRING_CODE", "42424242").strip()
+        code = os.environ.get("TORCHAT_TORKA_PAIRING_CODE", "").strip()
         if not code:
             raise RuntimeError("TORCHAT_TORKA_PAIRING_CODE is required")
         # A previous successful smoke can leave the integration identity

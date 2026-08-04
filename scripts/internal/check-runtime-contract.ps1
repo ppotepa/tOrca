@@ -228,7 +228,6 @@ $generatedChecks = @(
             'const generatedTorPhases',
             'const generatedConnectionStates',
             'const generatedTransportPhases',
-            "'FORWARDED'",
             "'WELCOME_PREPARED'"
         )
     }

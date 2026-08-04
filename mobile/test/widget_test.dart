@@ -21,7 +21,6 @@ class _SplashRuntime implements ClientRuntime {
         torReady: true,
         peerListenerReady: true,
         onionServiceReady: true,
-        relayReady: true,
         generation: 1,
         detail: 'test runtime ready',
       );

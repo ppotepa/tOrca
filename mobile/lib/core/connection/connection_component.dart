@@ -2,7 +2,6 @@ enum ConnectionComponent {
   engine,
   localData,
   tor,
-  relay,
   peerListener,
   onionService,
 }

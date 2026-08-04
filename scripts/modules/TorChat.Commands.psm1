@@ -230,10 +230,18 @@ function Invoke-TorChatDeployCommand {
         [Parameter(Mandatory = $true)][string]$RunPolicy,
         [Parameter(Mandatory = $true)][string]$Readiness,
         [string]$Device,
+        [ValidateSet('prompt','emulator','android-desktop')][string]$ClientMode = 'android-desktop',
         [switch]$NoCache,
         [switch]$Confirm
     )
     Assert-TorChatCommandTarget -Target $Target -Allowed @('android','windows','all')
+    $effectiveTarget = $Target
+    if ($Target -eq 'all' -and $ClientMode -eq 'emulator') {
+        $effectiveTarget = 'android'
+        Write-TorChatInfo 'Client mode: Android emulator/device only.'
+    } elseif ($Target -eq 'all' -and $ClientMode -eq 'android-desktop') {
+        Write-TorChatInfo 'Client mode: Android APK + Windows desktop.'
+    }
     if ($OnionPolicy -eq 'rotate' -and -not $Confirm) {
         throw 'Onion rotation requires -Confirm.'
     }
@@ -280,10 +288,10 @@ function Invoke-TorChatDeployCommand {
         Import-TorChatEnvironmentState -EnvironmentState $EnvironmentState -RequireOnion
     }
 
-    if ($Target -in @('windows','all')) {
+    if ($effectiveTarget -in @('windows','all')) {
         Invoke-TorChatWindowsBuildPlan -Context $Context -EnvironmentState $EnvironmentState -BuildPolicy $BuildPolicy
     }
-    if ($Target -in @('android','all')) {
+    if ($effectiveTarget -in @('android','all')) {
         Invoke-TorChatAndroidBuildPlan -Context $Context -EnvironmentState $EnvironmentState -BuildPolicy $BuildPolicy
     }
 
@@ -295,7 +303,7 @@ function Invoke-TorChatDeployCommand {
     # consume their output afterwards: skipped stages have no device payload.
     if ($Context.DryRun) { return }
 
-    if ($Target -in @('android','all')) {
+    if ($effectiveTarget -in @('android','all')) {
         $resolveResult = Invoke-TorChatStage -Context $Context -Id 'device.android.resolve' -Name 'Resolve Android device' -Action {
             $resolved = Resolve-TorChatAndroidDevice -Context $Context -Device $Device -AllowMultiple:($Device -eq 'all')
             [string[]]$devices = @($resolved)
@@ -356,7 +364,7 @@ function Invoke-TorChatDeployCommand {
         }
     }
 
-    if ($Target -in @('windows','all')) {
+    if ($effectiveTarget -in @('windows','all')) {
         $skipWindowsRun = $RunPolicy -eq 'skip'
         if ($RunPolicy -eq 'start' -and $ClientDataPolicy -eq 'preserve' -and -not $skipWindowsRun) {
             $skipWindowsRun = (Get-TorChatWindowsStatus -Context $Context).State -eq 'Ready'
@@ -663,7 +671,7 @@ function Invoke-TorChatCommand {
             Invoke-TorChatBuildCommand -Context $Context -EnvironmentState $EnvironmentState -Target $Target -BuildPolicy $Options.BuildPolicy -NoCache:$Options.NoCache
         }
         'deploy' {
-            Invoke-TorChatDeployCommand -Context $Context -EnvironmentState $EnvironmentState -Target $Target -BuildPolicy $Options.BuildPolicy -OnionPolicy $Options.OnionPolicy -DatabasePolicy $Options.DatabasePolicy -ClientDataPolicy $Options.ClientDataPolicy -StackPolicy $Options.StackPolicy -InstallPolicy $Options.InstallPolicy -RunPolicy $Options.RunPolicy -Readiness $Options.Readiness -Device $Options.Device -NoCache:$Options.NoCache -Confirm:$Options.Confirm
+            Invoke-TorChatDeployCommand -Context $Context -EnvironmentState $EnvironmentState -Target $Target -BuildPolicy $Options.BuildPolicy -OnionPolicy $Options.OnionPolicy -DatabasePolicy $Options.DatabasePolicy -ClientDataPolicy $Options.ClientDataPolicy -StackPolicy $Options.StackPolicy -InstallPolicy $Options.InstallPolicy -RunPolicy $Options.RunPolicy -Readiness $Options.Readiness -Device $Options.Device -ClientMode $Options.ClientMode -NoCache:$Options.NoCache -Confirm:$Options.Confirm
         }
         'run' {
             Invoke-TorChatRunCommand -Context $Context -EnvironmentState $EnvironmentState -Target $Target -ClientDataPolicy $Options.ClientDataPolicy -StackPolicy $Options.StackPolicy -Readiness $Options.Readiness -ReadyAttempts $Options.ReadyAttempts -Device $Options.Device

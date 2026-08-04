@@ -40,30 +40,15 @@ function Ensure-TorChatEnvironment {
         if (-not $values['TORCHAT_COMPOSE_PROJECT']) { $values['TORCHAT_COMPOSE_PROJECT'] = 'torchat-local' }
         if (-not $values['TORCHAT_HTTP_PORT']) { $values['TORCHAT_HTTP_PORT'] = '8080' }
         if (-not $values['TORCHAT_SOCKS_PORT']) { $values['TORCHAT_SOCKS_PORT'] = '9050' }
-        if (-not $values['TORCHAT_DATABASE_PASSWORD']) {
-            $bytes = New-Object byte[] 24
-            $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
-            try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
-            $values['TORCHAT_DATABASE_PASSWORD'] = [Convert]::ToBase64String($bytes).Replace('+','A').Replace('/','B').Replace('=','')
-        }
     }
     if (Test-Path -LiteralPath $paths.RuntimeEnvironment) {
         # The manifest owns stable behaviour (ports, profile and project
         # name). Runtime state owns only generated or secret values.
         foreach ($pair in (Read-TorChatEnvironmentFile $paths.RuntimeEnvironment).GetEnumerator()) {
-            if ($pair.Key -in @('TORCHAT_ONION_URL', 'TORCHAT_DATABASE_PASSWORD', 'TORCHAT_PAIRING_SECRET')) {
+            if ($pair.Key -in @('TORCHAT_ONION_URL')) {
                 $values[$pair.Key] = $pair.Value
             }
         }
-    }
-    if (-not $values['TORCHAT_PAIRING_SECRET']) {
-        $bytes = New-Object byte[] 32
-        $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
-        try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
-        $values['TORCHAT_PAIRING_SECRET'] = [Convert]::ToBase64String($bytes).Replace('+','A').Replace('/','B').Replace('=','')
-    }
-    if (-not $values['TORCHAT_TORKA_PAIRING_CODE']) {
-        $values['TORCHAT_TORKA_PAIRING_CODE'] = '42424242'
     }
     $values['TORCHAT_ENVIRONMENT'] = $Environment
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)

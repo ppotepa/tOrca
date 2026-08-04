@@ -8,7 +8,6 @@ String localizeProblem(
 ) => switch (problem.code) {
   UserProblemCode.pairingWelcomeStale => l10n.problemPairingWelcomeStale,
   UserProblemCode.pairingCodeInvalid => l10n.problemPairingCodeInvalid,
-  UserProblemCode.pairingRequiresRelay => l10n.problemPairingRequiresRelay,
   UserProblemCode.nicknameRequired => l10n.problemNicknameRequired,
   UserProblemCode.inviteCodeUnavailable => l10n.problemInviteCodeUnavailable,
   UserProblemCode.pairingGatewayUnavailable =>

@@ -135,32 +135,25 @@ impl ClientEngineActor {
             sequence,
             self.clock.now_ms() / 1_000,
         )?;
-        let policy = self.contact_transport_policy(&message.recipient_installation_id)?;
         self.pending_engine_events.push(EngineEvent::Log {
             log: EngineLogEvent {
                 level: "info".to_owned(),
                 message: format!(
-                    "delivery route selected message_id={} policy={:?}",
-                    message.message_id, policy
+                    "delivery route selected message_id={} policy=peer_only",
+                    message.message_id
                 ),
             },
         });
-        let peer_result = if matches!(policy, ContactTransportPolicy::RelayOnly) {
-            Err(EngineError::Transport(
-                "peer route disabled by contact policy".to_owned(),
-            ))
-        } else {
-            self.queue_peer_payload(
-                envelope_id,
-                &message.recipient_installation_id,
-                &message.conversation_id,
-                sequence,
-                payload.clone().into_bytes(),
-                PeerDeliveryTag::Message {
-                    message_id: message.message_id.clone(),
-                },
-            )
-        };
+        let peer_result = self.queue_peer_payload(
+            envelope_id,
+            &message.recipient_installation_id,
+            &message.conversation_id,
+            sequence,
+            payload.clone().into_bytes(),
+            PeerDeliveryTag::Message {
+                message_id: message.message_id.clone(),
+            },
+        );
         if let Err(error) = peer_result {
             return self.handle_failed_peer_message_delivery(
                 &message.recipient_installation_id,
@@ -177,46 +170,6 @@ impl ClientEngineActor {
         message_id: &str,
         error: &str,
     ) -> EngineResult<Vec<torchat_client_runtime::RuntimeEvent>> {
-        let policy = self.contact_transport_policy(installation_id)?;
-        let payload = self
-            .database
-            .message(message_id)?
-            .and_then(|message| message.wire_ciphertext)
-            .ok_or_else(|| {
-                EngineError::Storage("outbound wire ciphertext is missing".to_owned())
-            })?;
-        let payload = String::from_utf8(payload).map_err(|decode_error| {
-            EngineError::Storage(format!(
-                "stored wire ciphertext is invalid UTF-8: {decode_error}"
-            ))
-        })?;
-        let envelope_id = uuid::Uuid::parse_str(message_id)
-            .map_err(|parse_error| EngineError::InvalidCommand(parse_error.to_string()))?;
-        if matches!(
-            policy,
-            ContactTransportPolicy::PeerWithRelayFallback | ContactTransportPolicy::RelayOnly
-        ) && self
-            .queue_relay_envelope(
-                envelope_id,
-                installation_id,
-                &payload,
-                PendingRelayDelivery::Message {
-                    message_id: message_id.to_owned(),
-                },
-            )
-            .is_ok()
-        {
-            self.pending_engine_events.push(EngineEvent::Log {
-                log: EngineLogEvent {
-                    level: "warn".to_owned(),
-                    message: format!(
-                        "delivery route fallback message_id={} route=relay error={error}",
-                        message_id
-                    ),
-                },
-            });
-            return Ok(Vec::new());
-        }
         let delivery = self.database.outbound_delivery(message_id)?;
         let attempt = delivery
             .as_ref()

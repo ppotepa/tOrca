@@ -23,19 +23,13 @@ void main() {
     expect(wrapper, contains("export 'app_controller_base.dart';"));
   });
 
-  test('warmup phases are awaited in canonical order', () {
+  test('warmup opens on local data without a global relay gate', () {
     final source = File(
       'lib/app/sequential_app_controller.dart',
     ).readAsStringSync();
     const phases = [
       'SequentialStartupPhase.engine',
       'SequentialStartupPhase.localData',
-      'SequentialStartupPhase.tor',
-      'SequentialStartupPhase.peerListener',
-      'SequentialStartupPhase.onionService',
-      'SequentialStartupPhase.relay',
-      'SequentialStartupPhase.communication',
-      'SequentialStartupPhase.complete',
     ];
 
     var previous = -1;
@@ -45,10 +39,9 @@ void main() {
       previous = current;
     }
 
-    expect(source, contains('await _startup.waitForTor(generation)'));
-    expect(source, contains('await _startup.waitForRelay(generation)'));
-    expect(source, contains('await _startup.waitForPeerListener(generation)'));
-    expect(source, contains('await _waitForOnionService(generation)'));
+    expect(source, isNot(contains('waitForRelay')));
+    expect(source, isNot(contains('observeRelayReady')));
+    expect(source, contains('Local data is the shell gate'));
   });
 
   test(

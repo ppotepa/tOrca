@@ -10,6 +10,8 @@ pub mod application;
 pub mod mls;
 pub mod peer_protocol;
 pub mod relay;
+pub mod rendezvous;
+pub mod rendezvous_crypto;
 
 pub const PROTOCOL_VERSION: u16 = 1;
 
