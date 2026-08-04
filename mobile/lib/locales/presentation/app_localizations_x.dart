@@ -136,6 +136,8 @@ extension AppLocalizationsUiCopy on AppLocalizations {
   String get uiHideDetails => _isPolish ? 'Ukryj szczegóły' : 'Hide details';
   String get uiAccount => _isPolish ? 'Konto' : 'Account';
   String get uiSettings => _isPolish ? 'Ustawienia' : 'Settings';
+  String get uiShowApp => _isPolish ? 'Pokaż TorChat' : 'Show TorChat';
+  String get uiExitApp => _isPolish ? 'Zakończ' : 'Exit';
 
   String uiPairingAccepted(String name) => _isPolish
       ? '$name przyjął Twoje zaproszenie.'
