@@ -1,4 +1,4 @@
-include!("legacy.rs");
+include!("state.rs");
 
 mod command_pipeline;
 mod commands;
