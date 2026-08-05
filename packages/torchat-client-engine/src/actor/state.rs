@@ -216,8 +216,6 @@ impl ClientEngineActor {
     ) -> EngineResult<Self> {
         let identity = identity_from_config(&config)?;
         let mut database = ClientDatabase::open(&config.database_path, &config.database_key)?;
-        // Recover claims left by a crashed/restarted process before loading
-        // the technical state. Durable queues remain eligible for retry.
         database.requeue_after_disconnect(unix_ms())?;
         database.requeue_peer_deliveries(unix_ms())?;
         seed_runtime_identity(&mut database, &identity)?;
@@ -372,11 +370,6 @@ impl ClientEngineActor {
         conversation_id: &str,
         application: ApplicationPayloadV1,
     ) -> EngineResult<()> {
-        // OpenMLS application encryption advances the sender generation. A
-        // typing/presence/read frame cannot use a lossy latest-only queue:
-        // dropping it would make the next durable message undecryptable.
-        // Keep these signals off until they use a non-ratcheting authenticated
-        // channel or the same durable delivery semantics as chat messages.
         const EPHEMERAL_MLS_DELIVERY_SAFE: bool = false;
         let capability_frame = matches!(
             &application,
@@ -496,10 +489,6 @@ impl ClientEngineActor {
             return Ok(());
         }
         if let Some(pairing) = effect.pairing().cloned() {
-            // Accepted rendezvous pairings deliver the MLS Welcome directly
-            // from accept_invite. The retry effect must not reuse the original
-            // ContactInvite as a RelayPayload response. Only rejection uses
-            // the generic envelope path.
             if pairing.kind == torchat_runtime::PairingSendKind::Offer {
                 return Ok(());
             }
@@ -668,37 +657,8 @@ impl RuntimeTransport for EngineRuntimeTransport<'_> {
     fn status(&self) -> RuntimeTorStatus {
         self.status.clone()
     }
-
-    fn refresh_pairing_code(
-        &mut self,
-    ) -> torchat_runtime::RuntimeResult<torchat_runtime::InviteCode> {
-        Err(torchat_runtime::RuntimeError::Unavailable(
-            "relay effects must be executed outside RuntimeSession".to_owned(),
-        ))
-    }
-
-    fn submit_pairing_code(
-        &mut self,
-        code: &str,
-    ) -> torchat_runtime::RuntimeResult<torchat_runtime::PairingItem> {
-        let _ = code;
-        Err(torchat_runtime::RuntimeError::Unavailable(
-            "relay effects must be executed outside RuntimeSession".to_owned(),
-        ))
-    }
-
-    fn pairing_inbox(
-        &mut self,
-    ) -> torchat_runtime::RuntimeResult<Vec<torchat_runtime::PairingItem>> {
-        Err(torchat_runtime::RuntimeError::Unavailable(
-            "relay effects must be executed outside RuntimeSession".to_owned(),
-        ))
-    }
 }
 
-/// Couples an idempotency key to the complete command payload, not merely to
-/// its command kind. A caller reusing an id for a different recipient/body is
-/// rejected instead of receiving a stale success response.
 fn idempotency_descriptor(command: &EngineCommand, command_type: &str) -> String {
     let encoded = serde_json::to_vec(command).unwrap_or_default();
     let digest = URL_SAFE_NO_PAD.encode(Sha256::digest(encoded));
@@ -751,9 +711,6 @@ fn protocol_nickname(installation_id: &str, nickname: &str) -> String {
     format!("peer-{suffix}")
 }
 
-/// Loads MLS state with an optional platform secure-store anti-rollback gate.
-/// Hosts that have a secure anchor must pass it here before exposing the
-/// conversations to the actor.
 pub(crate) fn load_engine_technical_state_with_anchor(
     database: &ClientDatabase,
     mut anchor: Option<&mut dyn MlsEpochAnchor<Error = EngineError>>,
@@ -893,9 +850,6 @@ pub(super) trait RetryJitter {
     fn sample(&mut self, upper_inclusive_ms: i64) -> i64;
 }
 
-/// Injectable retry randomness boundary used by deterministic resilience
-/// tests. Production uses `SystemRetryJitter`; harnesses can provide a fixed
-/// sequence without touching scheduling logic.
 pub(super) trait RetryRandom: RetryJitter {}
 
 impl<T: RetryJitter> RetryRandom for T {}
@@ -1173,7 +1127,7 @@ fn relay_probe_state(
     }
 }
 
-#[allow(clippy::too_many_arguments)] // mirrors the generated transport-status contract.
+#[allow(clippy::too_many_arguments)]
 fn transport_status_event(
     component: torchat_runtime::TransportComponent,
     state: torchat_runtime::TransportProbeState,
