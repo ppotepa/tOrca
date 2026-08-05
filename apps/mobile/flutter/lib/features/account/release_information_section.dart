@@ -21,6 +21,7 @@ class ReleaseInformationSection extends StatefulWidget {
 
 class _ReleaseInformationSectionState
     extends State<ReleaseInformationSection> {
+  bool _checkingUpdate = false;
   bool _exportingDiagnostics = false;
   bool _resettingProfile = false;
 
@@ -31,15 +32,53 @@ class _ReleaseInformationSectionState
       ClipboardData(text: TorcaReleaseInfo.diagnosticLabel),
     );
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          _polish
-              ? 'Skopiowano informacje o wersji.'
-              : 'Release information copied.',
-        ),
-      ),
+    _showMessage(
+      _polish
+          ? 'Skopiowano informacje o wersji.'
+          : 'Release information copied.',
     );
+  }
+
+  Future<void> _checkUpdate() async {
+    if (_checkingUpdate) return;
+    setState(() => _checkingUpdate = true);
+    try {
+      final result = await PlatformServices.current.updates.selectAndVerifyManifest();
+      if (!mounted || result == null) return;
+      if (!result.updateAvailable) {
+        _showMessage(
+          _polish
+              ? 'Ten build Torca jest aktualny względem wybranego manifestu.'
+              : 'This Torca build is current for the selected manifest.',
+        );
+        return;
+      }
+      final artifact = result.artifact;
+      if (artifact == null) {
+        _showMessage(
+          _polish
+              ? 'Manifest jest poprawny, ale nie zawiera artefaktu dla tej platformy.'
+              : 'The manifest is valid but has no artifact for this platform.',
+        );
+        return;
+      }
+      await Clipboard.setData(ClipboardData(text: artifact.url.toString()));
+      if (!mounted) return;
+      _showMessage(
+        _polish
+            ? 'Dostępna jest Torca ${result.manifest.version}+${result.manifest.build}. Zweryfikowany adres pobrania skopiowano do schowka.'
+            : 'Torca ${result.manifest.version}+${result.manifest.build} is available. The verified download URL was copied.',
+      );
+    } catch (_) {
+      if (!mounted) return;
+      _showMessage(
+        _polish
+            ? 'Manifest aktualizacji jest niedostępny, uszkodzony albo ma nieprawidłowy podpis.'
+            : 'The update manifest is unavailable, malformed or has an invalid signature.',
+      );
+    } finally {
+      if (mounted) setState(() => _checkingUpdate = false);
+    }
   }
 
   Future<void> _exportDiagnostics() async {
@@ -48,25 +87,17 @@ class _ReleaseInformationSectionState
     try {
       final result = await PlatformServices.current.diagnostics.export();
       if (!mounted || result == null) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            _polish
-                ? 'Zapisano zredagowaną diagnostykę: ${result.path}'
-                : 'Sanitized diagnostics saved: ${result.path}',
-          ),
-        ),
+      _showMessage(
+        _polish
+            ? 'Zapisano zredagowaną diagnostykę: ${result.path}'
+            : 'Sanitized diagnostics saved: ${result.path}',
       );
     } catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            _polish
-                ? 'Nie udało się wyeksportować diagnostyki.'
-                : 'Unable to export diagnostics.',
-          ),
-        ),
+      _showMessage(
+        _polish
+            ? 'Nie udało się wyeksportować diagnostyki.'
+            : 'Unable to export diagnostics.',
       );
     } finally {
       if (mounted) setState(() => _exportingDiagnostics = false);
@@ -148,14 +179,10 @@ class _ReleaseInformationSectionState
     try {
       await PlatformServices.current.profileReset.resetLocalProfile();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            _polish
-                ? 'Profil został usunięty. Uruchom Torca ponownie.'
-                : 'The profile was deleted. Restart Torca.',
-          ),
-        ),
+      _showMessage(
+        _polish
+            ? 'Profil został usunięty. Uruchom Torca ponownie.'
+            : 'The profile was deleted. Restart Torca.',
       );
     } catch (_) {
       if (!mounted) return;
@@ -163,6 +190,12 @@ class _ReleaseInformationSectionState
     } finally {
       if (mounted) setState(() => _resettingProfile = false);
     }
+  }
+
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
   }
 
   @override
@@ -178,6 +211,21 @@ class _ReleaseInformationSectionState
                   ? 'Kanał: ${TorcaReleaseInfo.channel} · commit ${TorcaReleaseInfo.shortCommit}'
                   : 'Channel: ${TorcaReleaseInfo.channel} · commit ${TorcaReleaseInfo.shortCommit}',
               onTap: _copy,
+            ),
+            const Divider(height: 1),
+            ActionTile(
+              leading: const Icon(Icons.system_update_alt_outlined),
+              title: _polish
+                  ? 'Sprawdź plik aktualizacji'
+                  : 'Check update manifest',
+              subtitle: _polish
+                  ? 'Weryfikuje lokalny manifest i podpis Ed25519 bez połączenia sieciowego.'
+                  : 'Verifies a local manifest and Ed25519 signature without a network connection.',
+              busy: _checkingUpdate,
+              busyLabel: _polish
+                  ? 'Weryfikowanie aktualizacji…'
+                  : 'Verifying update…',
+              onTap: _checkUpdate,
             ),
             const Divider(height: 1),
             ActionTile(
