@@ -23,6 +23,16 @@ void main() {
       '_lastPairingSync',
       '_autoTrustInFlight',
       '_lastAutoOpenedContactId',
+      '_maybeAutoPairTorka',
+      '_runTorkaWatchdogTick',
+      '_ensureTorkaWatchdog',
+      'debugTorkaPairingCodeOverride',
+      'debugTorkaWatchdogIntervalOverride',
+      'debugTorkaWatchdogMaxAttemptsOverride',
+      'refreshPairingAndApplication',
+      'forcePairing',
+      'allowAutoTorka',
+      'includePairing',
     ];
 
     for (final symbol in forbidden) {
@@ -37,6 +47,18 @@ void main() {
       File('lib/app/pairing_recovery_app_controller.dart').existsSync(),
       isFalse,
     );
+  });
+
+  test('repository requires one authoritative application projection', () {
+    final source = File(
+      'lib/core/runtime/runtime_repository.dart',
+    ).readAsStringSync();
+
+    expect(source, contains('_requireProjectionProvider'));
+    expect(source, contains('schema 2 is required'));
+    expect(source.contains('_runtime.listPairings()'), isFalse);
+    expect(source.contains('refreshPairingAndApplication'), isFalse);
+    expect(source.contains('includePairing'), isFalse);
   });
 
   test('presentation controller does not schedule domain retry', () {
