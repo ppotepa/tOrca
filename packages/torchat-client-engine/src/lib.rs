@@ -7,6 +7,7 @@ pub mod event;
 pub mod fault_injection;
 mod input;
 mod logging;
+mod output;
 pub mod peer;
 mod processing;
 pub mod probing;
