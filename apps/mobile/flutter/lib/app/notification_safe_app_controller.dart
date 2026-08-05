@@ -68,14 +68,8 @@ class NotificationSafeAppController extends PresentationAppController {
   }
 
   @override
-  Future<void> refreshData({
-    bool forcePairing = false,
-    bool allowAutoTorka = true,
-  }) async {
-    await super.refreshData(
-      forcePairing: forcePairing,
-      allowAutoTorka: allowAutoTorka,
-    );
+  Future<void> refreshData() async {
+    await super.refreshData();
     _hideRemovedRelationships();
   }
 
@@ -145,7 +139,7 @@ class NotificationSafeAppController extends PresentationAppController {
           .read(base.runtimeRepositoryProvider)
           .removeRelationship(contact.id, preserveHistory: preserveHistory);
     }
-    await super.refreshData(forcePairing: false, allowAutoTorka: false);
+    await super.refreshData();
     _hideRemovedRelationships();
   }
 
