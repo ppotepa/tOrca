@@ -8,7 +8,7 @@ use crate::{
 };
 
 impl ClientEngineActor {
-    pub(super) fn process_command_input(
+    pub(in crate::actor) fn process_command_input(
         &mut self,
         input_id: uuid::Uuid,
         envelope: EngineCommandEnvelope,
@@ -124,7 +124,7 @@ impl ClientEngineActor {
         result
     }
 
-    pub(super) fn process_effect_outcome(
+    pub(in crate::actor) fn process_effect_outcome(
         &mut self,
         outcome: EngineEffectOutcome,
     ) -> EngineProcessingResult {
