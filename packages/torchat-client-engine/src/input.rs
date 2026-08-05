@@ -1,4 +1,8 @@
-use crate::{EngineCommandEnvelope, PlatformFact, peer::PeerTransportEvent, relay::RelayEvent};
+use crate::{
+    EngineCommand, EngineCommandEnvelope, PlatformFact,
+    peer::PeerTransportEvent,
+    relay::RelayEvent,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum EngineInputSource {
@@ -63,14 +67,32 @@ pub(crate) enum EngineInput {
 
 impl EngineInputEnvelope {
     pub(crate) fn command(enqueued_at_ms: i64, envelope: EngineCommandEnvelope) -> Self {
-        let correlation_id = Some(envelope.request_id.clone());
-        Self {
-            input_id: uuid::Uuid::new_v4(),
-            correlation_id,
-            causation_id: None,
-            source: EngineInputSource::ClientApi,
-            enqueued_at_ms,
-            input: EngineInput::Command(envelope),
+        let EngineCommandEnvelope {
+            request_id,
+            command_id,
+            command,
+        } = envelope;
+        match command {
+            EngineCommand::PlatformFact { fact } => Self::platform_fact(
+                enqueued_at_ms,
+                Some(CommandRequestContext {
+                    request_id,
+                    command_id,
+                }),
+                fact,
+            ),
+            command => Self {
+                input_id: uuid::Uuid::new_v4(),
+                correlation_id: Some(request_id.clone()),
+                causation_id: None,
+                source: EngineInputSource::ClientApi,
+                enqueued_at_ms,
+                input: EngineInput::Command(EngineCommandEnvelope {
+                    request_id,
+                    command_id,
+                    command,
+                }),
+            },
         }
     }
 
@@ -138,6 +160,21 @@ impl EngineInputEnvelope {
         }
     }
 
+    pub(crate) fn into_command_envelope(self) -> Option<EngineCommandEnvelope> {
+        match self.input {
+            EngineInput::Command(envelope) => Some(envelope),
+            EngineInput::PlatformFact {
+                request: Some(request),
+                fact,
+            } => Some(EngineCommandEnvelope {
+                request_id: request.request_id,
+                command_id: request.command_id,
+                command: EngineCommand::PlatformFact { fact },
+            }),
+            _ => None,
+        }
+    }
+
     pub(crate) fn kind(&self) -> EngineInputKind {
         match &self.input {
             EngineInput::Command(_) => EngineInputKind::Command,
@@ -154,7 +191,6 @@ impl EngineInputEnvelope {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::EngineCommand;
 
     #[test]
     fn command_input_preserves_request_correlation() {
@@ -171,6 +207,28 @@ mod tests {
         assert_eq!(input.source, EngineInputSource::ClientApi);
         assert_eq!(input.enqueued_at_ms, 123);
         assert_eq!(input.kind(), EngineInputKind::Command);
+    }
+
+    #[test]
+    fn platform_command_becomes_platform_input_without_losing_request_context() {
+        let input = EngineInputEnvelope::command(
+            321,
+            EngineCommandEnvelope {
+                request_id: "request-platform".to_owned(),
+                command_id: Some("command-platform".to_owned()),
+                command: EngineCommand::PlatformFact {
+                    fact: PlatformFact::NetworkChanged { online: false },
+                },
+            },
+        );
+
+        assert_eq!(input.kind(), EngineInputKind::PlatformFact);
+        assert_eq!(input.source, EngineInputSource::Platform);
+        let restored = input
+            .into_command_envelope()
+            .expect("platform input restores command on send failure");
+        assert_eq!(restored.request_id, "request-platform");
+        assert_eq!(restored.command_id.as_deref(), Some("command-platform"));
     }
 
     #[test]
