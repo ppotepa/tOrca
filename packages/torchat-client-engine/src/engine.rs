@@ -6,7 +6,7 @@ use crate::{
     ClientEngineActor, EngineCommand, EngineCommandEnvelope, EngineConfig, EngineError,
     EngineEvent, EngineFatalError, EngineResult, PlatformFact, ResponseResult,
     event::EngineEventReceiver,
-    input::{EngineInput, EngineInputEnvelope},
+    input::EngineInputEnvelope,
     logging::StartupJournal,
     output::{PendingResponseRegistry, spawn_event_router},
 };
@@ -28,9 +28,10 @@ impl EngineCommandSender {
     ) -> Result<(), mpsc::error::SendError<EngineCommandEnvelope>> {
         let input = EngineInputEnvelope::command(unix_ms(), envelope);
         self.inbox.send(input).await.map_err(|error| {
-            let EngineInput::Command(envelope) = error.0.input else {
-                unreachable!("command sender only submits command inputs");
-            };
+            let envelope = error
+                .0
+                .into_command_envelope()
+                .expect("command sender only submits command or platform inputs");
             mpsc::error::SendError(envelope)
         })
     }
