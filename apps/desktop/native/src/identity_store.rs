@@ -8,7 +8,7 @@ use anyhow::{Context, Result, bail};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use directories::ProjectDirs;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use torchat_core::Identity;
 #[cfg(not(feature = "os-vault"))]
 use zeroize::Zeroizing;
@@ -167,11 +167,10 @@ pub fn reset_profile(path: Option<&Path>, tor_data_dir: Option<&Path>) -> Result
         FileSecretStore::new(&key_path).remove()?;
     }
 
-    remove_profile_files(&identity_path, &database_path, &key_path)?;
     if let Some(tor_data_dir) = tor_data_dir {
         remove_managed_tor_data(&root, tor_data_dir)?;
     }
-    Ok(())
+    remove_profile_files(&identity_path, &database_path, &key_path)
 }
 
 fn remove_profile_files(
@@ -205,20 +204,37 @@ fn remove_profile_files(
 }
 
 fn remove_managed_tor_data(profile_root: &Path, tor_data_dir: &Path) -> Result<()> {
-    let absolute = if tor_data_dir.is_absolute() {
+    if tor_data_dir
+        .components()
+        .any(|component| matches!(component, Component::ParentDir))
+    {
+        bail!(
+            "refusing to delete Tor data through a parent-directory component: {}",
+            tor_data_dir.display()
+        );
+    }
+    let candidate = if tor_data_dir.is_absolute() {
         tor_data_dir.to_path_buf()
     } else {
         std::env::current_dir()
             .context("resolve current directory for Tor data reset")?
             .join(tor_data_dir)
     };
-    if !absolute.starts_with(profile_root) {
+    if !candidate.exists() {
+        return Ok(());
+    }
+
+    let canonical_root = fs::canonicalize(profile_root)
+        .with_context(|| format!("resolve Torca profile root {}", profile_root.display()))?;
+    let canonical_target = fs::canonicalize(&candidate)
+        .with_context(|| format!("resolve managed Tor data {}", candidate.display()))?;
+    if canonical_target == canonical_root || !canonical_target.starts_with(&canonical_root) {
         bail!(
-            "refusing to delete Tor data outside the Torca profile: {}",
-            absolute.display()
+            "refusing to delete Tor data outside a child of the Torca profile: {}",
+            canonical_target.display()
         );
     }
-    remove_path_if_present(&absolute)
+    remove_path_if_present(&canonical_target)
 }
 
 fn remove_path_if_present(path: &Path) -> Result<()> {
@@ -288,6 +304,33 @@ mod tests {
         assert!(!identity.exists());
         assert!(!database.exists());
         assert!(!root.join("engine-logs").exists());
+        assert!(keep.exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn managed_tor_reset_rejects_parent_traversal_and_profile_root() {
+        let root = std::env::temp_dir().join(format!("torca-tor-reset-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(root.join("tor-data")).unwrap();
+
+        assert!(remove_managed_tor_data(&root, Path::new("../tor-data")).is_err());
+        assert!(remove_managed_tor_data(&root, &root).is_err());
+        assert!(root.exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn managed_tor_reset_removes_only_a_canonical_child() {
+        let root = std::env::temp_dir().join(format!("torca-tor-reset-{}", uuid::Uuid::new_v4()));
+        let tor_data = root.join("tor-data");
+        fs::create_dir_all(&tor_data).unwrap();
+        fs::write(tor_data.join("state"), b"test").unwrap();
+        let keep = root.join("keep.txt");
+        fs::write(&keep, b"keep").unwrap();
+
+        remove_managed_tor_data(&root, &tor_data).unwrap();
+
+        assert!(!tor_data.exists());
         assert!(keep.exists());
         let _ = fs::remove_dir_all(root);
     }
