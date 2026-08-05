@@ -50,10 +50,6 @@ impl EngineRelay for RelayEffectPlaceholder {
         busy()
     }
 
-    fn submit_pairing_code(&mut self, _code: &str) -> RuntimeResult<PairingItem> {
-        busy()
-    }
-
     fn submit_pairing_code_with_offer(
         &mut self,
         _code: &str,
