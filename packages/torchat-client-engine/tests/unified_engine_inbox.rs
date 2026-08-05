@@ -82,6 +82,10 @@ fn client_commands_enter_the_unified_inbox_before_actor_dispatch() {
         !source.contains("fn unified_command_channel"),
         "the temporary command-only forwarder must not return",
     );
+    assert!(
+        !source.contains("actor.run("),
+        "ClientEngine must not reactivate the legacy multi-receiver actor loop",
+    );
 }
 
 #[test]
@@ -168,18 +172,24 @@ fn blocking_rendezvous_operations_execute_outside_the_actor() {
         .expect("relay effect source is readable");
 
     for symbol in [
+        "runtime.prepare_refresh_pairing_code()",
+        "runtime.prepare_submit_pairing_code(code)",
+        "runtime.prepare_cancel_pairing(&pairing_id)",
         "RelayEffectOperation::RefreshPairingCode",
         "RelayEffectOperation::SubmitPairingCode",
         "RelayEffectOperation::CancelPairing",
         "process_effect_outcome",
         "RelayEffectPlaceholder::default()",
         "take_deferred_control",
+        "runtime.confirm_pairing_cancelled(&pairing_id)",
     ] {
         assert!(commands.contains(symbol), "missing actor effect boundary: {symbol}");
     }
     assert!(host.contains("spawn_engine_effect"));
     for symbol in [
         "tokio::task::spawn_blocking",
+        "std::panic::catch_unwind",
+        "RelayEffectResult::WorkerFailed",
         "EngineInputEnvelope::effect_outcome_correlated",
         "struct RelayEffectPlaceholder",
         "submit_pairing_code_with_offer",
