@@ -1,0 +1,10 @@
+Torca 0.3.8 — storage capability traits
+
+Implemented:
+- explicit storage capabilities for identity, profile, pairing, contacts, relationships,
+  conversations, messages, receipts, delivery and endpoint capabilities,
+- blanket adapters over the existing RuntimeStorage implementation,
+- pairing feature depends on PairingStorage instead of the full storage surface,
+- RuntimeStorage remains the compatibility aggregate while feature modules migrate incrementally.
+
+Validation intentionally not run in this batch.

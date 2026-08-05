@@ -14,6 +14,7 @@ pub mod retry;
 pub mod runtime;
 pub mod session;
 pub mod storage;
+pub mod storage_capabilities;
 pub mod testing;
 pub mod transport;
 
@@ -69,6 +70,10 @@ pub use pairing_rules::{expire_pairing_state, pairing_can_archive, pairing_is_ac
 pub use runtime::ClientRuntime;
 pub use session::RuntimeSession;
 pub use storage::{RelationshipTransition, RuntimeStorage};
+pub use storage_capabilities::{
+    CapabilityStorage, ContactStorage, ConversationStorage, DeliveryStorage, IdentityStorage,
+    MessageStorage, PairingStorage, ProfileStorage, ReceiptStorage, RelationshipStorage,
+};
 pub use transport::RuntimeTransport;
 
 #[cfg(test)]
@@ -87,15 +92,9 @@ mod tests {
         assert_eq!(fixture.contact.verification, VerificationState::Verified);
         assert_eq!(fixture.conversation.status, ConversationState::Active);
         assert_eq!(fixture.message.state, crate::models::MessageState::Delivered);
-        assert_eq!(
-            fixture.message_send_effect.recipient_installation_id,
-            "installation-bob"
-        );
+        assert_eq!(fixture.message_send_effect.recipient_installation_id, "installation-bob");
         assert_eq!(fixture.message_transport_outcomes.len(), 3);
-        assert_eq!(
-            fixture.pairing_preparation.recipient_installation_id,
-            "installation-bob"
-        );
+        assert_eq!(fixture.pairing_preparation.recipient_installation_id, "installation-bob");
         assert_eq!(fixture.pairing_send_effects.len(), 2);
         assert_eq!(fixture.pairing_peer_outcomes.len(), 3);
         assert_eq!(fixture.pairing_sync_result.acknowledgements.len(), 1);
@@ -103,11 +102,7 @@ mod tests {
         assert_eq!(fixture.pairing_outbox_item.state, InviteState::Pending);
 
         let events: Vec<RuntimeEvent> = fixture.events.clone();
-        assert!(
-            events
-                .iter()
-                .any(|event| matches!(event, RuntimeEvent::RuntimeReady { protocol: 1 }))
-        );
+        assert!(events.iter().any(|event| matches!(event, RuntimeEvent::RuntimeReady { protocol: 1 })));
         assert!(events.iter().any(|event| matches!(event, RuntimeEvent::TorStatus { .. })));
     }
 
