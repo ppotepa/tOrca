@@ -13,6 +13,7 @@ $RepositoryRoot = (Resolve-Path -LiteralPath $RepositoryRoot).Path
 
 $requiredFiles = @(
     'release/version.json',
+    'release/update-manifest.schema.json',
     'LICENSE',
     'SECURITY.md',
     'PRIVACY.md',
@@ -22,10 +23,16 @@ $requiredFiles = @(
     'scripts/release/check-release-version.ps1',
     'scripts/release/torca-release-matrix.json',
     'scripts/release/validate-torca-release.ps1',
+    'scripts/release/collect-release-artifacts.ps1',
     'scripts/release/generate-release-metadata.ps1',
+    'scripts/release/generate-update-manifest.ps1',
     'scripts/release/release-torca.ps1',
     'apps/mobile/flutter/android/app/src/main/res/xml/data_extraction_rules.xml',
+    'apps/mobile/flutter/android/app/src/main/kotlin/org/torchat/mobile/EngineMethodDispatcher.kt',
+    'apps/mobile/flutter/android/app/src/main/kotlin/org/torchat/mobile/ProfileReset.kt',
     'apps/mobile/flutter/lib/core/release/release_info.dart',
+    'apps/mobile/flutter/lib/core/release/update_manifest.dart',
+    'apps/mobile/flutter/lib/platform/update_check_service.dart',
     'apps/mobile/flutter/lib/platform/diagnostics_export_service.dart',
     'apps/mobile/flutter/lib/platform/profile_reset_service.dart',
     'apps/mobile/flutter/lib/core/attachments/image_attachment_policy.dart',
@@ -33,8 +40,7 @@ $requiredFiles = @(
     'apps/desktop/flutter/lib/platform/desktop/desktop_profile_reset.dart'
 )
 foreach ($relative in $requiredFiles) {
-    $path = Join-Path $RepositoryRoot $relative
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+    if (-not (Test-Path -LiteralPath (Join-Path $RepositoryRoot $relative) -PathType Leaf)) {
         throw "Release policy file is missing: $relative"
     }
 }
@@ -72,6 +78,8 @@ foreach ($needle in @(
     'RequirePlatforms',
     'TORCA_VERSION',
     'TORCA_COMMIT',
+    'TORCA_UPDATE_KEY_ID',
+    'TORCA_UPDATE_PUBLIC_KEY',
     'diagnostic-sanitization'
 )) {
     if (-not $validator.Contains($needle)) {
@@ -87,7 +95,9 @@ foreach ($needle in @(
     'check-release-policy.ps1',
     'validate-torca-release.ps1',
     '-RequirePlatforms',
-    'generate-release-metadata.ps1'
+    'collect-release-artifacts.ps1',
+    'generate-release-metadata.ps1',
+    'generate-update-manifest.ps1'
 )) {
     if (-not $wrapper.Contains($needle)) {
         throw "Canonical release command is missing: $needle"
@@ -100,13 +110,18 @@ foreach ($needle in @('CycloneDX', 'cargo', 'metadata', 'flutter', 'pub', 'deps'
         throw "Release metadata generator is missing: $needle"
     }
 }
+$updateGenerator = Get-Content -LiteralPath (Join-Path $RepositoryRoot 'scripts/release/generate-update-manifest.ps1') -Raw
+foreach ($needle in @('ed25519', 'openssl', 'pkeyutl', '-sign', '-rawin', 'Get-FileHash', 'SHA256')) {
+    if (-not $updateGenerator.Contains($needle)) {
+        throw "Update manifest generator is missing: $needle"
+    }
+}
 
 $deny = Get-Content -LiteralPath (Join-Path $RepositoryRoot 'deny.toml') -Raw
 if ($deny -notmatch 'unknown-registry\s*=\s*"deny"' -or
     $deny -notmatch 'unknown-git\s*=\s*"deny"') {
     throw 'deny.toml must reject unknown registry and git sources.'
 }
-
 $license = Get-Content -LiteralPath (Join-Path $RepositoryRoot 'LICENSE') -Raw
 if ($license -notmatch 'AGPL-3\.0-or-later') {
     throw 'LICENSE must declare AGPL-3.0-or-later.'
@@ -136,7 +151,6 @@ foreach ($needle in @(
         throw "Android privacy configuration is missing: $needle"
     }
 }
-
 $backupRules = Get-Content -LiteralPath (Join-Path $RepositoryRoot 'apps/mobile/flutter/android/app/src/main/res/xml/data_extraction_rules.xml') -Raw
 if ($backupRules -notmatch '<cloud-backup' -or $backupRules -notmatch '<device-transfer>') {
     throw 'Android backup rules must cover cloud backup and device transfer.'
@@ -161,8 +175,18 @@ foreach ($forbidden in @('HttpClient', 'WebSocket', 'Socket.connect', 'Multipart
 }
 
 $androidActivity = Get-Content -LiteralPath (Join-Path $RepositoryRoot 'apps/mobile/flutter/android/app/src/main/kotlin/org/torchat/mobile/MainActivity.kt') -Raw
-foreach ($needle in @('"resetLocalProfile"', 'clearApplicationUserData()', 'stopService(')) {
-    if (-not $androidActivity.Contains($needle)) {
+$androidDispatcher = Get-Content -LiteralPath (Join-Path $RepositoryRoot 'apps/mobile/flutter/android/app/src/main/kotlin/org/torchat/mobile/EngineMethodDispatcher.kt') -Raw
+$androidReset = Get-Content -LiteralPath (Join-Path $RepositoryRoot 'apps/mobile/flutter/android/app/src/main/kotlin/org/torchat/mobile/ProfileReset.kt') -Raw
+if (-not $androidActivity.Contains('EngineMethodDispatcher')) {
+    throw 'MainActivity must delegate engine method routing.'
+}
+foreach ($needle in @('"resetLocalProfile"', 'ProfileReset.clear')) {
+    if (-not $androidDispatcher.Contains($needle)) {
+        throw "Android reset dispatch is missing: $needle"
+    }
+}
+foreach ($needle in @('clearApplicationUserData()', 'stopService(')) {
+    if (-not $androidReset.Contains($needle)) {
         throw "Android profile reset is missing: $needle"
     }
 }
@@ -196,6 +220,19 @@ foreach ($needle in @(
 foreach ($needle in @('findDecoderForData', 'startDecode', 'decodeFrame(0)', 'info.numFrames != 1')) {
     if (-not $attachmentCodec.Contains($needle)) {
         throw "Attachment codec preflight is missing: $needle"
+    }
+}
+
+$updateClient = Get-Content -LiteralPath (Join-Path $RepositoryRoot 'apps/mobile/flutter/lib/core/release/update_manifest.dart') -Raw
+$updateService = Get-Content -LiteralPath (Join-Path $RepositoryRoot 'apps/mobile/flutter/lib/platform/update_check_service.dart') -Raw
+foreach ($needle in @('Ed25519().verify', 'expectedKeyId', 'sha256', 'isNewerThan')) {
+    if (-not $updateClient.Contains($needle)) {
+        throw "Update verification is missing: $needle"
+    }
+}
+foreach ($forbidden in @('HttpClient', 'WebSocket', 'Socket.connect')) {
+    if ($updateService.Contains($forbidden)) {
+        throw "Update checking must remain offline; forbidden API: $forbidden"
     }
 }
 
