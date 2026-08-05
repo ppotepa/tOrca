@@ -57,6 +57,19 @@ impl ClientEngineActor {
             return result;
         }
 
+        let requires_relay_effect = matches!(
+            &envelope.command,
+            EngineCommand::RefreshPairingCode
+                | EngineCommand::SubmitPairingCode { .. }
+                | EngineCommand::CancelPairing { .. }
+        );
+        if requires_relay_effect && !self.relay.can_start_effect() {
+            return self.command_error_result(
+                envelope.request_id,
+                EngineError::Transport("rendezvous operation is already in progress".to_owned()),
+            );
+        }
+
         let deferred_context = DeferredCommandContext {
             request_id: envelope.request_id.clone(),
             command_id: command_id.clone(),
