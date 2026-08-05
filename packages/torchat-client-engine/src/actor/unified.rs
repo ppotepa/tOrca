@@ -321,7 +321,7 @@ impl ClientEngineActor {
         }
         let relay = std::mem::replace(
             &mut self.relay,
-            Box::new(RelayEffectPlaceholder),
+            Box::new(RelayEffectPlaceholder::default()),
         );
         let mut result = EngineProcessingResult::empty();
         result.events.extend(
@@ -383,7 +383,14 @@ impl ClientEngineActor {
             relay,
             result: effect_result,
         } = outcome;
+        let deferred_control = self.relay.take_deferred_control();
         self.relay = relay;
+        if let Some(socks5_url) = deferred_control.socks5_url {
+            self.relay.set_socks5_url(socks5_url);
+        }
+        if deferred_control.invalidate_session {
+            self.relay.invalidate_session();
+        }
         let idempotency = context.command_id.as_ref().map(|command_id| {
             IdempotencyCommitContext {
                 command_id: command_id.clone(),
