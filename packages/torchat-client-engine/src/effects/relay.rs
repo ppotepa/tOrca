@@ -4,7 +4,7 @@ use torchat_runtime::{InviteCode, PairingItem, RuntimeError, RuntimeResult};
 use crate::{
     EngineRelay,
     input::EngineInputEnvelope,
-    relay::RelayEvent,
+    relay::{RelayDeferredControl, RelayEvent},
 };
 
 pub(crate) struct DeferredCommandContext {
@@ -84,7 +84,12 @@ pub(crate) fn spawn_engine_effect(
     envelope: EngineEffectEnvelope,
     inbox: mpsc::Sender<EngineInputEnvelope>,
 ) {
-    match envelope.effect {
+    let EngineEffectEnvelope {
+        effect_id,
+        causation_id,
+        effect,
+    } = envelope;
+    match effect {
         EngineEffect::Relay(effect) => {
             tokio::task::spawn_blocking(move || {
                 let RelayEffect {
@@ -113,14 +118,14 @@ pub(crate) fn spawn_engine_effect(
                     }
                 };
                 let outcome = EngineEffectOutcome::Relay(RelayEffectOutcome {
-                    effect_id: envelope.effect_id,
+                    effect_id,
                     context,
                     relay,
                     result,
                 });
                 let _ = inbox.blocking_send(EngineInputEnvelope::effect_outcome(
                     unix_ms(),
-                    envelope.causation_id,
+                    causation_id,
                     outcome,
                 ));
             });
@@ -128,14 +133,27 @@ pub(crate) fn spawn_engine_effect(
     }
 }
 
-pub(crate) struct RelayEffectPlaceholder;
+#[derive(Default)]
+pub(crate) struct RelayEffectPlaceholder {
+    deferred: RelayDeferredControl,
+}
 
 impl EngineRelay for RelayEffectPlaceholder {
     fn can_start_effect(&self) -> bool {
         false
     }
 
-    fn set_socks5_url(&mut self, _socks5_url: Option<String>) {}
+    fn take_deferred_control(&mut self) -> RelayDeferredControl {
+        std::mem::take(&mut self.deferred)
+    }
+
+    fn set_socks5_url(&mut self, socks5_url: Option<String>) {
+        self.deferred.socks5_url = Some(socks5_url);
+    }
+
+    fn invalidate_session(&mut self) {
+        self.deferred.invalidate_session = true;
+    }
 
     fn shutdown(&mut self) {}
 
