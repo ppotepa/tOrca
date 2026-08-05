@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Torca security report
+    url: https://github.com/ppotepa/tOrca/security/advisories/new
+    about: Report suspected vulnerabilities privately. Never include secrets in a public issue.
+  - name: Torca support instructions
+    url: https://github.com/ppotepa/tOrca/blob/main/SUPPORT.md
+    about: Read the beta reporting and diagnostic privacy requirements first.
