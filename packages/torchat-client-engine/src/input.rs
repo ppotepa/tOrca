@@ -1,5 +1,6 @@
 use crate::{
     EngineCommand, EngineCommandEnvelope, PlatformFact,
+    effects::EngineEffectOutcome,
     peer::PeerTransportEvent,
     relay::RelayEvent,
 };
@@ -61,7 +62,7 @@ pub(crate) enum EngineInput {
         kind: EngineTimerKind,
         generation: u64,
     },
-    EffectOutcome,
+    EffectOutcome(EngineEffectOutcome),
     ShutdownRequested,
 }
 
@@ -149,6 +150,21 @@ impl EngineInputEnvelope {
         }
     }
 
+    pub(crate) fn effect_outcome(
+        enqueued_at_ms: i64,
+        causation_id: uuid::Uuid,
+        outcome: EngineEffectOutcome,
+    ) -> Self {
+        Self {
+            input_id: uuid::Uuid::new_v4(),
+            correlation_id: None,
+            causation_id: Some(causation_id),
+            source: EngineInputSource::EffectWorker,
+            enqueued_at_ms,
+            input: EngineInput::EffectOutcome(outcome),
+        }
+    }
+
     pub(crate) fn shutdown(enqueued_at_ms: i64) -> Self {
         Self {
             input_id: uuid::Uuid::new_v4(),
@@ -182,7 +198,7 @@ impl EngineInputEnvelope {
             EngineInput::RelayEvent(_) => EngineInputKind::RelayEvent,
             EngineInput::PlatformFact { .. } => EngineInputKind::PlatformFact,
             EngineInput::TimerElapsed { .. } => EngineInputKind::TimerElapsed,
-            EngineInput::EffectOutcome => EngineInputKind::EffectOutcome,
+            EngineInput::EffectOutcome(_) => EngineInputKind::EffectOutcome,
             EngineInput::ShutdownRequested => EngineInputKind::ShutdownRequested,
         }
     }
