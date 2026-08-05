@@ -43,9 +43,10 @@ void main() {
     final decoded = decodeImageMessageBody(body);
 
     expect(isImageMessageBody(body), isTrue);
-    expect(body.length, lessThanOrEqualTo(
-      ImageAttachmentPolicy.maximumMessageBodyCharacters,
-    ));
+    expect(
+      body.length,
+      lessThanOrEqualTo(ImageAttachmentPolicy.maximumMessageBodyCharacters),
+    );
     expect(decoded, isNotNull);
     expect(decoded!.bytes, prepared.bytes);
     expect(decoded.width, prepared.width);
@@ -74,9 +75,15 @@ void main() {
     })}';
     expect(decodeImageMessageBody(forged), isNull);
 
-    final oversizedBody =
-        '$imageMessagePrefix${'x' * ImageAttachmentPolicy.maximumMessageBodyCharacters}';
-    expect(decodeImageMessageBody(oversizedBody), isNull);
+    final oversizedData = List<String>.filled(
+      ImageAttachmentPolicy.maximumMessageBodyCharacters,
+      'x',
+      growable: false,
+    ).join();
+    expect(
+      decodeImageMessageBody('$imageMessagePrefix$oversizedData'),
+      isNull,
+    );
   });
 
   test('policy rejects decompression-bomb geometry and animation', () {
