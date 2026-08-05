@@ -12,15 +12,11 @@ import '../locales/domain/user_problem_code.dart';
 import 'app_controller_base.dart' as base;
 import 'conversation_navigation_intent.dart';
 import '../platform/platform_services.dart';
-import 'pairing_recovery_app_controller.dart';
+import 'presentation_app_controller.dart';
 
-class NotificationSafeAppController extends PairingRecoveryAppController {
-  static const _relationshipActiveSincePrefix =
-      'torchat.relationship.activeSince.';
+class NotificationSafeAppController extends PresentationAppController {
   static const _activeNotificationConversationKey =
       'torchat.notifications.activeConversationId';
-
-  final Set<String> _appliedRelationshipRemovalMessageIds = <String>{};
 
   @override
   base.AppState build() {
@@ -63,8 +59,8 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
             preferences.getBool('torchat.privacy.lastSeen') ?? true,
       );
     } on MissingPluginException {
-      // A host can attach the platform plugins after the engine starts. The
-      // preference is only a persistence hint; it must not block runtime boot.
+      // A host can attach platform plugins after the engine starts. The
+      // preference is persistence-only and must not block runtime boot.
     }
     await super.initialize();
     await _persistActiveConversation(state.selectedConversationId);
@@ -120,18 +116,6 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
   }
 
   @override
-  Future<void> onPairingContactActivated(ContactRecord contact) async {
-    final preferences = await SharedPreferences.getInstance();
-    await preferences.setString(
-      '$_relationshipActiveSincePrefix${contact.id}',
-      DateTime.now().toUtc().toIso8601String(),
-    );
-    _appliedRelationshipRemovalMessageIds.removeWhere(
-      (id) => id.startsWith('preview:${contact.id}:'),
-    );
-  }
-
-  @override
   Future<void> updateContactSettings(
     ContactRecord contact,
     String? localAlias,
@@ -170,9 +154,6 @@ class NotificationSafeAppController extends PairingRecoveryAppController {
     try {
       preferences = await SharedPreferences.getInstance();
     } on MissingPluginException {
-      // Widget/unit tests and headless engine startup have no platform
-      // preferences channel. The canonical runtime state remains in the
-      // application store, so persistence is optional here.
       return;
     }
     final id = conversationId?.trim() ?? '';
