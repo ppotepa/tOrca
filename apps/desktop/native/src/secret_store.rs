@@ -10,21 +10,17 @@ use std::path::PathBuf;
 use zeroize::Zeroizing;
 
 /// Storage boundary for desktop secrets. Platform vault implementations can
-/// replace `FileSecretStore` without changing identity/database migration.
-#[allow(dead_code)]
+/// replace `FileSecretStore` without changing identity and database handling.
 pub(crate) trait DesktopSecretStore {
     fn read(&self) -> Result<Option<Zeroizing<Vec<u8>>>>;
     fn write(&self, secret: &[u8]) -> Result<()>;
     fn remove(&self) -> Result<()>;
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum DesktopSecretKind {
     IdentityPrivateKey,
     DatabaseKeyActive,
-    DatabaseKeyPending,
-    MlsCheckpoint,
 }
 
 #[cfg(feature = "os-vault")]
@@ -33,8 +29,6 @@ impl DesktopSecretKind {
         match self {
             Self::IdentityPrivateKey => "identity-private-key",
             Self::DatabaseKeyActive => "database-key-active",
-            Self::DatabaseKeyPending => "database-key-pending",
-            Self::MlsCheckpoint => "mls-checkpoint",
         }
     }
 }
@@ -90,14 +84,15 @@ impl DesktopSecretStore for OsVaultSecretStore {
     }
 
     fn remove(&self) -> Result<()> {
-        self.entry()?
-            .delete_credential()
-            .context("remove desktop OS-vault secret")
+        match self.entry()?.delete_credential() {
+            Ok(()) => Ok(()),
+            Err(error) if matches!(&error, keyring::Error::NoEntry) => Ok(()),
+            Err(error) => Err(error).context("remove desktop OS-vault secret"),
+        }
     }
 }
 
 #[cfg(any(test, feature = "torka-file-secrets"))]
-#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub(crate) struct FileSecretStore {
     path: PathBuf,
@@ -156,7 +151,7 @@ mod tests {
 
     #[test]
     fn file_store_is_atomic_shape_and_validates_secret_length() {
-        let root = std::env::temp_dir().join(format!("torchat-secret-{}", uuid::Uuid::new_v4()));
+        let root = std::env::temp_dir().join(format!("torca-secret-{}", uuid::Uuid::new_v4()));
         let store = FileSecretStore::new(root.join("secret"));
         assert!(store.read().unwrap().is_none());
         assert!(store.write(&[1; 31]).is_err());
