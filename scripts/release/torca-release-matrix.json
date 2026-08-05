@@ -3,8 +3,8 @@
   "product": "Torca",
   "automated": [
     "release-version",
+    "release-policy",
     "runtime-contract",
-    "single-baseline",
     "source-size",
     "rust-format",
     "runtime-tests",
@@ -13,9 +13,12 @@
     "rust-clippy",
     "rust-dependency-policy",
     "diagnostic-sanitization",
-    "flutter-format",
-    "flutter-analyze",
-    "flutter-tests",
+    "flutter-mobile-format",
+    "flutter-mobile-analyze",
+    "flutter-mobile-tests",
+    "flutter-desktop-format",
+    "flutter-desktop-analyze",
+    "flutter-desktop-tests",
     "android-release-build",
     "android-clean-install-smoke",
     "android-upgrade-preserves-data",
@@ -23,6 +26,12 @@
     "windows-release-build",
     "windows-clean-profile-smoke",
     "windows-profile-restart-preserves-data"
+  ],
+  "postValidation": [
+    "release-artifact-collection",
+    "release-sbom",
+    "release-checksums",
+    "signed-update-manifest"
   ],
   "manual": [
     {
