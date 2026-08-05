@@ -30,13 +30,15 @@ class ConversationProjection {
 
 class ApplicationSnapshot {
   const ApplicationSnapshot({
-    this.schemaVersion = 1,
+    this.schemaVersion = 2,
     this.generation = 0,
     this.createdAtMs = 0,
     this.identity = const RuntimeIdentity(),
     this.profile = const RuntimeProfile(),
     this.contacts = const [],
     this.conversations = const [],
+    this.pairingInbox = const [],
+    this.pairingOutbox = const [],
     this.pendingInbox = 0,
     this.pendingOutbox = 0,
     this.peerEndpointAvailable = false,
@@ -54,6 +56,8 @@ class ApplicationSnapshot {
   final RuntimeProfile profile;
   final List<ContactRecord> contacts;
   final List<ConversationSummary> conversations;
+  final List<PairingItem> pairingInbox;
+  final List<PairingItem> pairingOutbox;
   final int pendingInbox;
   final int pendingOutbox;
   final bool peerEndpointAvailable;
@@ -66,6 +70,7 @@ class ApplicationSnapshot {
     engineSessionId: projectionSessionId,
     revision: projectionRevision,
   );
+
   final String destination;
   final String? selectedConversationId;
 
@@ -79,6 +84,8 @@ class ApplicationSnapshot {
     RuntimeProfile? profile,
     List<ContactRecord>? contacts,
     List<ConversationSummary>? conversations,
+    List<PairingItem>? pairingInbox,
+    List<PairingItem>? pairingOutbox,
     int? pendingInbox,
     int? pendingOutbox,
     bool? peerEndpointAvailable,
@@ -95,6 +102,8 @@ class ApplicationSnapshot {
     profile: profile ?? this.profile,
     contacts: contacts ?? this.contacts,
     conversations: conversations ?? this.conversations,
+    pairingInbox: pairingInbox ?? this.pairingInbox,
+    pairingOutbox: pairingOutbox ?? this.pairingOutbox,
     pendingInbox: pendingInbox ?? this.pendingInbox,
     pendingOutbox: pendingOutbox ?? this.pendingOutbox,
     peerEndpointAvailable: peerEndpointAvailable ?? this.peerEndpointAvailable,
