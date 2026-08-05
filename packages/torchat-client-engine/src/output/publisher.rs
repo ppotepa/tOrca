@@ -2,7 +2,7 @@ use tokio::sync::mpsc;
 
 use crate::EngineEvent;
 
-pub(super) fn spawn_public_event_publisher(
+pub(in crate::output) fn spawn_public_event_publisher(
     mut publish_rx: mpsc::UnboundedReceiver<EngineEvent>,
     public_events: mpsc::Sender<EngineEvent>,
 ) {
