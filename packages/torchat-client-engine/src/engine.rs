@@ -67,7 +67,7 @@ impl ClientEngine {
         config: EngineConfig,
         anchor: Box<dyn MlsEpochAnchor<Error = EngineError> + Send>,
     ) -> EngineResult<Self> {
-        let (command_tx, command_rx) = unified_command_channel();
+        let (command_tx, inbox_rx, inbox_tx) = unified_inbox_channel();
         let (actor_event_tx, actor_event_rx) = mpsc::channel(WORKER_OUTCOME_CHANNEL_CAPACITY);
         let (event_tx, event_rx) = mpsc::channel(WORKER_OUTCOME_CHANNEL_CAPACITY);
         let shutdown = CancellationToken::new();
@@ -83,7 +83,10 @@ impl ClientEngine {
         let fatal_events = actor_event_tx.clone();
         let actor_shutdown = shutdown.clone();
         tokio::spawn(async move {
-            if let Err(error) = actor.run(command_rx, actor_event_tx, actor_shutdown).await {
+            if let Err(error) = actor
+                .run_unified(inbox_rx, inbox_tx, actor_event_tx, actor_shutdown)
+                .await
+            {
                 let _ = fatal_events
                     .send(EngineEvent::Fatal {
                         error: EngineFatalError {
@@ -106,7 +109,7 @@ impl ClientEngine {
         config: EngineConfig,
         anchor: Option<&mut dyn MlsEpochAnchor<Error = EngineError>>,
     ) -> EngineResult<Self> {
-        let (command_tx, command_rx) = unified_command_channel();
+        let (command_tx, inbox_rx, inbox_tx) = unified_inbox_channel();
         let (actor_event_tx, actor_event_rx) = mpsc::channel(WORKER_OUTCOME_CHANNEL_CAPACITY);
         let (event_tx, event_rx) = mpsc::channel(WORKER_OUTCOME_CHANNEL_CAPACITY);
         let shutdown = CancellationToken::new();
@@ -133,7 +136,10 @@ impl ClientEngine {
         let fatal_events = actor_event_tx.clone();
         let actor_shutdown = shutdown.clone();
         tokio::spawn(async move {
-            if let Err(error) = actor.run(command_rx, actor_event_tx, actor_shutdown).await {
+            if let Err(error) = actor
+                .run_unified(inbox_rx, inbox_tx, actor_event_tx, actor_shutdown)
+                .await
+            {
                 let _ = fatal_events
                     .send(EngineEvent::Fatal {
                         error: EngineFatalError {
@@ -263,23 +269,19 @@ impl ClientEngine {
     }
 }
 
-fn unified_command_channel() -> (
+fn unified_inbox_channel() -> (
     EngineCommandSender,
-    mpsc::Receiver<EngineCommandEnvelope>,
+    mpsc::Receiver<EngineInputEnvelope>,
+    mpsc::Sender<EngineInputEnvelope>,
 ) {
-    let (inbox_tx, mut inbox_rx) = mpsc::channel::<EngineInputEnvelope>(ENGINE_INBOX_CAPACITY);
-    let (command_tx, command_rx) = mpsc::channel(COMMAND_CHANNEL_CAPACITY);
-    tokio::spawn(async move {
-        while let Some(input) = inbox_rx.recv().await {
-            let EngineInput::Command(envelope) = input.input else {
-                continue;
-            };
-            if command_tx.send(envelope).await.is_err() {
-                break;
-            }
-        }
-    });
-    (EngineCommandSender { inbox: inbox_tx }, command_rx)
+    let (inbox_tx, inbox_rx) = mpsc::channel::<EngineInputEnvelope>(ENGINE_INBOX_CAPACITY);
+    (
+        EngineCommandSender {
+            inbox: inbox_tx.clone(),
+        },
+        inbox_rx,
+        inbox_tx,
+    )
 }
 
 fn spawn_event_router(
