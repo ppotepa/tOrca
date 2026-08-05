@@ -58,21 +58,27 @@ void main() {
     expect(store.pairingInbox.single.id, 'new');
   });
 
-  test('schema two empty pairing projection overrides schema one fallback', () {
+  test('empty authoritative projection clears previously visible pairing', () {
     final store = ApplicationStateStore();
-    store.setPairing(
-      [pairing('legacy-inbox', PairingOrigin.inbox)],
-      [pairing('legacy-outbox', PairingOrigin.outbox)],
-    );
-
     store.hydrate(
-      const ApplicationSnapshot(
+      ApplicationSnapshot(
         schemaVersion: 2,
         projectionStoreId: 'store-1',
         projectionRevision: 1,
+        pairingInbox: [pairing('incoming', PairingOrigin.inbox)],
+        pairingOutbox: [pairing('outgoing', PairingOrigin.outbox)],
       ),
     );
 
+    final accepted = store.hydrate(
+      const ApplicationSnapshot(
+        schemaVersion: 2,
+        projectionStoreId: 'store-1',
+        projectionRevision: 2,
+      ),
+    );
+
+    expect(accepted, isTrue);
     expect(store.pairingInbox, isEmpty);
     expect(store.pairingOutbox, isEmpty);
   });
