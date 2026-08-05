@@ -6,6 +6,7 @@ pub mod clock;
 pub mod collections;
 pub mod contract;
 pub mod error;
+pub mod feature_facade;
 pub mod features;
 pub mod ids;
 pub mod logic;
@@ -41,6 +42,7 @@ pub use contract::{
 pub use error::{
     RuntimeError, RuntimeErrorCategory, RuntimeErrorCode, RuntimeProblem, RuntimeResult,
 };
+pub use feature_facade::ClientRuntimeFeatureFacade;
 pub use features::pairing::rules as pairing_rules;
 pub use ids::{
     CapabilityId, CommandId, ContactId, ConversationId, InstallationId, MessageId, OperationId,
@@ -84,7 +86,8 @@ pub use session::RuntimeSession;
 pub use storage::{RelationshipTransition, RuntimeStorage};
 pub use storage_capabilities::{
     CapabilityStorage, ContactStorage, ConversationStorage, DeliveryStorage, IdentityStorage,
-    MessageStorage, PairingStorage, ProfileStorage, ReceiptStorage, RelationshipStorage,
+    MessageStorage, OperationStorage, PairingStorage, ProfileStorage, ReceiptStorage,
+    RelationshipStorage,
 };
 pub use transport::RuntimeTransport;
 
