@@ -75,7 +75,7 @@ impl EngineInputEnvelope {
     }
 
     pub(crate) fn kind(&self) -> EngineInputKind {
-        match self.input {
+        match &self.input {
             EngineInput::Command(_) => EngineInputKind::Command,
             EngineInput::PeerEvent(_) => EngineInputKind::PeerEvent,
             EngineInput::RelayEvent(_) => EngineInputKind::RelayEvent,
