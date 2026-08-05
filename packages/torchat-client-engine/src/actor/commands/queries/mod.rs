@@ -1,0 +1,12 @@
+mod get_application_snapshot;
+mod get_identity;
+mod get_peer_endpoint;
+mod get_profile;
+mod get_startup_readiness;
+mod list_contacts;
+mod list_conversations;
+mod list_dead_letters;
+mod list_messages;
+mod list_pairings;
+mod pairing_inbox;
+mod pairing_outbox;
