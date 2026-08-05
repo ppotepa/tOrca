@@ -7,14 +7,37 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     ClientEngineActor, EngineCommand, EngineCommandEnvelope, EngineConfig, EngineError,
     EngineEvent, EngineFatalError, EngineResult, PlatformFact, ResponseResult,
-    event::EngineEventReceiver, logging::StartupJournal,
+    event::EngineEventReceiver,
+    input::{EngineInput, EngineInputEnvelope},
+    logging::StartupJournal,
 };
 
-pub const COMMAND_CHANNEL_CAPACITY: usize = 256;
+pub const ENGINE_INBOX_CAPACITY: usize = 512;
+pub const COMMAND_CHANNEL_CAPACITY: usize = ENGINE_INBOX_CAPACITY;
 pub const WORKER_OUTCOME_CHANNEL_CAPACITY: usize = 256;
 
+#[derive(Clone)]
+pub struct EngineCommandSender {
+    inbox: mpsc::Sender<EngineInputEnvelope>,
+}
+
+impl EngineCommandSender {
+    pub async fn send(
+        &self,
+        envelope: EngineCommandEnvelope,
+    ) -> Result<(), mpsc::error::SendError<EngineCommandEnvelope>> {
+        let input = EngineInputEnvelope::command(unix_ms(), envelope);
+        self.inbox.send(input).await.map_err(|error| {
+            let EngineInput::Command(envelope) = error.0.input else {
+                unreachable!("command sender only submits command inputs");
+            };
+            mpsc::error::SendError(envelope)
+        })
+    }
+}
+
 pub struct ClientEngine {
-    commands: mpsc::Sender<EngineCommandEnvelope>,
+    commands: EngineCommandSender,
     events: EngineEventReceiver,
     shutdown: CancellationToken,
     pending_responses: Arc<Mutex<HashMap<String, oneshot::Sender<ResponseResult>>>>,
@@ -43,7 +66,7 @@ impl ClientEngine {
         config: EngineConfig,
         anchor: Box<dyn MlsEpochAnchor<Error = EngineError> + Send>,
     ) -> EngineResult<Self> {
-        let (command_tx, command_rx) = mpsc::channel(COMMAND_CHANNEL_CAPACITY);
+        let (command_tx, command_rx) = unified_command_channel();
         let (actor_event_tx, mut actor_event_rx) = mpsc::channel(WORKER_OUTCOME_CHANNEL_CAPACITY);
         let (event_tx, event_rx) = mpsc::channel(WORKER_OUTCOME_CHANNEL_CAPACITY);
         let shutdown = CancellationToken::new();
@@ -90,7 +113,7 @@ impl ClientEngine {
         config: EngineConfig,
         anchor: Option<&mut dyn MlsEpochAnchor<Error = EngineError>>,
     ) -> EngineResult<Self> {
-        let (command_tx, command_rx) = mpsc::channel(COMMAND_CHANNEL_CAPACITY);
+        let (command_tx, command_rx) = unified_command_channel();
         let (actor_event_tx, mut actor_event_rx) = mpsc::channel(WORKER_OUTCOME_CHANNEL_CAPACITY);
         let (event_tx, event_rx) = mpsc::channel(WORKER_OUTCOME_CHANNEL_CAPACITY);
         let shutdown = CancellationToken::new();
@@ -161,13 +184,13 @@ impl ClientEngine {
     /// Submits a command without discarding its caller-supplied command id.
     ///
     /// FFI hosts use this path because `command_id` participates in durable
-    /// idempotency.  Keeping it at the engine boundary also makes a retried
+    /// idempotency. Keeping it at the engine boundary also makes a retried
     /// platform request distinguishable from a new command.
     pub async fn submit_envelope(&self, envelope: EngineCommandEnvelope) -> EngineResult<()> {
         self.commands
             .send(envelope)
             .await
-            .map_err(|_| EngineError::Closed("engine command channel is closed"))
+            .map_err(|_| EngineError::Closed("engine inbox is closed"))
     }
 
     pub(crate) async fn submit_and_wait(
@@ -243,11 +266,40 @@ impl ClientEngine {
     pub fn into_parts(
         self,
     ) -> (
-        mpsc::Sender<EngineCommandEnvelope>,
+        EngineCommandSender,
         EngineEventReceiver,
         CancellationToken,
     ) {
         (self.commands, self.events, self.shutdown)
     }
 }
+
+fn unified_command_channel() -> (
+    EngineCommandSender,
+    mpsc::Receiver<EngineCommandEnvelope>,
+) {
+    let (inbox_tx, mut inbox_rx) = mpsc::channel::<EngineInputEnvelope>(ENGINE_INBOX_CAPACITY);
+    let (command_tx, command_rx) = mpsc::channel(COMMAND_CHANNEL_CAPACITY);
+    tokio::spawn(async move {
+        while let Some(input) = inbox_rx.recv().await {
+            let EngineInput::Command(envelope) = input.input else {
+                continue;
+            };
+            if command_tx.send(envelope).await.is_err() {
+                break;
+            }
+        }
+    });
+    (EngineCommandSender { inbox: inbox_tx }, command_rx)
+}
+
+fn unix_ms() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(i64::MAX as u128) as i64
+}
+
 use torchat_crypto::anti_rollback::MlsEpochAnchor;
