@@ -18,7 +18,7 @@ pub mod storage;
 pub use actor::ClientEngineActor;
 pub use command::{EngineCommand, EngineCommandEnvelope, PlatformFact, PlatformKind, TorPhase};
 pub use config::EngineConfig;
-pub use engine::ClientEngine;
+pub use engine::{ClientEngine, EngineCommandSender};
 pub mod client_api;
 pub use client_api::PairingList;
 pub use error::{EngineError, EngineResult};
