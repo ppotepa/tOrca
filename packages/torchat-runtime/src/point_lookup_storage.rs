@@ -4,9 +4,9 @@ use crate::{
 
 /// Point-oriented reads used by domain features.
 ///
-/// The blanket implementation keeps existing storage adapters source-compatible
-/// while moving collection scans behind the storage boundary. Production
-/// adapters can override this port with direct SQL without changing domain code.
+/// The aggregate storage contract owns the compatibility defaults. Production
+/// adapters override those methods with direct queries, while features depend
+/// only on this point-oriented boundary.
 pub trait PointLookupStorage {
     fn contact_by_installation_id(
         &self,
@@ -32,39 +32,29 @@ impl<T: RuntimeStorage + ?Sized> PointLookupStorage for T {
         &self,
         installation_id: &str,
     ) -> RuntimeResult<Option<ContactRecord>> {
-        Ok(RuntimeStorage::contacts(self)?
-            .into_iter()
-            .find(|contact| contact.installation_id == installation_id))
+        RuntimeStorage::contact_by_installation_id(self, installation_id)
     }
 
     fn conversation_by_id(&self, id: &str) -> RuntimeResult<Option<ConversationSummary>> {
-        Ok(RuntimeStorage::conversations(self)?
-            .into_iter()
-            .find(|conversation| conversation.id == id))
+        RuntimeStorage::conversation_by_id(self, id)
     }
 
     fn conversation_for_contact(
         &self,
         installation_id: &str,
     ) -> RuntimeResult<Option<ConversationSummary>> {
-        Ok(RuntimeStorage::conversations(self)?
-            .into_iter()
-            .find(|conversation| conversation.contact_installation_id == installation_id))
+        RuntimeStorage::conversation_for_contact(self, installation_id)
     }
 
     fn pairing_inbox_by_id(&self, pairing_id: &str) -> RuntimeResult<Option<PairingItem>> {
-        Ok(RuntimeStorage::pairing_inbox(self)?
-            .into_iter()
-            .find(|item| item.pairing_id == pairing_id))
+        RuntimeStorage::pairing_inbox_by_id(self, pairing_id)
     }
 
     fn pairing_outbox_by_id(&self, pairing_id: &str) -> RuntimeResult<Option<PairingItem>> {
-        Ok(RuntimeStorage::pairing_outbox(self)?
-            .into_iter()
-            .find(|item| item.pairing_id == pairing_id))
+        RuntimeStorage::pairing_outbox_by_id(self, pairing_id)
     }
 
     fn message_by_id(&self, message_id: &str) -> RuntimeResult<Option<ChatMessage>> {
-        RuntimeStorage::message(self, message_id)
+        RuntimeStorage::message_by_id(self, message_id)
     }
 }
