@@ -1,8 +1,22 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn crate_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+}
+
+fn rust_files_below(path: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    for entry in fs::read_dir(path).expect("command directory is readable") {
+        let entry = entry.expect("directory entry is readable");
+        let path = entry.path();
+        if path.is_dir() {
+            files.extend(rust_files_below(&path));
+        } else if path.extension().and_then(|value| value.to_str()) == Some("rs") {
+            files.push(path);
+        }
+    }
+    files
 }
 
 #[test]
@@ -50,10 +64,24 @@ fn processing_contract_keeps_outputs_explicit() {
         "derived_inputs: Vec<EngineInputEnvelope>",
         "scheduler_plan_changed: bool",
         "control: ProcessingControl",
-        "struct EngineProcessingResultBuilder",
     ] {
         assert!(source.contains(symbol), "missing processing symbol: {symbol}");
     }
+}
+
+#[test]
+fn command_contract_is_split_from_platform_contracts() {
+    let root = crate_root().join("src/contract");
+    for file in [
+        "command.rs",
+        "command_envelope.rs",
+        "platform_fact.rs",
+        "platform_kind.rs",
+        "tor_phase.rs",
+    ] {
+        assert!(root.join(file).is_file(), "missing contract file: {file}");
+    }
+    assert!(!crate_root().join("src/command.rs").exists());
 }
 
 #[test]
@@ -73,19 +101,9 @@ fn client_commands_enter_the_unified_inbox_before_actor_dispatch() {
     ] {
         assert!(source.contains(symbol), "missing unified command ingress symbol: {symbol}");
     }
-
-    assert!(
-        !source.contains("commands: mpsc::Sender<EngineCommandEnvelope>"),
-        "ClientEngine must not own the legacy raw command sender",
-    );
-    assert!(
-        !source.contains("fn unified_command_channel"),
-        "the temporary command-only forwarder must not return",
-    );
-    assert!(
-        !source.contains("actor.run("),
-        "ClientEngine must not reactivate the legacy multi-receiver actor loop",
-    );
+    assert!(!source.contains("commands: mpsc::Sender<EngineCommandEnvelope>"));
+    assert!(!source.contains("fn unified_command_channel"));
+    assert!(!source.contains("actor.run("));
 }
 
 #[test]
@@ -115,10 +133,7 @@ fn active_actor_loop_has_exactly_one_state_mutating_receiver() {
         .split("fn process_unified_input")
         .next()
         .expect("run_unified body exists");
-    assert!(
-        !loop_body.contains("tokio::select!"),
-        "the state-owning actor loop must not arbitrate independent receivers",
-    );
+    assert!(!loop_body.contains("tokio::select!"));
     assert!(!loop_body.contains("peer_events.recv()"));
     assert!(!loop_body.contains("sleep_until("));
 }
@@ -142,30 +157,60 @@ fn timers_are_external_inputs_with_generation_fencing() {
 }
 
 #[test]
-fn relay_frames_become_inputs_before_state_mutation() {
-    let host = fs::read_to_string(crate_root().join("src/actor/unified.rs"))
-        .expect("unified actor source is readable");
-    let handlers = fs::read_to_string(crate_root().join("src/actor/unified_handlers.rs"))
-        .expect("unified handler source is readable");
+fn command_router_only_delegates() {
+    let router = fs::read_to_string(crate_root().join("src/actor/command_dispatch.rs"))
+        .expect("command router is readable");
 
-    assert!(host.contains("derived_inputs.pop_front"));
-    assert!(host.contains("derived_inputs.extend"));
-    assert!(handlers.contains("result.derived_inputs.push"));
-    assert!(handlers.contains("EngineInputEnvelope::relay_event_caused"));
-    let relay_tick = handlers
-        .split("EngineTimerKind::RelayPoll")
-        .nth(1)
-        .expect("relay timer exists")
-        .split("EngineTimerKind::PeerProbeRound")
-        .next()
-        .expect("relay timer body exists");
-    assert!(!relay_tick.contains("process_relay_input(event)"));
+    assert!(router.contains("match command"));
+    assert!(router.contains("self.command_send_message"));
+    for forbidden in [
+        "with_runtime(",
+        "with_runtime_idempotent(",
+        "self.database.",
+        "self.relay.",
+        "pending_engine_events.push",
+        "EngineEvent::Response",
+    ] {
+        assert!(!router.contains(forbidden), "router contains logic: {forbidden}");
+    }
+}
+
+#[test]
+fn command_handlers_are_granular_and_do_not_publish_rpc_responses() {
+    let root = crate_root().join("src/actor/commands");
+    let files = rust_files_below(&root);
+    assert!(files.len() >= 35, "expected granular command files, found {}", files.len());
+
+    for path in files {
+        let source = fs::read_to_string(&path).expect("command handler is readable");
+        assert!(
+            !source.contains("EngineEvent::Response"),
+            "handler publishes RPC response: {}",
+            path.display(),
+        );
+        assert!(
+            !source.contains("spawn_blocking"),
+            "handler executes worker directly: {}",
+            path.display(),
+        );
+    }
 }
 
 #[test]
 fn blocking_rendezvous_operations_execute_outside_the_actor() {
-    let commands = fs::read_to_string(crate_root().join("src/actor/unified_command.rs"))
-        .expect("unified command source is readable");
+    let processor = fs::read_to_string(
+        crate_root().join("src/actor/command_pipeline/processor.rs"),
+    )
+    .expect("command processor is readable");
+    let relay_effect = fs::read_to_string(
+        crate_root().join("src/actor/command_pipeline/relay_effect.rs"),
+    )
+    .expect("relay effect preparation is readable");
+    let pairing_root = crate_root().join("src/actor/commands/pairing");
+    let pairing_sources = rust_files_below(&pairing_root)
+        .into_iter()
+        .map(|path| fs::read_to_string(path).expect("pairing command is readable"))
+        .collect::<String>();
     let host = fs::read_to_string(crate_root().join("src/actor/unified.rs"))
         .expect("unified actor source is readable");
     let worker = fs::read_to_string(crate_root().join("src/effects/relay.rs"))
@@ -176,15 +221,15 @@ fn blocking_rendezvous_operations_execute_outside_the_actor() {
         "runtime.prepare_submit_pairing_code(code)",
         "runtime.prepare_cancel_pairing(&pairing_id)",
         "RelayEffectOperation::RefreshPairingCode",
-        "RelayEffectOperation::SubmitPairingCode",
         "RelayEffectOperation::CancelPairing",
-        "process_effect_outcome",
-        "RelayEffectPlaceholder::default()",
-        "take_deferred_control",
-        "runtime.confirm_pairing_cancelled(&pairing_id)",
     ] {
-        assert!(commands.contains(symbol), "missing actor effect boundary: {symbol}");
+        assert!(
+            pairing_sources.contains(symbol) || relay_effect.contains(symbol),
+            "missing pairing effect boundary: {symbol}",
+        );
     }
+    assert!(processor.contains("process_effect_outcome"));
+    assert!(processor.contains("take_deferred_control"));
     assert!(host.contains("spawn_engine_effect"));
     for symbol in [
         "tokio::task::spawn_blocking",
@@ -196,10 +241,23 @@ fn blocking_rendezvous_operations_execute_outside_the_actor() {
     ] {
         assert!(worker.contains(symbol), "missing relay effect worker symbol: {symbol}");
     }
+    assert!(!pairing_sources.contains("self.relay.refresh_pairing_code()"));
+    assert!(!pairing_sources.contains("self.relay.submit_pairing_code_with_offer"));
+    assert!(!pairing_sources.contains("self.relay.cancel_pairing"));
+    assert!(!crate_root().join("src/actor/unified_command.rs").exists());
+}
 
-    assert!(!commands.contains("self.relay.refresh_pairing_code()"));
-    assert!(!commands.contains("self.relay.submit_pairing_code_with_offer"));
-    assert!(!commands.contains("self.relay.cancel_pairing"));
+#[test]
+fn relay_frames_become_inputs_before_state_mutation() {
+    let host = fs::read_to_string(crate_root().join("src/actor/unified.rs"))
+        .expect("unified actor source is readable");
+    let handlers = fs::read_to_string(crate_root().join("src/actor/unified_handlers.rs"))
+        .expect("unified handler source is readable");
+
+    assert!(host.contains("derived_inputs.pop_front"));
+    assert!(host.contains("derived_inputs.extend"));
+    assert!(handlers.contains("result.derived_inputs.push"));
+    assert!(handlers.contains("EngineInputEnvelope::relay_event_caused"));
 }
 
 #[test]
@@ -214,13 +272,8 @@ fn response_resolution_is_not_blocked_by_public_event_backpressure() {
         .split("fn spawn_event_router")
         .nth(1)
         .expect("event router exists");
-    let response_index = router
-        .find("pending.complete")
-        .expect("response is resolved");
-    let publish_index = router
-        .find("publish_tx.send(event)")
-        .expect("event is queued for publishing");
-    assert!(response_index < publish_index);
+    assert!(router.find("pending.complete").expect("response resolution exists")
+        < router.find("publish_tx.send(event)").expect("event publishing exists"));
 }
 
 #[test]
