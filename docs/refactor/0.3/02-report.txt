@@ -1,0 +1,104 @@
+BATCH: 0.3.2 pairing workflow ownership
+BASE COMMIT: 6a20369fc0ceb2794fa8a093feeb0b1c88e2dc09
+HEAD COMMIT: filled by repository history after this report commit
+
+GOAL:
+- make Rust and ClientEngine the only owners of pairing convergence;
+- remove Flutter pairing retry, watchdog, synchronization and auto-promotion;
+- require one authoritative schema-2 ApplicationSnapshot;
+- leave Flutter responsible only for user intent, progress and presentation.
+
+BACKEND OWNERSHIP CONFIRMED:
+- accept_invite persists a verified relationship and conversation state;
+- the Welcome payload is persisted before delivery;
+- pending Welcome delivery is retried from durable storage;
+- retry claims attempts and uses backend backoff policy;
+- duplicate invite handling reuses persisted Welcome state;
+- accept command executes prepare -> runtime workflow -> projection update.
+
+FLUTTER CHANGES:
+- deleted app/pairing_recovery_app_controller.dart;
+- added app/presentation_app_controller.dart;
+- NotificationSafeAppController now extends the presentation-only controller;
+- removed pairing watchdog, synchronization queue and trailing recovery refresh;
+- removed Welcome polling and automatic contact verification;
+- removed automatic conversation creation/opening after pairing;
+- removed debug Torka auto-pair workflow and its timers;
+- removed forcePairing, allowAutoTorka and includePairing refresh variants;
+- pairing commands now issue one user intent and consume the next authoritative
+  application projection.
+
+PROJECTION CHANGES:
+- RuntimeRepository now requires RuntimeProjectionProvider;
+- RuntimeProjectionProvider must return schema version 2 or newer;
+- repository fallback assembled from identity/profile/contacts/listPairings was
+  removed;
+- _runtime.listPairings() is not used by RuntimeRepository;
+- refreshPairingAndApplication was removed;
+- pairing inbox/outbox presentation views are derived from ApplicationSnapshot.
+
+NEW FILES:
+- apps/mobile/flutter/lib/app/presentation_app_controller.dart
+- apps/mobile/flutter/test/core/application_state/pairing_workflow_ownership_test.dart
+- packages/torchat-client-engine/tests/pairing_workflow_ownership.rs
+- docs/refactor/0.3/02-report.txt
+
+REMOVED FILES:
+- apps/mobile/flutter/lib/app/pairing_recovery_app_controller.dart
+
+TESTS ADDED OR UPDATED:
+- Rust ownership ratchet for persisted Welcome, retry claim, backoff,
+  verified relationship and conversation persistence;
+- Flutter ratchet rejecting recovery controllers, watchdogs, pairing-specific
+  refresh APIs and automatic trust/conversation promotion;
+- automatic trust contract now verifies backend-owned convergence;
+- RuntimeRepository tests use the authoritative schema-2 projection API and
+  assert listPairings is not called.
+
+SOURCE-SIZE RATCHETS:
+- app_controller_base.dart baseline reduced from 958 to 685 lines;
+- runtime_repository.dart baseline reduced from 875 to 701 lines;
+- sequential_app_controller.dart fell below 500 lines and its oversized
+  baseline was removed.
+
+PRESERVED INVARIANTS:
+- one ClientEngine inbox and command/effect pipeline;
+- one revisioned ApplicationSnapshot store;
+- pairing UI still exposes submit/accept/reject/cancel/archive intentions;
+- current wire protocol and SQLite schema are unchanged;
+- no GitHub Actions or workflow changes.
+
+STATIC AUDIT:
+- pairing_recovery_app_controller.dart is absent;
+- active app controller hierarchy contains no PairingRecoveryAppController;
+- active Flutter sources contain no pairing watchdog or Welcome polling loop;
+- active repository contains no _runtime.listPairings() fallback;
+- pairing-specific refresh parameters are removed from active controllers;
+- production runtime created by the composition root exposes the projection
+  capability through the session-aware wrapper.
+
+KNOWN FOLLOW-UP:
+- ClientRuntime still declares direct pairing list methods for platform adapter
+  compatibility. RuntimeRepository does not consume them. Their removal belongs
+  to the single-contract/client-runtime consolidation batch, where all Android,
+  desktop and fake adapters can be migrated atomically.
+- general application event coalescing and typing-expiry timers remain; they do
+  not advance pairing domain state.
+
+TESTS NOT RUN:
+- cargo fmt/check/clippy/test;
+- Flutter format/analyze/test;
+- Android or Windows build;
+- platform smoke tests;
+- manual pairing/restart evidence;
+- GitHub Actions or workflow runs.
+
+REASON:
+- the execution environment used connector-backed source editing and the user
+  explicitly excluded GitHub Actions and workflows.
+
+NEXT BATCH:
+- 0.3.3 controller consolidation.
+- Replace the AppControllerBase -> Sequential -> Presentation -> Notification
+  inheritance chain with one ApplicationController plus small presentation,
+  lifecycle and notification collaborators.
