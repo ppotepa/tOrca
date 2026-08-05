@@ -25,12 +25,25 @@ pub enum RelayEvent {
     Envelope(RelayEnvelope),
 }
 
+#[derive(Default)]
+pub struct RelayDeferredControl {
+    pub socks5_url: Option<Option<String>>,
+    pub invalidate_session: bool,
+}
+
 pub trait EngineRelay: Send {
     /// Returns false only while ownership of the concrete relay has been
     /// transferred to a blocking effect worker. This prevents two workers
     /// from racing and later restoring stale relay instances into the actor.
     fn can_start_effect(&self) -> bool {
         true
+    }
+
+    /// A temporary placeholder records lifecycle facts received while a
+    /// blocking effect owns the concrete relay. The actor applies these facts
+    /// immediately after the relay returns from the worker.
+    fn take_deferred_control(&mut self) -> RelayDeferredControl {
+        RelayDeferredControl::default()
     }
 
     fn set_socks5_url(&mut self, socks5_url: Option<String>);
