@@ -1,6 +1,7 @@
 pub mod actor;
-pub mod command;
+pub mod client_api;
 pub mod config;
+pub mod contract;
 pub mod engine;
 pub mod error;
 pub mod event;
@@ -21,11 +22,10 @@ mod scheduler;
 pub mod storage;
 
 pub use actor::ClientEngineActor;
-pub use command::{EngineCommand, EngineCommandEnvelope, PlatformFact, PlatformKind, TorPhase};
-pub use config::EngineConfig;
-pub use engine::{ClientEngine, EngineCommandSender};
-pub mod client_api;
 pub use client_api::PairingList;
+pub use config::EngineConfig;
+pub use contract::{EngineCommand, EngineCommandEnvelope, PlatformFact, PlatformKind, TorPhase};
+pub use engine::{ClientEngine, EngineCommandSender};
 pub use error::{EngineError, EngineResult};
 pub use event::{
     ConnectionSnapshot, ConnectionState, EngineEvent, EngineFatalError, EngineLogEvent,
