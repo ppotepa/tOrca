@@ -28,9 +28,9 @@ struct Command {
 
 fn main() -> Result<(), String> {
     let root = find_repo_root(std::env::current_dir().map_err(|error| error.to_string())?)?;
-    let manifest_path = root.join("common/client-engine-contract.json");
     let manifest: Manifest = serde_json::from_str(
-        &fs::read_to_string(&manifest_path).map_err(|error| error.to_string())?,
+        &fs::read_to_string(root.join("common/client-engine-contract.json"))
+            .map_err(|error| error.to_string())?,
     )
     .map_err(|error| error.to_string())?;
     validate(&manifest)?;
@@ -41,13 +41,23 @@ fn main() -> Result<(), String> {
     )?;
     write(
         &root.join("apps/mobile/flutter/lib/core/runtime/generated/command_contract.g.dart"),
-        &render_dart(&manifest),
+        &render_dart_metadata(&manifest),
+    )?;
+    write(
+        &root.join("apps/mobile/flutter/lib/core/runtime/generated/command_envelope.g.dart"),
+        &render_dart_envelopes(),
     )?;
     write(
         &root.join(
             "apps/mobile/flutter/android/app/src/main/kotlin/org/torchat/generated/GeneratedCommandContract.kt",
         ),
-        &render_kotlin(&manifest),
+        &render_kotlin_metadata(&manifest),
+    )?;
+    write(
+        &root.join(
+            "apps/mobile/flutter/android/app/src/main/kotlin/org/torchat/generated/GeneratedCommandEnvelope.kt",
+        ),
+        &render_kotlin_envelopes(),
     )?;
     Ok(())
 }
@@ -157,43 +167,11 @@ fn render_rust(manifest: &Manifest) -> String {
     output
 }
 
-fn render_dart(manifest: &Manifest) -> String {
+fn render_dart_metadata(manifest: &Manifest) -> String {
     let mut output = String::from(HEADER);
     output.push_str(
-        "final class GeneratedCommandRequest {\n\
-         \tconst GeneratedCommandRequest({required this.type, this.commandId, this.payload = const <String, Object?>{}});\n\
-         \tfinal String type;\n\
-         \tfinal String? commandId;\n\
-         \tfinal Map<String, Object?> payload;\n\
-         \tMap<String, Object?> toJson() => <String, Object?>{\n\
-         \t\t'type': type,\n\
-         \t\tif (commandId != null) 'commandId': commandId,\n\
-         \t\t'payload': payload,\n\
-         \t};\n\
-         }\n\n\
-         final class GeneratedCommandResponse {\n\
-         \tconst GeneratedCommandResponse({required this.status, this.payload, this.code, this.retryable});\n\
-         \tfinal String status;\n\
-         \tfinal Object? payload;\n\
-         \tfinal String? code;\n\
-         \tfinal bool? retryable;\n\
-         \tfactory GeneratedCommandResponse.fromJson(Map<String, Object?> json) => GeneratedCommandResponse(\n\
-         \t\tstatus: json['status'] as String,\n\
-         \t\tpayload: json['payload'],\n\
-         \t\tcode: json['code'] as String?,\n\
-         \t\tretryable: json['retryable'] as bool?,\n\
-         \t);\n\
-         }\n\n\
-         final class GeneratedCommandContract {\n\
-         \tconst GeneratedCommandContract({\n\
-         \t\trequired this.publicMethod,\n\
-         \t\trequired this.wireName,\n\
-         \t\trequired this.category,\n\
-         \t\trequired this.durable,\n\
-         \t\trequired this.requiresCommandId,\n\
-         \t\trequired this.idempotent,\n\
-         \t\trequired this.handlerKey,\n\
-         \t});\n\
+        "final class GeneratedCommandContract {\n\
+         \tconst GeneratedCommandContract({required this.publicMethod, required this.wireName, required this.category, required this.durable, required this.requiresCommandId, required this.idempotent, required this.handlerKey});\n\
          \tfinal String publicMethod;\n\
          \tfinal String wireName;\n\
          \tfinal String category;\n\
@@ -226,22 +204,29 @@ fn render_dart(manifest: &Manifest) -> String {
     output
 }
 
-fn render_kotlin(manifest: &Manifest) -> String {
-    let mut output = String::from(HEADER);
-    output.push_str("package org.torchat.generated\n\n");
-    output.push_str(
-        "import org.json.JSONObject\n\n\
-         data class GeneratedCommandRequest(\n\
-         \tval type: String,\n\
-         \tval commandId: String? = null,\n\
-         \tval payload: JSONObject = JSONObject(),\n\
-         )\n\n\
-         data class GeneratedCommandResponse(\n\
-         \tval status: String,\n\
-         \tval payload: Any? = null,\n\
-         \tval code: String? = null,\n\
-         \tval retryable: Boolean? = null,\n\
-         )\n\n\
+fn render_dart_envelopes() -> String {
+    format!(
+        "{HEADER}final class GeneratedCommandRequest {{\n\
+         \tconst GeneratedCommandRequest({{required this.type, this.commandId, this.payload = const <String, Object?>{{}}}});\n\
+         \tfinal String type;\n\
+         \tfinal String? commandId;\n\
+         \tfinal Map<String, Object?> payload;\n\
+         \tMap<String, Object?> toJson() => <String, Object?>{{'type': type, if (commandId != null) 'commandId': commandId, 'payload': payload}};\n\
+         }}\n\n\
+         final class GeneratedCommandResponse {{\n\
+         \tconst GeneratedCommandResponse({{required this.status, this.payload, this.code, this.retryable}});\n\
+         \tfinal String status;\n\
+         \tfinal Object? payload;\n\
+         \tfinal String? code;\n\
+         \tfinal bool? retryable;\n\
+         \tfactory GeneratedCommandResponse.fromJson(Map<String, Object?> json) => GeneratedCommandResponse(status: json['status'] as String, payload: json['payload'], code: json['code'] as String?, retryable: json['retryable'] as bool?);\n\
+         }}\n"
+    )
+}
+
+fn render_kotlin_metadata(manifest: &Manifest) -> String {
+    let mut output = format!(
+        "{HEADER}package org.torchat.generated\n\n\
          data class GeneratedCommandContract(\n\
          \tval publicMethod: String,\n\
          \tval wireName: String,\n\
@@ -250,9 +235,9 @@ fn render_kotlin(manifest: &Manifest) -> String {
          \tval requiresCommandId: Boolean,\n\
          \tval idempotent: Boolean,\n\
          \tval handlerKey: String,\n\
-         )\n\n",
+         )\n\n\
+         object GeneratedCommandContracts {{\n"
     );
-    output.push_str("object GeneratedCommandContracts {\n");
     output.push_str(&format!("    const val PROTOCOL: Int = {}\n", manifest.protocol));
     output.push_str("    val all: List<GeneratedCommandContract> = listOf(\n");
     for command in &manifest.commands {
@@ -273,6 +258,15 @@ fn render_kotlin(manifest: &Manifest) -> String {
          }\n",
     );
     output
+}
+
+fn render_kotlin_envelopes() -> String {
+    format!(
+        "{HEADER}package org.torchat.generated\n\n\
+         import org.json.JSONObject\n\n\
+         data class GeneratedCommandRequest(val type: String, val commandId: String? = null, val payload: JSONObject = JSONObject())\n\n\
+         data class GeneratedCommandResponse(val status: String, val payload: Any? = null, val code: String? = null, val retryable: Boolean? = null)\n"
+    )
 }
 
 fn find_repo_root(mut path: PathBuf) -> Result<PathBuf, String> {
