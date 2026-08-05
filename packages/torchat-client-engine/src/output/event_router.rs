@@ -2,7 +2,7 @@ use tokio::sync::mpsc;
 
 use crate::{EngineEvent, logging::StartupJournal};
 
-use super::{PendingResponseRegistry, spawn_public_event_publisher};
+use super::{PendingResponseRegistry, publisher::spawn_public_event_publisher};
 
 pub(crate) fn spawn_event_router(
     mut actor_events: mpsc::Receiver<EngineEvent>,
