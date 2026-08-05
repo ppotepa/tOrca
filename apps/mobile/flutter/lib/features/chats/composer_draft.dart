@@ -1,8 +1,10 @@
 import 'dart:typed_data';
 
+import '../../core/attachments/image_attachment_policy.dart';
 import '../../core/attachments/image_message_codec.dart';
 
-const maxComposerAttachments = 4;
+const maxComposerAttachments =
+    ImageAttachmentPolicy.maximumAttachmentsPerMessage;
 
 class ComposerAttachment {
   const ComposerAttachment({
