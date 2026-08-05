@@ -1,0 +1,485 @@
+TORCA 0.3 BASELINE INVENTORY
+============================
+
+BATCH: 0.3.0
+BASE COMMIT: 604708230b2ed84ba3c71cf05651af2a2648a712
+BASE DATE: 2026-08-05
+SCOPE: architecture ownership, frontend/backend boundary and behavior freeze
+WORKFLOWS: explicitly outside this refactor scope
+
+1. CURRENT SYSTEM SHAPE
+-----------------------
+
+Frontend:
+- apps/mobile/flutter is currently the shared application implementation used
+  by Android and reused by the desktop composition root.
+- apps/desktop/flutter supplies Windows-specific platform services and runtime
+  hosting.
+- packages/torchat-flutter-ui contains shared presentation models, theme and
+  widgets.
+
+Backend:
+- torchat-client-engine owns the serialized engine inbox, actor state,
+  command pipeline, effects, scheduler and public engine events.
+- torchat-runtime owns domain behavior.
+- torchat-storage owns SQLite and SQL files.
+- torchat-peer owns direct peer sessions and application-message transport.
+- torchat-rendezvous-client and torchat-relay-protocol own pairing rendezvous
+  transport contracts.
+- torchat-crypto owns MLS and cryptographic primitives.
+
+Platform:
+- Android owns foreground service lifecycle, Tor process, secure storage,
+  notifications and JNI/FFI hosting.
+- Windows owns process, tray/window lifecycle, notifications, autostart and
+  native runtime sidecar integration.
+
+2. EXISTING ARCHITECTURE ALREADY IN PLACE
+-----------------------------------------
+
+The following must be extended rather than recreated:
+
+- one ClientEngine actor inbox;
+- actor/command_pipeline as the only command pipeline;
+- separated input, output, scheduler and relay-effect modules;
+- one contract manifest at common/client-engine-contract.json;
+- parameterized SQL files under packages/torchat-storage/sql;
+- ApplicationSnapshot projection stamp containing store_id,
+  engine_session_id and revision;
+- ConversationProjection as a separate revisioned message projection;
+- Flutter ApplicationStateStore rejecting older revisions from the same store;
+- release/version.json as the release version source;
+- release policy and local validation scripts.
+
+3. FRONTEND GOD OBJECTS AND MIXED RESPONSIBILITIES
+--------------------------------------------------
+
+3.1 apps/mobile/flutter/lib/main.dart
+
+Current approximate baseline: 738 lines before the 0.3 refactor.
+
+Current responsibilities include:
+- Flutter bootstrap;
+- PlatformServices initialization;
+- ProviderScope and MaterialApp;
+- theme and locale composition;
+- application lifecycle observation;
+- desktop navigation intent subscription;
+- notification-to-conversation navigation;
+- pairing dialog queueing;
+- incoming pairing decision dialog;
+- pairing outcome toasts;
+- contact-added toasts;
+- invite-code dialog;
+- QR scanner navigation;
+- message submission;
+- account/settings composition;
+- launch-phase resolution;
+- main-shell composition.
+
+Known domain/convergence behavior in main.dart:
+- _openConversationFromNotification retries up to 12 times;
+- each retry refreshes application data;
+- retries use Future.delayed(250 ms);
+- pairing acceptance waits for a contact to appear;
+- the invite dialog refreshes data after it closes.
+
+Required outcome:
+- main.dart becomes a composition root;
+- lifecycle, navigation and dialogs move to presentation coordinators;
+- all domain convergence loops are removed rather than relocated.
+
+3.2 controller chain
+
+Current chain:
+
+AppControllerBase
+  -> SequentialAppController
+  -> PairingRecoveryAppController
+  -> NotificationSafeAppController
+
+Current files and approximate sizes:
+- app_controller_base.dart: 28 KB / baseline about 958 lines;
+- sequential_app_controller.dart: 19 KB / baseline about 602 lines;
+- pairing_recovery_app_controller.dart: 13 KB;
+- notification_safe_app_controller.dart: 6 KB;
+- app_controller.dart: provider composition wrapper.
+
+Observed overlapping responsibilities:
+- domain command forwarding;
+- command serialization;
+- UI operation state;
+- error sanitization based on text;
+- pairing synchronization;
+- pairing watchdog;
+- automatic contact verification;
+- automatic conversation opening;
+- notification safety wrapping;
+- local state mutation after commands.
+
+Required outcome:
+- one ApplicationController;
+- one command client;
+- UI operation registry only for short-lived presentation busy state;
+- backend snapshot as the domain source of truth;
+- error presenter separate from domain command execution.
+
+3.3 PairingRecoveryAppController
+
+This is the strongest confirmed frontend ownership violation.
+
+Current behavior includes:
+- Timer.periodic pairing watchdog every 20 seconds;
+- minimum synchronization interval tracking;
+- queued and in-flight pairing synchronization;
+- pairing mutation tracking;
+- local mutation error capture;
+- refresh after foreground resume;
+- manual pairing reconciliation after engine attach;
+- retry after accepted/completed pairing while waiting for a contact;
+- delays of 250, 750 and 1500 ms;
+- automatic verification of newly paired contacts;
+- automatic conversation creation/opening;
+- local memory of the last automatically opened contact.
+
+Required outcome:
+- delete PairingRecoveryAppController;
+- move durable recovery and convergence to Rust;
+- retain only visual dialog ordering in Flutter.
+
+4. MULTIPLE FRONTEND STATE COPIES
+---------------------------------
+
+4.1 Rust projection
+
+ApplicationSnapshot already provides:
+- schema_version;
+- generation;
+- identity and profile;
+- contacts;
+- conversations;
+- pairing summary;
+- peer endpoint availability;
+- ProjectionStamp with store_id, engine_session_id and revision.
+
+ConversationProjection separately provides message history paging data.
+
+4.2 Flutter projection store
+
+ApplicationStateStore currently stores:
+- current ApplicationSnapshot;
+- stale marker;
+- per-conversation messages and local message revisions;
+- separate pairing inbox collection;
+- separate pairing outbox collection.
+
+4.3 AppState/controller copies
+
+AppState also exposes or retains:
+- application snapshot;
+- pairing inbox items;
+- pairing outbox items;
+- transport and startup state;
+- typing contacts;
+- local action/error state;
+- selected conversation and destination.
+
+Known risk:
+- contacts/conversations can be read from snapshot while pairings and other
+  fields are read from controller-local state;
+- command handlers may patch or refresh one source before another;
+- UI has more than one way to obtain the same domain information.
+
+Required outcome:
+- one authoritative domain projection;
+- separate revisioned message projection for paging;
+- presentation-only selection/draft/modal state remains in Flutter;
+- pairing collections and durable workflow state come from Rust projection.
+
+5. BACKEND GOD OBJECTS
+----------------------
+
+5.1 packages/torchat-runtime/src/runtime.rs
+
+Current size: approximately 104 KB / source-size baseline 3135 lines.
+
+Responsibilities currently mixed in the facade:
+- profile;
+- pairing;
+- relationships;
+- contacts;
+- conversations;
+- messaging;
+- receipts;
+- presence/typing;
+- peer and capability behavior;
+- event publication;
+- storage orchestration;
+- retry-related behavior.
+
+Existing partial extractions:
+- runtime/helpers.rs;
+- runtime/lifecycle.rs;
+- runtime/message_delivery.rs;
+- runtime/pairing_process.rs;
+- runtime/relationship_process.rs;
+- pairing_rules.rs;
+- message_rules.rs;
+- logic.rs;
+- session.rs.
+
+Required outcome:
+- ClientRuntime remains a temporary facade;
+- business behavior moves to features/*;
+- no duplicate implementation remains in runtime.rs after each extraction.
+
+5.2 packages/torchat-client-engine/src/actor/state.rs
+
+Current source-size baseline: 1260 lines.
+
+Current responsibilities include actor fields, construction-related state and
+shared helpers used by command, event, retry and transport handling.
+
+Required outcome:
+- split by real responsibility after runtime ownership is stable;
+- do not move domain rules into actor helper modules;
+- actor remains the serialized coordinator.
+
+5.3 packages/torchat-client-engine/src/relay/actor.rs
+
+Current source-size baseline: 1067 lines.
+
+Required outcome:
+- split connection/session concerns only when behavior tests exist;
+- do not introduce a second relay client implementation.
+
+5.4 Android TorChatForegroundService.kt
+
+Current source-size baseline: 1039 lines.
+
+Responsibilities include:
+- foreground-service lifecycle;
+- engine host lifecycle;
+- Tor lifecycle and retry;
+- platform facts;
+- notifications;
+- runtime status buffering;
+- reset behavior.
+
+Required outcome:
+- split lifecycle, Tor host, notification rendering and platform-fact mapping;
+- keep Kotlin free from domain workflow.
+
+5.5 Windows runtime bridge
+
+apps/desktop/flutter/lib/platform/desktop/windows_runtime.dart baseline: about
+701 lines.
+
+Responsibilities include:
+- process startup/shutdown;
+- JSON-lines transport;
+- request correlation;
+- runtime event decoding;
+- bootstrap;
+- logging;
+- executable discovery.
+
+Required outcome:
+- split only by real ports such as process host, wire transport and log sink;
+- maintain one runtime process owner.
+
+6. STORAGE CONTRACT DEBT
+------------------------
+
+6.1 RuntimeStorage
+
+Current RuntimeStorage is one broad trait covering identity, profile, pairing,
+contacts, relationships, conversations, messages, receipts, retry and endpoint
+capabilities.
+
+Confirmed dangerous defaults:
+- current_relationship_epoch returns 0;
+- pending_receipts returns an empty list;
+- expedite_retry_after_ready returns Ok(());
+- revoke_peer_endpoint_capability returns Ok(());
+- multiple required operations return generic Unavailable defaults;
+- remove_relationship_with_id can fall back to the less complete method.
+
+Confirmed duplicate responsibility:
+- RuntimeStorage::apply_relationship_transition contains a transition match;
+- SQLite storage also owns transition implementation/delegation.
+
+Confirmed full scan:
+- RuntimeStorage::message iterates every conversation;
+- for each conversation it loads messages;
+- it then searches for message_id.
+
+Required outcome:
+- capability traits introduced feature by feature;
+- required methods have no silent success defaults;
+- one relationship-transition owner;
+- point lookups replace full scans.
+
+6.2 large storage files
+
+Current source-size baselines:
+- storage/runtime_storage.rs: 1609 lines;
+- storage/sqlite/mod.rs: 3161 lines.
+
+Required outcome:
+- split by storage capability;
+- shared row decoders under sqlite/records;
+- no ORM or query builder;
+- SQL remains explicit and parameterized.
+
+7. CONTRACT DUPLICATION
+-----------------------
+
+common/client-engine-contract.json currently maintains separate lists for:
+- methods.public;
+- commandTypes;
+- engineEventTypes;
+- events;
+- response types;
+- platform facts;
+- statuses and outcomes;
+- platform actions.
+
+Known risk:
+- adding a command requires synchronized changes in several lists and
+  generated outputs;
+- idempotency and handler metadata are not represented as one command object.
+
+Required outcome:
+- one command definition contains public name, wire name, request/response,
+  category, idempotency and handler key;
+- generated Rust/Dart/Kotlin metadata;
+- handler and event completeness checks;
+- no generated domain logic.
+
+8. COMMAND PIPELINE BASELINE
+----------------------------
+
+The following already exist and must remain the single path:
+- actor/command_dispatch.rs;
+- actor/command_pipeline/processor.rs;
+- actor/command_pipeline/relay_effect.rs;
+- actor/command_pipeline/effect_outcomes;
+- actor/commands feature directories.
+
+Required outcome:
+- consolidate common validation/idempotency/commit/publication behavior;
+- group trivial handlers by feature;
+- retain separate files for complex workflows;
+- never introduce another pipeline.
+
+9. RETRY AND TIME BASELINE
+--------------------------
+
+Known frontend retry/polling locations:
+- PairingRecoveryAppController watchdog and delays;
+- main.dart notification navigation retries;
+- pairing dialog post-accept refresh loops;
+- controller refresh and recovery wrappers.
+
+Backend retry/time infrastructure already exists partially:
+- torchat-runtime/src/retry.rs;
+- torchat-runtime/src/clock.rs;
+- engine scheduler and timer input;
+- durable delivery/retry SQL.
+
+Required outcome:
+- domain retry belongs to backend;
+- presentation debounce remains allowed;
+- one injected domain clock;
+- one retry algorithm with operation-specific policy.
+
+10. USER-FACING TEXT BOUNDARY
+-----------------------------
+
+Confirmed frontend controller code contains hardcoded Polish operation labels
+such as loading contacts, opening conversations and processing pairing codes.
+These labels are not localized through stable error/operation codes.
+
+Required outcome:
+- Rust returns semantic code/status only;
+- Flutter localization creates visible wording;
+- controller code does not classify technical failures by message text;
+- backend logs retain sanitized technical detail.
+
+11. GENERATED AND SOURCE-OF-TRUTH AREAS
+---------------------------------------
+
+Existing generated/source boundaries include:
+- common/client-engine-contract.json;
+- tools/torchat-contract-gen;
+- generated Dart runtime models/constants;
+- generated Kotlin EngineContract;
+- generated/registered SQL catalog;
+- release/version.json.
+
+Required outcome:
+- stale generated output fails a local check;
+- generated files are marked DO NOT EDIT;
+- one manifest definition per wire entity;
+- one generated SQL catalog.
+
+12. TEST BASELINE AND GAPS
+--------------------------
+
+Existing strengths:
+- runtime unit tests;
+- engine actor and contract tests;
+- FFI tests;
+- Flutter controller/widget tests;
+- storage tests;
+- release tooling and diagnostic sanitization tests;
+- architecture/source-size ratchets.
+
+Priority gaps for 0.3:
+- restart after local pairing acceptance;
+- restart after network send before Welcome;
+- restart after Welcome before contact creation;
+- duplicate Welcome convergence;
+- crossed-pairing uniqueness;
+- no Flutter wait-for-contact loop;
+- stale snapshot from same store;
+- new store/session projection replacement;
+- event consumer backpressure;
+- effect outcome after actor shutdown;
+- point lookup proving no full-table collection read;
+- storage capability completeness;
+- stable error code across storage/runtime/engine/FFI/Dart;
+- FFI concurrent lifecycle and ABI version.
+
+13. BASELINE SUCCESS METRICS
+----------------------------
+
+The 0.3 refactor must reduce:
+- number of domain owners in Flutter;
+- number of controller layers;
+- number of mutable copies of domain collections;
+- number of full-list-then-find calls;
+- number of required storage defaults;
+- number of manually synchronized wire lists;
+- number of god objects above their existing source-size baseline;
+- number of files changed to add one command or feature.
+
+It must not reduce behavior coverage, restart safety, protocol compatibility or
+storage migration safety.
+
+14. FIRST IMPLEMENTATION ORDER
+------------------------------
+
+1. Complete snapshot ownership.
+2. Move pairing recovery and convergence to Rust.
+3. Remove PairingRecoveryAppController.
+4. Consolidate ApplicationController.
+5. Decompose main.dart after domain polling has been removed.
+6. Add ChangeSet before broad runtime extraction.
+7. Extract runtime features with their storage capabilities and point lookups.
+8. Stabilize error contract.
+9. Consolidate contract metadata and command pipeline.
+10. Split SQLite and generate SQL catalog.
+11. Establish shared Flutter app shell and explicit platform providers.
+12. Harden FFI ABI.
