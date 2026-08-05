@@ -148,7 +148,7 @@ function Stop-TorChatBuildProcesses {
         # already disappeared (and its executable may come from a staging
         # directory). Always stop TorChat-owned binaries by name; retain the
         # repository guard for generic build tools.
-        (($name -in @('torchat_mobile.exe','torchat-desktop.exe')) -or
+        (($name -in @('torchat_desktop.exe','torchat-desktop.exe')) -or
           ($name -in @('flutter.exe','dart.exe','cmake.exe','msbuild.exe','ninja.exe') -and
             ($path.StartsWith($repoPath) -or $command.Contains($repoPath) -or $command.Contains($repoPath.Replace('\','/')))))
     } | Sort-Object ProcessId -Unique)
@@ -230,7 +230,7 @@ function Build-TorChatDesktopEngine {
     $artifact = Join-Path $Context.RepositoryRoot "target\$profile\$binaryName"
     $hash = Get-TorChatInputHash -RepositoryRoot $Context.RepositoryRoot -Roots @(
         'Cargo.toml','Cargo.lock','common\client-engine-contract.json','common\torchat-core',
-        'common\torchat-client-runtime','common\torchat-client-engine','desktop'
+        'packages\torchat-runtime','packages\torchat-client-engine','apps\desktop\native'
     ) -ExtraValues @(
         "profile=$profile",
         "onion=$($EnvironmentState.Values['TORCHAT_ONION_URL'])",
@@ -301,11 +301,11 @@ function Build-TorChatAndroidEngine {
     } finally {
         Remove-Item -LiteralPath $writeProbe -Force -ErrorAction SilentlyContinue
     }
-    $out = Join-Path $Context.RepositoryRoot "mobile\build\app\generated\jniLibs\$abi"
+    $out = Join-Path $Context.RepositoryRoot "apps\mobile\flutter\build\app\generated\jniLibs\$abi"
     $artifact = Join-Path $out 'libtorchat_client_engine.so'
     $hash = Get-TorChatInputHash -RepositoryRoot $Context.RepositoryRoot -Roots @(
         'Cargo.toml','Cargo.lock','common\client-engine-contract.json','common\torchat-core',
-        'common\torchat-client-runtime','common\torchat-client-engine','common\torchat-client-engine-ffi'
+        'packages\torchat-runtime','packages\torchat-client-engine','packages\torchat-client-engine-ffi'
     ) -ExtraValues @("target=$RustTarget","ndk=$env:ANDROID_NDK_HOME")
     if ($Policy -eq 'smart' -and (Test-TorChatBuildFresh -RepositoryRoot $Context.RepositoryRoot -Key "android-core-$RustTarget" -Hash $hash -Artifacts @($artifact))) {
         return [pscustomobject]@{ State = 'Skipped'; Code = 'ANDROID_ENGINE_FRESH'; Message = 'Android engine unchanged'; Artifact = $artifact }
@@ -336,10 +336,10 @@ function Build-TorChatAndroidClient {
     Assert-TorChatTool -Name flutter
     Import-TorChatEnvironmentState -EnvironmentState $EnvironmentState -RequireOnion
     $variant = $Context.Configuration
-    $artifact = Join-Path $Context.RepositoryRoot "mobile\build\app\outputs\flutter-apk\app-$variant.apk"
+    $artifact = Join-Path $Context.RepositoryRoot "apps\mobile\flutter\build\app\outputs\flutter-apk\app-$variant.apk"
     $engineArtifacts = @(
-        (Join-Path $Context.RepositoryRoot 'mobile\build\app\generated\jniLibs\arm64-v8a\libtorchat_client_engine.so'),
-        (Join-Path $Context.RepositoryRoot 'mobile\build\app\generated\jniLibs\x86_64\libtorchat_client_engine.so')
+        (Join-Path $Context.RepositoryRoot 'apps\mobile\flutter\build\app\generated\jniLibs\arm64-v8a\libtorchat_client_engine.so'),
+        (Join-Path $Context.RepositoryRoot 'apps\mobile\flutter\build\app\generated\jniLibs\x86_64\libtorchat_client_engine.so')
     )
     foreach ($engineArtifact in $engineArtifacts) {
         if (-not (Test-Path -LiteralPath $engineArtifact)) {
@@ -350,8 +350,8 @@ function Build-TorChatAndroidClient {
         "engine=$([IO.Path]::GetFileName((Split-Path -Parent $_))):$(Get-TorChatFileSha256 -Path $_)"
     })
     $hash = Get-TorChatInputHash -RepositoryRoot $Context.RepositoryRoot -Roots @(
-        'common\client-engine-contract.json','mobile\pubspec.yaml','mobile\pubspec.lock',
-        'mobile\lib','mobile\assets','mobile\android'
+        'common\client-engine-contract.json','apps\mobile\flutter\pubspec.yaml','apps\mobile\flutter\pubspec.lock',
+        'apps\mobile\flutter\lib','apps\mobile\flutter\assets','apps\mobile\flutter\android'
     ) -ExtraValues (@(
         "environment=$($Context.Environment)",
         "onion=$($EnvironmentState.Values['TORCHAT_ONION_URL'])",
@@ -373,7 +373,7 @@ function Build-TorChatAndroidClient {
         if (-not [string]::IsNullOrWhiteSpace($torkaPairingCode)) {
             $arguments += "--dart-define=TORCHAT_TORKA_PAIRING_CODE=$torkaPairingCode"
         }
-        [void](Invoke-TorChatNative -Context $Context -FilePath 'flutter' -ArgumentList $arguments -WorkingDirectory (Join-Path $Context.RepositoryRoot 'mobile') -LogName 'flutter-android.log')
+        [void](Invoke-TorChatNative -Context $Context -FilePath 'flutter' -ArgumentList $arguments -WorkingDirectory (Join-Path $Context.RepositoryRoot 'apps\mobile\flutter') -LogName 'flutter-android.log')
     } finally {
         $env:TORCHAT_CONFIG_FILE = $previousConfig
         $env:TORCHAT_DEV_PROFILE = $previousProfile
@@ -396,10 +396,11 @@ function Build-TorChatWindowsClient {
     Import-TorChatEnvironmentState -EnvironmentState $EnvironmentState -RequireOnion
     $variant = if ($Context.Configuration -eq 'release') { 'Release' } else { 'Debug' }
     $flutterVariant = if ($Context.Configuration -eq 'release') { '--release' } else { '--debug' }
-    $artifact = Join-Path $Context.RepositoryRoot "mobile\build\windows\x64\runner\$variant\torchat_mobile.exe"
+    $artifact = Join-Path $Context.RepositoryRoot "apps\desktop\flutter\build\windows\x64\runner\$variant\torchat_desktop.exe"
     $hash = Get-TorChatInputHash -RepositoryRoot $Context.RepositoryRoot -Roots @(
-        'common\client-engine-contract.json','mobile\pubspec.yaml','mobile\pubspec.lock',
-        'mobile\lib','mobile\assets','mobile\windows'
+        'common\client-engine-contract.json','apps\mobile\flutter\pubspec.yaml','apps\mobile\flutter\pubspec.lock',
+        'apps\mobile\flutter\lib','apps\mobile\flutter\assets','apps\desktop\flutter',
+        'packages\torchat-flutter-ui'
     ) -ExtraValues @(
         "environment=$($Context.Environment)",
         "onion=$($EnvironmentState.Values['TORCHAT_ONION_URL'])",
@@ -418,23 +419,36 @@ function Build-TorChatWindowsClient {
     } finally {
         $sha.Dispose()
     }
-    $mobileRoot = Join-Path $Context.RepositoryRoot 'mobile'
+    $mobileRoot = Join-Path $Context.RepositoryRoot 'apps\mobile\flutter'
+    $desktopRoot = Join-Path $Context.RepositoryRoot 'apps\desktop\flutter'
+    $uiPackageRoot = Join-Path $Context.RepositoryRoot 'packages\torchat-flutter-ui'
     # Keep staging isolated per exact Flutter input set. The old fixed path could
     # retain a partially copied project (including merge-conflict markers) when
     # a previous build was interrupted or robocopy was unable to replace a file.
     $inputHash = $hash.Substring(0, 16).ToLowerInvariant()
-    $stagingMobile = Join-Path $stagingParent "TorChat\flutter-windows\$repoHash\$inputHash\mobile"
-    $stagingBuild = Join-Path $stagingMobile 'build\windows'
-    $destinationBuild = Join-Path $mobileRoot 'build\windows'
-    Remove-TorChatDirectoryRobust -Path $stagingMobile -Description 'Windows Flutter staging directory'
-    New-Item -ItemType Directory -Force -Path $stagingMobile | Out-Null
+    $stagingRoot = Join-Path $stagingParent "TorChat\flutter-windows\$repoHash\$inputHash"
+    $stagingMobile = Join-Path $stagingRoot 'apps\mobile\flutter'
+    $stagingDesktop = Join-Path $stagingRoot 'apps\desktop\flutter'
+    $stagingPackages = Join-Path $stagingRoot 'packages'
+    $stagingBuild = Join-Path $stagingDesktop 'build\windows'
+    $destinationBuild = Join-Path $desktopRoot 'build\windows'
+    Remove-TorChatDirectoryRobust -Path $stagingRoot -Description 'Windows Flutter staging directory'
+    New-Item -ItemType Directory -Force -Path $stagingMobile,$stagingDesktop,$stagingPackages | Out-Null
     & robocopy $mobileRoot $stagingMobile /E /NFL /NDL /NJH /NJS /NP `
         /XD (Join-Path $mobileRoot 'build') `
             (Join-Path $mobileRoot '.dart_tool') `
-            (Join-Path $mobileRoot 'windows\flutter\ephemeral') `
             (Join-Path $mobileRoot 'android') `
         /XF '*.apk' '*.aab' '*.log' | Out-Null
     if ($LASTEXITCODE -gt 7) { throw "Windows Flutter staging copy failed with robocopy exit $LASTEXITCODE." }
+    & robocopy $desktopRoot $stagingDesktop /E /NFL /NDL /NJH /NJS /NP `
+        /XD (Join-Path $desktopRoot 'build') `
+            (Join-Path $desktopRoot '.dart_tool') `
+            (Join-Path $desktopRoot 'windows\flutter\ephemeral') `
+        /XF '*.log' | Out-Null
+    if ($LASTEXITCODE -gt 7) { throw "Desktop Flutter staging copy failed with robocopy exit $LASTEXITCODE." }
+    & robocopy $uiPackageRoot (Join-Path $stagingPackages 'torchat-flutter-ui') /E /NFL /NDL /NJH /NJS /NP `
+        /XD (Join-Path $uiPackageRoot '.dart_tool') | Out-Null
+    if ($LASTEXITCODE -gt 7) { throw "Shared Flutter UI staging copy failed with robocopy exit $LASTEXITCODE." }
     $sourceArb = Join-Path $mobileRoot 'lib\locales\resources\app_en.arb'
     $stagedArb = Join-Path $stagingMobile 'lib\locales\resources\app_en.arb'
     if (-not (Test-Path -LiteralPath $stagedArb)) { throw "Windows Flutter staging copy omitted localization catalog: $stagedArb" }
@@ -447,11 +461,68 @@ function Build-TorChatWindowsClient {
     $torkaPairingCode = [string]$EnvironmentState.Values['TORCHAT_TORKA_PAIRING_CODE']
     $env:TORCHAT_CONFIG_FILE = $EnvironmentState.Paths.RuntimeEnvironment
     try {
-        $arguments = @('build','windows',$flutterVariant)
+        # Resolve plugins before the build so the staging copy can repair the
+        # Windows include layout of flutter_secure_storage_windows. Version
+        # 4.1.0 declares its own include directory as INTERFACE while its
+        # source uses a path rooted at include/, which breaks MSVC builds.
+        [void](Invoke-TorChatNative -Context $Context -FilePath 'flutter' -ArgumentList @('pub','get') -WorkingDirectory $stagingDesktop -LogName 'flutter-windows-pub-get.log')
+        $secureStorageRoot = Join-Path $stagingDesktop 'windows\flutter\ephemeral\.plugin_symlinks\flutter_secure_storage_windows'
+        $secureStorageCmake = Join-Path $secureStorageRoot 'windows\CMakeLists.txt'
+        $secureStorageCpp = Join-Path $secureStorageRoot 'windows\flutter_secure_storage_windows_plugin.cpp'
+        if (Test-Path -LiteralPath $secureStorageRoot) {
+            $secureStorageItem = Get-Item -LiteralPath $secureStorageRoot -Force
+            if (($secureStorageItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                $secureStorageSource = [string]$secureStorageItem.Target
+                # Flutter's Windows toolchain follows this link while copying
+                # plugin sources. Patch the resolved package first so the
+                # generated CMake project receives the corrected source.
+                $resolvedCmake = Join-Path $secureStorageSource 'windows\CMakeLists.txt'
+                $resolvedCpp = Join-Path $secureStorageSource 'windows\flutter_secure_storage_windows_plugin.cpp'
+                if ((Test-Path -LiteralPath $resolvedCmake) -and (Test-Path -LiteralPath $resolvedCpp)) {
+                    $resolvedCmakeText = [IO.File]::ReadAllText($resolvedCmake)
+                    $resolvedCppText = [IO.File]::ReadAllText($resolvedCpp)
+                    [IO.File]::WriteAllText($resolvedCmake, $resolvedCmakeText.Replace('target_include_directories(${PLUGIN_NAME} INTERFACE', 'target_include_directories(${PLUGIN_NAME} PRIVATE'), [Text.UTF8Encoding]::new($false))
+                    [IO.File]::WriteAllText($resolvedCpp, $resolvedCppText.Replace('#include "include/flutter_secure_storage_windows/flutter_secure_storage_windows_plugin.h"', '#include "flutter_secure_storage_windows/flutter_secure_storage_windows_plugin.h"'), [Text.UTF8Encoding]::new($false))
+                }
+                # Remove only this generated staging link. PowerShell can
+                # follow directory links on exFAT, so use rmdir for the link
+                # itself and verify that the target was not touched.
+                cmd.exe /c "rmdir `"$secureStorageRoot`"" | Out-Null
+                if (Test-Path -LiteralPath $secureStorageRoot) {
+                    throw "Could not replace staged flutter_secure_storage_windows link: $secureStorageRoot"
+                }
+                New-Item -ItemType Directory -Force -Path $secureStorageRoot | Out-Null
+                & robocopy $secureStorageSource $secureStorageRoot /E /NFL /NDL /NJH /NJS /NP | Out-Null
+                if ($LASTEXITCODE -gt 7) { throw "Failed to materialize staged flutter_secure_storage_windows plugin (robocopy exit $LASTEXITCODE)." }
+                $secureStorageCmake = Join-Path $secureStorageRoot 'windows\CMakeLists.txt'
+                $secureStorageCpp = Join-Path $secureStorageRoot 'windows\flutter_secure_storage_windows_plugin.cpp'
+            }
+        }
+        if ((Test-Path -LiteralPath $secureStorageCmake) -and (Test-Path -LiteralPath $secureStorageCpp)) {
+            $cmakeText = [IO.File]::ReadAllText($secureStorageCmake)
+            $cppText = [IO.File]::ReadAllText($secureStorageCpp)
+            $newCmakeText = $cmakeText.Replace('target_include_directories(${PLUGIN_NAME} INTERFACE', 'target_include_directories(${PLUGIN_NAME} PRIVATE')
+            $newCppText = $cppText.Replace('#include "include/flutter_secure_storage_windows/flutter_secure_storage_windows_plugin.h"', '#include "flutter_secure_storage_windows/flutter_secure_storage_windows_plugin.h"')
+            if ($newCmakeText -ne $cmakeText) {
+                [IO.File]::WriteAllText($secureStorageCmake, $newCmakeText, [Text.UTF8Encoding]::new($false))
+            }
+            if ($newCppText -ne $cppText) {
+                [IO.File]::WriteAllText($secureStorageCpp, $newCppText, [Text.UTF8Encoding]::new($false))
+            }
+            if (($newCmakeText -ne $cmakeText) -or ($newCppText -ne $cppText)) {
+                Write-TorChatInfo 'Applied MSVC include-path workaround to staged flutter_secure_storage_windows plugin.'
+            }
+        }
+        # Force CMake to re-read the corrected plugin CMakeLists instead of
+        # reusing a project generated from the broken package metadata.
+        if (Test-Path -LiteralPath $stagingBuild) {
+            Remove-TorChatDirectoryRobust -Path $stagingBuild -Description 'stale Windows Flutter CMake output'
+        }
+        $arguments = @('build','windows',$flutterVariant,'--no-pub')
         if (-not [string]::IsNullOrWhiteSpace($torkaPairingCode)) {
             $arguments += "--dart-define=TORCHAT_TORKA_PAIRING_CODE=$torkaPairingCode"
         }
-        [void](Invoke-TorChatNative -Context $Context -FilePath 'flutter' -ArgumentList $arguments -WorkingDirectory $stagingMobile -LogName 'flutter-windows.log')
+        [void](Invoke-TorChatNative -Context $Context -FilePath 'flutter' -ArgumentList $arguments -WorkingDirectory $stagingDesktop -LogName 'flutter-windows.log')
     } finally {
         $env:TORCHAT_CONFIG_FILE = $previousConfig
     }
@@ -483,9 +554,9 @@ function Build-TorChatServerImage {
     )
     Assert-TorChatTool -Name docker
     $compose = Get-TorChatComposeContext -RepositoryRoot $Context.RepositoryRoot -EnvironmentState $EnvironmentState
-    $args = @($compose.Arguments + @('build','server'))
+    $args = @($compose.Arguments + @('build','relay'))
     if ($NoCache) { $args += '--no-cache' }
-    [void](Invoke-TorChatNative -Context $Context -FilePath 'docker' -ArgumentList $args -WorkingDirectory $Context.RepositoryRoot -LogName 'docker-build-server.log')
+    [void](Invoke-TorChatNative -Context $Context -FilePath 'docker' -ArgumentList $args -WorkingDirectory $Context.RepositoryRoot -LogName 'docker-build-relay.log')
     [pscustomobject]@{ State = 'Ready'; Code = 'SERVER_IMAGE_BUILT'; Message = 'Relay server image built' }
 }
 

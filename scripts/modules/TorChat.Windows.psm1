@@ -3,8 +3,8 @@ Set-StrictMode -Version Latest
 function Get-TorChatWindowsRunnerProcesses {
     param([Parameter(Mandatory = $true)][string]$RepositoryRoot)
     if ($env:OS -ne 'Windows_NT') { return @() }
-    $windowsRoot = [IO.Path]::GetFullPath((Join-Path $RepositoryRoot 'mobile\build\windows'))
-    return @(Get-CimInstance Win32_Process -Filter "Name='torchat_mobile.exe'" -ErrorAction SilentlyContinue | Where-Object {
+    $windowsRoot = [IO.Path]::GetFullPath((Join-Path $RepositoryRoot 'apps\desktop\flutter\build\windows'))
+    return @(Get-CimInstance Win32_Process -Filter "Name='torchat_desktop.exe'" -ErrorAction SilentlyContinue | Where-Object {
         $_.ExecutablePath -and [IO.Path]::GetFullPath($_.ExecutablePath).StartsWith($windowsRoot, [StringComparison]::OrdinalIgnoreCase)
     })
 }
@@ -109,7 +109,7 @@ function Save-TorChatWindowsDiagnostics {
     $root = Join-Path $Context.RunDirectory 'windows-diagnostics'
     New-Item -ItemType Directory -Force -Path $root | Out-Null
     Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -in @('torchat_mobile.exe','torchat-desktop.exe','tor.exe') } |
+        Where-Object { $_.Name -in @('torchat_desktop.exe','torchat-desktop.exe','tor.exe') } |
         Select-Object Name,ProcessId,ParentProcessId,ExecutablePath,CommandLine |
         Format-List | Out-File -LiteralPath (Join-Path $root 'processes.txt') -Encoding utf8
     return $root
@@ -193,7 +193,7 @@ function Start-TorChatWindowsClient {
     $profile = if ($Context.Configuration -eq 'release') { 'release' } else { 'debug' }
     $variant = if ($Context.Configuration -eq 'release') { 'Release' } else { 'Debug' }
     $engine = Join-Path $Context.RepositoryRoot "target\$profile\torchat-desktop.exe"
-    $runner = Join-Path $Context.RepositoryRoot "mobile\build\windows\x64\runner\$variant\torchat_mobile.exe"
+    $runner = Join-Path $Context.RepositoryRoot "apps\desktop\flutter\build\windows\x64\runner\$variant\torchat_desktop.exe"
     if (-not (Test-Path -LiteralPath $engine)) { throw "Desktop engine artifact missing: $engine" }
     if (-not (Test-Path -LiteralPath $runner)) { throw "Windows client artifact missing: $runner" }
 

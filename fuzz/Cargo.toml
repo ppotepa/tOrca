@@ -11,6 +11,8 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4"
 base64 = "0.22"
 torchat-core = { path = "../common/torchat-core" }
+torchat-protocol = { path = "../packages/torchat-protocol" }
+torchat-crypto = { path = "../packages/torchat-crypto" }
 
 [[bin]]
 name = "application_payload"

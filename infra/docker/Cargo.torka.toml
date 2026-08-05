@@ -2,9 +2,9 @@
 resolver = "2"
 members = [
     "common/torchat-core",
-    "common/torchat-client-runtime",
-    "common/torchat-client-engine",
-    "desktop",
+    "packages/torchat-runtime",
+    "packages/torchat-client-engine",
+    "apps/desktop/native",
 ]
 
 [workspace.package]

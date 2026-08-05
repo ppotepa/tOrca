@@ -1,0 +1,18 @@
+[package]
+name = "torchat-peer"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+base64 = "0.22"
+futures-util = "=0.3.32"
+getrandom = "0.3"
+serde_json = "1"
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "sync", "time"] }
+tokio-tungstenite = "0.29"
+tokio-socks = "0.5"
+tokio-util = "0.7"
+torchat-core = { path = "../../common/torchat-core" }
+torchat-runtime = { path = "../torchat-runtime" }
+uuid = { version = "1", features = ["v4"] }
+url = "2"

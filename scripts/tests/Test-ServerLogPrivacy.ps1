@@ -4,12 +4,12 @@ param()
 $ErrorActionPreference = 'Stop'
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot '..\..')
 $checker = Join-Path $repoRoot 'scripts\internal\check-server-log-privacy.ps1'
-$source = Join-Path $repoRoot 'server\torchat-server\src\main.rs'
+$source = Join-Path $repoRoot 'services\torchat-relay\src\main.rs'
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("torchat-log-privacy-" + [guid]::NewGuid())
 
 try {
     New-Item -ItemType Directory -Path $tempRoot | Out-Null
-    $mutatedRoot = Join-Path $tempRoot 'server\torchat-server\src'
+    $mutatedRoot = Join-Path $tempRoot 'services\torchat-relay\src'
     New-Item -ItemType Directory -Path $mutatedRoot -Force | Out-Null
     Copy-Item -LiteralPath $source -Destination (Join-Path $mutatedRoot 'main.rs')
     $mutated = Join-Path $mutatedRoot 'main.rs'

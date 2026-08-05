@@ -147,7 +147,7 @@ if ($runCore) {
         Invoke-TorChatNativeCommand cargo @('fmt','--all','--','--check') $repositoryRoot
     }
     Invoke-TorChatMatrixStep 'runtime-tests' 'core' {
-        Invoke-TorChatNativeCommand cargo @('test','-p','torchat-client-runtime') $repositoryRoot
+        Invoke-TorChatNativeCommand cargo @('test','-p','torchat-runtime') $repositoryRoot
     }
     Invoke-TorChatMatrixStep 'engine-tests' 'core' {
         Invoke-TorChatNativeCommand cargo @('test','-p','torchat-client-engine') $repositoryRoot
@@ -157,7 +157,7 @@ if ($runCore) {
     }
     Invoke-TorChatMatrixStep 'rust-clippy' 'core' {
         Invoke-TorChatNativeCommand cargo @(
-            'clippy','-p','torchat-client-runtime','-p','torchat-client-engine',
+            'clippy','-p','torchat-runtime','-p','torchat-client-engine',
             '-p','torchat-client-engine-ffi','--all-targets','--','-D','warnings'
         ) $repositoryRoot
     }
@@ -170,21 +170,21 @@ if ($runCore) {
     Invoke-TorChatMatrixStep 'flutter-format' 'flutter' {
         Invoke-TorChatNativeCommand dart @(
             'format','--output=none','--set-exit-if-changed','lib','test','integration_test'
-        ) (Join-Path $repositoryRoot 'mobile')
+        ) (Join-Path $repositoryRoot 'apps\mobile\flutter')
     }
     Invoke-TorChatMatrixStep 'flutter-analyze' 'flutter' {
-        Invoke-TorChatNativeCommand flutter @('pub','get') (Join-Path $repositoryRoot 'mobile')
-        Invoke-TorChatNativeCommand flutter @('analyze') (Join-Path $repositoryRoot 'mobile')
+        Invoke-TorChatNativeCommand flutter @('pub','get') (Join-Path $repositoryRoot 'apps\mobile\flutter')
+        Invoke-TorChatNativeCommand flutter @('analyze') (Join-Path $repositoryRoot 'apps\mobile\flutter')
     }
     Invoke-TorChatMatrixStep 'flutter-tests' 'flutter' {
-        Invoke-TorChatNativeCommand flutter @('test') (Join-Path $repositoryRoot 'mobile')
+        Invoke-TorChatNativeCommand flutter @('test') (Join-Path $repositoryRoot 'apps\mobile\flutter')
     }
 }
 
 if ($runAndroid) {
     Invoke-TorChatMatrixStep 'android-debug-build' 'android' {
-        Invoke-TorChatNativeCommand flutter @('pub','get') (Join-Path $repositoryRoot 'mobile')
-        Invoke-TorChatNativeCommand flutter @('build','apk','--debug') (Join-Path $repositoryRoot 'mobile')
+        Invoke-TorChatNativeCommand flutter @('pub','get') (Join-Path $repositoryRoot 'apps\mobile\flutter')
+        Invoke-TorChatNativeCommand flutter @('build','apk','--debug') (Join-Path $repositoryRoot 'apps\mobile\flutter')
     }
 
     $resolvedDevice = Test-TorChatAndroidDevice -RequestedDevice $Device
@@ -194,7 +194,7 @@ if ($runAndroid) {
         'android-cold-start-recovery'
     )
     if ($resolvedDevice) {
-        $apk = Join-Path $repositoryRoot 'mobile\build\app\outputs\flutter-apk\app-debug.apk'
+        $apk = Join-Path $repositoryRoot 'apps\mobile\flutter\build\app\outputs\flutter-apk\app-debug.apk'
         Invoke-TorChatMatrixStep 'android-clean-install-smoke' 'android' {
             if (-not (Test-Path -LiteralPath $apk)) { throw "Android APK is missing: $apk" }
             & adb -s $resolvedDevice uninstall org.torchat.mobile 2>$null | Out-Null
@@ -237,11 +237,11 @@ if ($runAndroid) {
 if ($runWindows) {
     if ($env:OS -eq 'Windows_NT') {
         Invoke-TorChatMatrixStep 'windows-debug-build' 'windows' {
-            Invoke-TorChatNativeCommand flutter @('config','--enable-windows-desktop') (Join-Path $repositoryRoot 'mobile')
-            Invoke-TorChatNativeCommand flutter @('pub','get') (Join-Path $repositoryRoot 'mobile')
-            Invoke-TorChatNativeCommand flutter @('build','windows','--debug') (Join-Path $repositoryRoot 'mobile')
+            Invoke-TorChatNativeCommand flutter @('config','--enable-windows-desktop') (Join-Path $repositoryRoot 'apps\desktop\flutter')
+            Invoke-TorChatNativeCommand flutter @('pub','get') (Join-Path $repositoryRoot 'apps\desktop\flutter')
+            Invoke-TorChatNativeCommand flutter @('build','windows','--debug') (Join-Path $repositoryRoot 'apps\desktop\flutter')
         }
-        $executable = Join-Path $repositoryRoot 'mobile\build\windows\x64\runner\Debug\torchat_mobile.exe'
+        $executable = Join-Path $repositoryRoot 'apps\desktop\flutter\build\windows\x64\runner\Debug\torchat_desktop.exe'
         Invoke-TorChatMatrixStep 'windows-clean-profile-smoke' 'windows' {
             if (-not (Test-Path -LiteralPath $executable)) { throw "Windows executable is missing: $executable" }
             $profile = Join-Path ([System.IO.Path]::GetTempPath()) ("torchat-profile-" + [guid]::NewGuid().ToString('N'))

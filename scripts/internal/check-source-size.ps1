@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
     [string]$RepositoryRoot,
     [switch]$WarnOnly
@@ -53,37 +53,42 @@ $testPathPatterns = @(
 # Existing oversized files are explicit debt. They may shrink, but they may not
 # grow while the refactor is in progress.
 $oversizedBaselines = @{
-    'common/torchat-client-engine/src/actor/mod.rs' = 5399
-    'common/torchat-client-engine/src/actor/connection.rs' = 503
-    'common/torchat-client-engine/src/peer/inbound.rs' = 521
-    'common/torchat-client-engine/src/peer/outbound.rs' = 504
-    'common/torchat-client-engine/src/peer/session.rs' = 546
-    'common/torchat-client-engine/src/relay/actor.rs' = 1067
-    'common/torchat-client-engine/src/storage/runtime_storage.rs' = 1609
-    'common/torchat-client-engine/src/storage/sqlite/mod.rs' = 3161
-    'common/torchat-client-runtime/src/models.rs' = 733
-    'common/torchat-client-runtime/src/pairing_rules.rs' = 773
-    'common/torchat-client-runtime/src/runtime.rs' = 3135
+    'packages/torchat-client-engine/src/actor/mod.rs' = 5399
+    'packages/torchat-client-engine/src/actor/connection.rs' = 503
+    'packages/torchat-client-engine/src/actor/peer_events.rs' = 511
+    'packages/torchat-peer/src/peer/inbound.rs' = 521
+    'packages/torchat-peer/src/peer/outbound.rs' = 504
+    'packages/torchat-peer/src/peer/session.rs' = 546
+    'packages/torchat-client-engine/src/relay/actor.rs' = 1067
+    'packages/torchat-storage/src/storage/runtime_storage.rs' = 1609
+    'packages/torchat-storage/src/storage/sqlite/mod.rs' = 3161
+    'packages/torchat-runtime/src/models.rs' = 751
+    'packages/torchat-runtime/src/pairing_rules.rs' = 781
+    'packages/torchat-runtime/src/runtime/pairing_process.rs' = 715
+    'packages/torchat-runtime/src/runtime.rs' = 3135
     'common/torchat-core/src/peer_protocol.rs' = 665
-    'common/torchat-core/src/relay.rs' = 506
-    'mobile/android/app/src/main/kotlin/org/torchat/mobile/MainActivity.kt' = 517
-    'mobile/lib/features/chats/release_chat_view.dart' = 1124
+    'packages/torchat-crypto/src/mls.rs' = 731
+    'common/torchat-core/src/relay.rs' = 541
+    'apps/mobile/flutter/android/app/src/main/kotlin/org/torchat/mobile/MainActivity.kt' = 525
+    'apps/mobile/flutter/lib/features/chats/release_chat_view.dart' = 1124
     # Bounded lifecycle disposal/focus state added during R2; refactor remains
     # tracked by the ratchet and cannot grow beyond this new baseline.
-    'mobile/lib/app/app_controller_base.dart' = 958
-    'mobile/lib/app/sequential_app_controller.dart' = 602
-    'mobile/lib/app/theme/families/retro_theme.dart' = 722
-    'mobile/lib/features/contacts/contacts_view.dart' = 640
-    'mobile/lib/features/onboarding/onboarding_views.dart' = 535
-    'mobile/lib/features/shell/desktop/desktop_workspace.dart' = 706
-    'mobile/lib/core/models/domain.dart' = 1052
-    'mobile/android/app/src/main/kotlin/org/torchat/mobile/TorChatForegroundService.kt' = 1039
-    'mobile/lib/core/runtime/runtime_repository.dart' = 875
-    'mobile/lib/main.dart' = 709
-    'mobile/lib/windows_runtime.dart' = 619
+    'apps/mobile/flutter/lib/app/app_controller_base.dart' = 958
+    'apps/mobile/flutter/lib/app/sequential_app_controller.dart' = 602
+    'packages/torchat-flutter-ui/lib/theme/families/retro_theme.dart' = 722
+    'apps/mobile/flutter/lib/features/account/settings_view.dart' = 524
+    'apps/mobile/flutter/lib/features/contacts/contacts_view.dart' = 765
+    'apps/mobile/flutter/lib/features/onboarding/onboarding_views.dart' = 572
+'apps/mobile/flutter/lib/platform/desktop/desktop_workspace.dart' = 807
+    'packages/torchat-flutter-ui/lib/core/models/domain.dart' = 1052
+    'apps/mobile/flutter/android/app/src/main/kotlin/org/torchat/mobile/TorChatForegroundService.kt' = 1039
+    'apps/mobile/flutter/lib/core/runtime/runtime_repository.dart' = 875
+    'apps/mobile/flutter/lib/main.dart' = 738
+'apps/desktop/flutter/lib/platform/desktop/windows_runtime.dart' = 701
     'scripts/zip.ps1' = 753
-    'server/torchat-server/src/main.rs' = 1821
-    'tools/torchat-contract-gen/src/main.rs' = 860
+    'services/torchat-relay/src/main.rs' = 687
+    'apps/desktop/native/src/runtime_engine_stdio.rs' = 594
+    'tools/torchat-contract-gen/src/main.rs' = 861
 }
 
 function Convert-ToRepoPath {

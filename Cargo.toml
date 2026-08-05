@@ -2,12 +2,19 @@
 resolver = "2"
 exclude = ["fuzz"]
 members = [
+    "packages/torchat-protocol",
+    "packages/torchat-domain",
+    "packages/torchat-crypto",
+    "packages/torchat-relay-protocol",
+    "packages/torchat-rendezvous-client",
+    "packages/torchat-storage",
+    "packages/torchat-peer",
     "common/torchat-core",
-    "common/torchat-client-runtime",
-    "common/torchat-client-engine",
-    "common/torchat-client-engine-ffi",
-    "server/torchat-server",
-    "desktop",
+    "packages/torchat-runtime",
+    "packages/torchat-client-engine",
+    "packages/torchat-client-engine-ffi",
+    "services/torchat-relay",
+    "apps/desktop/native",
     "tools/torchat-contract-gen",
 ]
 

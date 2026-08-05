@@ -2,7 +2,7 @@
 param(
     [string]$WorkflowPath = (Join-Path $PSScriptRoot '..\..\.github\workflows\release-0-1-validation.yml'),
     [string]$DenyPath = (Join-Path $PSScriptRoot '..\..\deny.toml'),
-    [string]$MlsFixturePath = (Join-Path $PSScriptRoot '..\..\protocol\dev-fixtures\android-peer.json')
+    [string]$MlsFixturePath = (Join-Path $PSScriptRoot '..\..\tests\fixtures\protocol\android-peer.json')
 )
 
 $ErrorActionPreference = 'Stop'

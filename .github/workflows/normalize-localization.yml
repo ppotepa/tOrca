@@ -19,8 +19,8 @@ jobs:
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const paths = [
-              'mobile/lib/locales/resources/app_en.arb',
-              'mobile/lib/locales/resources/app_pl.arb',
+              'apps/mobile/flutter/lib/locales/resources/app_en.arb',
+              'apps/mobile/flutter/lib/locales/resources/app_pl.arb',
             ];
 
             function normalize(text) {

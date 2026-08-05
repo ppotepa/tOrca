@@ -35,12 +35,18 @@ jobs:
       - name: Clean architecture check
         shell: pwsh
         run: ./scripts/internal/check-clean-architecture.ps1
-- name: Runtime contract check
-  shell: pwsh
-  run: ./scripts/internal/check-runtime-contract.ps1
-- name: Localization contract check
-  shell: pwsh
-  run: ./scripts/internal/check-localization.ps1
+      - name: Dependency boundary check
+        shell: pwsh
+        run: ./scripts/internal/check-dependency-rules.ps1
+      - name: Target structure check
+        shell: pwsh
+        run: ./scripts/internal/check-target-structure.ps1
+      - name: Runtime contract check
+        shell: pwsh
+        run: ./scripts/internal/check-runtime-contract.ps1
+      - name: Localization contract check
+        shell: pwsh
+        run: ./scripts/internal/check-localization.ps1
       - name: SQL isolation check
         shell: pwsh
         run: ./scripts/internal/check-sql-isolation.ps1
@@ -87,7 +93,7 @@ jobs:
           cargo metadata --locked --format-version 1 > "$RUNNER_TEMP/torchat-sbom/cargo-metadata.json"
           cargo install cargo-cyclonedx --locked --version 0.5.9
           cargo cyclonedx \
-            --manifest-path common/torchat-client-engine/Cargo.toml \
+            --manifest-path packages/torchat-client-engine/Cargo.toml \
             --format json \
             --spec-version 1.5 \
             --override-filename torchat-sbom
@@ -145,20 +151,20 @@ jobs:
         run: ./scripts/tests/Test-TorChatTwoEngineIntegration.ps1 -TimeoutSeconds 360
 
   container-security:
-    name: Server image SBOM and vulnerability scan
+    name: Relay image SBOM and vulnerability scan
     needs: rust
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
       - name: Build server image for scanning
-        run: docker build --tag torchat-server:ci --file infra/docker/Dockerfile.server .
+        run: docker build --tag torchat-relay:ci --file infra/relay/docker/Dockerfile .
       - name: Scan image and generate CycloneDX SBOM
         uses: aquasecurity/trivy-action@6c175e9c4083a92bbca2f9724c8a5e33bc2d97a5 # v0.30.0
         with:
-          image-ref: torchat-server:ci
+          image-ref: torchat-relay:ci
           format: cyclonedx
-          output: torchat-server-image.cdx.json
+          output: torchat-relay-image.cdx.json
           severity: HIGH,CRITICAL
           ignore-unfixed: false
           exit-code: '1'
@@ -166,8 +172,8 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
-          name: torchat-server-image-sbom-${{ github.sha }}
-          path: torchat-server-image.cdx.json
+          name: torchat-relay-image-sbom-${{ github.sha }}
+          path: torchat-relay-image.cdx.json
           if-no-files-found: error
 
   flutter:
@@ -175,12 +181,12 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: mobile
+        working-directory: apps/mobile/flutter
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: subosito/flutter-action@395322a6cded4e9ed503aebd4cc1965625f8e59a # v2.20.0
         with:
-          flutter-version-file: mobile/.flutter-version
+          flutter-version-file: apps/mobile/flutter/.flutter-version
           cache: true
       - run: flutter pub get
       - name: Format
@@ -195,7 +201,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: mobile
+        working-directory: apps/mobile/flutter
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
@@ -209,7 +215,7 @@ jobs:
           sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358"
       - uses: subosito/flutter-action@395322a6cded4e9ed503aebd4cc1965625f8e59a # v2.20.0
         with:
-          flutter-version-file: mobile/.flutter-version
+          flutter-version-file: apps/mobile/flutter/.flutter-version
           cache: true
       - run: flutter pub get
       - run: flutter build apk --debug
@@ -221,7 +227,7 @@ jobs:
         uses: aquasecurity/trivy-action@6c175e9c4083a92bbca2f9724c8a5e33bc2d97a5 # v0.30.0
         with:
           scan-type: fs
-          scan-ref: mobile/build/app/outputs/flutter-apk/app-debug.apk
+          scan-ref: apps/mobile/flutter/build/app/outputs/flutter-apk/app-debug.apk
           format: cyclonedx
           output: android-debug.cdx.json
           severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
@@ -245,7 +251,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: mobile
+        working-directory: apps/mobile/flutter
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
@@ -259,7 +265,7 @@ jobs:
           sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358"
       - uses: subosito/flutter-action@395322a6cded4e9ed503aebd4cc1965625f8e59a # v2.20.0
         with:
-          flutter-version-file: mobile/.flutter-version
+          flutter-version-file: apps/mobile/flutter/.flutter-version
           cache: true
       - name: Materialize release keystore
         shell: bash
@@ -285,15 +291,15 @@ jobs:
         with:
           name: torchat-android-release
           path: |
-            mobile/build/app/outputs/flutter-apk/app-release.apk
-            mobile/app-release.apk.sha256
+            apps/mobile/flutter/build/app/outputs/flutter-apk/app-release.apk
+            apps/mobile/flutter/app-release.apk.sha256
 
   windows:
     name: Windows debug build and diagnostics
     runs-on: windows-latest
     defaults:
       run:
-        working-directory: mobile
+        working-directory: apps/desktop/flutter
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Diagnostic sanitization test
@@ -302,7 +308,7 @@ jobs:
         run: ./scripts/tests/test-diagnostic-sanitization.ps1
       - uses: subosito/flutter-action@395322a6cded4e9ed503aebd4cc1965625f8e59a # v2.20.0
         with:
-          flutter-version-file: mobile/.flutter-version
+          flutter-version-file: apps/mobile/flutter/.flutter-version
           cache: true
       - run: flutter config --enable-windows-desktop
       - run: flutter pub get
@@ -311,7 +317,7 @@ jobs:
         uses: aquasecurity/trivy-action@6c175e9c4083a92bbca2f9724c8a5e33bc2d97a5 # v0.30.0
         with:
           scan-type: fs
-          scan-ref: mobile/build/windows/x64/runner/Debug
+          scan-ref: apps/desktop/flutter/build/windows/x64/runner/Debug
           format: cyclonedx
           output: windows-desktop.cdx.json
           severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL

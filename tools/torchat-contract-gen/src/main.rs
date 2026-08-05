@@ -100,11 +100,11 @@ fn main() -> Result<(), String> {
     let platform_action_types = string_list(manifest.get("platformActionTypes"))?;
 
     let android_output = repo_root
-        .join("mobile/android/app/src/main/kotlin/org/torchat/generated/EngineContract.kt");
+        .join("apps/mobile/flutter/android/app/src/main/kotlin/org/torchat/generated/EngineContract.kt");
     let dart_contract_output =
-        repo_root.join("mobile/lib/core/runtime/generated/runtime_contract.g.dart");
+        repo_root.join("apps/mobile/flutter/lib/core/runtime/generated/runtime_contract.g.dart");
     let dart_models_output =
-        repo_root.join("mobile/lib/core/models/generated/runtime_models.g.dart");
+        repo_root.join("apps/mobile/flutter/lib/core/models/generated/runtime_models.g.dart");
 
     write_file(
         &android_output,

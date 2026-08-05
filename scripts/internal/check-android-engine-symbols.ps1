@@ -8,7 +8,7 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 
 if (-not $LibraryPath) {
-    $candidates = @(Get-ChildItem -LiteralPath (Join-Path $repoRoot 'mobile\build') -Filter libtorchat_client_engine.so -File -Recurse -ErrorAction SilentlyContinue)
+    $candidates = @(Get-ChildItem -LiteralPath (Join-Path $repoRoot 'apps\mobile\flutter\build') -Filter libtorchat_client_engine.so -File -Recurse -ErrorAction SilentlyContinue)
     if (-not $candidates) { throw 'Android engine library was not found. Build the Android engine first.' }
     $LibraryPath = ($candidates | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1).FullName
 }

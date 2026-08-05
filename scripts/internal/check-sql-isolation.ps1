@@ -9,11 +9,10 @@ if (Test-Path -LiteralPath $checker) {
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 $sqlRoots = @(
-    (Join-Path $repoRoot 'desktop\sql'),
-    (Join-Path $repoRoot 'mobile\android\app\src\main\assets\sql'),
-    (Join-Path $repoRoot 'infra\db\migrations')
+    (Join-Path $repoRoot 'packages\torchat-storage\sql')
 )
-$connectionPragmas = Join-Path $repoRoot 'common\torchat-client-engine\sql\queries\connection_pragmas.sql'
+$sqlRoots = @($sqlRoots | Where-Object { Test-Path -LiteralPath $_ })
+$connectionPragmas = Join-Path $repoRoot 'packages\torchat-storage\sql\queries\connection_pragmas.sql'
 if (Test-Path -LiteralPath $connectionPragmas) {
     $pragmas = Get-Content -LiteralPath $connectionPragmas -Raw
     foreach ($forbidden in @('CREATE TABLE', 'CREATE TRIGGER', 'CREATE VIEW', 'ALTER TABLE', 'INSERT INTO')) {

@@ -28,7 +28,7 @@ jobs:
             cargo fuzz run "$target" --manifest-path fuzz/Cargo.toml -- -max_total_time=20 -runs=0
           done
       - name: Runtime resilience tests
-        run: cargo test -p torchat-client-runtime --quiet
+        run: cargo test -p torchat-runtime --quiet
 
   real-tor:
     if: ${{ vars.TORCHAT_NIGHTLY_REAL_TOR == 'true' }}

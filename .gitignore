@@ -4,13 +4,21 @@
 Cargo.lock.bak
 
 # Flutter / Dart
-mobile/.dart_tool/
-mobile/.flutter-plugins
-mobile/.flutter-plugins-dependencies
-mobile/.packages
-mobile/build/
-mobile/coverage/
-mobile/lib/locales/generated/*.dart
+apps/mobile/flutter/.dart_tool/
+apps/mobile/flutter/.flutter-plugins
+apps/mobile/flutter/.flutter-plugins-dependencies
+apps/desktop/flutter/.dart_tool/
+apps/desktop/flutter/.flutter-plugins
+apps/desktop/flutter/.flutter-plugins-dependencies
+apps/mobile/flutter/.packages
+apps/mobile/flutter/build/
+apps/desktop/flutter/.pub-cache/
+packages/torchat-flutter-ui/.dart_tool/
+packages/torchat-flutter-ui/.flutter-plugins
+packages/torchat-flutter-ui/.flutter-plugins-dependencies
+packages/torchat-flutter-ui/.packages
+apps/mobile/flutter/coverage/
+apps/mobile/flutter/lib/locales/generated/*.dart
 
 # Android / Gradle
 .gradle/
@@ -21,7 +29,7 @@ build/
 local.properties
 *.keystore
 *.jks
-mobile/android/app/src/main/jniLibs/**/*.so
+apps/mobile/flutter/android/app/src/main/jniLibs/**/*.so
 
 # Desktop build outputs
 desktop/target/

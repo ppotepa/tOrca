@@ -3,7 +3,8 @@ WORKDIR /src
 COPY infra/docker/Cargo.torka.toml ./Cargo.toml
 COPY Cargo.lock ./
 COPY common ./common
-COPY desktop ./desktop
+COPY packages ./packages
+COPY apps/desktop/native ./apps/desktop/native
 RUN cargo build --release -p torchat-desktop --no-default-features --features torka-file-secrets
 
 FROM debian:bookworm-slim

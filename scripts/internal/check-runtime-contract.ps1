@@ -4,9 +4,9 @@ param()
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $manifestPath = Join-Path $repoRoot 'common\client-engine-contract.json'
-$kotlinPath = Join-Path $repoRoot 'mobile\android\app\src\main\kotlin\org\torchat\generated\EngineContract.kt'
-$dartContractPath = Join-Path $repoRoot 'mobile\lib\core\runtime\generated\runtime_contract.g.dart'
-$dartModelsPath = Join-Path $repoRoot 'mobile\lib\core\models\generated\runtime_models.g.dart'
+$kotlinPath = Join-Path $repoRoot 'apps\mobile\flutter\android\app\src\main\kotlin\org\torchat\generated\EngineContract.kt'
+$dartContractPath = Join-Path $repoRoot 'packages\torchat-flutter-ui\lib\core\runtime\generated\runtime_contract.g.dart'
+$dartModelsPath = Join-Path $repoRoot 'packages\torchat-flutter-ui\lib\core\models\generated\runtime_models.g.dart'
 
 foreach ($file in @($manifestPath, $kotlinPath, $dartContractPath, $dartModelsPath)) {
     if (-not (Test-Path -LiteralPath $file)) {

@@ -1,10 +1,10 @@
 services:
-  server:
+  relay:
     deploy:
       replicas: 1
     build:
       context: ../..
-      dockerfile: infra/docker/Dockerfile.server
+      dockerfile: infra/relay/docker/Dockerfile
     environment:
       TORCHAT_BIND: 0.0.0.0:8080
     logging:
@@ -21,7 +21,7 @@ services:
       context: .
       dockerfile: Dockerfile.tor
     depends_on:
-      server:
+      relay:
         condition: service_started
     volumes:
       - type: bind
