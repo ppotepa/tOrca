@@ -124,16 +124,18 @@ fn timers_are_external_inputs_with_generation_fencing() {
 
 #[test]
 fn response_resolution_is_not_blocked_by_public_event_backpressure() {
-    let source = fs::read_to_string(crate_root().join("src/engine.rs"))
-        .expect("engine source is readable");
+    let source = fs::read_to_string(crate_root().join("src/output.rs"))
+        .expect("output source is readable");
 
     assert!(source.contains("mpsc::unbounded_channel"));
+    assert!(source.contains("struct PendingResponseRegistry"));
+    assert!(source.contains("fn fail_all"));
     let router = source
         .split("fn spawn_event_router")
         .nth(1)
         .expect("event router exists");
     let response_index = router
-        .find("pending.lock().await.remove")
+        .find("pending.complete")
         .expect("response is resolved");
     let publish_index = router
         .find("publish_tx.send(event)")
