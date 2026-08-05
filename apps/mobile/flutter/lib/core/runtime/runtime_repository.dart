@@ -12,12 +12,27 @@ import 'runtime_repository_models.dart';
 export 'runtime_repository_models.dart';
 
 class RuntimeRepository {
-  RuntimeRepository(this._runtime);
+  RuntimeRepository(this._runtime)
+      : _projectionProvider = _requireProjectionProvider(_runtime);
 
   static const int _messageCacheLimit = 5;
 
   final ClientRuntime _runtime;
+  final RuntimeProjectionProvider _projectionProvider;
   final ApplicationStateStore applicationState = ApplicationStateStore.shared;
+
+  static RuntimeProjectionProvider _requireProjectionProvider(
+    ClientRuntime runtime,
+  ) {
+    if (runtime case final RuntimeProjectionProvider provider) {
+      return provider;
+    }
+    throw ArgumentError.value(
+      runtime,
+      'runtime',
+      'Torca requires an authoritative RuntimeProjectionProvider',
+    );
+  }
 
   ApplicationSnapshot? get currentApplicationSnapshot =>
       applicationState.current;
@@ -57,9 +72,6 @@ class RuntimeRepository {
     }
   }
 
-  // Runtime events have exactly one consumer-side coordinator. Cache
-  // invalidation and projection refresh are owned by the application
-  // controller; performing them here as well creates competing refreshes.
   late final Stream<RuntimeEvent> _events = _runtime.events
       .map(_recordLiveEventState)
       .asBroadcastStream();
@@ -129,9 +141,6 @@ class RuntimeRepository {
   Future<List<ChatMessage>> allMessages(String conversationId) =>
       _runtime.allMessages(conversationId);
 
-  /// Applies a user-requested older page through the repository owner. UI
-  /// controllers must not mutate the projection store directly, otherwise a
-  /// concurrent message/status refresh can overwrite or resurrect history.
   Future<int> mergeOlderMessagePage(
     String conversationId,
     RuntimeMessagePage page,
@@ -157,16 +166,9 @@ class RuntimeRepository {
 
   Future<InviteCode?> refreshInviteCode() => _runtime.refreshPairingCode();
 
-  Future<ApplicationSnapshot> applicationSnapshot({
-    bool includePairing = false,
-    bool force = false,
-  }) {
+  Future<ApplicationSnapshot> applicationSnapshot({bool force = false}) {
     final cached = applicationState.current;
-    final requiresSchemaTwo = includePairing;
-    if (!force &&
-        cached != null &&
-        !applicationState.isStale &&
-        (!requiresSchemaTwo || cached.schemaVersion >= 2)) {
+    if (!force && cached != null && !applicationState.isStale) {
       return Future.value(cached);
     }
 
@@ -177,10 +179,7 @@ class RuntimeRepository {
         return inFlight.then((snapshot) {
           if (!_applicationTrailingRefreshRequested) return snapshot;
           _applicationTrailingRefreshRequested = false;
-          return applicationSnapshot(
-            includePairing: includePairing,
-            force: true,
-          );
+          return applicationSnapshot(force: true);
         });
       }
       return inFlight;
@@ -197,43 +196,16 @@ class RuntimeRepository {
 
   Future<ApplicationSnapshot> _buildApplicationSnapshot() async {
     final applicationEpoch = _applicationInvalidationEpoch;
-    var snapshot = _runtime is RuntimeProjectionProvider
-        ? await (_runtime as RuntimeProjectionProvider).applicationSnapshot()
-        : null;
+    final snapshot = await _projectionProvider.applicationSnapshot();
     if (snapshot == null) {
-      final values = await Future.wait<Object?>([
-        _runtime.identity(),
-        _runtime.profile(),
-        _loadLocalBatch(force: true),
-        _runtime.listPairings(),
-      ]);
-      final local = values[2] as RuntimeLocalSnapshot;
-      final pairings = values[3] as List<PairingItem>;
-      final inbox = <PairingItem>[];
-      final outbox = <PairingItem>[];
-      for (final item in pairings) {
-        switch (item.origin) {
-          case PairingOrigin.inbox:
-            inbox.add(item);
-          case PairingOrigin.outbox:
-            outbox.add(item);
-          case PairingOrigin.unknown:
-            (item.received ? inbox : outbox).add(item);
-        }
-      }
-      snapshot = ApplicationSnapshot(
-        schemaVersion: 2,
-        generation: local.generation,
-        createdAtMs: DateTime.now().millisecondsSinceEpoch,
-        identity: values[0] as RuntimeIdentity? ?? const RuntimeIdentity(),
-        profile: values[1] as RuntimeProfile? ?? const RuntimeProfile(),
-        contacts: local.contacts,
-        conversations: local.conversations,
-        pairingInbox: List<PairingItem>.unmodifiable(inbox),
-        pairingOutbox: List<PairingItem>.unmodifiable(outbox),
-        pendingInbox: inbox.where((item) => item.status.isOutstanding).length,
-        pendingOutbox: outbox.where((item) => item.status.isOutstanding).length,
-        peerEndpointAvailable: local.peerEndpointAvailable,
+      throw StateError(
+        'RuntimeProjectionProvider returned no authoritative application snapshot',
+      );
+    }
+    if (snapshot.schemaVersion < 2) {
+      throw StateError(
+        'RuntimeProjectionProvider returned unsupported schema '
+        '${snapshot.schemaVersion}; schema 2 is required',
       );
     }
     if (applicationEpoch != _applicationInvalidationEpoch) {
@@ -254,13 +226,9 @@ class RuntimeRepository {
   }
 
   Future<RuntimeRefreshSnapshot> refresh({
-    bool includePairing = false,
     bool bypassCooldown = false,
   }) async {
-    final application = await applicationSnapshot(
-      includePairing: includePairing,
-      force: true,
-    );
+    final application = await applicationSnapshot(force: true);
     final local = RuntimeLocalSnapshot(
       contacts: application.contacts,
       conversations: application.conversations,
@@ -270,7 +238,7 @@ class RuntimeRepository {
     return RuntimeRefreshSnapshot(
       application: application,
       local: local,
-      pairing: includePairing ? _pairingProjection(application) : null,
+      pairing: _pairingProjection(application),
     );
   }
 
@@ -375,12 +343,6 @@ class RuntimeRepository {
     return item;
   }
 
-  /// Pairing, contacts and conversations are one authoritative projection.
-  Future<RuntimeRefreshSnapshot> refreshPairingAndApplication() async {
-    invalidateLocalCache();
-    return refresh(includePairing: true, bypassCooldown: true);
-  }
-
   Future<void> acceptPairing(String id) async {
     await _runtime.acceptPairing(id);
     invalidateLocalCache();
@@ -438,9 +400,6 @@ class RuntimeRepository {
   Future<List<ConversationSummary>> conversations() async =>
       (await _loadLocalBatch()).conversations;
 
-  /// Refreshes the conversation summary after a message mutation without
-  /// touching the message projection itself. The caller is responsible for
-  /// loading messages with `force: true` so the two projections cannot race.
   Future<void> refreshDataForConversation(String conversationId) async {
     if (conversationId.trim().isEmpty) return;
     invalidateLocalCache();
@@ -458,10 +417,6 @@ class RuntimeRepository {
     final current = _messagesInFlight[id];
     if (current != null) {
       if (force) {
-        // Collapse all invalidations arriving during an active projection
-        // fetch into one trailing fetch. A single delivery emits several ACK
-        // and projection events; chaining one request per event caused a
-        // refresh convoy over the open conversation.
         _messageTrailingRefreshRequested.add(id);
         return current.then((_) {
           if (_messageTrailingRefreshRequested.remove(id)) {
@@ -500,10 +455,6 @@ class RuntimeRepository {
     int requestSequence,
   ) async {
     try {
-      // The bare `messages(id)` operation is intentionally a bounded page
-      // (currently 50 rows). The live conversation projection must never
-      // treat that page as the complete history. Use the explicit full-history
-      // operation here; paging remains user driven.
       final messages = await _runtime.allMessages(id);
       final projection = List<ChatMessage>.unmodifiable(messages);
       final currentEpoch = _messageInvalidationEpoch[id] ?? 0;
@@ -572,20 +523,14 @@ class RuntimeRepository {
 
   Future<List<PairingItem>> inbox({bool force = false}) async {
     final current = applicationState.current;
-    if (!force && current != null && current.schemaVersion >= 2) {
-      return current.pairingInbox;
-    }
-    return (await applicationSnapshot(includePairing: true, force: true))
-        .pairingInbox;
+    if (!force && current != null) return current.pairingInbox;
+    return (await applicationSnapshot(force: true)).pairingInbox;
   }
 
   Future<List<PairingItem>> outbox({bool force = false}) async {
     final current = applicationState.current;
-    if (!force && current != null && current.schemaVersion >= 2) {
-      return current.pairingOutbox;
-    }
-    return (await applicationSnapshot(includePairing: true, force: true))
-        .pairingOutbox;
+    if (!force && current != null) return current.pairingOutbox;
+    return (await applicationSnapshot(force: true)).pairingOutbox;
   }
 
   Future<PeerEndpoint?> peerEndpoint() => _runtime.peerEndpoint();
@@ -615,7 +560,6 @@ class RuntimeRepository {
     invalidateLocalCache();
   }
 
-  /// The sole client-side entry point for making a conversation usable.
   Future<ActivatedConversation> activateConversation(String contactId) async {
     var snapshot = await applicationSnapshot(force: true);
     var conversation = snapshot.conversations.firstOrNullWhere(
@@ -652,10 +596,6 @@ class RuntimeRepository {
     String? replyToMessageId,
   }) async {
     await _runtime.sendMessage(id, text, replyToMessageId: replyToMessageId);
-    // Apply the durable queued message immediately. Transport events may
-    // arrive before or after the command response, so the repository owns
-    // this one read-your-writes refresh and the controller does not start a
-    // second competing request.
     invalidateMessages(id);
     await messages(id, force: true);
     await refreshDataForConversation(id);
