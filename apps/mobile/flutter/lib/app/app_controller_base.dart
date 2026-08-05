@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -23,15 +22,6 @@ final clientRuntimeProvider = Provider<ClientRuntime>(
 final runtimeRepositoryProvider = Provider<RuntimeRepository>(
   (ref) => RuntimeRepository(ref.watch(clientRuntimeProvider)),
 );
-
-@visibleForTesting
-String? debugTorkaPairingCodeOverride;
-
-@visibleForTesting
-Duration? debugTorkaWatchdogIntervalOverride;
-
-@visibleForTesting
-int? debugTorkaWatchdogMaxAttemptsOverride;
 
 enum ControllerScreen { boot, nickname, main }
 
@@ -162,34 +152,18 @@ class AppState {
 
 abstract class AppController extends Notifier<AppState> {
   late final RuntimeRepository _repository;
-  bool _torkaPairingInFlight = false;
-  bool _torkaConversationInFlight = false;
-  String? _torkaInstallationIdHint;
-  Timer? _torkaWatchdog;
-  int _torkaWatchdogAttempts = 0;
 
   @override
   AppState build() {
     _repository = ref.watch(runtimeRepositoryProvider);
-    ref.onDispose(() {
-      _torkaWatchdog?.cancel();
-      unawaited(_repository.dispose());
-    });
+    ref.onDispose(() => unawaited(_repository.dispose()));
     return const AppState();
   }
 
   Future<void> initialize();
 
-  Future<void> refreshData({
-    bool forcePairing = false,
-    bool allowAutoTorka = true,
-  }) async {
-    final snapshot = forcePairing
-        ? await _repository.refreshPairingAndApplication()
-        : await _repository.refresh(
-            includePairing: false,
-            bypassCooldown: true,
-          );
+  Future<void> refreshData() async {
+    final snapshot = await _repository.refresh(bypassCooldown: true);
     final applicationSnapshot = snapshot.application;
     final peerEndpointAvailable = snapshot.local.peerEndpointAvailable;
     final peerServerStatus = _peerServerStatusForRefresh(
@@ -216,9 +190,6 @@ abstract class AppController extends Notifier<AppState> {
           peerServerStatus: peerServerStatus,
         ),
       );
-      if (allowAutoTorka) {
-        unawaited(_maybeAutoPairTorka());
-      }
     }
   }
 
@@ -226,10 +197,7 @@ abstract class AppController extends Notifier<AppState> {
     state = state.copyWith(error: '');
     try {
       await _repository.connect();
-      final snapshot = await _repository.refresh(
-        includePairing: true,
-        bypassCooldown: true,
-      );
+      final snapshot = await _repository.refresh(bypassCooldown: true);
       state = state.copyWith(applicationSnapshot: snapshot.application);
     } catch (error) {
       state = state.copyWith(
@@ -253,7 +221,6 @@ abstract class AppController extends Notifier<AppState> {
         ),
         error: '',
       );
-      unawaited(_maybeAutoPairTorka());
     } catch (error) {
       state = state.copyWith(
         error: _message(error),
@@ -452,13 +419,8 @@ abstract class AppController extends Notifier<AppState> {
     }
     state = state.copyWith(action: OperationAction.submitPairing, error: '');
     try {
-      await _cancelBlockingTorkaOutboxIfNeeded(normalizedCode);
-      final item = await _repository.submitPairingCode(normalizedCode);
-      final hintedInstallationId = item.peer?.id.trim() ?? '';
-      if (hintedInstallationId.isNotEmpty) {
-        _torkaInstallationIdHint = hintedInstallationId;
-      }
-      await refreshData(forcePairing: true, allowAutoTorka: false);
+      await _repository.submitPairingCode(normalizedCode);
+      await refreshData();
       state = state.copyWith(action: '');
     } catch (error) {
       state = state.copyWith(
@@ -510,27 +472,26 @@ abstract class AppController extends Notifier<AppState> {
   Future<void> acceptPairing(String id) async {
     await _runAction(OperationAction.acceptPairing, () async {
       await _repository.acceptPairing(id);
-    }, refreshPairing: true);
+    });
   }
 
   Future<void> rejectPairing(String id) async {
     await _runAction(OperationAction.rejectPairing, () async {
       await _repository.rejectPairing(id);
-    }, refreshPairing: true);
+    });
   }
 
   Future<void> archiveInvite(String id) async {
     await _runAction(
       OperationAction.archivePairing,
       () => _repository.archiveInvite(id),
-      refreshPairing: true,
     );
   }
 
   Future<void> cancelPairing(String id) async {
     await _runAction(OperationAction.cancelPairing, () async {
       await _repository.cancelPairing(id);
-    }, refreshPairing: true);
+    });
   }
 
   Future<void> verifyContact(String id) async {
@@ -567,13 +528,12 @@ abstract class AppController extends Notifier<AppState> {
 
   Future<void> _runAction(
     String action,
-    Future<void> Function() operation, {
-    bool refreshPairing = false,
-  }) async {
+    Future<void> Function() operation,
+  ) async {
     state = state.copyWith(action: action, error: '');
     try {
       await operation();
-      await refreshData(forcePairing: refreshPairing);
+      await refreshData();
       state = state.copyWith(action: '');
     } catch (error) {
       state = state.copyWith(
@@ -619,174 +579,6 @@ abstract class AppController extends Notifier<AppState> {
         ? UserProblemCode.connectionUnavailable
         : UserProblemCode.operationFailed;
     return UserProblem(code: code, arguments: {'raw': error.toString()});
-  }
-
-  bool get _devTorkaEnabled =>
-      kDebugMode && isPairingCode(_effectiveDevTorkaPairingCode);
-
-  String get _effectiveDevTorkaPairingCode {
-    final override = debugTorkaPairingCodeOverride?.trim() ?? '';
-    if (override.isNotEmpty) return override;
-    return '';
-  }
-
-  bool _isTorkaContact(ContactRecord contact) {
-    final identifiers = <String>{
-      contact.displayName.trim().toLowerCase(),
-      contact.nickname.trim().toLowerCase(),
-      contact.localAlias?.trim().toLowerCase() ?? '',
-    };
-    return identifiers.contains('torka') ||
-        identifiers.contains('peer-torka') ||
-        (_torkaInstallationIdHint != null &&
-            contact.id == _torkaInstallationIdHint);
-  }
-
-  bool _isTorkaPairingItem(PairingItem item) {
-    final peer = item.peer;
-    return peer != null && _isTorkaContact(peer);
-  }
-
-  Future<void> _cancelBlockingTorkaOutboxIfNeeded(String code) async {
-    if (!_devTorkaEnabled) return;
-    final outstanding = state.outbox
-        .where(
-          (item) =>
-              item.status == InviteState.pending ||
-              item.status == InviteState.accepted,
-        )
-        .toList(growable: false);
-    if (outstanding.length != 1 || !_isTorkaPairingItem(outstanding.single)) {
-      return;
-    }
-    await _repository.cancelPairing(outstanding.single.id);
-  }
-
-  Future<void> _maybeAutoPairTorka() async {
-    if (!_devTorkaEnabled ||
-        _torkaPairingInFlight ||
-        state.profile.nickname.trim().length < 2 ||
-        !state.transport.connected) {
-      return;
-    }
-    final torka = state.contacts.firstOrNullWhere(_isTorkaContact);
-    if (torka != null) {
-      _stopTorkaWatchdog();
-      await _maybeEnsureTorkaConversation(torka);
-      return;
-    }
-    final hasOutstandingOutbox = state.outbox.any(
-      (item) =>
-          item.status == InviteState.pending ||
-          item.status == InviteState.accepted,
-    );
-    if (hasOutstandingOutbox) {
-      _ensureTorkaWatchdog();
-      return;
-    }
-    _torkaPairingInFlight = true;
-    try {
-      final item = await _repository.submitPairingCode(
-        _effectiveDevTorkaPairingCode,
-      );
-      final hintedInstallationId = item.peer?.id.trim() ?? '';
-      if (hintedInstallationId.isNotEmpty) {
-        _torkaInstallationIdHint = hintedInstallationId;
-      }
-      await refreshData(forcePairing: true, allowAutoTorka: false);
-      _ensureTorkaWatchdog(immediate: true);
-    } catch (error) {
-      final message = _message(error).toLowerCase();
-      if (!message.contains('pending invitation') &&
-          !message.contains('active pairing request already exists') &&
-          !message.contains('pairing code expired or invalid')) {
-        debugPrint('Torka pairing deferred: ${_message(error)}');
-      }
-    } finally {
-      _torkaPairingInFlight = false;
-    }
-  }
-
-  Duration get _torkaWatchdogInterval =>
-      debugTorkaWatchdogIntervalOverride ?? const Duration(seconds: 5);
-
-  int get _torkaWatchdogMaxAttempts =>
-      debugTorkaWatchdogMaxAttemptsOverride ?? 60;
-
-  void _ensureTorkaWatchdog({bool immediate = false}) {
-    if (!_devTorkaEnabled) return;
-    _torkaWatchdog ??= Timer.periodic(_torkaWatchdogInterval, (_) {
-      unawaited(_runTorkaWatchdogTick());
-    });
-    if (immediate) unawaited(_runTorkaWatchdogTick());
-  }
-
-  void _stopTorkaWatchdog() {
-    _torkaWatchdog?.cancel();
-    _torkaWatchdog = null;
-    _torkaWatchdogAttempts = 0;
-  }
-
-  bool get _hasOutstandingTorkaOutbox => state.outbox.any(
-    (item) =>
-        (item.status == InviteState.pending ||
-            item.status == InviteState.accepted) &&
-        _isTorkaPairingItem(item),
-  );
-
-  Future<void> _runTorkaWatchdogTick() async {
-    if (!_devTorkaEnabled || !state.transport.connected) {
-      _stopTorkaWatchdog();
-      return;
-    }
-    if (_torkaPairingInFlight || _torkaConversationInFlight) return;
-
-    final torka = state.contacts.firstOrNullWhere(_isTorkaContact);
-    if (torka != null) {
-      await _maybeEnsureTorkaConversation(torka);
-      final exists = state.conversations.any(
-        (conversation) => conversation.contactId == torka.id,
-      );
-      if (exists) _stopTorkaWatchdog();
-      return;
-    }
-
-    if (!_hasOutstandingTorkaOutbox) {
-      _stopTorkaWatchdog();
-      return;
-    }
-
-    _torkaWatchdogAttempts += 1;
-    if (_torkaWatchdogAttempts > _torkaWatchdogMaxAttempts) {
-      _stopTorkaWatchdog();
-      debugPrint(
-        'Torka pairing timeout: contact is not confirmed in runtime yet.',
-      );
-      return;
-    }
-
-    try {
-      await refreshData(forcePairing: true, allowAutoTorka: false);
-    } catch (_) {
-      // Best-effort background recovery only.
-    }
-  }
-
-  Future<void> _maybeEnsureTorkaConversation(ContactRecord contact) async {
-    if (_torkaConversationInFlight) return;
-    final exists = state.conversations.any(
-      (conversation) => conversation.contactId == contact.id,
-    );
-    if (exists) return;
-    _torkaConversationInFlight = true;
-    try {
-      await _repository.startConversation(contact.id);
-      await refreshData(allowAutoTorka: false);
-    } catch (_) {
-      // Local development helper only.
-    } finally {
-      _torkaConversationInFlight = false;
-    }
   }
 
   List<StartupStep> _startupSteps(
