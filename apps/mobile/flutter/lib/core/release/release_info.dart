@@ -16,11 +16,24 @@ abstract final class TorcaReleaseInfo {
     'TORCA_COMMIT',
     defaultValue: 'unknown',
   );
+  static const updateKeyId = String.fromEnvironment(
+    'TORCA_UPDATE_KEY_ID',
+    defaultValue: '',
+  );
+  static const updatePublicKey = String.fromEnvironment(
+    'TORCA_UPDATE_PUBLIC_KEY',
+    defaultValue: '',
+  );
 
   static String get shortCommit =>
       commit.length <= 12 ? commit : commit.substring(0, 12);
 
   static String get displayVersion => '$version+$build';
+
+  static int? get numericBuild => int.tryParse(build);
+
+  static bool get canVerifyUpdates =>
+      updateKeyId.isNotEmpty && updatePublicKey.isNotEmpty;
 
   static Map<String, Object> get diagnosticMetadata => <String, Object>{
         'product': product,
@@ -28,6 +41,7 @@ abstract final class TorcaReleaseInfo {
         'build': build,
         'channel': channel,
         'commit': commit,
+        'updateKeyId': updateKeyId.isEmpty ? 'not-configured' : updateKeyId,
       };
 
   static String get diagnosticLabel =>
