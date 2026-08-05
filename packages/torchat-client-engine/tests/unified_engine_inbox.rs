@@ -71,7 +71,8 @@ fn unified_input_keeps_correlation_and_causation_metadata() {
     ] {
         assert!(input.contains(symbol), "missing input symbol: {symbol}");
     }
-    assert!(!input_root.join("envelope.rs").exists() || !read(input_root.join("envelope.rs")).contains("pub(crate) fn effect_outcome("));
+    let envelope = read(input_root.join("envelope.rs"));
+    assert!(!envelope.contains("pub(crate) fn effect_outcome("));
     assert!(!crate_root().join("src/input.rs").exists());
     assert!(!crate_root().join("src/input_derived.rs").exists());
 }
@@ -79,22 +80,23 @@ fn unified_input_keeps_correlation_and_causation_metadata() {
 #[test]
 fn engine_has_one_command_inbox_and_one_state_mutating_receiver() {
     let engine = read(crate_root().join("src/engine.rs"));
-    let actor = read(crate_root().join("src/actor/unified.rs"));
+    let actor = read(crate_root().join("src/actor/run.rs"));
 
     assert!(engine.contains("mpsc::Sender<EngineInputEnvelope>"));
-    assert!(engine.contains("fn unified_inbox_channel"));
-    assert!(engine.contains(".run_unified("));
+    assert!(engine.contains("fn engine_inbox_channel"));
+    assert!(engine.contains(".run("));
     assert!(!engine.contains("commands: mpsc::Sender<EngineCommandEnvelope>"));
-    assert!(!engine.contains("actor.run("));
+    assert!(!engine.contains("run_unified"));
+    assert!(!engine.contains("unified_inbox_channel"));
     assert!(!engine.contains("COMMAND_CHANNEL_CAPACITY"));
 
     assert!(actor.contains("inbox.recv().await"));
-    assert!(actor.contains("fn process_unified_input"));
+    assert!(actor.contains("fn process_input"));
     let loop_body = actor
-        .split("pub async fn run_unified")
+        .split("pub async fn run(")
         .nth(1)
-        .expect("run_unified exists")
-        .split("fn process_unified_input")
+        .expect("run exists")
+        .split("fn process_input")
         .next()
         .expect("run loop body exists");
     assert!(!loop_body.contains("tokio::select!"));
@@ -103,16 +105,20 @@ fn engine_has_one_command_inbox_and_one_state_mutating_receiver() {
 }
 
 #[test]
-fn actor_has_one_canonical_loop_and_no_historical_source_file() {
+fn actor_has_one_canonical_loop_and_no_transitional_source_files() {
     let actor_root = crate_root().join("src/actor");
     assert!(actor_root.join("state.rs").is_file());
+    assert!(actor_root.join("run.rs").is_file());
+    assert!(actor_root.join("input_handlers.rs").is_file());
     assert!(!actor_root.join("legacy.rs").exists());
     assert!(!actor_root.join("legacy").exists());
+    assert!(!actor_root.join("unified.rs").exists());
+    assert!(!actor_root.join("unified_handlers.rs").exists());
 
     let state = read(actor_root.join("state.rs"));
-    let unified = read(actor_root.join("unified.rs"));
+    let run = read(actor_root.join("run.rs"));
     assert!(!state.contains("pub async fn run("));
-    assert!(unified.contains("pub async fn run_unified("));
+    assert!(run.contains("pub async fn run("));
 }
 
 #[test]
@@ -204,11 +210,11 @@ fn runtime_and_relay_expose_only_the_canonical_pairing_path() {
 }
 
 #[test]
-fn timers_and_relay_frames_reenter_the_unified_input_pipeline() {
+fn timers_and_relay_frames_reenter_the_input_pipeline() {
     let scheduler_root = crate_root().join("src/scheduler");
     let scheduler = read_tree(&scheduler_root);
-    let actor = read(crate_root().join("src/actor/unified.rs"));
-    let handlers = read(crate_root().join("src/actor/unified_handlers.rs"));
+    let actor = read(crate_root().join("src/actor/run.rs"));
+    let handlers = read(crate_root().join("src/actor/input_handlers.rs"));
 
     for file in ["mod.rs", "plan.rs", "worker.rs"] {
         assert!(scheduler_root.join(file).is_file(), "missing scheduler file: {file}");
