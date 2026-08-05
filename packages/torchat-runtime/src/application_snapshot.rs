@@ -5,10 +5,10 @@ use crate::{
     RuntimeProfile,
 };
 
-pub const APPLICATION_SNAPSHOT_SCHEMA_VERSION: u32 = 1;
+pub const APPLICATION_SNAPSHOT_SCHEMA_VERSION: u32 = 2;
 
 /// Identifies the durable store and the engine session that produced a
-/// projection.  The revision is persisted with the domain mutation, so a
+/// projection. The revision is persisted with the domain mutation, so a
 /// client can reject stale responses even when transports deliver events out
 /// of order.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -33,6 +33,10 @@ pub struct ApplicationSnapshot {
     pub profile: Option<RuntimeProfile>,
     pub contacts: Vec<ContactRecord>,
     pub conversations: Vec<ConversationSummary>,
+    #[serde(default)]
+    pub pairing_inbox: Vec<crate::PairingItem>,
+    #[serde(default)]
+    pub pairing_outbox: Vec<crate::PairingItem>,
     pub pairing_summary: PairingSummary,
     pub peer_endpoint_available: bool,
     pub ui_checkpoint: UiCheckpoint,
@@ -81,6 +85,10 @@ impl ApplicationSnapshot {
                 .cmp(&left.last_message_at)
                 .then(left.id.cmp(&right.id))
         });
+        self.pairing_inbox
+            .sort_by(|left, right| left.pairing_id.cmp(&right.pairing_id));
+        self.pairing_outbox
+            .sort_by(|left, right| left.pairing_id.cmp(&right.pairing_id));
         self
     }
 
@@ -102,7 +110,29 @@ impl ApplicationSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ContactTransportPolicy, ConversationState, VerificationState};
+    use crate::{
+        ContactTransportPolicy, ConversationState, InviteState, PairingAvailableAction,
+        PairingItem, VerificationState,
+    };
+
+    fn pairing(id: &str, received: bool) -> PairingItem {
+        PairingItem {
+            pairing_id: id.to_owned(),
+            pair_key: None,
+            sender: None,
+            capability: None,
+            expires_at: 10,
+            state: InviteState::Pending,
+            received,
+            available_actions: if received {
+                vec![PairingAvailableAction::Accept]
+            } else {
+                vec![PairingAvailableAction::Cancel]
+            },
+            offer_invite_id: None,
+            offer_payload: None,
+        }
+    }
 
     #[test]
     fn snapshot_normalization_is_deterministic() {
@@ -169,7 +199,12 @@ mod tests {
                     unread_count: 1,
                 },
             ],
-            pairing_summary: PairingSummary::default(),
+            pairing_inbox: vec![pairing("z", true), pairing("a", true)],
+            pairing_outbox: vec![pairing("y", false), pairing("b", false)],
+            pairing_summary: PairingSummary {
+                pending_inbox: 2,
+                pending_outbox: 2,
+            },
             peer_endpoint_available: true,
             ui_checkpoint: UiCheckpoint::default(),
             projection: ProjectionStamp::default(),
@@ -179,6 +214,8 @@ mod tests {
         assert_eq!(snapshot.schema_version, APPLICATION_SNAPSHOT_SCHEMA_VERSION);
         assert_eq!(snapshot.contacts[0].installation_id, "a");
         assert_eq!(snapshot.conversations[0].id, "newer");
+        assert_eq!(snapshot.pairing_inbox[0].pairing_id, "a");
+        assert_eq!(snapshot.pairing_outbox[0].pairing_id, "b");
         assert_eq!(snapshot.direct_session_count(), 1);
         assert_eq!(snapshot.verified_endpoint_count(), 1);
     }
