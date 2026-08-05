@@ -9,6 +9,8 @@ fn crate_root() -> PathBuf {
 fn unified_input_contract_declares_correlation_and_causation_metadata() {
     let source = fs::read_to_string(crate_root().join("src/input.rs"))
         .expect("input contract source is readable");
+    let derived = fs::read_to_string(crate_root().join("src/input_derived.rs"))
+        .expect("derived input source is readable");
 
     for symbol in [
         "struct EngineInputEnvelope",
@@ -27,6 +29,8 @@ fn unified_input_contract_declares_correlation_and_causation_metadata() {
     ] {
         assert!(source.contains(symbol), "missing unified input symbol: {symbol}");
     }
+    assert!(derived.contains("fn relay_event_caused"));
+    assert!(derived.contains("causation_id: Some(causation_id)"));
 }
 
 #[test]
@@ -38,6 +42,7 @@ fn processing_contract_keeps_outputs_explicit() {
         "struct EngineProcessingResult",
         "events: Vec<EngineEvent>",
         "effects: Vec<EngineEffectEnvelope>",
+        "derived_inputs: Vec<EngineInputEnvelope>",
         "scheduler_plan_changed: bool",
         "control: ProcessingControl",
         "struct EngineProcessingResultBuilder",
@@ -79,7 +84,7 @@ fn active_actor_loop_has_exactly_one_state_mutating_receiver() {
 
     for symbol in [
         "pub async fn run_unified",
-        "while let Some(envelope) = inbox.recv().await",
+        "inbox.recv().await",
         "fn process_unified_input",
         "EngineInput::Command",
         "EngineInput::PeerEvent",
@@ -123,6 +128,24 @@ fn timers_are_external_inputs_with_generation_fencing() {
         assert!(source.contains(symbol), "missing scheduler symbol: {symbol}");
     }
     assert!(actor.contains("generation != scheduler_generation"));
+}
+
+#[test]
+fn relay_frames_become_inputs_before_state_mutation() {
+    let actor = fs::read_to_string(crate_root().join("src/actor/unified.rs"))
+        .expect("unified actor source is readable");
+
+    assert!(actor.contains("result.derived_inputs.push"));
+    assert!(actor.contains("EngineInputEnvelope::relay_event_caused"));
+    assert!(actor.contains("derived_inputs.pop_front"));
+    let relay_tick = actor
+        .split("EngineTimerKind::RelayPoll")
+        .nth(1)
+        .expect("relay timer exists")
+        .split("EngineTimerKind::PeerProbeRound")
+        .next()
+        .expect("relay timer body exists");
+    assert!(!relay_tick.contains("process_relay_input(event)"));
 }
 
 #[test]
