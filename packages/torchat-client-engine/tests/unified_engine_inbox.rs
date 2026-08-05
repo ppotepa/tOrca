@@ -22,6 +22,7 @@ fn unified_input_contract_declares_correlation_and_causation_metadata() {
         "fn peer_event",
         "fn relay_event",
         "fn timer",
+        "fn effect_outcome",
         "fn shutdown",
     ] {
         assert!(source.contains(symbol), "missing unified input symbol: {symbol}");
@@ -36,6 +37,7 @@ fn processing_contract_keeps_outputs_explicit() {
     for symbol in [
         "struct EngineProcessingResult",
         "events: Vec<EngineEvent>",
+        "effects: Vec<EngineEffectEnvelope>",
         "scheduler_plan_changed: bool",
         "control: ProcessingControl",
         "struct EngineProcessingResultBuilder",
@@ -84,6 +86,7 @@ fn active_actor_loop_has_exactly_one_state_mutating_receiver() {
         "EngineInput::RelayEvent",
         "EngineInput::PlatformFact",
         "EngineInput::TimerElapsed",
+        "EngineInput::EffectOutcome",
         "EngineInput::ShutdownRequested",
     ] {
         assert!(source.contains(symbol), "missing single-consumer symbol: {symbol}");
@@ -120,6 +123,36 @@ fn timers_are_external_inputs_with_generation_fencing() {
         assert!(source.contains(symbol), "missing scheduler symbol: {symbol}");
     }
     assert!(actor.contains("generation != scheduler_generation"));
+}
+
+#[test]
+fn blocking_rendezvous_operations_execute_outside_the_actor() {
+    let actor = fs::read_to_string(crate_root().join("src/actor/unified.rs"))
+        .expect("unified actor source is readable");
+    let worker = fs::read_to_string(crate_root().join("src/effects/relay.rs"))
+        .expect("relay effect source is readable");
+
+    for symbol in [
+        "RelayEffectOperation::RefreshPairingCode",
+        "RelayEffectOperation::SubmitPairingCode",
+        "RelayEffectOperation::CancelPairing",
+        "spawn_engine_effect",
+        "process_effect_outcome",
+    ] {
+        assert!(actor.contains(symbol), "missing actor effect boundary: {symbol}");
+    }
+    for symbol in [
+        "tokio::task::spawn_blocking",
+        "EngineInputEnvelope::effect_outcome",
+        "struct RelayEffectPlaceholder",
+        "submit_pairing_code_with_offer",
+    ] {
+        assert!(worker.contains(symbol), "missing relay effect worker symbol: {symbol}");
+    }
+
+    assert!(!actor.contains("self.relay.refresh_pairing_code()"));
+    assert!(!actor.contains("self.relay.submit_pairing_code_with_offer"));
+    assert!(!actor.contains("self.relay.cancel_pairing"));
 }
 
 #[test]
