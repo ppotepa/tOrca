@@ -45,7 +45,7 @@ abstract final class ImageAttachmentPolicy {
       );
     }
     if (frames < 1 || frames > maximumFrames) {
-      throw const StateError('Animated images are not supported.');
+      throw StateError('Animated images are not supported.');
     }
   }
 }
