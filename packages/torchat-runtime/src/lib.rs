@@ -6,10 +6,10 @@ pub mod clock;
 pub mod collections;
 pub mod contract;
 pub mod error;
+pub mod features;
 pub mod logic;
 pub mod message_rules;
 pub mod models;
-pub mod pairing_rules;
 pub mod retry;
 pub mod runtime;
 pub mod session;
@@ -35,6 +35,7 @@ pub use contract::{
     TransportProbeState,
 };
 pub use error::{RuntimeError, RuntimeResult};
+pub use features::pairing::rules as pairing_rules;
 pub use logic::RuntimeConversationUpdate;
 pub use logic::{
     contact_card_from_invite, contact_record_from_card, runtime_conversation_summary,
@@ -78,7 +79,7 @@ mod tests {
     #[test]
     fn fixture_models_match_contract() {
         let fixture = crate::models::RuntimeFixture::from_json(include_str!(
-        "../../../common/internal-runtime-fixtures.json"
+            "../../../common/internal-runtime-fixtures.json"
         ))
         .expect("fixture should parse");
 

@@ -1,0 +1,11 @@
+Torca 0.3.7 — pairing feature extraction
+
+Implemented:
+- canonical feature namespace under features/pairing,
+- pairing rules moved under the feature boundary,
+- pure pairing process moved under the same feature boundary,
+- existing public pairing_rules path preserved as a module alias,
+- runtime pairing_process reduced to a thin route to the single implementation,
+- no duplicate pairing implementation introduced.
+
+Validation intentionally not run in this batch.
