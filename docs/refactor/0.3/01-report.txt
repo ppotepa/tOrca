@@ -1,0 +1,87 @@
+BATCH: 0.3.1 snapshot ownership completion
+BASE COMMIT: 604708230b2ed84ba3c71cf05651af2a2648a712
+HEAD COMMIT: filled by repository history after this report commit
+
+GOAL:
+- make the revisioned backend ApplicationSnapshot the only domain projection;
+- publish pairing inbox/outbox atomically with contacts and conversations;
+- remove pairing-specific caches, controller copies and invalidation paths;
+- preserve compatibility at presentation boundaries without a second store.
+
+CHANGED AREAS:
+- Rust application snapshot schema and construction;
+- Flutter snapshot model and bridge decoder;
+- ApplicationStateStore revision fencing;
+- RuntimeRepository projection loading;
+- SequentialAppController warmup and invalidation;
+- AppState pairing accessors;
+- repository and projection contract tests.
+
+NEW FILES:
+- apps/mobile/flutter/test/core/application_state/pairing_projection_architecture_test.dart
+- docs/refactor/0.3/01-report.txt
+
+REMOVED CONCEPTS:
+- pairing-specific repository cache;
+- separate pairing fetch during snapshot refresh;
+- AppState-owned pairing inbox/outbox collections;
+- ApplicationStateStore pairing setter and alternate state;
+- pairing-specific cache invalidation;
+- equal-revision overwrite of an already accepted projection.
+
+AUTHORITATIVE FLOW:
+1. Rust reads identity, profiles, contacts, conversations and pairing within
+   one application projection operation.
+2. The bridge carries schema-2 pairing collections in ApplicationSnapshot.
+3. RuntimeRepository requests the application projection once.
+4. ApplicationStateStore accepts only a newer revision for the same store and
+   resets correctly when store identity changes.
+5. AppState inbox/outbox getters delegate to the accepted snapshot.
+
+PRESERVED INVARIANTS:
+- one ClientEngine command/projection pipeline;
+- one store identity and monotonic revision fence;
+- existing pairing presentation models and UI accessors;
+- current wire protocol and SQLite ownership;
+- no GitHub Actions or workflow changes.
+
+RATCHET:
+- pairing_projection_architecture_test.dart scans active Flutter lib sources
+  and rejects reintroduction of pairing-specific cache fields, setters,
+  controller copies and invalidation symbols.
+
+STATIC AUDIT:
+- no occurrences of invalidatePairingCache;
+- no occurrences of pairingInboxItems or pairingOutboxItems;
+- no occurrences of setPairing;
+- no occurrences of listPairings in active indexed repository sources.
+
+TESTS ADDED OR UPDATED:
+- schema-2 snapshot decode contract;
+- store identity and revision fencing;
+- authoritative repository projection behavior;
+- architecture ratchet against parallel pairing state.
+
+TESTS NOT RUN:
+- cargo fmt/check/clippy/test;
+- Flutter format/analyze/test;
+- Android or Windows build;
+- platform smoke tests;
+- pairing/message manual evidence;
+- GitHub Actions and workflow runs.
+
+REASON:
+- execution environment in this batch was connector-backed repository editing;
+  Actions and workflows were explicitly out of scope.
+
+RISKS REMAINING:
+- pairing recovery and polling orchestration still exists in Flutter;
+- controller chain remains broader than presentation-only responsibility;
+- main.dart composition remains oversized;
+- RuntimeStorage still has broad defaults and scans.
+
+NEXT BATCH:
+- 0.3.2 pairing recovery ownership.
+- Move retry, timeout, outstanding-pairing reconciliation and recovery policy
+  behind the backend command/projection boundary; keep Flutter limited to
+  user intent, progress display and presentation effects.
