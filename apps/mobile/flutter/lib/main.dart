@@ -190,8 +190,7 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
     }
     final request = inbox.firstOrNullWhere(
       (item) =>
-          item.origin == PairingOrigin.inbox &&
-          item.can(PairingAvailableAction.accept) &&
+          item.requiresLocalDecision &&
           _pairingUi.canSchedule(item),
     );
     if (request == null) return;

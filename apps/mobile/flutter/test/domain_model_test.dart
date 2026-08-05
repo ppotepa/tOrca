@@ -52,6 +52,19 @@ void main() {
     expect(request.can(PairingAvailableAction.cancel), isTrue);
   });
 
+  test(
+    'incoming pending pairing still requires approval while actions normalize',
+    () {
+      const incoming = PairingItem(
+        id: 'incoming-1',
+        status: InviteState.pending,
+        origin: PairingOrigin.inbox,
+      );
+
+      expect(incoming.requiresLocalDecision, isTrue);
+    },
+  );
+
   test('runtime event decoder accepts generic dynamic maps', () {
     final event = RuntimePayload.fromMap({
       'type': 'tor_status',

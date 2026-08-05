@@ -807,7 +807,11 @@ class PairingItem {
   bool get requiresLocalDecision =>
       origin == PairingOrigin.inbox &&
       status == InviteState.pending &&
-      can(PairingAvailableAction.accept);
+      // The engine normally supplies availableActions, but an incoming
+      // pairing can be published between persistence and normalization. The
+      // durable state/origin is authoritative for deciding whether the UI
+      // must present the approval modal.
+      (can(PairingAvailableAction.accept) || availableActions.isEmpty);
 
   PairingRelationshipState get relationshipState => switch (status) {
     InviteState.pending when origin == PairingOrigin.inbox =>
