@@ -1,8 +1,8 @@
 use rusqlite::{OptionalExtension, Row, params};
 use serde::de::DeserializeOwned;
 use torchat_runtime::{
-    DurableOperation, OperationId, OperationState, OperationType, RuntimeError, RuntimeErrorCode,
-    RuntimeResult,
+    DurableOperation, OperationId, OperationState, OperationStorage, OperationType, RuntimeError,
+    RuntimeErrorCode, RuntimeResult,
 };
 
 use super::ClientDatabase;
@@ -59,6 +59,23 @@ impl ClientDatabase {
     }
 }
 
+impl OperationStorage for ClientDatabase {
+    fn operation_by_id(
+        &self,
+        operation_id: &OperationId,
+    ) -> RuntimeResult<Option<DurableOperation>> {
+        ClientDatabase::operation_by_id(self, operation_id)
+    }
+
+    fn put_operation(&mut self, operation: DurableOperation) -> RuntimeResult<()> {
+        ClientDatabase::put_operation(self, &operation)
+    }
+
+    fn pending_operations(&self) -> RuntimeResult<Vec<DurableOperation>> {
+        ClientDatabase::pending_operations(self)
+    }
+}
+
 fn decode_operation(row: &Row<'_>) -> rusqlite::Result<RuntimeResult<DurableOperation>> {
     let operation_id = row.get::<_, String>("operation_id")?;
     let operation_type = row.get::<_, String>("operation_type")?;
@@ -99,5 +116,4 @@ fn storage_error(error: rusqlite::Error) -> RuntimeError {
     RuntimeError::Storage(format!("{error:#}"))
 }
 
-#[allow(dead_code)]
-fn _assert_operation_types(_: OperationType, _: OperationState, _: RuntimeErrorCode) {}
+const _: fn(OperationType, OperationState, RuntimeErrorCode) = |_, _, _| {};
