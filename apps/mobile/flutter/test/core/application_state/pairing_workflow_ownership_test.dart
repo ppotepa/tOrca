@@ -61,14 +61,16 @@ void main() {
     expect(source.contains('includePairing'), isFalse);
   });
 
-  test('presentation controller does not schedule domain retry', () {
-    final source = File(
-      'lib/app/presentation_app_controller.dart',
-    ).readAsStringSync();
+  test('application controller does not schedule pairing recovery', () {
+    final sources = <String>[
+      File('lib/app/application_controller.dart').readAsStringSync(),
+      File('lib/app/application_controller_commands.dart').readAsStringSync(),
+      File('lib/app/application_runtime_coordinator.dart').readAsStringSync(),
+    ].join('\n');
 
-    expect(source.contains('Timer.periodic'), isFalse);
-    expect(source.contains('Future<void>.delayed'), isFalse);
-    expect(source.contains('verifyContact(contact.id)'), isFalse);
-    expect(source.contains('openOrStartConversation(contact)'), isFalse);
+    expect(sources.contains('Timer.periodic'), isFalse);
+    expect(sources.contains('_retryWelcomeProjectionIfNeeded'), isFalse);
+    expect(sources.contains('verifyContact(contact.id)'), isFalse);
+    expect(sources.contains('openOrStartConversation(contact)'), isFalse);
   });
 }

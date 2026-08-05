@@ -1,28 +1,58 @@
 import 'dart:async';
 import 'dart:io';
-
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
-import '../client_runtime.dart';
 import 'package:torchat_flutter_ui/core/runtime/generated/runtime_contract.g.dart';
-import '../core/runtime/runtime_repository.dart';
-import '../core/startup/sequential_startup_orchestrator.dart';
+import '../client_runtime.dart';
 import '../core/presence/contact_probe_coordinator.dart';
 import '../core/presence/contact_presence_store.dart';
+import '../core/runtime/runtime_repository.dart';
+import '../core/startup/sequential_startup_orchestrator.dart';
+import '../locales/domain/user_problem.dart';
 import '../shared/formatters/operation_status.dart';
-import 'app_controller_base.dart' as base;
-
-class SequentialAppController extends base.AppController {
+import 'application_state.dart';
+class ApplicationRuntimeCoordinator {
+  ApplicationRuntimeCoordinator({
+    required ClientRuntime runtime,
+    required RuntimeRepository repository,
+    required ContactPresenceStore contactPresence,
+    required AppState Function() readState,
+    required void Function(AppState) writeState,
+    required Future<void> Function() refreshCore,
+    required String Function(Object) messageForError,
+    required UserProblem Function(Object) problemForError,
+    required void Function(RuntimeEvent) handleSideEffects,
+  }) : _runtime = runtime,
+       _repository = repository,
+       _readState = readState,
+       _writeState = writeState,
+       _refreshCore = refreshCore,
+       _messageForError = messageForError,
+       _problemForError = problemForError,
+       _handleSideEffects = handleSideEffects,
+       _presenceCoordinator = ContactProbeCoordinator(contactPresence);
+  final ClientRuntime _runtime;
+  final RuntimeRepository _repository;
+  final AppState Function() _readState;
+  final void Function(AppState) _writeState;
+  final Future<void> Function() _refreshCore;
+  final String Function(Object) _messageForError;
+  final UserProblem Function(Object) _problemForError;
+  final void Function(RuntimeEvent) _handleSideEffects;
+  final ContactProbeCoordinator _presenceCoordinator;
+  AppState get state => _readState();
+  set state(AppState value) => _writeState(value);
+  void dispose() {
+    _startup.cancel();
+    unawaited(_events?.cancel());
+    _presenceCoordinator.dispose();
+    for (final timer in _typingExpiry.values) {
+      timer.cancel();
+    }
+  }
   final SequentialStartupOrchestrator _startup =
       SequentialStartupOrchestrator();
   final Map<String, Timer> _typingExpiry = {};
-  late ContactPresenceStore contactPresence;
-  late final ContactProbeCoordinator _presenceCoordinator =
-      ContactProbeCoordinator(contactPresence);
-
-  late ClientRuntime _runtime;
-  late RuntimeRepository _repository;
   StreamSubscription<RuntimeEvent>? _events;
   Future<void>? _initializeInFlight;
   Future<void> _refreshTail = Future<void>.value();
@@ -34,25 +64,6 @@ class SequentialAppController extends base.AppController {
   bool _startupComplete = false;
   bool _introPlayed = false;
   SequentialStartupPhase _phase = SequentialStartupPhase.engine;
-
-  @override
-  base.AppState build() {
-    final initial = super.build();
-    _runtime = ref.read(base.clientRuntimeProvider);
-    _repository = ref.read(base.runtimeRepositoryProvider);
-    contactPresence = ref.read(contactPresenceStoreProvider);
-    ref.onDispose(() {
-      _startup.cancel();
-      _events?.cancel();
-      _presenceCoordinator.dispose();
-      for (final timer in _typingExpiry.values) {
-        timer.cancel();
-      }
-    });
-    return initial;
-  }
-
-  @override
   Future<void> initialize() {
     final current = _initializeInFlight;
     if (current != null) return current;
@@ -95,7 +106,7 @@ class SequentialAppController extends base.AppController {
     var localShellReady = false;
     _applyPhase(SequentialStartupPhase.engine);
     state = state.copyWith(
-      screen: base.ControllerScreen.boot,
+      screen: ControllerScreen.boot,
       isLoading: true,
       action: OperationAction.connect,
       error: '',
@@ -150,8 +161,8 @@ class SequentialAppController extends base.AppController {
             : PeerServerStatus.starting,
         isLoading: false,
         screen: snapshot.profile.nickname.trim().isNotEmpty
-            ? base.ControllerScreen.main
-            : base.ControllerScreen.nickname,
+            ? ControllerScreen.main
+            : ControllerScreen.nickname,
       );
       localShellReady = true;
       _startupComplete = true;
@@ -164,8 +175,8 @@ class SequentialAppController extends base.AppController {
             ? PeerServerStatus.ready
             : PeerServerStatus.starting,
         screen: snapshot.profile.nickname.trim().isNotEmpty
-            ? base.ControllerScreen.main
-            : base.ControllerScreen.nickname,
+            ? ControllerScreen.main
+            : ControllerScreen.nickname,
         isLoading: false,
         action: '',
         error: '',
@@ -177,14 +188,14 @@ class SequentialAppController extends base.AppController {
       state = state.copyWith(
         isLoading: false,
         action: '',
-        error: _message(error),
-        problem: problemForError(error),
-        startupSteps: _startup.stepsFor(_phase, error: _message(error)),
+        error: _messageForError(error),
+        problem: _problemForError(error),
+        startupSteps: _startup.stepsFor(_phase, error: _messageForError(error)),
         screen: localShellReady
             ? (state.profile.nickname.trim().isNotEmpty
-                  ? base.ControllerScreen.main
-                  : base.ControllerScreen.nickname)
-            : base.ControllerScreen.boot,
+                  ? ControllerScreen.main
+                  : ControllerScreen.nickname)
+            : ControllerScreen.boot,
       );
     } finally {
       if (_startup.generation == generation) {
@@ -211,7 +222,6 @@ class SequentialAppController extends base.AppController {
     state = state.copyWith(startupSteps: _startup.stepsFor(phase), error: '');
   }
 
-  @override
   Future<void> retryTor() async {
     final current = _initializeInFlight;
     if (current != null) {
@@ -225,7 +235,6 @@ class SequentialAppController extends base.AppController {
     await initialize();
   }
 
-  @override
   Future<void> refreshData() {
     if (_warming) {
       _refreshAfterWarmup = true;
@@ -234,7 +243,7 @@ class SequentialAppController extends base.AppController {
     final completer = Completer<void>();
     _refreshTail = _refreshTail.catchError((Object _) {}).then<void>((_) async {
       try {
-        await super.refreshData();
+        await _refreshCore();
         _restoreStartupProjection();
         completer.complete();
       } catch (error, stackTrace) {
@@ -362,18 +371,16 @@ class SequentialAppController extends base.AppController {
       case NotificationRequestedEvent():
         unawaited(_notificationBeep());
     }
-    handleRuntimeEventSideEffects(event);
+    _handleSideEffects(event);
   }
-
-  void handleRuntimeEventSideEffects(RuntimeEvent event) {}
 
   void _handleEventStreamFailure(Object error, StackTrace stackTrace) {
     _startup.fail(error);
     state = state.copyWith(
       isLoading: false,
       action: '',
-      error: _message(error),
-      problem: problemForError(error),
+      error: _messageForError(error),
+      problem: _problemForError(error),
       startupSteps: _startup.stepsFor(_phase, error: error),
     );
   }
@@ -421,8 +428,8 @@ class SequentialAppController extends base.AppController {
         await refreshData();
       } catch (error) {
         state = state.copyWith(
-          error: _message(error),
-          problem: problemForError(error),
+          error: _messageForError(error),
+          problem: _problemForError(error),
         );
       }
     }
@@ -450,12 +457,6 @@ class SequentialAppController extends base.AppController {
     final conversationId = payload[EngineContract.conversationId]?.toString();
     if (conversationId == null || conversationId.isEmpty) return;
   }
-
-  String _message(Object error) => error
-      .toString()
-      .replaceFirst('Exception: ', '')
-      .replaceFirst('Bad state: ', '')
-      .replaceFirst('TimeoutException: ', '');
 
   Future<void> _notificationBeep() async {
     final preferences = await SharedPreferences.getInstance();

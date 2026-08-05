@@ -1,0 +1,35 @@
+BATCH: 0.3.3 application controller consolidation
+BASE COMMIT: 7be5f5190cf2d685e3b701e6762b53525704f92e
+
+GOAL:
+- replace the AppControllerBase -> Sequential -> Presentation -> Notification
+  inheritance chain with one ApplicationController;
+- retain runtime sequencing, notification integration and public UI commands;
+- move lifecycle/event and notification responsibilities to collaborators.
+
+IMPLEMENTATION:
+- ApplicationController is the only Riverpod Notifier for AppState;
+- ApplicationRuntimeCoordinator owns startup sequencing, runtime events,
+  coalesced projection refresh and presence attachment;
+- ApplicationNotificationCoordinator owns notification side effects,
+  active-conversation persistence, privacy defaults and hidden-relationship UI;
+- AppState was moved to application_state.dart;
+- app_controller.dart is now a thin provider/composition entry point.
+
+REMOVED:
+- AppControllerBase;
+- SequentialAppController;
+- PresentationAppController;
+- NotificationSafeAppController;
+- the controller inheritance chain and super-call workflow.
+
+PRESERVED:
+- existing public methods consumed by views;
+- one schema-2 ApplicationSnapshot projection;
+- startup orchestration and event coalescing;
+- transient typing expiry and notification presentation;
+- no GitHub Actions or workflow changes.
+
+VALIDATION:
+- code-only batch;
+- no build, analyzer, tests or platform commands were run by request.
