@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tokio::time::Duration;
+use torchat_runtime::{
+    RuntimeErrorCategory, RuntimeErrorCode, RuntimeProblem,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -93,9 +96,56 @@ pub enum ResponseResult {
         payload: ResponsePayload,
     },
     Error {
-        code: String,
-        message: String,
+        #[serde(flatten)]
+        problem: RuntimeProblem,
     },
+}
+
+impl ResponseResult {
+    pub fn error(problem: RuntimeProblem) -> Self {
+        Self::Error { problem }
+    }
+
+    pub fn from_engine_error(error: &crate::EngineError) -> Self {
+        Self::error(engine_problem(error))
+    }
+}
+
+pub fn engine_problem(error: &crate::EngineError) -> RuntimeProblem {
+    let (code, category, retryable) = match error {
+        crate::EngineError::Closed(_) => (
+            RuntimeErrorCode::TemporarilyUnavailable,
+            RuntimeErrorCategory::Availability,
+            false,
+        ),
+        crate::EngineError::InvalidConfig(_) | crate::EngineError::InvalidCommand(_) => (
+            RuntimeErrorCode::InvalidInput,
+            RuntimeErrorCategory::Validation,
+            false,
+        ),
+        crate::EngineError::Unsupported(_) => (
+            RuntimeErrorCode::Unsupported,
+            RuntimeErrorCategory::Availability,
+            false,
+        ),
+        crate::EngineError::Serialization(_) => (
+            RuntimeErrorCode::InvalidInput,
+            RuntimeErrorCategory::Validation,
+            false,
+        ),
+        crate::EngineError::Storage(_) => (
+            RuntimeErrorCode::StorageFailed,
+            RuntimeErrorCategory::Persistence,
+            false,
+        ),
+        crate::EngineError::Transport(_) => (
+            RuntimeErrorCode::TransportUnavailable,
+            RuntimeErrorCategory::Transport,
+            true,
+        ),
+    };
+    RuntimeProblem::new(code, category, retryable)
+        .with_diagnostic_context(error.to_string())
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
