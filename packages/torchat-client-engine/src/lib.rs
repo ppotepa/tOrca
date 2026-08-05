@@ -6,13 +6,16 @@ pub mod error;
 pub mod event;
 mod effects;
 pub mod fault_injection;
+#[allow(dead_code)]
 mod input;
 mod logging;
 mod output;
 pub mod peer;
+#[allow(dead_code)]
 mod processing;
 pub mod probing;
 pub mod relay;
+#[allow(dead_code)]
 mod scheduler;
 pub mod storage;
 
