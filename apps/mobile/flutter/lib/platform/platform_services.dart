@@ -4,17 +4,13 @@ import 'dart:io';
 import '../client_runtime.dart';
 import '../locales/domain/app_locale_preference.dart';
 import 'android/mobile_bridge.dart';
+import 'diagnostics_export_service.dart';
 
 bool get isDesktopPlatform =>
     Platform.isWindows || Platform.isLinux || Platform.isMacOS;
 
 enum DesktopNavigationIntent { openSettings }
 
-/// Platform-facing services used by the shared application composition root.
-///
-/// The default implementation is retained for the current mobile runner. A
-/// desktop runner can replace these services at composition time without
-/// making the shared application import desktop implementation files.
 abstract interface class WindowLifecycleService {
   Future<bool> initialize();
 
@@ -88,17 +84,20 @@ final class PlatformServices {
     NavigationIntentService? navigation,
     RuntimeBridgeFactory? runtimeBridgeFactory,
     AutostartService? autostart,
+    DiagnosticsExportService? diagnostics,
   })  : windowLifecycle = windowLifecycle ?? const DefaultWindowLifecycleService(),
         notifications = notifications ?? const DefaultNotificationService(),
         navigation = navigation ?? const DefaultNavigationIntentService(),
         runtimeBridgeFactory = runtimeBridgeFactory ?? MobileBridge.new,
-        autostart = autostart ?? const DefaultAutostartService();
+        autostart = autostart ?? const DefaultAutostartService(),
+        diagnostics = diagnostics ?? const LocalDiagnosticsExportService();
 
   final WindowLifecycleService windowLifecycle;
   final NotificationService notifications;
   final NavigationIntentService navigation;
   final RuntimeBridgeFactory runtimeBridgeFactory;
   final AutostartService autostart;
+  final DiagnosticsExportService diagnostics;
 
   static PlatformServices current = PlatformServices();
 }
