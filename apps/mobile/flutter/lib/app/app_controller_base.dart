@@ -54,14 +54,12 @@ class AppState {
     this.typingContacts = const {},
     this.lastSeenEnabled = true,
     this.applicationSnapshot,
-    this.pairingInboxItems = const [],
-    this.pairingOutboxItems = const [],
   });
+
   final ControllerScreen screen;
   final MainDestination destination;
   final ApplicationSnapshot? applicationSnapshot;
-  final List<PairingItem> pairingInboxItems;
-  final List<PairingItem> pairingOutboxItems;
+
   RuntimeIdentity get identity =>
       applicationSnapshot?.identity ?? const RuntimeIdentity();
   RuntimeProfile get profile =>
@@ -69,10 +67,13 @@ class AppState {
   List<ContactRecord> get contacts => applicationSnapshot?.contacts ?? const [];
   List<ConversationSummary> get conversations =>
       applicationSnapshot?.conversations ?? const [];
-  List<PairingItem> get inbox => pairingInboxItems;
-  List<PairingItem> get outbox => pairingOutboxItems;
+  List<PairingItem> get inbox =>
+      applicationSnapshot?.pairingInbox ?? const <PairingItem>[];
+  List<PairingItem> get outbox =>
+      applicationSnapshot?.pairingOutbox ?? const <PairingItem>[];
   List<ChatMessage> get messages =>
       ApplicationStateStore.shared.messages(selectedConversationId ?? '');
+
   final InviteCode? ownInvite;
   final RuntimeTorStatus transport;
   final PeerServerStatus peerServerStatus;
@@ -134,8 +135,6 @@ class AppState {
     Map<String, bool>? typingContacts,
     bool? lastSeenEnabled,
     ApplicationSnapshot? applicationSnapshot,
-    List<PairingItem>? pairingInboxItems,
-    List<PairingItem>? pairingOutboxItems,
   }) => AppState(
     screen: screen ?? this.screen,
     destination: destination ?? this.destination,
@@ -158,8 +157,6 @@ class AppState {
     typingContacts: typingContacts ?? this.typingContacts,
     lastSeenEnabled: lastSeenEnabled ?? this.lastSeenEnabled,
     applicationSnapshot: applicationSnapshot ?? this.applicationSnapshot,
-    pairingInboxItems: pairingInboxItems ?? this.pairingInboxItems,
-    pairingOutboxItems: pairingOutboxItems ?? this.pairingOutboxItems,
   );
 }
 
@@ -187,8 +184,6 @@ abstract class AppController extends Notifier<AppState> {
     bool forcePairing = false,
     bool allowAutoTorka = true,
   }) async {
-    late final bool peerEndpointAvailable;
-
     final snapshot = forcePairing
         ? await _repository.refreshPairingAndApplication()
         : await _repository.refresh(
@@ -196,8 +191,7 @@ abstract class AppController extends Notifier<AppState> {
             bypassCooldown: true,
           );
     final applicationSnapshot = snapshot.application;
-    final pairing = snapshot.pairing;
-    peerEndpointAvailable = snapshot.local.peerEndpointAvailable;
+    final peerEndpointAvailable = snapshot.local.peerEndpointAvailable;
     final peerServerStatus = _peerServerStatusForRefresh(
       state.transport,
       peerEndpointAvailable,
@@ -205,8 +199,6 @@ abstract class AppController extends Notifier<AppState> {
     );
     state = state.copyWith(
       applicationSnapshot: applicationSnapshot,
-      pairingInboxItems: pairing?.inbox ?? state.pairingInboxItems,
-      pairingOutboxItems: pairing?.outbox ?? state.pairingOutboxItems,
       peerServerStatus: peerServerStatus,
       startupSteps: _startupStepsForEndpoint(
         state.startupSteps,
@@ -234,7 +226,11 @@ abstract class AppController extends Notifier<AppState> {
     state = state.copyWith(error: '');
     try {
       await _repository.connect();
-      await _repository.refresh(includePairing: true, bypassCooldown: true);
+      final snapshot = await _repository.refresh(
+        includePairing: true,
+        bypassCooldown: true,
+      );
+      state = state.copyWith(applicationSnapshot: snapshot.application);
     } catch (error) {
       state = state.copyWith(
         error: _message(error),
@@ -246,9 +242,9 @@ abstract class AppController extends Notifier<AppState> {
   Future<void> setNickname(String nickname) async {
     try {
       final profile = await _repository.setNickname(nickname.trim());
-      final snapshot = state.applicationSnapshot;
       state = state.copyWith(
-        applicationSnapshot: snapshot?.copyWith(profile: profile),
+        applicationSnapshot:
+            _repository.currentApplicationSnapshot ?? state.applicationSnapshot,
         screen: _screenAfterConnect(
           profile,
           state.transport,
@@ -286,6 +282,8 @@ abstract class AppController extends Notifier<AppState> {
         conversation?.contactId ?? id,
       );
       state = state.copyWith(
+        applicationSnapshot:
+            _repository.currentApplicationSnapshot ?? state.applicationSnapshot,
         selectedConversationId: activated.conversation.id,
         destination: MainDestination.chats,
         error: '',
@@ -307,6 +305,8 @@ abstract class AppController extends Notifier<AppState> {
     try {
       final activated = await _repository.activateConversation(contact.id);
       state = state.copyWith(
+        applicationSnapshot:
+            _repository.currentApplicationSnapshot ?? state.applicationSnapshot,
         selectedConversationId: activated.conversation.id,
         action: '',
       );
@@ -334,7 +334,11 @@ abstract class AppController extends Notifier<AppState> {
         text.trim(),
         replyToMessageId: replyToMessageId,
       );
-      state = state.copyWith(action: '');
+      state = state.copyWith(
+        applicationSnapshot:
+            _repository.currentApplicationSnapshot ?? state.applicationSnapshot,
+        action: '',
+      );
     } catch (error) {
       state = state.copyWith(
         action: '',
@@ -350,8 +354,9 @@ abstract class AppController extends Notifier<AppState> {
       final conversationId = state.selectedConversationId;
       if (conversationId != null) {
         await _repository.messages(conversationId, force: true);
-        state = state.copyWith(error: '');
       }
+      final snapshot = await _repository.applicationSnapshot(force: true);
+      state = state.copyWith(applicationSnapshot: snapshot, error: '');
     } catch (error) {
       state = state.copyWith(
         error: _message(error),
@@ -366,8 +371,9 @@ abstract class AppController extends Notifier<AppState> {
       final conversationId = state.selectedConversationId;
       if (conversationId != null) {
         await _repository.messages(conversationId, force: true);
-        state = state.copyWith(error: '');
       }
+      final snapshot = await _repository.applicationSnapshot(force: true);
+      state = state.copyWith(applicationSnapshot: snapshot, error: '');
     } catch (error) {
       state = state.copyWith(
         error: _message(error),
@@ -429,12 +435,6 @@ abstract class AppController extends Notifier<AppState> {
       return;
     }
     final profile = await _repository.profile(force: true);
-    final snapshot = state.applicationSnapshot;
-    if (snapshot != null && snapshot.profile != profile) {
-      state = state.copyWith(
-        applicationSnapshot: snapshot.copyWith(profile: profile),
-      );
-    }
     if (profile.nickname.trim().length < 2) {
       state = state.copyWith(
         error: '',
@@ -555,8 +555,8 @@ abstract class AppController extends Notifier<AppState> {
         blocked: blocked,
         transportPolicy: transportPolicy,
       );
-      await _repository.contacts();
-      state = state.copyWith(error: '');
+      final snapshot = await _repository.applicationSnapshot(force: true);
+      state = state.copyWith(applicationSnapshot: snapshot, error: '');
     } catch (error) {
       state = state.copyWith(
         error: _message(error),
