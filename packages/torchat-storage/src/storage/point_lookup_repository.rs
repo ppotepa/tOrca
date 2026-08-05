@@ -3,7 +3,8 @@ use serde::de::DeserializeOwned;
 use torchat_runtime::{
     ChatMessage, ContactRecord, ContactTransportPolicy, ConversationState, ConversationSummary,
     InviteState, MessageReply, MessageState, PairingItem, PeerConnectionStatus,
-    PeerEndpointStatus, RuntimeError, RuntimeResult, VerificationState, pairing_available_actions,
+    PeerEndpointStatus, PointLookupStorage, RuntimeError, RuntimeResult, VerificationState,
+    pairing_available_actions,
     logic::{fallback_contact_nickname, normalized_contact_nickname},
 };
 
@@ -84,6 +85,38 @@ impl ClientDatabase {
             .optional()
             .map_err(storage_error)?
             .transpose()
+    }
+}
+
+impl PointLookupStorage for ClientDatabase {
+    fn contact_by_installation_id(
+        &self,
+        installation_id: &str,
+    ) -> RuntimeResult<Option<ContactRecord>> {
+        ClientDatabase::contact_by_installation_id(self, installation_id)
+    }
+
+    fn conversation_by_id(&self, id: &str) -> RuntimeResult<Option<ConversationSummary>> {
+        ClientDatabase::conversation_by_id(self, id)
+    }
+
+    fn conversation_for_contact(
+        &self,
+        installation_id: &str,
+    ) -> RuntimeResult<Option<ConversationSummary>> {
+        ClientDatabase::conversation_for_contact(self, installation_id)
+    }
+
+    fn pairing_inbox_by_id(&self, pairing_id: &str) -> RuntimeResult<Option<PairingItem>> {
+        ClientDatabase::pairing_inbox_by_id(self, pairing_id)
+    }
+
+    fn pairing_outbox_by_id(&self, pairing_id: &str) -> RuntimeResult<Option<PairingItem>> {
+        ClientDatabase::pairing_outbox_by_id(self, pairing_id)
+    }
+
+    fn message_by_id(&self, message_id: &str) -> RuntimeResult<Option<ChatMessage>> {
+        ClientDatabase::message_by_id(self, message_id)
     }
 }
 
