@@ -1,6 +1,11 @@
 import '../../client_runtime.dart';
 import '../application_state/application_snapshot.dart';
 
+extension RuntimeInviteStateProjection on InviteState {
+  bool get isOutstanding =>
+      this == InviteState.pending || this == InviteState.accepted;
+}
+
 final class RuntimeLocalSnapshot {
   const RuntimeLocalSnapshot({
     required this.contacts,
