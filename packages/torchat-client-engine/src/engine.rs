@@ -103,7 +103,7 @@ impl ClientEngine {
         config: EngineConfig,
         anchor: Box<dyn MlsEpochAnchor<Error = EngineError> + Send>,
     ) -> EngineResult<Self> {
-        let (command_tx, inbox_rx, inbox_tx) = unified_inbox_channel();
+        let (command_tx, inbox_rx, inbox_tx) = engine_inbox_channel();
         let (actor_event_tx, actor_event_rx) = mpsc::channel(WORKER_OUTCOME_CHANNEL_CAPACITY);
         let (event_tx, event_rx) = mpsc::channel(WORKER_OUTCOME_CHANNEL_CAPACITY);
         let shutdown = CancellationToken::new();
@@ -119,7 +119,7 @@ impl ClientEngine {
         let actor_shutdown = shutdown.clone();
         tokio::spawn(async move {
             if let Err(error) = actor
-                .run_unified(inbox_rx, inbox_tx, actor_event_tx, actor_shutdown)
+                .run(inbox_rx, inbox_tx, actor_event_tx, actor_shutdown)
                 .await
             {
                 let _ = fatal_events
@@ -144,7 +144,7 @@ impl ClientEngine {
         config: EngineConfig,
         anchor: Option<&mut dyn MlsEpochAnchor<Error = EngineError>>,
     ) -> EngineResult<Self> {
-        let (command_tx, inbox_rx, inbox_tx) = unified_inbox_channel();
+        let (command_tx, inbox_rx, inbox_tx) = engine_inbox_channel();
         let (actor_event_tx, actor_event_rx) = mpsc::channel(WORKER_OUTCOME_CHANNEL_CAPACITY);
         let (event_tx, event_rx) = mpsc::channel(WORKER_OUTCOME_CHANNEL_CAPACITY);
         let shutdown = CancellationToken::new();
@@ -171,7 +171,7 @@ impl ClientEngine {
         let actor_shutdown = shutdown.clone();
         tokio::spawn(async move {
             if let Err(error) = actor
-                .run_unified(inbox_rx, inbox_tx, actor_event_tx, actor_shutdown)
+                .run(inbox_rx, inbox_tx, actor_event_tx, actor_shutdown)
                 .await
             {
                 let _ = fatal_events
@@ -312,7 +312,7 @@ impl ClientEngine {
     }
 }
 
-fn unified_inbox_channel() -> (
+fn engine_inbox_channel() -> (
     EngineCommandSender,
     mpsc::Receiver<EngineInputEnvelope>,
     mpsc::Sender<EngineInputEnvelope>,
