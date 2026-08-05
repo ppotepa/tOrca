@@ -64,12 +64,17 @@ impl ClientEngineActor {
         };
         match envelope.command {
             EngineCommand::RefreshPairingCode => {
-                return self.defer_relay_effect(
-                    input_id,
-                    deferred_context,
-                    RelayEffectOperation::RefreshPairingCode,
-                    Vec::new(),
-                );
+                return match self
+                    .with_runtime(|runtime| runtime.prepare_refresh_pairing_code())
+                {
+                    Ok((_, runtime_events)) => self.defer_relay_effect(
+                        input_id,
+                        deferred_context,
+                        RelayEffectOperation::RefreshPairingCode,
+                        runtime_events,
+                    ),
+                    Err(error) => self.command_error_result(envelope.request_id, error),
+                };
             }
             EngineCommand::SubmitPairingCode { code } => {
                 return match self.prepare_submit_pairing_effect(code) {
@@ -83,12 +88,19 @@ impl ClientEngineActor {
                 };
             }
             EngineCommand::CancelPairing { pairing_id } => {
-                return self.defer_relay_effect(
-                    input_id,
-                    deferred_context,
-                    RelayEffectOperation::CancelPairing { pairing_id },
-                    Vec::new(),
-                );
+                return match self
+                    .with_runtime(|runtime| runtime.prepare_cancel_pairing(&pairing_id))
+                {
+                    Ok((prepared_pairing_id, runtime_events)) => self.defer_relay_effect(
+                        input_id,
+                        deferred_context,
+                        RelayEffectOperation::CancelPairing {
+                            pairing_id: prepared_pairing_id,
+                        },
+                        runtime_events,
+                    ),
+                    Err(error) => self.command_error_result(envelope.request_id, error),
+                };
             }
             command => {
                 let idempotency = command_id.as_ref().map(|command_id| {
@@ -241,11 +253,7 @@ impl ClientEngineActor {
             RelayEffectResult::PairingCode(Ok(code)) => self
                 .with_runtime_idempotent(
                     idempotency.as_ref(),
-                    |runtime| {
-                        runtime.prepare_refresh_pairing_code()?;
-                        runtime.commit_pairing_code(code.clone())?;
-                        Ok(code.clone())
-                    },
+                    |runtime| runtime.commit_pairing_code(code.clone()),
                     |value| json_response(value),
                 )
                 .and_then(|(value, events)| Ok((json_response(value)?, events))),
@@ -259,27 +267,16 @@ impl ClientEngineActor {
             RelayEffectResult::PairingCancelled {
                 pairing_id,
                 result: Ok(()),
-            } => {
-                let prepared =
-                    self.with_runtime(|runtime| runtime.prepare_cancel_pairing(&pairing_id));
-                match prepared {
-                    Ok((_, mut events)) => self
-                        .with_runtime_idempotent(
-                            idempotency.as_ref(),
-                            |runtime| runtime.confirm_pairing_cancelled(&pairing_id),
-                            |_| Ok(ResponsePayload::Empty),
-                        )
-                        .map(|(_, confirm_events)| {
-                            events.extend(confirm_events);
-                            (ResponsePayload::Empty, events)
-                        }),
-                    Err(error) => Err(error),
-                }
-            }
+            } => self
+                .with_runtime_idempotent(
+                    idempotency.as_ref(),
+                    |runtime| runtime.confirm_pairing_cancelled(&pairing_id),
+                    |_| Ok(ResponsePayload::Empty),
+                )
+                .map(|(_, events)| (ResponsePayload::Empty, events)),
             RelayEffectResult::PairingCode(Err(error))
-            | RelayEffectResult::PairingSubmitted(Err(error)) => {
-                Err(EngineError::Transport(error))
-            }
+            | RelayEffectResult::PairingSubmitted(Err(error))
+            | RelayEffectResult::WorkerFailed(error) => Err(EngineError::Transport(error)),
             RelayEffectResult::PairingCancelled {
                 result: Err(error),
                 ..
