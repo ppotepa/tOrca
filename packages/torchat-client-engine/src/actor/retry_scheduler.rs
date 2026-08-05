@@ -6,8 +6,17 @@ impl ClientEngineActor {
         events: &mpsc::Sender<EngineEvent>,
         deadline: RetryDeadline,
     ) {
+        for event in self.run_retry_scheduler_collect(deadline) {
+            let _ = events.send(event).await;
+        }
+    }
+
+    pub(super) fn run_retry_scheduler_collect(
+        &mut self,
+        deadline: RetryDeadline,
+    ) -> Vec<EngineEvent> {
         if !self.retry_is_runnable(deadline.kind) {
-            return;
+            return Vec::new();
         }
         let result = match deadline.kind {
             RetryKind::MessageSend | RetryKind::PairingResponse => {
@@ -27,18 +36,17 @@ impl ClientEngineActor {
                 .flush_pending_send_effects()
                 .map(|_| "relationship removal flush"),
         };
-        if let Err(error) = result {
-            let _ = events
-                .send(EngineEvent::Log {
-                    log: EngineLogEvent {
-                        level: "warn".to_owned(),
-                        message: format!(
-                            "retry scheduler {:?} failed at {}: {error}",
-                            deadline.kind, deadline.at_ms
-                        ),
-                    },
-                })
-                .await;
+        match result {
+            Ok(_) => Vec::new(),
+            Err(error) => vec![EngineEvent::Log {
+                log: EngineLogEvent {
+                    level: "warn".to_owned(),
+                    message: format!(
+                        "retry scheduler {:?} failed at {}: {error}",
+                        deadline.kind, deadline.at_ms
+                    ),
+                },
+            }],
         }
     }
 
