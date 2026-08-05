@@ -74,6 +74,70 @@ impl EngineInputEnvelope {
         }
     }
 
+    pub(crate) fn peer_event(enqueued_at_ms: i64, event: PeerTransportEvent) -> Self {
+        Self {
+            input_id: uuid::Uuid::new_v4(),
+            correlation_id: None,
+            causation_id: None,
+            source: EngineInputSource::Peer,
+            enqueued_at_ms,
+            input: EngineInput::PeerEvent(event),
+        }
+    }
+
+    pub(crate) fn relay_event(enqueued_at_ms: i64, event: RelayEvent) -> Self {
+        Self {
+            input_id: uuid::Uuid::new_v4(),
+            correlation_id: None,
+            causation_id: None,
+            source: EngineInputSource::Relay,
+            enqueued_at_ms,
+            input: EngineInput::RelayEvent(event),
+        }
+    }
+
+    pub(crate) fn platform_fact(
+        enqueued_at_ms: i64,
+        request: Option<CommandRequestContext>,
+        fact: PlatformFact,
+    ) -> Self {
+        let correlation_id = request.as_ref().map(|request| request.request_id.clone());
+        Self {
+            input_id: uuid::Uuid::new_v4(),
+            correlation_id,
+            causation_id: None,
+            source: EngineInputSource::Platform,
+            enqueued_at_ms,
+            input: EngineInput::PlatformFact { request, fact },
+        }
+    }
+
+    pub(crate) fn timer(
+        enqueued_at_ms: i64,
+        kind: EngineTimerKind,
+        generation: u64,
+    ) -> Self {
+        Self {
+            input_id: uuid::Uuid::new_v4(),
+            correlation_id: None,
+            causation_id: None,
+            source: EngineInputSource::Scheduler,
+            enqueued_at_ms,
+            input: EngineInput::TimerElapsed { kind, generation },
+        }
+    }
+
+    pub(crate) fn shutdown(enqueued_at_ms: i64) -> Self {
+        Self {
+            input_id: uuid::Uuid::new_v4(),
+            correlation_id: None,
+            causation_id: None,
+            source: EngineInputSource::Platform,
+            enqueued_at_ms,
+            input: EngineInput::ShutdownRequested,
+        }
+    }
+
     pub(crate) fn kind(&self) -> EngineInputKind {
         match &self.input {
             EngineInput::Command(_) => EngineInputKind::Command,
@@ -111,17 +175,7 @@ mod tests {
 
     #[test]
     fn timer_input_carries_generation() {
-        let input = EngineInputEnvelope {
-            input_id: uuid::Uuid::new_v4(),
-            correlation_id: None,
-            causation_id: None,
-            source: EngineInputSource::Scheduler,
-            enqueued_at_ms: 456,
-            input: EngineInput::TimerElapsed {
-                kind: EngineTimerKind::RetryDue,
-                generation: 7,
-            },
-        };
+        let input = EngineInputEnvelope::timer(456, EngineTimerKind::RetryDue, 7);
 
         match input.input {
             EngineInput::TimerElapsed { kind, generation } => {
@@ -130,5 +184,12 @@ mod tests {
             }
             _ => panic!("expected timer input"),
         }
+    }
+
+    #[test]
+    fn shutdown_is_a_first_class_input() {
+        let input = EngineInputEnvelope::shutdown(789);
+        assert_eq!(input.kind(), EngineInputKind::ShutdownRequested);
+        assert_eq!(input.source, EngineInputSource::Platform);
     }
 }
