@@ -1,78 +1,72 @@
 import 'package:torchat_flutter_ui/core/application_state/application_snapshot.dart';
-import 'platform/platform_services.dart';
-export 'package:torchat_flutter_ui/core/models/domain.dart';
 import 'package:torchat_flutter_ui/core/models/domain.dart';
 
-/// Optional capability for platforms whose native process outlives Flutter UI.
+import 'platform/platform_services.dart';
+import 'runtime_capabilities.dart';
+
+export 'package:torchat_flutter_ui/core/models/domain.dart';
+
 abstract interface class RuntimeAttachmentProvider {
   Future<Map<String, dynamic>?> runtimeSnapshot();
 }
 
-abstract interface class RuntimeProjectionProvider {
-  Future<ApplicationSnapshot?> applicationSnapshot();
-}
+abstract interface class RuntimeProjectionProvider
+    implements RuntimeProjectionCapability {}
 
-/// Optional lifecycle hook for runtimes that own an external process. Mobile
-/// foreground-service bridges intentionally do not implement it.
 abstract interface class RuntimeDisposable {
   Future<void> disposeRuntime();
 }
 
-/// Platform-neutral contract consumed by the Flutter UI.
-abstract class ClientRuntime {
-  Stream<RuntimeEvent> get events;
-
-  Future<bool> connect();
-  Future<RuntimeIdentity?> identity();
-  Future<RuntimeProfile?> profile();
-  Future<StartupReadinessSnapshot> startupReadiness();
-  Future<InviteCode?> refreshPairingCode();
-  Future<RuntimeProfile> setNickname(String nickname);
-  Future<PairingItem> submitPairingCode(String code);
-  Future<List<PairingItem>> pairingInbox();
-  Future<List<PairingItem>> pairingOutbox();
-  Future<List<PairingItem>> listPairings();
-  Future<PeerEndpoint?> peerEndpoint();
-  Future<bool> peerEndpointAvailable();
-  Future<void> retryPeerConnection(String installationId);
-  Future<void> rotatePeerEndpoint();
+/// Platform-neutral frontend/backend boundary. Pairing collections are absent
+/// and belong to the revisioned application projection.
+abstract class ClientRuntime
+    implements
+        RuntimeLifecycleCapability,
+        RuntimeProfileCapability,
+        RuntimePairingCapability,
+        RuntimeContactCapability,
+        RuntimeConversationCapability,
+        RuntimeMessagingCapability,
+        RuntimePeerCapability {
+  @override
   Future<ContactEndpointCapabilityStatus> contactEndpointCapability(
     String installationId,
-  ) async => throw UnsupportedError('contact capability status unavailable');
-  Future<void> rotateContactEndpointCapability(String installationId) async {}
-  Future<void> revokeContactEndpointCapability(String installationId) async {}
-  Future<void> verifyContact(String installationId);
-  Future<ContactRecord> updateContactSettings(
-    String installationId, {
-    String? localAlias,
-    required bool muted,
-    required bool blocked,
-    ContactTransportPolicy? transportPolicy,
-  });
+  ) => throw UnsupportedError('contact capability status unavailable');
+  @override
+  Future<void> rotateContactEndpointCapability(String installationId) =>
+      throw UnsupportedError('contact capability rotation unavailable');
+  @override
+  Future<void> revokeContactEndpointCapability(String installationId) =>
+      throw UnsupportedError('contact capability revocation unavailable');
+  @override
   Future<void> removeRelationship(
     String installationId, {
     required bool preserveHistory,
-  }) async {}
-  Future<List<ContactRecord>> contacts();
-  Future<List<ConversationSummary>> conversations();
-  Future<List<ChatMessage>> messages(String id);
-  Future<void> openConversation(String id);
-  Future<void> closeConversation();
-  Future<void> startConversation(String contactId);
-  Future<void> sendMessage(String id, String text, {String? replyToMessageId});
-  Future<void> retryMessage(String messageId) async {}
-  Future<void> retryDeadLetter(String kind, String id) async {}
-  Future<void> deleteMessageLocal(String messageId) async {}
-  Future<void> setTyping(String conversationId, bool typing) async {}
-  Future<void> setPresence(bool online) async {}
-  Future<void> sendReadReceipts(String conversationId) async {
-    throw UnsupportedError('read receipts disabled by runtime');
-  }
-  Future<void> acceptPairing(String pairingId);
-  Future<void> rejectPairing(String pairingId);
-  Future<void> cancelPairing(String pairingId);
-  Future<void> archivePairing(String pairingId);
-  Future<void> updateAppVisibility(bool foreground);
+  }) => throw UnsupportedError('relationship removal unavailable');
+  @override
+  Future<void> retryMessage(String messageId) =>
+      throw UnsupportedError('message retry unavailable');
+  @override
+  Future<void> retryDeadLetter(String kind, String id) =>
+      throw UnsupportedError('dead-letter retry unavailable');
+  @override
+  Future<List<Map<String, dynamic>>> listDeadLetters() =>
+      throw UnsupportedError('dead-letter inspection unavailable');
+  @override
+  Future<void> deleteMessageLocal(String messageId) =>
+      throw UnsupportedError('local message deletion unavailable');
+  @override
+  Future<void> setTyping(String conversationId, bool typing) =>
+      throw UnsupportedError('typing updates unavailable');
+  @override
+  Future<void> setConversationFocus(String conversationId, bool focused) =>
+      throw UnsupportedError('conversation focus unavailable');
+  @override
+  Future<void> setPresence(bool online) =>
+      throw UnsupportedError('presence updates unavailable');
+  @override
+  Future<void> sendReadReceipts(String conversationId) =>
+      throw UnsupportedError('read receipts unavailable');
 }
 
 final class _SessionAwareClientRuntime
@@ -87,24 +81,37 @@ final class _SessionAwareClientRuntime
 
   @override
   Future<void> disposeRuntime() async {
-    if (_delegate is RuntimeDisposable) {
-      await (_delegate as RuntimeDisposable).disposeRuntime();
-    }
+    final delegate = _delegate;
+    if (delegate is RuntimeDisposable) await delegate.disposeRuntime();
   }
 
   @override
   Future<ApplicationSnapshot?> applicationSnapshot() async {
-    final provider = _delegate;
-    if (provider is! RuntimeProjectionProvider) return null;
-    return (provider as RuntimeProjectionProvider).applicationSnapshot();
+    final delegate = _delegate;
+    if (delegate is! RuntimeProjectionCapability) return null;
+    return delegate.applicationSnapshot();
+  }
+
+  RuntimePairingQueryCapability get _pairingQueries {
+    final delegate = _delegate;
+    if (delegate is! RuntimePairingQueryCapability) {
+      throw UnsupportedError('direct pairing queries unavailable');
+    }
+    return delegate;
   }
 
   @override
+  Future<List<PairingItem>> pairingInbox() => _pairingQueries.pairingInbox();
+  @override
+  Future<List<PairingItem>> pairingOutbox() => _pairingQueries.pairingOutbox();
+  @override
+  Future<List<PairingItem>> listPairings() => _pairingQueries.listPairings();
+
+  @override
   Future<Map<String, dynamic>?> runtimeSnapshot() async {
-    if (_delegate is! RuntimeAttachmentProvider) return null;
-    // This snapshot is bootstrap metadata only. RuntimeRepository owns the
-    // canonical typed projection and is the sole ApplicationStateStore writer.
-    return (_delegate as RuntimeAttachmentProvider).runtimeSnapshot();
+    final delegate = _delegate;
+    if (delegate is! RuntimeAttachmentProvider) return null;
+    return delegate.runtimeSnapshot();
   }
 
   @override
@@ -127,11 +134,17 @@ final class _SessionAwareClientRuntime
   Future<PairingItem> submitPairingCode(String code) =>
       _delegate.submitPairingCode(code);
   @override
-  Future<List<PairingItem>> pairingInbox() => _delegate.pairingInbox();
+  Future<void> acceptPairing(String pairingId) =>
+      _delegate.acceptPairing(pairingId);
   @override
-  Future<List<PairingItem>> pairingOutbox() => _delegate.pairingOutbox();
+  Future<void> rejectPairing(String pairingId) =>
+      _delegate.rejectPairing(pairingId);
   @override
-  Future<List<PairingItem>> listPairings() => _delegate.listPairings();
+  Future<void> cancelPairing(String pairingId) =>
+      _delegate.cancelPairing(pairingId);
+  @override
+  Future<void> archivePairing(String pairingId) =>
+      _delegate.archivePairing(pairingId);
   @override
   Future<PeerEndpoint?> peerEndpoint() => _delegate.peerEndpoint();
   @override
@@ -191,6 +204,9 @@ final class _SessionAwareClientRuntime
   Future<void> startConversation(String contactId) =>
       _delegate.startConversation(contactId);
   @override
+  Future<void> setConversationFocus(String conversationId, bool focused) =>
+      _delegate.setConversationFocus(conversationId, focused);
+  @override
   Future<void> sendMessage(
     String id,
     String text, {
@@ -202,33 +218,20 @@ final class _SessionAwareClientRuntime
   @override
   Future<void> retryDeadLetter(String kind, String id) =>
       _delegate.retryDeadLetter(kind, id);
+  @override
   Future<List<Map<String, dynamic>>> listDeadLetters() =>
-      (_delegate as dynamic).listDeadLetters();
+      _delegate.listDeadLetters();
   @override
   Future<void> deleteMessageLocal(String messageId) =>
       _delegate.deleteMessageLocal(messageId);
   @override
   Future<void> setTyping(String conversationId, bool typing) =>
       _delegate.setTyping(conversationId, typing);
-  Future<void> setConversationFocus(String conversationId, bool focused) =>
-      (_delegate as dynamic).setConversationFocus(conversationId, focused);
   @override
   Future<void> setPresence(bool online) => _delegate.setPresence(online);
   @override
   Future<void> sendReadReceipts(String conversationId) =>
       _delegate.sendReadReceipts(conversationId);
-  @override
-  Future<void> acceptPairing(String pairingId) =>
-      _delegate.acceptPairing(pairingId);
-  @override
-  Future<void> rejectPairing(String pairingId) =>
-      _delegate.rejectPairing(pairingId);
-  @override
-  Future<void> cancelPairing(String pairingId) =>
-      _delegate.cancelPairing(pairingId);
-  @override
-  Future<void> archivePairing(String pairingId) =>
-      _delegate.archivePairing(pairingId);
   @override
   Future<void> updateAppVisibility(bool foreground) =>
       _delegate.updateAppVisibility(foreground);
