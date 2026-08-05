@@ -35,6 +35,23 @@ abstract final class TorcaReleaseInfo {
 class ReleaseInformationSection extends StatelessWidget {
   const ReleaseInformationSection({super.key});
 
+  Future<void> _copy(BuildContext context) async {
+    final polish = Localizations.localeOf(context).languageCode == 'pl';
+    await Clipboard.setData(
+      ClipboardData(text: TorcaReleaseInfo.diagnosticLabel),
+    );
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          polish
+              ? 'Skopiowano informacje o wersji.'
+              : 'Release information copied.',
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final polish = Localizations.localeOf(context).languageCode == 'pl';
@@ -46,27 +63,7 @@ class ReleaseInformationSection extends StatelessWidget {
         subtitle: polish
             ? 'Kanał: ${TorcaReleaseInfo.channel} · commit ${TorcaReleaseInfo.shortCommit}'
             : 'Channel: ${TorcaReleaseInfo.channel} · commit ${TorcaReleaseInfo.shortCommit}',
-        trailing: IconButton(
-          tooltip: polish
-              ? 'Kopiuj informacje o wersji'
-              : 'Copy release information',
-          icon: const Icon(Icons.copy_outlined),
-          onPressed: () async {
-            await Clipboard.setData(
-              ClipboardData(text: TorcaReleaseInfo.diagnosticLabel),
-            );
-            if (!context.mounted) return;
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  polish
-                      ? 'Skopiowano informacje o wersji.'
-                      : 'Release information copied.',
-                ),
-              ),
-            );
-          },
-        ),
+        onTap: () => _copy(context),
       ),
     );
   }
