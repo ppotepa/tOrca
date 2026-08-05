@@ -1,0 +1,64 @@
+BATCH: 0.3.0 architecture baseline and behavior freeze
+BASE COMMIT: 604708230b2ed84ba3c71cf05651af2a2648a712
+HEAD COMMIT: filled by repository history after this report commit
+
+GOAL:
+- define the frontend/backend/platform/storage ownership model;
+- identify existing god objects and duplicate sources of truth;
+- freeze observable 0.2 behavior before implementation moves;
+- establish the execution order for the 0.3 migration.
+
+CHANGED FILES:
+- docs/architecture/dependency-rules.md
+
+NEW FILES:
+- docs/architecture/architecture.md
+- docs/architecture/responsibility-matrix.md
+- docs/refactor/0.3/00-baseline-inventory.txt
+- docs/refactor/0.3/00-behavior-freeze.txt
+- docs/refactor/0.3/00-report.txt
+
+REMOVED FILES:
+- none
+
+MOVED SYMBOLS:
+- none; this batch intentionally changes no runtime behavior.
+
+OWNERSHIP CHANGES:
+- formalized Rust runtime as domain/workflow owner;
+- formalized ClientEngine as serialized command/effect/projection coordinator;
+- formalized Flutter as presentation and user-intention owner only;
+- formalized torchat-storage as the only SQLite/raw SQL owner;
+- formalized Android/Windows code as platform lifecycle adapters.
+
+PRESERVED INVARIANTS:
+- one active ClientEngine inbox and command pipeline;
+- current wire protocol and FFI contract;
+- current SQLite schema and migrations;
+- current 0.2 observable application behavior;
+- no GitHub Actions or workflow changes.
+
+TESTS:
+- documentation and repository-path inspection only.
+
+TESTS NOT RUN:
+- cargo fmt/check/clippy/test;
+- Flutter format/analyze/test;
+- Android or Windows build;
+- platform smoke tests;
+- pairing/message manual evidence.
+
+REASON:
+- no production source was changed in this batch.
+
+RISKS:
+- existing Flutter pairing recovery and polling remain active until batch 0.3.2;
+- snapshot state still has duplicate pairing collections in Flutter;
+- controller chain and main.dart god object remain active;
+- RuntimeStorage still contains broad defaults and full scans.
+
+NEXT BATCH:
+- 0.3.1 snapshot ownership completion.
+- Remove independent pairing collections from Flutter projection/controller
+  state and make authoritative revisioned backend projections the source of
+  domain data.
