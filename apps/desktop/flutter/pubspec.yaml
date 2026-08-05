@@ -1,7 +1,7 @@
 name: torchat_desktop
-description: TorChat desktop Flutter composition root.
+description: Torca desktop Flutter composition root.
 publish_to: none
-version: 0.1.0
+version: 0.2.0-beta.1+2
 
 environment:
   sdk: '>=3.8.0 <4.0.0'
