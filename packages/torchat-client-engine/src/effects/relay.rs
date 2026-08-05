@@ -67,6 +67,7 @@ pub(crate) enum RelayEffectResult {
         pairing_id: String,
         result: Result<(), String>,
     },
+    WorkerFailed(String),
 }
 
 pub(crate) struct RelayEffectOutcome {
@@ -98,26 +99,14 @@ pub(crate) fn spawn_engine_effect(
                     operation,
                 } = effect;
                 let correlation_id = context.request_id.clone();
-                let result = match operation {
-                    RelayEffectOperation::RefreshPairingCode => RelayEffectResult::PairingCode(
-                        relay.refresh_pairing_code().map_err(|error| error.to_string()),
-                    ),
-                    RelayEffectOperation::SubmitPairingCode {
-                        code,
-                        pairing_id,
-                        offer,
-                    } => RelayEffectResult::PairingSubmitted(
-                        relay
-                            .submit_pairing_code_with_offer(&code, pairing_id, offer)
-                            .map_err(|error| error.to_string()),
-                    ),
-                    RelayEffectOperation::CancelPairing { pairing_id } => {
-                        let result = relay
-                            .cancel_pairing(&pairing_id)
-                            .map_err(|error| error.to_string());
-                        RelayEffectResult::PairingCancelled { pairing_id, result }
-                    }
-                };
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    execute_relay_operation(relay.as_mut(), operation)
+                }))
+                .unwrap_or_else(|_| {
+                    RelayEffectResult::WorkerFailed(
+                        "rendezvous effect worker panicked".to_owned(),
+                    )
+                });
                 let outcome = EngineEffectOutcome::Relay(RelayEffectOutcome {
                     effect_id,
                     context,
@@ -133,6 +122,34 @@ pub(crate) fn spawn_engine_effect(
                     ),
                 );
             });
+        }
+    }
+}
+
+fn execute_relay_operation(
+    relay: &mut dyn EngineRelay,
+    operation: RelayEffectOperation,
+) -> RelayEffectResult {
+    match operation {
+        RelayEffectOperation::RefreshPairingCode => RelayEffectResult::PairingCode(
+            relay
+                .refresh_pairing_code()
+                .map_err(|error| error.to_string()),
+        ),
+        RelayEffectOperation::SubmitPairingCode {
+            code,
+            pairing_id,
+            offer,
+        } => RelayEffectResult::PairingSubmitted(
+            relay
+                .submit_pairing_code_with_offer(&code, pairing_id, offer)
+                .map_err(|error| error.to_string()),
+        ),
+        RelayEffectOperation::CancelPairing { pairing_id } => {
+            let result = relay
+                .cancel_pairing(&pairing_id)
+                .map_err(|error| error.to_string());
+            RelayEffectResult::PairingCancelled { pairing_id, result }
         }
     }
 }
