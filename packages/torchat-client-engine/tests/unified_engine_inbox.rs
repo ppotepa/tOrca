@@ -24,13 +24,18 @@ fn unified_input_contract_declares_correlation_and_causation_metadata() {
         "fn peer_event",
         "fn relay_event",
         "fn timer",
-        "fn effect_outcome",
         "fn shutdown",
     ] {
         assert!(source.contains(symbol), "missing unified input symbol: {symbol}");
     }
-    assert!(derived.contains("fn relay_event_caused"));
-    assert!(derived.contains("causation_id: Some(causation_id)"));
+    for symbol in [
+        "fn relay_event_caused",
+        "fn effect_outcome_correlated",
+        "causation_id: Some(causation_id)",
+        "correlation_id: Some(correlation_id)",
+    ] {
+        assert!(derived.contains(symbol), "missing derived input symbol: {symbol}");
+    }
 }
 
 #[test]
@@ -63,6 +68,8 @@ fn client_commands_enter_the_unified_inbox_before_actor_dispatch() {
         "fn unified_inbox_channel",
         "ENGINE_INBOX_CAPACITY",
         ".run_unified(",
+        "EngineInputSource::ClientApi",
+        "EngineInputSource::Ffi",
     ] {
         assert!(source.contains(symbol), "missing unified command ingress symbol: {symbol}");
     }
@@ -132,13 +139,16 @@ fn timers_are_external_inputs_with_generation_fencing() {
 
 #[test]
 fn relay_frames_become_inputs_before_state_mutation() {
-    let actor = fs::read_to_string(crate_root().join("src/actor/unified.rs"))
+    let host = fs::read_to_string(crate_root().join("src/actor/unified.rs"))
         .expect("unified actor source is readable");
+    let handlers = fs::read_to_string(crate_root().join("src/actor/unified_handlers.rs"))
+        .expect("unified handler source is readable");
 
-    assert!(actor.contains("result.derived_inputs.push"));
-    assert!(actor.contains("EngineInputEnvelope::relay_event_caused"));
-    assert!(actor.contains("derived_inputs.pop_front"));
-    let relay_tick = actor
+    assert!(host.contains("derived_inputs.pop_front"));
+    assert!(host.contains("derived_inputs.extend"));
+    assert!(handlers.contains("result.derived_inputs.push"));
+    assert!(handlers.contains("EngineInputEnvelope::relay_event_caused"));
+    let relay_tick = handlers
         .split("EngineTimerKind::RelayPoll")
         .nth(1)
         .expect("relay timer exists")
@@ -150,7 +160,9 @@ fn relay_frames_become_inputs_before_state_mutation() {
 
 #[test]
 fn blocking_rendezvous_operations_execute_outside_the_actor() {
-    let actor = fs::read_to_string(crate_root().join("src/actor/unified.rs"))
+    let commands = fs::read_to_string(crate_root().join("src/actor/unified_command.rs"))
+        .expect("unified command source is readable");
+    let host = fs::read_to_string(crate_root().join("src/actor/unified.rs"))
         .expect("unified actor source is readable");
     let worker = fs::read_to_string(crate_root().join("src/effects/relay.rs"))
         .expect("relay effect source is readable");
@@ -159,23 +171,25 @@ fn blocking_rendezvous_operations_execute_outside_the_actor() {
         "RelayEffectOperation::RefreshPairingCode",
         "RelayEffectOperation::SubmitPairingCode",
         "RelayEffectOperation::CancelPairing",
-        "spawn_engine_effect",
         "process_effect_outcome",
+        "RelayEffectPlaceholder::default()",
+        "take_deferred_control",
     ] {
-        assert!(actor.contains(symbol), "missing actor effect boundary: {symbol}");
+        assert!(commands.contains(symbol), "missing actor effect boundary: {symbol}");
     }
+    assert!(host.contains("spawn_engine_effect"));
     for symbol in [
         "tokio::task::spawn_blocking",
-        "EngineInputEnvelope::effect_outcome",
+        "EngineInputEnvelope::effect_outcome_correlated",
         "struct RelayEffectPlaceholder",
         "submit_pairing_code_with_offer",
     ] {
         assert!(worker.contains(symbol), "missing relay effect worker symbol: {symbol}");
     }
 
-    assert!(!actor.contains("self.relay.refresh_pairing_code()"));
-    assert!(!actor.contains("self.relay.submit_pairing_code_with_offer"));
-    assert!(!actor.contains("self.relay.cancel_pairing"));
+    assert!(!commands.contains("self.relay.refresh_pairing_code()"));
+    assert!(!commands.contains("self.relay.submit_pairing_code_with_offer"));
+    assert!(!commands.contains("self.relay.cancel_pairing"));
 }
 
 #[test]
@@ -197,4 +211,16 @@ fn response_resolution_is_not_blocked_by_public_event_backpressure() {
         .find("publish_tx.send(event)")
         .expect("event is queued for publishing");
     assert!(response_index < publish_index);
+}
+
+#[test]
+fn flutter_does_not_reintroduce_a_platform_specific_command_queue() {
+    let flutter = fs::read_to_string(
+        crate_root().join("../../apps/mobile/flutter/lib/client_runtime.dart"),
+    )
+    .expect("flutter runtime source is readable");
+
+    assert!(!flutter.contains("_SerializedClientRuntime"));
+    assert!(!flutter.contains("Platform.isWindows"));
+    assert!(flutter.contains("return _SessionAwareClientRuntime(platform);"));
 }
