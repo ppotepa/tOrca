@@ -1,5 +1,6 @@
 use super::*;
 
+use std::collections::VecDeque;
 use tokio::sync::watch;
 
 use crate::{
@@ -109,12 +110,23 @@ impl ClientEngineActor {
         let initial_plan = self.scheduler_plan(scheduler_generation)?;
         let (scheduler_tx, scheduler_rx) = watch::channel(initial_plan);
         spawn_engine_scheduler(scheduler_rx, inbox_tx.clone(), shutdown.clone());
+        let mut derived_inputs = VecDeque::new();
 
-        while let Some(envelope) = inbox.recv().await {
+        loop {
+            let envelope = match derived_inputs.pop_front() {
+                Some(envelope) => envelope,
+                None => {
+                    let Some(envelope) = inbox.recv().await else {
+                        break;
+                    };
+                    envelope
+                }
+            };
             let mut result = self.process_unified_input(envelope, scheduler_generation)?;
             let plan_changed = result.scheduler_plan_changed;
             let should_stop = result.should_stop();
             let effects = std::mem::take(&mut result.effects);
+            derived_inputs.extend(std::mem::take(&mut result.derived_inputs));
             publish_events(&events, result.events).await;
             for effect in effects {
                 spawn_engine_effect(effect, inbox_tx.clone());
@@ -153,7 +165,7 @@ impl ClientEngineActor {
                 if generation != scheduler_generation {
                     return Ok(EngineProcessingResult::empty());
                 }
-                self.process_timer_input(kind)
+                self.process_timer_input(input_id, kind)
             }
             EngineInput::EffectOutcome(outcome) => Ok(self.process_effect_outcome(outcome)),
             EngineInput::ShutdownRequested => Ok(self.process_shutdown_input()),
@@ -587,6 +599,7 @@ impl ClientEngineActor {
 
     fn process_timer_input(
         &mut self,
+        causation_id: uuid::Uuid,
         kind: EngineTimerKind,
     ) -> EngineResult<EngineProcessingResult> {
         let mut result = EngineProcessingResult::empty();
@@ -594,8 +607,13 @@ impl ClientEngineActor {
         match kind {
             EngineTimerKind::RelayPoll => {
                 while let Some(event) = self.relay.poll_event() {
-                    let relay_result = self.process_relay_input(event);
-                    result.events.extend(relay_result.events);
+                    result.derived_inputs.push(
+                        EngineInputEnvelope::relay_event_caused(
+                            unix_ms(),
+                            causation_id,
+                            event,
+                        ),
+                    );
                 }
                 self.relay_poll_at = Instant::now() + self.relay_poll_interval();
             }
