@@ -69,12 +69,10 @@ $oversizedBaselines = @{
     'common/torchat-core/src/peer_protocol.rs' = 665
     'packages/torchat-crypto/src/mls.rs' = 731
     'common/torchat-core/src/relay.rs' = 541
-    'apps/mobile/flutter/android/app/src/main/kotlin/org/torchat/mobile/MainActivity.kt' = 525
     'apps/mobile/flutter/lib/features/chats/release_chat_view.dart' = 1124
     'apps/mobile/flutter/lib/app/app_controller_base.dart' = 958
     'apps/mobile/flutter/lib/app/sequential_app_controller.dart' = 602
     'packages/torchat-flutter-ui/lib/theme/families/retro_theme.dart' = 722
-    'apps/mobile/flutter/lib/features/account/settings_view.dart' = 524
     'apps/mobile/flutter/lib/features/contacts/contacts_view.dart' = 765
     'apps/mobile/flutter/lib/features/onboarding/onboarding_views.dart' = 572
     'apps/mobile/flutter/lib/platform/desktop/desktop_workspace.dart' = 807
@@ -211,4 +209,4 @@ if ($failures.Count -gt 0) {
     }
 }
 
-Write-Host "[torchat] source-size check passed with $($warnings.Count) warning(s)."
+Write-Host "[torca] source-size check passed with $($warnings.Count) warning(s)."
