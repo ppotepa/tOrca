@@ -8,6 +8,7 @@ use crate::{
     generated::command_contract::command_contract,
     processing::{EngineProcessingResult, ProcessingControl},
 };
+use torchat_runtime::{RuntimeErrorCategory, RuntimeErrorCode, RuntimeProblem};
 
 impl ClientEngineActor {
     pub(in crate::actor) fn process_command_input(
@@ -60,17 +61,29 @@ impl ClientEngineActor {
         {
             trace.complete(CommandPipelineStage::CheckIdempotency);
             let stored_result = if stored_type != command_descriptor {
-                ResponseResult::Error {
-                    code: "idempotency_conflict".to_owned(),
-                    message: "command id was already used for a different command".to_owned(),
-                }
+                ResponseResult::error(
+                    RuntimeProblem::new(
+                        RuntimeErrorCode::Conflict,
+                        RuntimeErrorCategory::Domain,
+                        false,
+                    )
+                    .with_diagnostic_context(
+                        "command id was already used for a different command",
+                    ),
+                )
             } else {
                 match serde_json::from_str::<ResponsePayload>(&result_json) {
                     Ok(payload) => ResponseResult::Ok { payload },
-                    Err(_) => ResponseResult::Error {
-                        code: "idempotency_corrupt".to_owned(),
-                        message: "stored command result is invalid".to_owned(),
-                    },
+                    Err(error) => ResponseResult::error(
+                        RuntimeProblem::new(
+                            RuntimeErrorCode::Internal,
+                            RuntimeErrorCategory::Internal,
+                            false,
+                        )
+                        .with_diagnostic_context(format!(
+                            "stored command result is invalid: {error}"
+                        )),
+                    ),
                 }
             };
             trace.complete(CommandPipelineStage::EncodeResponse);
@@ -120,18 +133,6 @@ impl ClientEngineActor {
                         trace.complete(CommandPipelineStage::CollectChanges);
                         trace.complete(CommandPipelineStage::Commit);
                         trace.complete(CommandPipelineStage::ScheduleEffects);
-                        if contract.idempotent
-                            && let Some(command_id) = command_id.as_deref()
-                            && let Ok((_, revision)) = self.projection_head()
-                            && let Ok(result_json) = serde_json::to_string(&payload)
-                        {
-                            let _ = self.database.save_processed_command(
-                                command_id,
-                                &command_descriptor,
-                                &result_json,
-                                revision,
-                            );
-                        }
                         trace.complete(CommandPipelineStage::PublishRevision);
                         trace.complete(CommandPipelineStage::EncodeResponse);
                         result.events.push(EngineEvent::Response {
@@ -143,10 +144,7 @@ impl ClientEngineActor {
                         self.pending_engine_events.clear();
                         result.events.push(EngineEvent::Response {
                             request_id: envelope.request_id,
-                            result: ResponseResult::Error {
-                                code: error_code(&error).to_owned(),
-                                message: error.to_string(),
-                            },
+                            result: ResponseResult::from_engine_error(&error),
                         });
                     }
                 }
@@ -226,10 +224,7 @@ impl ClientEngineActor {
                 self.pending_engine_events.clear();
                 result.events.push(EngineEvent::Response {
                     request_id: context.request_id,
-                    result: ResponseResult::Error {
-                        code: error_code(&error).to_owned(),
-                        message: error.to_string(),
-                    },
+                    result: ResponseResult::from_engine_error(&error),
                 });
             }
         }
@@ -245,10 +240,7 @@ impl ClientEngineActor {
         let mut result = EngineProcessingResult::empty();
         result.events.push(EngineEvent::Response {
             request_id,
-            result: ResponseResult::Error {
-                code: error_code(&error).to_owned(),
-                message: error.to_string(),
-            },
+            result: ResponseResult::from_engine_error(&error),
         });
         result
     }
