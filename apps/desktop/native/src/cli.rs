@@ -2,9 +2,9 @@ use clap::Parser;
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
-#[command(name = "torchat-desktop", version, about = "TorChat desktop client")]
+#[command(name = "torchat-desktop", version, about = "Torca desktop client")]
 pub struct Cli {
-    /// Exact v3 onion server URL. TorChat has no direct/LAN fallback.
+    /// Exact v3 onion server URL. Torca has no direct/LAN fallback.
     /// Runtime override. If omitted, the onion captured by the client build
     /// is used; production clients therefore never depend on a LAN address.
     #[arg(long, env = "TORCHAT_SERVER_URL")]
@@ -33,9 +33,9 @@ pub struct Cli {
     #[arg(long, env = "TORCHAT_IDENTITY_FILE")]
     pub identity_file: Option<PathBuf>,
 
-    /// Explicit one-time import of a legacy plaintext identity into OS vault.
-    #[arg(long, env = "TORCHAT_IMPORT_LEGACY_IDENTITY")]
-    pub import_legacy_identity: Option<PathBuf>,
+    /// Delete the current desktop profile and all locally managed Tor data.
+    #[arg(long, hide = true, default_value_t = false)]
+    pub reset_profile: bool,
 
     /// Publish this nickname for paired contacts after bootstrap.
     #[arg(long, env = "TORCHAT_NICKNAME")]
