@@ -7,7 +7,6 @@ pub(crate) enum EngineInputSource {
     Platform,
     Scheduler,
     EffectWorker,
-    Recovery,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
