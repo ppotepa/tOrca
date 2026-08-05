@@ -63,7 +63,10 @@ impl EngineEffectEnvelope {
 pub(crate) enum RelayEffectResult {
     PairingCode(Result<InviteCode, String>),
     PairingSubmitted(Result<PairingItem, String>),
-    PairingCancelled(Result<(), String>),
+    PairingCancelled {
+        pairing_id: String,
+        result: Result<(), String>,
+    },
 }
 
 pub(crate) struct RelayEffectOutcome {
@@ -103,11 +106,10 @@ pub(crate) fn spawn_engine_effect(
                             .map_err(|error| error.to_string()),
                     ),
                     RelayEffectOperation::CancelPairing { pairing_id } => {
-                        RelayEffectResult::PairingCancelled(
-                            relay
-                                .cancel_pairing(&pairing_id)
-                                .map_err(|error| error.to_string()),
-                        )
+                        let result = relay
+                            .cancel_pairing(&pairing_id)
+                            .map_err(|error| error.to_string());
+                        RelayEffectResult::PairingCancelled { pairing_id, result }
                     }
                 };
                 let outcome = EngineEffectOutcome::Relay(RelayEffectOutcome {
