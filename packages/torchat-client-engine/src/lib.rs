@@ -1,4 +1,5 @@
 pub mod actor;
+pub mod change_publication;
 pub mod client_api;
 pub mod config;
 pub mod contract;
@@ -18,6 +19,7 @@ mod scheduler;
 pub mod storage;
 
 pub use actor::ClientEngineActor;
+pub use change_publication::ChangePublication;
 pub use client_api::PairingList;
 pub use config::EngineConfig;
 pub use contract::{EngineCommand, EngineCommandEnvelope, PlatformFact, PlatformKind, TorPhase};

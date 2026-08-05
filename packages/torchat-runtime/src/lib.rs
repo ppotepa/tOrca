@@ -1,6 +1,7 @@
 //! Internal shared client domain runtime used exclusively by `torchat-client-engine`.
 
 pub mod application_snapshot;
+pub mod changes;
 pub mod clock;
 pub mod collections;
 pub mod contract;
@@ -19,6 +20,10 @@ pub mod transport;
 pub use application_snapshot::{
     APPLICATION_SNAPSHOT_SCHEMA_VERSION, ApplicationSnapshot, ConversationProjection,
     PairingSummary, ProjectionStamp, UiCheckpoint,
+};
+pub use changes::{
+    ChangePublisher, ChangeSections, ChangeSet, ChangedEntities, CommittedChange, DomainEffect,
+    FeatureResult,
 };
 pub use clock::{RuntimeClock, SystemRuntimeClock};
 pub use collections::{
@@ -80,10 +85,7 @@ mod tests {
         assert_eq!(fixture.profile.nickname, "Alice");
         assert_eq!(fixture.contact.verification, VerificationState::Verified);
         assert_eq!(fixture.conversation.status, ConversationState::Active);
-        assert_eq!(
-            fixture.message.state,
-            crate::models::MessageState::Delivered
-        );
+        assert_eq!(fixture.message.state, crate::models::MessageState::Delivered);
         assert_eq!(
             fixture.message_send_effect.recipient_installation_id,
             "installation-bob"
@@ -105,11 +107,7 @@ mod tests {
                 .iter()
                 .any(|event| matches!(event, RuntimeEvent::RuntimeReady { protocol: 1 }))
         );
-        assert!(
-            events
-                .iter()
-                .any(|event| matches!(event, RuntimeEvent::TorStatus { .. }))
-        );
+        assert!(events.iter().any(|event| matches!(event, RuntimeEvent::TorStatus { .. })));
     }
 
     #[test]
@@ -121,7 +119,7 @@ mod tests {
     #[test]
     fn fixture_canonical_tor_status_includes_retry_attempt() {
         let fixture: serde_json::Value =
-    serde_json::from_str(include_str!("../../../common/internal-runtime-fixtures.json"))
+            serde_json::from_str(include_str!("../../../common/internal-runtime-fixtures.json"))
                 .expect("fixture should parse");
 
         let retry_attempt = fixture["events"][1]["retryAttempt"]
