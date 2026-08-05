@@ -3,13 +3,13 @@
 package org.torchat.generated
 
 data class GeneratedCommandContract(
-    val publicMethod: String,
-    val wireName: String,
-    val category: String,
-    val durable: Boolean,
-    val requiresCommandId: Boolean,
-    val idempotent: Boolean,
-    val handlerKey: String,
+	val publicMethod: String,
+	val wireName: String,
+	val category: String,
+	val durable: Boolean,
+	val requiresCommandId: Boolean,
+	val idempotent: Boolean,
+	val handlerKey: String,
 )
 
 object GeneratedCommandContracts {
@@ -58,5 +58,5 @@ object GeneratedCommandContracts {
         GeneratedCommandContract("platformFact", "platform_fact", "platform_fact", false, false, true, "platform_fact"),
         GeneratedCommandContract("shutdown", "shutdown", "lifecycle", false, false, true, "shutdown"),
     )
-    val byWireName: Map<String, GeneratedCommandContract> = all.associateBy { it.wireName }
+	val byWireName: Map<String, GeneratedCommandContract> = all.associateBy { it.wireName }
 }
