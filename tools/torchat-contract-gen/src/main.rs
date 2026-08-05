@@ -101,7 +101,29 @@ fn validate(manifest: &Manifest) -> Result<(), String> {
 fn render_rust(manifest: &Manifest) -> String {
     let mut output = String::from(HEADER);
     output.push_str(
-        "#[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
+        "use serde::{Deserialize, Serialize};\n\n\
+         #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]\n\
+         #[serde(rename_all = \"camelCase\")]\n\
+         pub struct GeneratedCommandRequest {\n\
+         \t#[serde(rename = \"type\")]\n\
+         \tpub command_type: String,\n\
+         \t#[serde(skip_serializing_if = \"Option::is_none\")]\n\
+         \tpub command_id: Option<String>,\n\
+         \t#[serde(default)]\n\
+         \tpub payload: serde_json::Value,\n\
+         }\n\n\
+         #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]\n\
+         #[serde(rename_all = \"camelCase\")]\n\
+         pub struct GeneratedCommandResponse {\n\
+         \tpub status: String,\n\
+         \t#[serde(skip_serializing_if = \"Option::is_none\")]\n\
+         \tpub payload: Option<serde_json::Value>,\n\
+         \t#[serde(skip_serializing_if = \"Option::is_none\")]\n\
+         \tpub code: Option<String>,\n\
+         \t#[serde(skip_serializing_if = \"Option::is_none\")]\n\
+         \tpub retryable: Option<bool>,\n\
+         }\n\n\
+         #[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
          pub struct CommandContract {\n\
          \tpub public_method: &'static str,\n\
          \tpub wire_name: &'static str,\n\
@@ -138,7 +160,31 @@ fn render_rust(manifest: &Manifest) -> String {
 fn render_dart(manifest: &Manifest) -> String {
     let mut output = String::from(HEADER);
     output.push_str(
-        "final class GeneratedCommandContract {\n\
+        "final class GeneratedCommandRequest {\n\
+         \tconst GeneratedCommandRequest({required this.type, this.commandId, this.payload = const <String, Object?>{}});\n\
+         \tfinal String type;\n\
+         \tfinal String? commandId;\n\
+         \tfinal Map<String, Object?> payload;\n\
+         \tMap<String, Object?> toJson() => <String, Object?>{\n\
+         \t\t'type': type,\n\
+         \t\tif (commandId != null) 'commandId': commandId,\n\
+         \t\t'payload': payload,\n\
+         \t};\n\
+         }\n\n\
+         final class GeneratedCommandResponse {\n\
+         \tconst GeneratedCommandResponse({required this.status, this.payload, this.code, this.retryable});\n\
+         \tfinal String status;\n\
+         \tfinal Object? payload;\n\
+         \tfinal String? code;\n\
+         \tfinal bool? retryable;\n\
+         \tfactory GeneratedCommandResponse.fromJson(Map<String, Object?> json) => GeneratedCommandResponse(\n\
+         \t\tstatus: json['status'] as String,\n\
+         \t\tpayload: json['payload'],\n\
+         \t\tcode: json['code'] as String?,\n\
+         \t\tretryable: json['retryable'] as bool?,\n\
+         \t);\n\
+         }\n\n\
+         final class GeneratedCommandContract {\n\
          \tconst GeneratedCommandContract({\n\
          \t\trequired this.publicMethod,\n\
          \t\trequired this.wireName,\n\
@@ -184,7 +230,19 @@ fn render_kotlin(manifest: &Manifest) -> String {
     let mut output = String::from(HEADER);
     output.push_str("package org.torchat.generated\n\n");
     output.push_str(
-        "data class GeneratedCommandContract(\n\
+        "import org.json.JSONObject\n\n\
+         data class GeneratedCommandRequest(\n\
+         \tval type: String,\n\
+         \tval commandId: String? = null,\n\
+         \tval payload: JSONObject = JSONObject(),\n\
+         )\n\n\
+         data class GeneratedCommandResponse(\n\
+         \tval status: String,\n\
+         \tval payload: Any? = null,\n\
+         \tval code: String? = null,\n\
+         \tval retryable: Boolean? = null,\n\
+         )\n\n\
+         data class GeneratedCommandContract(\n\
          \tval publicMethod: String,\n\
          \tval wireName: String,\n\
          \tval category: String,\n\
