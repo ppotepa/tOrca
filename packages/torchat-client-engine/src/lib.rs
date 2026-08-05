@@ -8,6 +8,7 @@ mod effects;
 pub mod fault_injection;
 #[allow(dead_code)]
 mod input;
+mod input_derived;
 mod logging;
 mod output;
 pub mod peer;
