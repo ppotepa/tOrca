@@ -29,7 +29,6 @@ class SequentialAppController extends base.AppController {
   Future<void>? _eventRefreshInFlight;
   final Set<String> _eventMessageRefreshes = <String>{};
   bool _eventRefreshQueued = false;
-  bool _eventRefreshNeedsPairing = false;
   bool _refreshAfterWarmup = false;
   bool _warming = false;
   bool _startupComplete = false;
@@ -104,7 +103,6 @@ class SequentialAppController extends base.AppController {
     );
 
     try {
-      // Keep engine and local-data readiness as separate, ordered phases.
       await _runtime.connect().timeout(const Duration(seconds: 60));
       _ensureGeneration(generation);
       final readiness = await _runtime.startupReadiness().timeout(
@@ -151,9 +149,6 @@ class SequentialAppController extends base.AppController {
             ? PeerServerStatus.ready
             : PeerServerStatus.starting,
         isLoading: false,
-        // Local data is the shell gate. Tor, relay, onion and per-contact
-        // reachability remain capability/transport states and may recover in
-        // the background without hiding history and settings.
         screen: snapshot.profile.nickname.trim().isNotEmpty
             ? base.ControllerScreen.main
             : base.ControllerScreen.nickname,
@@ -195,14 +190,8 @@ class SequentialAppController extends base.AppController {
       if (_startup.generation == generation) {
         _warming = false;
         if (_startupComplete) {
-          // Events can arrive while the readiness gate is warming. Preserve
-          // the strongest requested refresh so an invite is not hidden until
-          // the next app restart.
-          final needsPairing = _refreshAfterWarmup || _eventRefreshNeedsPairing;
           _refreshAfterWarmup = false;
-          unawaited(
-            refreshData(forcePairing: needsPairing, allowAutoTorka: true),
-          );
+          unawaited(refreshData());
         } else if (_refreshAfterWarmup) {
           _refreshAfterWarmup = false;
           _scheduleEventRefresh();
@@ -237,10 +226,7 @@ class SequentialAppController extends base.AppController {
   }
 
   @override
-  Future<void> refreshData({
-    bool forcePairing = false,
-    bool allowAutoTorka = true,
-  }) {
+  Future<void> refreshData() {
     if (_warming) {
       _refreshAfterWarmup = true;
       return Future<void>.value();
@@ -248,10 +234,7 @@ class SequentialAppController extends base.AppController {
     final completer = Completer<void>();
     _refreshTail = _refreshTail.catchError((Object _) {}).then<void>((_) async {
       try {
-        await super.refreshData(
-          forcePairing: forcePairing,
-          allowAutoTorka: allowAutoTorka,
-        );
+        await super.refreshData();
         _restoreStartupProjection();
         completer.complete();
       } catch (error, stackTrace) {
@@ -318,7 +301,6 @@ class SequentialAppController extends base.AppController {
           _applyConversationFocus(payload);
         } else if (type == EngineContract.presenceChanged) {
           final contactId = payload[EngineContract.contactId]?.toString();
-          // Presence state is owned by ContactProbeCoordinator.
           if (contactId == null || contactId.isEmpty) break;
         } else {
           if (type == EngineContract.projectionChanged) {
@@ -326,25 +308,16 @@ class SequentialAppController extends base.AppController {
                 (payload[EngineContract.revision] as num?)?.toInt() ?? 0;
             final currentRevision =
                 _repository.applicationState.current?.projectionRevision ?? 0;
-            // Duplicate/replayed projection notifications are harmless. A
-            // newer revision schedules one coalesced authoritative refresh.
             if (incomingRevision > 0 && incomingRevision <= currentRevision) {
               break;
             }
           }
           _repository.invalidateLocalCache();
-          if (type == EngineContract.inviteReceived ||
-              type == EngineContract.inviteStateChanged) {
-            _eventRefreshNeedsPairing = true;
-          }
           final changeKind = type == EngineContract.changed
               ? payload[EngineContract.kind]?.toString() ?? ''
               : type;
           if (type == EngineContract.messageReceived ||
               type == EngineContract.messageStateChanged) {
-            // Message events are self-addressing. Never infer a conversation
-            // from the currently selected UI route: an event for another
-            // contact would otherwise refresh or overwrite the open chat.
             final conversationId = payload[EngineContract.conversationId]
                 ?.toString();
             if (conversationId != null && conversationId.isNotEmpty) {
@@ -386,8 +359,6 @@ class SequentialAppController extends base.AppController {
         }
         state = state.copyWith(error: message);
       case RuntimeLogEvent():
-      // Diagnostic text is never a readiness protocol. Typed snapshots and
-      // events above are the only inputs to the startup gate.
       case NotificationRequestedEvent():
         unawaited(_notificationBeep());
     }
@@ -442,14 +413,12 @@ class SequentialAppController extends base.AppController {
     while (_eventRefreshQueued && !_warming) {
       _eventRefreshQueued = false;
       try {
-        final includePairing = _eventRefreshNeedsPairing;
-        _eventRefreshNeedsPairing = false;
         final messageRefreshes = Set<String>.of(_eventMessageRefreshes);
         _eventMessageRefreshes.removeAll(messageRefreshes);
         for (final conversationId in messageRefreshes.toList()..sort()) {
           await _repository.messages(conversationId, force: true);
         }
-        await refreshData(forcePairing: includePairing, allowAutoTorka: false);
+        await refreshData();
       } catch (error) {
         state = state.copyWith(
           error: _message(error),
@@ -480,7 +449,6 @@ class SequentialAppController extends base.AppController {
   void _applyConversationFocus(Map<String, dynamic> payload) {
     final conversationId = payload[EngineContract.conversationId]?.toString();
     if (conversationId == null || conversationId.isEmpty) return;
-    // Focus expiry is owned by ContactProbeCoordinator.
   }
 
   String _message(Object error) => error
