@@ -1,9 +1,12 @@
 use crate::{
-    ChatMessage, ClientRuntime, ContactRecord, ContactStorage, ConversationStorage,
-    ConversationSummary, FeatureResult, MessageStorage, PointLookupStorage, RuntimeClock,
-    RuntimeResult, RuntimeTransport,
+    CapabilityStorage, ChatMessage, ClientRuntime, ContactRecord, ContactStorage,
+    ConversationStorage, ConversationSummary, FeatureResult, MessageStorage, PointLookupStorage,
+    ReceiptSendEffect, ReceiptStorage, RelationshipStorage, RelationshipTransition, RuntimeClock,
+    RuntimeEvent, RuntimeResult, RuntimeTransport,
     features::{
         contacts::ContactsFeature, conversations::ConversationsFeature, messaging::MessagingFeature,
+        peer::PeerFeature, presence::PresenceFeature, receipts::ReceiptsFeature,
+        relationships::RelationshipsFeature,
     },
 };
 
@@ -37,14 +40,37 @@ pub trait ClientRuntimeFeatureFacade {
         &mut self,
         conversation_id: &str,
     ) -> RuntimeResult<FeatureResult<()>>;
-    fn feature_message_by_id(&mut self, message_id: &str)
-        -> RuntimeResult<Option<ChatMessage>>;
+    fn feature_message_by_id(
+        &mut self,
+        message_id: &str,
+    ) -> RuntimeResult<Option<ChatMessage>>;
     fn feature_save_message(
         &mut self,
         message: ChatMessage,
     ) -> RuntimeResult<FeatureResult<ChatMessage>>;
-    fn feature_delete_message(&mut self, message_id: &str)
-        -> RuntimeResult<FeatureResult<()>>;
+    fn feature_delete_message(
+        &mut self,
+        message_id: &str,
+    ) -> RuntimeResult<FeatureResult<()>>;
+    fn feature_apply_relationship(
+        &mut self,
+        transition: RelationshipTransition,
+    ) -> RuntimeResult<FeatureResult<()>>;
+    fn feature_pending_receipts(&self) -> RuntimeResult<Vec<ReceiptSendEffect>>;
+    fn feature_publish_presence(&mut self, event: RuntimeEvent) -> FeatureResult<()>;
+    fn feature_store_peer_capability(
+        &mut self,
+        contact_installation_id: &str,
+        capability_id: &str,
+        secret: &[u8],
+        sequence: u64,
+        issued_at: i64,
+        expires_at: Option<i64>,
+    ) -> RuntimeResult<FeatureResult<()>>;
+    fn feature_revoke_peer_capability(
+        &mut self,
+        contact_installation_id: &str,
+    ) -> RuntimeResult<FeatureResult<()>>;
 }
 
 impl<S, T, C> ClientRuntimeFeatureFacade for ClientRuntime<S, T, C>
@@ -52,7 +78,10 @@ where
     S: ContactStorage
         + ConversationStorage
         + MessageStorage
-        + PointLookupStorage,
+        + PointLookupStorage
+        + RelationshipStorage
+        + ReceiptStorage
+        + CapabilityStorage,
     T: RuntimeTransport,
     C: RuntimeClock,
 {
@@ -117,5 +146,46 @@ where
         message_id: &str,
     ) -> RuntimeResult<FeatureResult<()>> {
         MessagingFeature::new(self.storage_mut()).delete(message_id)
+    }
+
+    fn feature_apply_relationship(
+        &mut self,
+        transition: RelationshipTransition,
+    ) -> RuntimeResult<FeatureResult<()>> {
+        RelationshipsFeature::new(self.storage_mut()).apply(transition)
+    }
+
+    fn feature_pending_receipts(&self) -> RuntimeResult<Vec<ReceiptSendEffect>> {
+        ReceiptsFeature::new(self.storage()).pending()
+    }
+
+    fn feature_publish_presence(&mut self, event: RuntimeEvent) -> FeatureResult<()> {
+        PresenceFeature::new(self.session_mut()).publish(event)
+    }
+
+    fn feature_store_peer_capability(
+        &mut self,
+        contact_installation_id: &str,
+        capability_id: &str,
+        secret: &[u8],
+        sequence: u64,
+        issued_at: i64,
+        expires_at: Option<i64>,
+    ) -> RuntimeResult<FeatureResult<()>> {
+        PeerFeature::new(self.storage_mut()).store_capability(
+            contact_installation_id,
+            capability_id,
+            secret,
+            sequence,
+            issued_at,
+            expires_at,
+        )
+    }
+
+    fn feature_revoke_peer_capability(
+        &mut self,
+        contact_installation_id: &str,
+    ) -> RuntimeResult<FeatureResult<()>> {
+        PeerFeature::new(self.storage_mut()).revoke_capability(contact_installation_id)
     }
 }
