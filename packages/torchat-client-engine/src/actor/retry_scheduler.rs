@@ -1,16 +1,6 @@
 use super::*;
 
 impl ClientEngineActor {
-    pub(super) async fn run_retry_scheduler(
-        &mut self,
-        events: &mpsc::Sender<EngineEvent>,
-        deadline: RetryDeadline,
-    ) {
-        for event in self.run_retry_scheduler_collect(deadline) {
-            let _ = events.send(event).await;
-        }
-    }
-
     pub(super) fn run_retry_scheduler_collect(
         &mut self,
         deadline: RetryDeadline,
