@@ -3,6 +3,9 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$singleBaselineCheck = Join-Path $PSScriptRoot 'check-single-baseline.ps1'
+& $singleBaselineCheck -RepositoryRoot $repoRoot
+
 $manifestPath = Join-Path $repoRoot 'common\client-engine-contract.json'
 $kotlinPath = Join-Path $repoRoot 'apps\mobile\flutter\android\app\src\main\kotlin\org\torchat\generated\EngineContract.kt'
 $dartContractPath = Join-Path $repoRoot 'packages\torchat-flutter-ui\lib\core\runtime\generated\runtime_contract.g.dart'
