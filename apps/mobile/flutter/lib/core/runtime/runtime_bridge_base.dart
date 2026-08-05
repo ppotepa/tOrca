@@ -72,17 +72,37 @@ mixin RuntimeBridgeMethods implements ClientRuntime, RuntimeProjectionProvider {
               ConversationSummary.fromMap(Map<String, dynamic>.from(item)),
         )
         .toList(growable: false);
+    final pairingInbox = (map['pairingInbox'] as List? ?? const [])
+        .whereType<Map>()
+        .map(
+          (item) => PairingItem.fromMap(
+            Map<String, dynamic>.from(item),
+            origin: PairingOrigin.inbox,
+          ),
+        )
+        .toList(growable: false);
+    final pairingOutbox = (map['pairingOutbox'] as List? ?? const [])
+        .whereType<Map>()
+        .map(
+          (item) => PairingItem.fromMap(
+            Map<String, dynamic>.from(item),
+            origin: PairingOrigin.outbox,
+          ),
+        )
+        .toList(growable: false);
     final pairing = map['pairingSummary'] is Map
         ? Map<String, dynamic>.from(map['pairingSummary'] as Map)
         : const <String, dynamic>{};
     return ApplicationSnapshot(
-      schemaVersion: (map['schemaVersion'] as num?)?.toInt() ?? 1,
+      schemaVersion: (map['schemaVersion'] as num?)?.toInt() ?? 2,
       generation: (map['generation'] as num?)?.toInt() ?? 0,
       createdAtMs: (map['createdAtMs'] as num?)?.toInt() ?? 0,
       identity: identity,
       profile: profile,
       contacts: contacts,
       conversations: conversations,
+      pairingInbox: pairingInbox,
+      pairingOutbox: pairingOutbox,
       pendingInbox: (pairing['pendingInbox'] as num?)?.toInt() ?? 0,
       pendingOutbox: (pairing['pendingOutbox'] as num?)?.toInt() ?? 0,
       peerEndpointAvailable: map['peerEndpointAvailable'] as bool? ?? false,
@@ -148,15 +168,19 @@ mixin RuntimeBridgeMethods implements ClientRuntime, RuntimeProjectionProvider {
     if (raw is! Map) return const <PairingItem>[];
     final map = Map<String, dynamic>.from(raw);
     final inbox = RuntimePayload.itemsFromDynamicOrNull(map['inbox'])
-        .map((payload) => PairingItem.fromMap(
-              payload.toMap(),
-              origin: PairingOrigin.inbox,
-            ));
+        .map(
+          (payload) => PairingItem.fromMap(
+            payload.toMap(),
+            origin: PairingOrigin.inbox,
+          ),
+        );
     final outbox = RuntimePayload.itemsFromDynamicOrNull(map['outbox'])
-        .map((payload) => PairingItem.fromMap(
-              payload.toMap(),
-              origin: PairingOrigin.outbox,
-            ));
+        .map(
+          (payload) => PairingItem.fromMap(
+            payload.toMap(),
+            origin: PairingOrigin.outbox,
+          ),
+        );
     return <PairingItem>[...inbox, ...outbox];
   }
 
