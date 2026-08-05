@@ -1,0 +1,85 @@
+name: Torca 0.2 bug report
+description: Report a reproducible problem in a Torca test release.
+title: "[0.2] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include plaintext messages, attachments, pairing codes, private keys, databases or capability tokens. Suspected vulnerabilities belong in the private security-reporting channel described in SECURITY.md.
+  - type: input
+    id: release
+    attributes:
+      label: Torca release information
+      description: Copy this from Settings → Test release and support.
+      placeholder: Torca 0.2.0-beta.1+2 / beta / commit …
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Android
+        - Windows
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system and device
+      placeholder: Android 15 / Pixel 8 or Windows 11 24H2
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. …
+        2. …
+        3. …
+    validations:
+      required: true
+  - type: input
+    id: time
+    attributes:
+      label: Approximate UTC time
+      description: Used to correlate the report with sanitized diagnostics.
+  - type: checkboxes
+    id: conditions
+    attributes:
+      label: Conditions involved
+      options:
+        - label: Tor bootstrap or onion service
+        - label: Network change or offline peer
+        - label: Android background or process kill
+        - label: Windows tray, sleep or restart
+        - label: Upgrade from another Torca build
+        - label: Pairing or relationship removal
+        - label: Message retry, delivery or receipt
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Sanitized diagnostics reference
+      description: Attach only the export produced by Torca. Confirm it contains no private user content before uploading.
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: Privacy confirmation
+      options:
+        - label: I did not include pairing codes, plaintext messages, attachments, private keys, database keys or capability tokens.
+          required: true
