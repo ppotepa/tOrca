@@ -6,6 +6,7 @@ import '../locales/domain/app_locale_preference.dart';
 import 'android/mobile_bridge.dart';
 import 'diagnostics_export_service.dart';
 import 'profile_reset_service.dart';
+import 'update_check_service.dart';
 
 bool get isDesktopPlatform =>
     Platform.isWindows || Platform.isLinux || Platform.isMacOS;
@@ -87,13 +88,15 @@ final class PlatformServices {
     AutostartService? autostart,
     DiagnosticsExportService? diagnostics,
     ProfileResetService? profileReset,
+    UpdateCheckService? updates,
   })  : windowLifecycle = windowLifecycle ?? const DefaultWindowLifecycleService(),
         notifications = notifications ?? const DefaultNotificationService(),
         navigation = navigation ?? const DefaultNavigationIntentService(),
         runtimeBridgeFactory = runtimeBridgeFactory ?? MobileBridge.new,
         autostart = autostart ?? const DefaultAutostartService(),
         diagnostics = diagnostics ?? const LocalDiagnosticsExportService(),
-        profileReset = profileReset ?? const MobileProfileResetService();
+        profileReset = profileReset ?? const MobileProfileResetService(),
+        updates = updates ?? const LocalSignedUpdateCheckService();
 
   final WindowLifecycleService windowLifecycle;
   final NotificationService notifications;
@@ -102,6 +105,7 @@ final class PlatformServices {
   final AutostartService autostart;
   final DiagnosticsExportService diagnostics;
   final ProfileResetService profileReset;
+  final UpdateCheckService updates;
 
   static PlatformServices current = PlatformServices();
 }
