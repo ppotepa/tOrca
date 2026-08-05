@@ -24,7 +24,13 @@ $requiredFiles = @(
     'scripts/release/validate-torca-release.ps1',
     'scripts/release/generate-release-metadata.ps1',
     'scripts/release/release-torca.ps1',
-    'apps/mobile/flutter/android/app/src/main/res/xml/data_extraction_rules.xml'
+    'apps/mobile/flutter/android/app/src/main/res/xml/data_extraction_rules.xml',
+    'apps/mobile/flutter/lib/core/release/release_info.dart',
+    'apps/mobile/flutter/lib/platform/diagnostics_export_service.dart',
+    'apps/mobile/flutter/lib/platform/profile_reset_service.dart',
+    'apps/mobile/flutter/lib/core/attachments/image_attachment_policy.dart',
+    'apps/mobile/flutter/lib/core/attachments/image_message_codec.dart',
+    'apps/desktop/flutter/lib/platform/desktop/desktop_profile_reset.dart'
 )
 foreach ($relative in $requiredFiles) {
     $path = Join-Path $RepositoryRoot $relative
@@ -36,7 +42,8 @@ foreach ($relative in $requiredFiles) {
 foreach ($obsolete in @(
     'scripts/release/torchat-0-1-matrix.json',
     'scripts/release/validate-torchat-0-1.ps1',
-    '.github/workflows/release-0-1-validation.yml'
+    '.github/workflows/release-0-1-validation.yml',
+    'apps/desktop/native/src/secret_migration.rs'
 )) {
     if (Test-Path -LiteralPath (Join-Path $RepositoryRoot $obsolete)) {
         throw "Obsolete release path is forbidden: $obsolete"
@@ -76,7 +83,12 @@ if ($validator -match "'build',\s*'apk',\s*'--debug'") {
 }
 
 $wrapper = Get-Content -LiteralPath (Join-Path $RepositoryRoot 'scripts/release/release-torca.ps1') -Raw
-foreach ($needle in @('validate-torca-release.ps1', '-RequirePlatforms', 'generate-release-metadata.ps1')) {
+foreach ($needle in @(
+    'check-release-policy.ps1',
+    'validate-torca-release.ps1',
+    '-RequirePlatforms',
+    'generate-release-metadata.ps1'
+)) {
     if (-not $wrapper.Contains($needle)) {
         throw "Canonical release command is missing: $needle"
     }
@@ -128,6 +140,63 @@ foreach ($needle in @(
 $backupRules = Get-Content -LiteralPath (Join-Path $RepositoryRoot 'apps/mobile/flutter/android/app/src/main/res/xml/data_extraction_rules.xml') -Raw
 if ($backupRules -notmatch '<cloud-backup' -or $backupRules -notmatch '<device-transfer>') {
     throw 'Android backup rules must cover cloud backup and device transfer.'
+}
+
+$diagnostics = Get-Content -LiteralPath (Join-Path $RepositoryRoot 'apps/mobile/flutter/lib/platform/diagnostics_export_service.dart') -Raw
+foreach ($needle in @(
+    "'sanitized': true",
+    "'automaticUpload': false",
+    "'messagePlaintextIncluded': false",
+    "'privateKeysIncluded': false",
+    'GZipCodec'
+)) {
+    if (-not $diagnostics.Contains($needle)) {
+        throw "Diagnostic export is missing privacy control: $needle"
+    }
+}
+foreach ($forbidden in @('HttpClient', 'WebSocket', 'Socket.connect', 'MultipartRequest', 'upload(')) {
+    if ($diagnostics.Contains($forbidden)) {
+        throw "Diagnostic export must remain local; forbidden network API: $forbidden"
+    }
+}
+
+$androidActivity = Get-Content -LiteralPath (Join-Path $RepositoryRoot 'apps/mobile/flutter/android/app/src/main/kotlin/org/torchat/mobile/MainActivity.kt') -Raw
+foreach ($needle in @('"resetLocalProfile"', 'clearApplicationUserData()', 'stopService(')) {
+    if (-not $androidActivity.Contains($needle)) {
+        throw "Android profile reset is missing: $needle"
+    }
+}
+
+$desktopReset = Get-Content -LiteralPath (Join-Path $RepositoryRoot 'apps/desktop/flutter/lib/platform/desktop/desktop_profile_reset.dart') -Raw
+foreach ($needle in @('stopRuntime()', "'--reset-profile'", 'SharedPreferences.getInstance()', 'preferences.clear()')) {
+    if (-not $desktopReset.Contains($needle)) {
+        throw "Desktop profile reset is missing: $needle"
+    }
+}
+$desktopIdentity = Get-Content -LiteralPath (Join-Path $RepositoryRoot 'apps/desktop/native/src/identity_store.rs') -Raw
+foreach ($needle in @('pub fn reset_profile(', 'remove_profile_files(', 'remove_managed_tor_data(')) {
+    if (-not $desktopIdentity.Contains($needle)) {
+        throw "Native desktop profile reset is missing: $needle"
+    }
+}
+
+$attachmentPolicy = Get-Content -LiteralPath (Join-Path $RepositoryRoot 'apps/mobile/flutter/lib/core/attachments/image_attachment_policy.dart') -Raw
+$attachmentCodec = Get-Content -LiteralPath (Join-Path $RepositoryRoot 'apps/mobile/flutter/lib/core/attachments/image_message_codec.dart') -Raw
+foreach ($needle in @(
+    'maximumSourceBytes',
+    'maximumEncodedBytes',
+    'maximumPixels',
+    'maximumFrames = 1',
+    'maximumMessageBodyCharacters'
+)) {
+    if (-not $attachmentPolicy.Contains($needle)) {
+        throw "Attachment policy is missing: $needle"
+    }
+}
+foreach ($needle in @('findDecoderForData', 'startDecode', 'decodeFrame(0)', 'info.numFrames != 1')) {
+    if (-not $attachmentCodec.Contains($needle)) {
+        throw "Attachment codec preflight is missing: $needle"
+    }
 }
 
 & (Join-Path $RepositoryRoot 'scripts/release/check-release-version.ps1') -RepositoryRoot $RepositoryRoot
