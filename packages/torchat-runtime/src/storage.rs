@@ -33,12 +33,33 @@ pub trait RuntimeStorage {
     fn put_pairing_code(&mut self, code: InviteCode) -> RuntimeResult<()>;
 
     fn pairing_inbox(&self) -> RuntimeResult<Vec<PairingItem>>;
+    fn pairing_inbox_by_id(&self, pairing_id: &str) -> RuntimeResult<Option<PairingItem>> {
+        Ok(self
+            .pairing_inbox()?
+            .into_iter()
+            .find(|item| item.pairing_id == pairing_id))
+    }
     fn put_pairing_inbox(&mut self, item: PairingItem) -> RuntimeResult<()>;
 
     fn pairing_outbox(&self) -> RuntimeResult<Vec<PairingItem>>;
+    fn pairing_outbox_by_id(&self, pairing_id: &str) -> RuntimeResult<Option<PairingItem>> {
+        Ok(self
+            .pairing_outbox()?
+            .into_iter()
+            .find(|item| item.pairing_id == pairing_id))
+    }
     fn put_pairing_outbox(&mut self, item: PairingItem) -> RuntimeResult<()>;
 
     fn contacts(&self) -> RuntimeResult<Vec<ContactRecord>>;
+    fn contact_by_installation_id(
+        &self,
+        installation_id: &str,
+    ) -> RuntimeResult<Option<ContactRecord>> {
+        Ok(self
+            .contacts()?
+            .into_iter()
+            .find(|contact| contact.installation_id == installation_id))
+    }
     fn put_contact(&mut self, contact: ContactRecord) -> RuntimeResult<()>;
 
     fn current_relationship_epoch(&mut self, _installation_id: &str) -> RuntimeResult<i64> {
@@ -92,10 +113,28 @@ pub trait RuntimeStorage {
     }
 
     fn conversations(&self) -> RuntimeResult<Vec<ConversationSummary>>;
+    fn conversation_by_id(&self, id: &str) -> RuntimeResult<Option<ConversationSummary>> {
+        Ok(self
+            .conversations()?
+            .into_iter()
+            .find(|conversation| conversation.id == id))
+    }
+    fn conversation_for_contact(
+        &self,
+        installation_id: &str,
+    ) -> RuntimeResult<Option<ConversationSummary>> {
+        Ok(self
+            .conversations()?
+            .into_iter()
+            .find(|conversation| conversation.contact_installation_id == installation_id))
+    }
     fn put_conversation(&mut self, conversation: ConversationSummary) -> RuntimeResult<()>;
     fn mark_conversation_read(&mut self, conversation_id: &str) -> RuntimeResult<()>;
 
     fn messages(&self, conversation_id: &str) -> RuntimeResult<Vec<ChatMessage>>;
+    fn message_by_id(&self, message_id: &str) -> RuntimeResult<Option<ChatMessage>> {
+        self.message(message_id)
+    }
     fn put_message(&mut self, message: ChatMessage) -> RuntimeResult<()>;
     fn delete_message(&mut self, message_id: &str) -> RuntimeResult<()>;
     fn remove_relationship(
