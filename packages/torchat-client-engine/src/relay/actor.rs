@@ -6,21 +6,21 @@ use std::{
 };
 
 use reqwest::Url;
-use torchat_runtime::{InviteCode, InviteState, PairingItem, RuntimeError, RuntimeResult};
-use torchat_relay_protocol::{RendezvousClientFrame, RendezvousServerFrame};
 use torchat_core::{
     ContactInvite, Identity,
     relay::RelayPayloadV1,
 };
 use torchat_crypto::rendezvous as rendezvous_crypto;
+use torchat_relay_protocol::{RendezvousClientFrame, RendezvousServerFrame};
+use torchat_runtime::{InviteCode, InviteState, PairingItem, RuntimeError, RuntimeResult};
 use uuid::Uuid;
+
+use super::{EngineRelay, RelayEvent};
 
 enum RendezvousEvent {
     Frame(RendezvousServerFrame),
     Error(String),
 }
-
-use super::{EngineRelay, RelayEvent};
 
 fn unix_now() -> i64 {
     SystemTime::now()
@@ -77,12 +77,6 @@ impl SharedRelayActor {
         }
     }
 
-    fn removed<T>() -> RuntimeResult<T> {
-        Err(RuntimeError::Unavailable(
-            "relay operation is not supported on the active rendezvous path".to_owned(),
-        ))
-    }
-
     fn remember_invite_pairing(&mut self, pairing_id: Uuid, payload: &str) {
         if let Ok(RelayPayloadV1::PairingOffer { invite, .. }) = RelayPayloadV1::decode(payload)
             && let Ok(invite) = ContactInvite::parse(&invite)
@@ -106,7 +100,7 @@ impl SharedRelayActor {
             RuntimeError::Unavailable("Tor SOCKS endpoint is not ready".to_owned())
         })?;
         let relay_url = Url::parse(&self.connection.relay_onion_url)
-            .map_err(|e| RuntimeError::InvalidCommand(e.to_string()))?;
+            .map_err(|error| RuntimeError::InvalidCommand(error.to_string()))?;
         let (command_tx, mut command_rx) = tokio::sync::mpsc::unbounded_channel();
         let (event_tx, event_rx) = std_mpsc::channel();
         thread::spawn(move || {
@@ -120,10 +114,17 @@ impl SharedRelayActor {
                 return;
             };
             runtime.block_on(async move {
-                let mut client = match torchat_rendezvous_client::PairingRendezvousClient::connect(relay_url, Some(&socks5)).await {
+                let mut client = match torchat_rendezvous_client::PairingRendezvousClient::connect(
+                    relay_url,
+                    Some(&socks5),
+                )
+                .await
+                {
                     Ok(client) => client,
                     Err(error) => {
-                        let _ = event_tx.send(RendezvousEvent::Error(format!("rendezvous connect failed: {error}")));
+                        let _ = event_tx.send(RendezvousEvent::Error(format!(
+                            "rendezvous connect failed: {error}"
+                        )));
                         return;
                     }
                 };
@@ -131,15 +132,23 @@ impl SharedRelayActor {
                     tokio::select! {
                         Some(command) = command_rx.recv() => {
                             if let Err(error) = client.send(command).await {
-                                let _ = event_tx.send(RendezvousEvent::Error(format!("rendezvous send failed: {error}")));
+                                let _ = event_tx.send(RendezvousEvent::Error(format!(
+                                    "rendezvous send failed: {error}"
+                                )));
                                 break;
                             }
                         }
                         result = client.next() => {
                             match result {
-                                Ok(frame) => { if event_tx.send(RendezvousEvent::Frame(frame)).is_err() { break; } }
+                                Ok(frame) => {
+                                    if event_tx.send(RendezvousEvent::Frame(frame)).is_err() {
+                                        break;
+                                    }
+                                }
                                 Err(error) => {
-                                    let _ = event_tx.send(RendezvousEvent::Error(format!("rendezvous receive failed: {error}")));
+                                    let _ = event_tx.send(RendezvousEvent::Error(format!(
+                                        "rendezvous receive failed: {error}"
+                                    )));
                                     break;
                                 }
                             }
@@ -176,7 +185,9 @@ impl SharedRelayActor {
             .as_ref()
             .ok_or_else(|| RuntimeError::Unavailable("rendezvous worker unavailable".into()))?
             .recv_timeout(Duration::from_secs(30))
-            .map_err(|e| RuntimeError::Unavailable(format!("rendezvous response timeout: {e}")))?
+            .map_err(|error| {
+                RuntimeError::Unavailable(format!("rendezvous response timeout: {error}"))
+            })?
         {
             RendezvousEvent::Frame(frame) => Ok(frame),
             RendezvousEvent::Error(error) => {
@@ -199,7 +210,7 @@ impl SharedRelayActor {
             request_id,
             display_code: code.to_owned(),
         })?;
-        let (slot_handle, _owner_key) = match self.receive_frame()? {
+        let (slot_handle, owner_key) = match self.receive_frame()? {
             RendezvousServerFrame::PairingSlotResolved {
                 request_id: received,
                 slot_handle,
@@ -217,10 +228,11 @@ impl SharedRelayActor {
         };
         self.remember_invite_pairing(pairing_id, &offer);
         let mut joiner_key = [0_u8; 32];
-        getrandom::fill(&mut joiner_key).map_err(|e| RuntimeError::Unavailable(e.to_string()))?;
+        getrandom::fill(&mut joiner_key)
+            .map_err(|error| RuntimeError::Unavailable(error.to_string()))?;
         self.pairing_private_keys.insert(pairing_id, joiner_key);
-        self.pairing_peer_keys.insert(pairing_id, _owner_key);
-        let encrypted_offer = rendezvous_crypto::seal(joiner_key, _owner_key, offer.as_bytes())
+        self.pairing_peer_keys.insert(pairing_id, owner_key);
+        let encrypted_offer = rendezvous_crypto::seal(joiner_key, owner_key, offer.as_bytes())
             .map_err(RuntimeError::Unavailable)?;
         self.send_frame(RendezvousClientFrame::BeginPairing {
             request_id: Uuid::new_v4(),
@@ -376,10 +388,7 @@ impl EngineRelay for SharedRelayActor {
                 .ok()?;
                 let offer = String::from_utf8(offer).ok()?;
                 self.remember_invite_pairing(pairing_id, &offer);
-                Some(RelayEvent::Envelope(envelope_for_payload(
-                    pairing_id,
-                    offer,
-                )))
+                Some(RelayEvent::Envelope(envelope_for_payload(pairing_id, offer)))
             }
             RendezvousServerFrame::PairingAccepted {
                 pairing_id,
@@ -415,7 +424,7 @@ impl EngineRelay for SharedRelayActor {
         let request_id = Uuid::new_v4();
         let mut rendezvous_key = [0_u8; 32];
         getrandom::fill(&mut rendezvous_key)
-            .map_err(|e| RuntimeError::Unavailable(e.to_string()))?;
+            .map_err(|error| RuntimeError::Unavailable(error.to_string()))?;
         self.send_frame(RendezvousClientFrame::CreatePairingSlot {
             request_id,
             rendezvous_public_key: rendezvous_crypto::public_key(rendezvous_key),
@@ -439,12 +448,10 @@ impl EngineRelay for SharedRelayActor {
                 })
             }
             RendezvousServerFrame::Error { code, .. } => Err(RuntimeError::Unavailable(code)),
-            _ => Self::removed(),
+            _ => Err(RuntimeError::Unavailable(
+                "unexpected rendezvous response".to_owned(),
+            )),
         }
-    }
-
-    fn submit_pairing_code(&mut self, _code: &str) -> RuntimeResult<PairingItem> {
-        Self::removed()
     }
 
     fn submit_pairing_code_with_offer(
@@ -457,8 +464,8 @@ impl EngineRelay for SharedRelayActor {
     }
 
     fn cancel_pairing(&mut self, pairing_id: &str) -> RuntimeResult<()> {
-        let pairing_id =
-            Uuid::parse_str(pairing_id).map_err(|e| RuntimeError::InvalidCommand(e.to_string()))?;
+        let pairing_id = Uuid::parse_str(pairing_id)
+            .map_err(|error| RuntimeError::InvalidCommand(error.to_string()))?;
         if let Some(token) = self.joiner_tokens.get(&pairing_id).cloned() {
             return self.send_frame(RendezvousClientFrame::CancelPairing {
                 pairing_id,
@@ -471,7 +478,9 @@ impl EngineRelay for SharedRelayActor {
                 side_token: token,
             });
         }
-        Self::removed()
+        Err(RuntimeError::Unavailable(
+            "pairing side token missing".to_owned(),
+        ))
     }
 }
 
