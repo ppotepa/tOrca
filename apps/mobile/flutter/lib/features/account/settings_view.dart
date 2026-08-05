@@ -3,31 +3,30 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:torchat_flutter_ui/app_theme.dart';
+import 'package:torchat_flutter_ui/async/async_operation_state.dart';
+import 'package:torchat_flutter_ui/async/busy_surface.dart';
 
 import '../../app/app_controller.dart';
-import 'package:torchat_flutter_ui/app_theme.dart';
-import '../../platform/platform_services.dart';
 import '../../app/notifications/ui_notification_center.dart';
 import '../../app/ui_operation_registry.dart';
 import '../../locales/presentation/app_localizations_x.dart';
 import '../../locales/presentation/language_picker.dart';
 import '../../locales/presentation/status_localizer.dart';
 import '../../locales/presentation/theme_localizer.dart';
-import 'package:torchat_flutter_ui/async/async_operation_state.dart';
-import 'package:torchat_flutter_ui/async/busy_surface.dart';
+import '../../platform/platform_services.dart';
 import '../../shared/widgets/action_section.dart';
 import '../../shared/widgets/action_tile.dart';
 import '../../shared/widgets/callout_card.dart';
 import '../../shared/widgets/info_tile.dart';
 import '../../shared/widgets/themed_switch_list_tile.dart';
 import 'image_storage_settings_section.dart';
+import 'release_information_section.dart';
 
 class SettingsView extends ConsumerStatefulWidget {
   const SettingsView({
     super.key,
     required this.nickname,
-    @Deprecated('Tor status is read from the typed controller state.')
-    this.torStatus = '',
     required this.themePreferences,
     required this.onThemeFamilyChanged,
     required this.onBrightnessChanged,
@@ -38,8 +37,6 @@ class SettingsView extends ConsumerStatefulWidget {
   });
 
   final String nickname;
-  @Deprecated('Tor status is read from the typed controller state.')
-  final String torStatus;
   final TorChatThemePreferences themePreferences;
   final ValueChanged<TorChatThemeFamily> onThemeFamilyChanged;
   final ValueChanged<TorChatBrightnessMode> onBrightnessChanged;
@@ -456,6 +453,8 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
           const Divider(),
           const ImageStorageSettingsSection(),
           const Divider(),
+          const ReleaseInformationSection(),
+          const Divider(),
           ActionSection(
             title: l10n.settingsIdentitySection,
             child: ActionTile(
@@ -477,9 +476,10 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
               ),
               title: l10n.settingsResetDemoData,
               subtitle: l10n.settingsRequiresConfirmation,
-              borderColor: Theme.of(
-                context,
-              ).colorScheme.error.withValues(alpha: .60),
+              borderColor: Theme.of(context)
+                  .colorScheme
+                  .error
+                  .withValues(alpha: .60),
               backgroundColor: Theme.of(context).colorScheme.errorContainer,
               child: ActionTile(
                 title: l10n.settingsClearLocalState,
