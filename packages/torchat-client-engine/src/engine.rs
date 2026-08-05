@@ -46,10 +46,38 @@ impl EngineCommandSender {
     }
 }
 
+struct ShutdownGuard {
+    token: Option<CancellationToken>,
+}
+
+impl ShutdownGuard {
+    fn new(token: CancellationToken) -> Self {
+        Self { token: Some(token) }
+    }
+
+    fn cancel(&self) {
+        if let Some(token) = &self.token {
+            token.cancel();
+        }
+    }
+
+    fn into_token(mut self) -> CancellationToken {
+        self.token
+            .take()
+            .expect("shutdown guard token must be present")
+    }
+}
+
+impl Drop for ShutdownGuard {
+    fn drop(&mut self) {
+        self.cancel();
+    }
+}
+
 pub struct ClientEngine {
     commands: EngineCommandSender,
     events: EngineEventReceiver,
-    shutdown: CancellationToken,
+    shutdown: ShutdownGuard,
     pending_responses: PendingResponseRegistry,
 }
 
@@ -108,7 +136,7 @@ impl ClientEngine {
         Ok(Self {
             commands: command_tx,
             events: EngineEventReceiver::new(event_rx),
-            shutdown,
+            shutdown: ShutdownGuard::new(shutdown),
             pending_responses,
         })
     }
@@ -160,7 +188,7 @@ impl ClientEngine {
         Ok(Self {
             commands: command_tx,
             events: EngineEventReceiver::new(event_rx),
-            shutdown,
+            shutdown: ShutdownGuard::new(shutdown),
             pending_responses,
         })
     }
@@ -271,10 +299,16 @@ impl ClientEngine {
         EngineEventReceiver,
         CancellationToken,
     ) {
+        let Self {
+            commands,
+            events,
+            shutdown,
+            pending_responses: _,
+        } = self;
         (
-            self.commands.with_source(EngineInputSource::Ffi),
-            self.events,
-            self.shutdown,
+            commands.with_source(EngineInputSource::Ffi),
+            events,
+            shutdown.into_token(),
         )
     }
 }
@@ -305,3 +339,27 @@ fn unix_ms() -> i64 {
 }
 
 use torchat_crypto::anti_rollback::MlsEpochAnchor;
+
+#[cfg(test)]
+mod tests {
+    use super::ShutdownGuard;
+    use tokio_util::sync::CancellationToken;
+
+    #[test]
+    fn shutdown_guard_cancels_when_dropped() {
+        let token = CancellationToken::new();
+        let observed = token.clone();
+        drop(ShutdownGuard::new(token));
+        assert!(observed.is_cancelled());
+    }
+
+    #[test]
+    fn shutdown_guard_can_transfer_token_without_cancelling() {
+        let token = CancellationToken::new();
+        let observed = token.clone();
+        let transferred = ShutdownGuard::new(token).into_token();
+        assert!(!observed.is_cancelled());
+        transferred.cancel();
+        assert!(observed.is_cancelled());
+    }
+}
