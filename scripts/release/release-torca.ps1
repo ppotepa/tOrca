@@ -15,6 +15,12 @@ $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $repositoryRoot = (Resolve-Path -LiteralPath $repositoryRoot).Path
 
+& (Join-Path $repositoryRoot 'scripts/internal/check-release-policy.ps1') `
+    -RepositoryRoot $repositoryRoot
+if ($LASTEXITCODE -notin @(0, $null)) {
+    throw "Torca release policy failed with code $LASTEXITCODE."
+}
+
 & (Join-Path $PSScriptRoot 'validate-torca-release.ps1') `
     -Target $Target `
     -Device $Device `
@@ -33,4 +39,4 @@ if ($LASTEXITCODE -notin @(0, $null)) {
     throw "Torca release metadata generation failed with code $LASTEXITCODE."
 }
 
-Write-Host '[torca] release validation and metadata generation completed.'
+Write-Host '[torca] release policy, validation and metadata generation completed.'
