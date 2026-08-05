@@ -56,6 +56,21 @@ pub struct RuntimeProblem {
 }
 
 impl RuntimeProblem {
+    pub const fn new(
+        code: RuntimeErrorCode,
+        category: RuntimeErrorCategory,
+        retryable: bool,
+    ) -> Self {
+        Self {
+            code,
+            category,
+            retryable,
+            operation_id: None,
+            entity_id: None,
+            diagnostic_context: None,
+        }
+    }
+
     pub fn from_error(error: &RuntimeError) -> Self {
         let (code, category, retryable) = match error {
             RuntimeError::InvalidCommand(_) | RuntimeError::InvalidParams(_) => (
@@ -99,14 +114,7 @@ impl RuntimeProblem {
                 true,
             ),
         };
-        Self {
-            code,
-            category,
-            retryable,
-            operation_id: None,
-            entity_id: None,
-            diagnostic_context: Some(error.technical_message()),
-        }
+        Self::new(code, category, retryable).with_diagnostic_context(error.technical_message())
     }
 
     pub fn with_operation_id(mut self, operation_id: impl Into<String>) -> Self {
@@ -116,6 +124,14 @@ impl RuntimeProblem {
 
     pub fn with_entity_id(mut self, entity_id: impl Into<String>) -> Self {
         self.entity_id = Some(entity_id.into());
+        self
+    }
+
+    pub fn with_diagnostic_context(mut self, context: impl Into<String>) -> Self {
+        let context = context.into();
+        if !context.trim().is_empty() {
+            self.diagnostic_context = Some(context);
+        }
         self
     }
 
