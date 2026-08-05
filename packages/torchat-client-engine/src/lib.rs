@@ -8,6 +8,7 @@ pub mod error;
 pub mod event;
 mod effects;
 pub mod fault_injection;
+pub mod generated;
 mod input;
 mod logging;
 mod output;
