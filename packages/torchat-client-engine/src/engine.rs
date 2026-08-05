@@ -1,6 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
-
-use tokio::sync::{Mutex, mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot};
 use tokio::time::Duration;
 use tokio_util::sync::CancellationToken;
 
@@ -10,6 +8,7 @@ use crate::{
     event::EngineEventReceiver,
     input::{EngineInput, EngineInputEnvelope},
     logging::StartupJournal,
+    output::{PendingResponseRegistry, spawn_event_router},
 };
 
 pub const ENGINE_INBOX_CAPACITY: usize = 512;
@@ -41,7 +40,7 @@ pub struct ClientEngine {
     commands: EngineCommandSender,
     events: EngineEventReceiver,
     shutdown: CancellationToken,
-    pending_responses: Arc<Mutex<HashMap<String, oneshot::Sender<ResponseResult>>>>,
+    pending_responses: PendingResponseRegistry,
 }
 
 impl ClientEngine {
@@ -71,13 +70,12 @@ impl ClientEngine {
         let (actor_event_tx, actor_event_rx) = mpsc::channel(WORKER_OUTCOME_CHANNEL_CAPACITY);
         let (event_tx, event_rx) = mpsc::channel(WORKER_OUTCOME_CHANNEL_CAPACITY);
         let shutdown = CancellationToken::new();
-        let pending_responses: Arc<Mutex<HashMap<String, oneshot::Sender<ResponseResult>>>> =
-            Arc::new(Mutex::new(HashMap::new()));
+        let pending_responses = PendingResponseRegistry::default();
         let actor = ClientEngineActor::new_with_owned_anchor(config, anchor)?;
         spawn_event_router(
             actor_event_rx,
             event_tx,
-            Arc::clone(&pending_responses),
+            pending_responses.clone(),
             None,
         );
         let fatal_events = actor_event_tx.clone();
@@ -113,8 +111,7 @@ impl ClientEngine {
         let (actor_event_tx, actor_event_rx) = mpsc::channel(WORKER_OUTCOME_CHANNEL_CAPACITY);
         let (event_tx, event_rx) = mpsc::channel(WORKER_OUTCOME_CHANNEL_CAPACITY);
         let shutdown = CancellationToken::new();
-        let pending_responses: Arc<Mutex<HashMap<String, oneshot::Sender<ResponseResult>>>> =
-            Arc::new(Mutex::new(HashMap::new()));
+        let pending_responses = PendingResponseRegistry::default();
         let mut journal = StartupJournal::open(config.log_directory.as_deref(), &config.platform);
         let actor_result = match anchor {
             Some(anchor) => ClientEngineActor::new_with_anchor(config, anchor),
@@ -130,7 +127,7 @@ impl ClientEngine {
         spawn_event_router(
             actor_event_rx,
             event_tx,
-            Arc::clone(&pending_responses),
+            pending_responses.clone(),
             Some(journal),
         );
         let fatal_events = actor_event_tx.clone();
@@ -206,9 +203,8 @@ impl ClientEngine {
         let request_id = format!("client-query-{}", uuid::Uuid::new_v4());
         let (reply_tx, reply_rx) = oneshot::channel();
         self.pending_responses
-            .lock()
-            .await
-            .insert(request_id.clone(), reply_tx);
+            .register(request_id.clone(), reply_tx)
+            .await;
 
         if let Err(error) = self
             .submit_envelope(EngineCommandEnvelope {
@@ -218,7 +214,7 @@ impl ClientEngine {
             })
             .await
         {
-            self.pending_responses.lock().await.remove(&request_id);
+            self.pending_responses.remove(&request_id).await;
             return Err(error);
         }
 
@@ -226,7 +222,7 @@ impl ClientEngine {
             Ok(Ok(result)) => Ok(result),
             Ok(Err(_)) => Err(EngineError::Closed("engine response channel is closed")),
             Err(_) => {
-                self.pending_responses.lock().await.remove(&request_id);
+                self.pending_responses.remove(&request_id).await;
                 Err(EngineError::Closed("engine response timed out"))
             }
         }
@@ -282,37 +278,6 @@ fn unified_inbox_channel() -> (
         inbox_rx,
         inbox_tx,
     )
-}
-
-fn spawn_event_router(
-    mut actor_events: mpsc::Receiver<EngineEvent>,
-    public_events: mpsc::Sender<EngineEvent>,
-    pending: Arc<Mutex<HashMap<String, oneshot::Sender<ResponseResult>>>>,
-    mut journal: Option<StartupJournal>,
-) {
-    let (publish_tx, mut publish_rx) = mpsc::unbounded_channel();
-    tokio::spawn(async move {
-        while let Some(event) = actor_events.recv().await {
-            if let Some(journal) = journal.as_mut() {
-                journal.record(&event);
-            }
-            if let EngineEvent::Response { request_id, result } = &event
-                && let Some(reply) = pending.lock().await.remove(request_id)
-            {
-                let _ = reply.send(result.clone());
-            }
-            if publish_tx.send(event).is_err() {
-                break;
-            }
-        }
-    });
-    tokio::spawn(async move {
-        while let Some(event) = publish_rx.recv().await {
-            if public_events.send(event).await.is_err() {
-                break;
-            }
-        }
-    });
 }
 
 fn unix_ms() -> i64 {
