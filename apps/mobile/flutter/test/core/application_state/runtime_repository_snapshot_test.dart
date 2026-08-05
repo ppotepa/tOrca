@@ -9,20 +9,26 @@ import 'package:torchat_mobile/core/runtime/runtime_repository.dart';
 void main() {
   setUp(ApplicationStateStore.shared.clear);
 
-  test('shell snapshot does not wait for pairing resources', () async {
+  test('shell and pairing are loaded from one application projection', () async {
     final runtime = _SnapshotRuntime();
     final repository = RuntimeRepository(runtime);
 
-    final snapshot = await repository.applicationSnapshot();
+    final snapshot = await repository.applicationSnapshot(
+      includePairing: true,
+    );
 
     expect(snapshot.profile.nickname, 'Alice');
     expect(snapshot.contacts.single.nickname, 'Bob');
     expect(snapshot.conversations.single.preview, 'hello');
-    expect(runtime.pairingInboxCalls, 0);
-    expect(runtime.pairingOutboxCalls, 0);
+    expect(snapshot.pairingInbox.single.id, 'inbox');
+    expect(snapshot.pairingOutbox.single.id, 'outbox');
+    expect(snapshot.pendingInbox, 1);
+    expect(snapshot.pendingOutbox, 1);
+    expect(runtime.applicationSnapshotCalls, 1);
+    expect(runtime.listPairingsCalls, 0);
   });
 
-  test('pairing counters are loaded only when requested', () async {
+  test('forced pairing refresh still performs one projection request', () async {
     final runtime = _SnapshotRuntime();
     final repository = RuntimeRepository(runtime);
 
@@ -31,11 +37,10 @@ void main() {
       force: true,
     );
 
-    expect(snapshot.pendingInbox, 1);
-    expect(snapshot.pendingOutbox, 1);
-    expect(runtime.listPairingsCalls, 1);
-    expect(runtime.pairingInboxCalls, 0);
-    expect(runtime.pairingOutboxCalls, 0);
+    expect(snapshot.pairingInbox.single.origin, PairingOrigin.inbox);
+    expect(snapshot.pairingOutbox.single.origin, PairingOrigin.outbox);
+    expect(runtime.applicationSnapshotCalls, 1);
+    expect(runtime.listPairingsCalls, 0);
   });
 
   test('forced profile read bypasses a stale application projection', () async {
@@ -52,11 +57,13 @@ void main() {
     expect((await repository.profile(force: true)).nickname, 'Alice');
   });
 
-  test('nickname update does not advance authoritative generation', () async {
-    final repository = RuntimeRepository(_SnapshotRuntime());
+  test('nickname update is published by a newer backend revision', () async {
+    final runtime = _SnapshotRuntime(projectionRevision: 12);
+    final repository = RuntimeRepository(runtime);
     repository.applicationState.hydrate(
       const ApplicationSnapshot(
-        generation: 7,
+        schemaVersion: 2,
+        generation: 12,
         projectionStoreId: 'engine-store',
         projectionRevision: 12,
         profile: RuntimeProfile(nickname: 'Alice'),
@@ -65,13 +72,13 @@ void main() {
 
     await repository.setNickname('Alicja');
 
-    expect(repository.applicationState.current?.generation, 7);
-    expect(repository.applicationState.current?.projectionRevision, 12);
+    expect(repository.applicationState.current?.generation, 13);
+    expect(repository.applicationState.current?.projectionRevision, 13);
     expect(repository.applicationState.current?.profile.nickname, 'Alicja');
   });
 
   test(
-    'refresh returns its transaction snapshot when cache is invalidated',
+    'refresh retries when its projection is invalidated while in flight',
     () async {
       final runtime = _SnapshotRuntime();
       final repository = RuntimeRepository(runtime);
@@ -82,6 +89,8 @@ void main() {
 
       expect(result.local.contacts.single.id, 'bob');
       expect(result.local.conversations.single.id, 'conversation');
+      expect(result.pairing?.inbox.single.id, 'inbox');
+      expect(runtime.listPairingsCalls, 0);
     },
   );
 
@@ -308,15 +317,18 @@ void main() {
   });
 }
 
-class _SnapshotRuntime implements ClientRuntime {
+class _SnapshotRuntime implements ClientRuntime, RuntimeProjectionProvider {
   _SnapshotRuntime({
     this.installationId = 'local',
+    int projectionRevision = 1,
     List<List<ChatMessage>> messageBatches = const [],
-  }) : _messageBatches = List<List<ChatMessage>>.of(messageBatches);
+  }) : _projectionRevision = projectionRevision,
+       _messageBatches = List<List<ChatMessage>>.of(messageBatches);
 
   final String installationId;
-  int pairingInboxCalls = 0;
-  int pairingOutboxCalls = 0;
+  int _projectionRevision;
+  String _nickname = 'Alice';
+  int applicationSnapshotCalls = 0;
   int listPairingsCalls = 0;
   int messageCalls = 0;
   final List<List<ChatMessage>> _messageBatches;
@@ -331,7 +343,68 @@ class _SnapshotRuntime implements ClientRuntime {
   Future<void> dispose() => _events.close();
 
   @override
+  Future<ApplicationSnapshot?> applicationSnapshot() async {
+    applicationSnapshotCalls += 1;
+    return ApplicationSnapshot(
+      schemaVersion: 2,
+      generation: _projectionRevision,
+      createdAtMs: _projectionRevision,
+      identity: RuntimeIdentity(
+        installationId: installationId,
+        fingerprint: 'local-fingerprint',
+        publicKey: 'local-key',
+      ),
+      profile: RuntimeProfile(
+        installationId: installationId,
+        nickname: _nickname,
+        fingerprint: 'local-fingerprint',
+        publicKey: 'local-key',
+      ),
+      contacts: const [
+        ContactRecord(
+          id: 'bob',
+          nickname: 'Bob',
+          fingerprint: 'bob-fingerprint',
+          publicKey: 'bob-key',
+          verified: true,
+        ),
+      ],
+      conversations: const [
+        ConversationSummary(
+          id: 'conversation',
+          contactId: 'bob',
+          preview: 'hello',
+          unread: 1,
+        ),
+      ],
+      pairingInbox: const [
+        PairingItem(
+          id: 'inbox',
+          status: InviteState.pending,
+          availableActions: [PairingAvailableAction.accept],
+          origin: PairingOrigin.inbox,
+        ),
+      ],
+      pairingOutbox: const [
+        PairingItem(
+          id: 'outbox',
+          status: InviteState.pending,
+          received: false,
+          origin: PairingOrigin.outbox,
+        ),
+      ],
+      pendingInbox: 1,
+      pendingOutbox: 1,
+      peerEndpointAvailable: true,
+      projectionStoreId: 'engine-store',
+      projectionSessionId: 'engine-session',
+      projectionRevision: _projectionRevision,
+    );
+  }
+
+  @override
   Future<bool> connect() async => true;
+
   @override
   Future<StartupReadinessSnapshot> startupReadiness() async =>
       const StartupReadinessSnapshot(
@@ -354,7 +427,7 @@ class _SnapshotRuntime implements ClientRuntime {
   @override
   Future<RuntimeProfile?> profile() async => RuntimeProfile(
     installationId: installationId,
-    nickname: 'Alice',
+    nickname: _nickname,
     fingerprint: 'local-fingerprint',
     publicKey: 'local-key',
   );
@@ -390,40 +463,17 @@ class _SnapshotRuntime implements ClientRuntime {
   Future<bool> peerEndpointAvailable() async => true;
 
   @override
-  Future<List<PairingItem>> pairingInbox() async {
-    pairingInboxCalls += 1;
-    return const [
-      PairingItem(
-        id: 'inbox',
-        status: InviteState.pending,
-        availableActions: [PairingAvailableAction.accept],
-      ),
-    ];
-  }
+  Future<List<PairingItem>> pairingInbox() async =>
+      (await applicationSnapshot())!.pairingInbox;
 
   @override
-  Future<List<PairingItem>> pairingOutbox() async {
-    pairingOutboxCalls += 1;
-    return const [PairingItem(id: 'outbox', status: InviteState.pending)];
-  }
+  Future<List<PairingItem>> pairingOutbox() async =>
+      (await applicationSnapshot())!.pairingOutbox;
 
   @override
   Future<List<PairingItem>> listPairings() async {
     listPairingsCalls += 1;
-    return const [
-      PairingItem(
-        id: 'inbox',
-        status: InviteState.pending,
-        availableActions: [PairingAvailableAction.accept],
-        origin: PairingOrigin.inbox,
-      ),
-      PairingItem(
-        id: 'outbox',
-        status: InviteState.pending,
-        received: false,
-        origin: PairingOrigin.outbox,
-      ),
-    ];
+    return const <PairingItem>[];
   }
 
   @override
@@ -441,26 +491,36 @@ class _SnapshotRuntime implements ClientRuntime {
   }
 
   @override
-  Future<RuntimeProfile> setNickname(String nickname) async => RuntimeProfile(
-    installationId: installationId,
-    nickname: nickname,
-    fingerprint: 'local-fingerprint',
-    publicKey: 'local-key',
-  );
+  Future<RuntimeProfile> setNickname(String nickname) async {
+    _nickname = nickname;
+    _projectionRevision += 1;
+    return RuntimeProfile(
+      installationId: installationId,
+      nickname: _nickname,
+      fingerprint: 'local-fingerprint',
+      publicKey: 'local-key',
+    );
+  }
 
   @override
   Future<InviteCode?> refreshPairingCode() async => null;
+
   @override
   Future<PairingItem> submitPairingCode(String code) async =>
       const PairingItem(id: 'submitted', status: InviteState.pending);
+
   @override
   Future<PeerEndpoint?> peerEndpoint() async => null;
+
   @override
   Future<void> retryPeerConnection(String installationId) async {}
+
   @override
   Future<void> rotatePeerEndpoint() async {}
+
   @override
   Future<void> verifyContact(String installationId) async {}
+
   @override
   Future<ContactEndpointCapabilityStatus> contactEndpointCapability(
     String installationId,
@@ -470,10 +530,13 @@ class _SnapshotRuntime implements ClientRuntime {
     sequence: 0,
     status: CapabilityStatus.missing,
   );
+
   @override
   Future<void> rotateContactEndpointCapability(String installationId) async {}
+
   @override
   Future<void> revokeContactEndpointCapability(String installationId) async {}
+
   @override
   Future<ContactRecord> updateContactSettings(
     String installationId, {
@@ -482,38 +545,53 @@ class _SnapshotRuntime implements ClientRuntime {
     required bool blocked,
     ContactTransportPolicy? transportPolicy,
   }) async => contacts().then((items) => items.single);
+
   @override
   Future<void> openConversation(String id) async {}
+
   @override
   Future<void> closeConversation() async {}
+
   @override
   Future<void> startConversation(String contactId) async {}
+
   @override
   Future<void> sendMessage(
     String id,
     String text, {
     String? replyToMessageId,
   }) async {}
+
   @override
   Future<void> retryMessage(String messageId) async {}
+
   @override
   Future<void> retryDeadLetter(String kind, String id) async {}
+
   @override
   Future<void> deleteMessageLocal(String messageId) async {}
+
   @override
   Future<void> setTyping(String conversationId, bool typing) async {}
+
   @override
   Future<void> setPresence(bool online) async {}
+
   @override
   Future<void> sendReadReceipts(String conversationId) async {}
+
   @override
   Future<void> acceptPairing(String pairingId) async {}
+
   @override
   Future<void> rejectPairing(String pairingId) async {}
+
   @override
   Future<void> cancelPairing(String pairingId) async {}
+
   @override
   Future<void> archivePairing(String pairingId) async {}
+
   @override
   Future<void> updateAppVisibility(bool foreground) async {}
 }
