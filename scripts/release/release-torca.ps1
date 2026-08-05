@@ -12,6 +12,7 @@ param(
     [string]$SigningKeyId,
     [string]$UpdatePublicKey,
     [string]$ReleaseNotesUrl,
+    [string]$ManualEvidencePath,
     [switch]$MandatoryUpdate
 )
 
@@ -34,6 +35,7 @@ if ($buildsArtifacts) {
         SigningPrivateKey = $SigningPrivateKey
         SigningKeyId = $SigningKeyId
         UpdatePublicKey = $UpdatePublicKey
+        ManualEvidencePath = $ManualEvidencePath
     }.GetEnumerator()) {
         if ([string]::IsNullOrWhiteSpace($required.Value)) {
             throw "$($required.Key) is required for a Torca platform release."
@@ -60,6 +62,15 @@ if ($LASTEXITCODE -notin @(0, $null)) {
 }
 
 if ($buildsArtifacts) {
+    New-Item -ItemType Directory -Force -Path $MetadataDirectory | Out-Null
+    & (Join-Path $PSScriptRoot 'check-manual-evidence.ps1') `
+        -RepositoryRoot $repositoryRoot `
+        -EvidencePath $ManualEvidencePath `
+        -ReceiptPath (Join-Path $MetadataDirectory 'manual-evidence-receipt.json')
+    if ($LASTEXITCODE -notin @(0, $null)) {
+        throw "Torca manual evidence failed with code $LASTEXITCODE."
+    }
+
     $collectTarget = if ($Target -eq 'all') { 'all' } else { $Target }
     & (Join-Path $PSScriptRoot 'collect-release-artifacts.ps1') `
         -RepositoryRoot $repositoryRoot `
@@ -92,4 +103,4 @@ if ($buildsArtifacts) {
     }
 }
 
-Write-Host '[torca] release policy, validation, artifacts, metadata and update manifest completed.'
+Write-Host '[torca] release policy, validation, manual evidence, artifacts, metadata and update manifest completed.'
