@@ -202,11 +202,12 @@ fn response_resolution_precedes_public_event_backpressure() {
 }
 
 #[test]
-fn legacy_snapshots_and_platform_specific_queue_are_absent() {
-    let actor_mod = read(crate_root().join("src/actor/mod.rs"));
+fn dead_snapshot_directory_and_platform_specific_queue_are_absent() {
     assert!(!crate_root().join("src/actor/legacy").exists());
-    assert!(!actor_mod.contains("include!(\"legacy.rs\")"));
-    assert!(!crate_root().join("src/actor/legacy.rs").exists());
+
+    let engine = read(crate_root().join("src/engine.rs"));
+    assert!(!engine.contains("actor.run("));
+    assert!(engine.contains(".run_unified("));
 
     let flutter = read(crate_root().join("../../apps/mobile/flutter/lib/client_runtime.dart"));
     assert!(!flutter.contains("_SerializedClientRuntime"));
