@@ -1,4 +1,8 @@
-use crate::{EngineEvent, effects::EngineEffectEnvelope};
+use crate::{
+    EngineEvent,
+    effects::EngineEffectEnvelope,
+    input::EngineInputEnvelope,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ProcessingControl {
@@ -9,6 +13,7 @@ pub(crate) enum ProcessingControl {
 pub(crate) struct EngineProcessingResult {
     pub events: Vec<EngineEvent>,
     pub effects: Vec<EngineEffectEnvelope>,
+    pub derived_inputs: Vec<EngineInputEnvelope>,
     pub scheduler_plan_changed: bool,
     pub control: ProcessingControl,
 }
@@ -18,6 +23,7 @@ impl EngineProcessingResult {
         Self {
             events: Vec::new(),
             effects: Vec::new(),
+            derived_inputs: Vec::new(),
             scheduler_plan_changed: false,
             control: ProcessingControl::Continue,
         }
@@ -27,6 +33,7 @@ impl EngineProcessingResult {
         Self {
             events,
             effects: Vec::new(),
+            derived_inputs: Vec::new(),
             scheduler_plan_changed: false,
             control: ProcessingControl::Stop,
         }
@@ -71,6 +78,11 @@ impl EngineProcessingResultBuilder {
         self
     }
 
+    pub(crate) fn derived_input(mut self, input: EngineInputEnvelope) -> Self {
+        self.result.derived_inputs.push(input);
+        self
+    }
+
     pub(crate) fn scheduler_plan_changed(mut self) -> Self {
         self.result.scheduler_plan_changed = true;
         self
@@ -96,6 +108,7 @@ mod tests {
 
         assert!(result.events.is_empty());
         assert!(result.effects.is_empty());
+        assert!(result.derived_inputs.is_empty());
         assert!(!result.scheduler_plan_changed);
         assert!(!result.should_stop());
     }
