@@ -1,4 +1,4 @@
-use crate::EngineEvent;
+use crate::{EngineEvent, effects::EngineEffectEnvelope};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ProcessingControl {
@@ -8,6 +8,7 @@ pub(crate) enum ProcessingControl {
 
 pub(crate) struct EngineProcessingResult {
     pub events: Vec<EngineEvent>,
+    pub effects: Vec<EngineEffectEnvelope>,
     pub scheduler_plan_changed: bool,
     pub control: ProcessingControl,
 }
@@ -16,6 +17,7 @@ impl EngineProcessingResult {
     pub(crate) fn empty() -> Self {
         Self {
             events: Vec::new(),
+            effects: Vec::new(),
             scheduler_plan_changed: false,
             control: ProcessingControl::Continue,
         }
@@ -24,6 +26,7 @@ impl EngineProcessingResult {
     pub(crate) fn stop(events: Vec<EngineEvent>) -> Self {
         Self {
             events,
+            effects: Vec::new(),
             scheduler_plan_changed: false,
             control: ProcessingControl::Stop,
         }
@@ -55,6 +58,19 @@ impl EngineProcessingResultBuilder {
         self
     }
 
+    pub(crate) fn effect(mut self, effect: EngineEffectEnvelope) -> Self {
+        self.result.effects.push(effect);
+        self
+    }
+
+    pub(crate) fn effects(
+        mut self,
+        effects: impl IntoIterator<Item = EngineEffectEnvelope>,
+    ) -> Self {
+        self.result.effects.extend(effects);
+        self
+    }
+
     pub(crate) fn scheduler_plan_changed(mut self) -> Self {
         self.result.scheduler_plan_changed = true;
         self
@@ -79,6 +95,7 @@ mod tests {
         let result = EngineProcessingResult::empty();
 
         assert!(result.events.is_empty());
+        assert!(result.effects.is_empty());
         assert!(!result.scheduler_plan_changed);
         assert!(!result.should_stop());
     }
