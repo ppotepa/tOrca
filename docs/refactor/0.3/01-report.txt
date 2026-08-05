@@ -3,7 +3,7 @@ BASE COMMIT: 604708230b2ed84ba3c71cf05651af2a2648a712
 HEAD COMMIT: filled by repository history after this report commit
 
 GOAL:
-- make the revisioned backend ApplicationSnapshot the only domain projection;
+- make the revisioned backend ApplicationSnapshot the production domain projection;
 - publish pairing inbox/outbox atomically with contacts and conversations;
 - remove pairing-specific caches, controller copies and invalidation paths;
 - preserve compatibility at presentation boundaries without a second store.
@@ -23,17 +23,17 @@ NEW FILES:
 
 REMOVED CONCEPTS:
 - pairing-specific repository cache;
-- separate pairing fetch during snapshot refresh;
+- separate pairing fetch on the RuntimeProjectionProvider production path;
 - AppState-owned pairing inbox/outbox collections;
 - ApplicationStateStore pairing setter and alternate state;
 - pairing-specific cache invalidation;
 - equal-revision overwrite of an already accepted projection.
 
-AUTHORITATIVE FLOW:
+AUTHORITATIVE PRODUCTION FLOW:
 1. Rust reads identity, profiles, contacts, conversations and pairing within
    one application projection operation.
 2. The bridge carries schema-2 pairing collections in ApplicationSnapshot.
-3. RuntimeRepository requests the application projection once.
+3. RuntimeRepository requests the RuntimeProjectionProvider projection once.
 4. ApplicationStateStore accepts only a newer revision for the same store and
    resets correctly when store identity changes.
 5. AppState inbox/outbox getters delegate to the accepted snapshot.
@@ -54,7 +54,8 @@ STATIC AUDIT:
 - no occurrences of invalidatePairingCache;
 - no occurrences of pairingInboxItems or pairingOutboxItems;
 - no occurrences of setPairing;
-- no occurrences of listPairings in active indexed repository sources.
+- RuntimeRepository still contains a compatibility fallback using
+  ClientRuntime.listPairings when RuntimeProjectionProvider is unavailable.
 
 TESTS ADDED OR UPDATED:
 - schema-2 snapshot decode contract;
@@ -75,6 +76,8 @@ REASON:
   Actions and workflows were explicitly out of scope.
 
 RISKS REMAINING:
+- compatibility snapshot assembly still performs separate identity, profile,
+  local batch and listPairings reads when a runtime lacks projection support;
 - pairing recovery and polling orchestration still exists in Flutter;
 - controller chain remains broader than presentation-only responsibility;
 - main.dart composition remains oversized;
@@ -82,6 +85,8 @@ RISKS REMAINING:
 
 NEXT BATCH:
 - 0.3.2 pairing recovery ownership.
-- Move retry, timeout, outstanding-pairing reconciliation and recovery policy
-  behind the backend command/projection boundary; keep Flutter limited to
-  user intent, progress display and presentation effects.
+- First remove or isolate the non-atomic RuntimeRepository compatibility
+  snapshot fallback; then move retry, timeout, outstanding-pairing
+  reconciliation and recovery policy behind the backend command/projection
+  boundary. Keep Flutter limited to user intent, progress display and
+  presentation effects.
