@@ -13,7 +13,9 @@ if ([string]::IsNullOrWhiteSpace($RepositoryRoot)) {
 }
 $RepositoryRoot = (Resolve-Path -LiteralPath $RepositoryRoot).Path
 if ([string]::IsNullOrWhiteSpace($ArtifactRoot)) {
-    $ArtifactRoot = Join-Path $RepositoryRoot '.torca/artifacts'
+    $releaseSource = Get-Content -LiteralPath (Join-Path $RepositoryRoot 'release/version.json') -Raw |
+        ConvertFrom-Json
+    $ArtifactRoot = Join-Path $RepositoryRoot ".torca/artifacts/$($releaseSource.version)"
 }
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
     $OutputDirectory = Join-Path $RepositoryRoot '.torca/release/metadata'
@@ -26,6 +28,7 @@ $commit = (& git -C $RepositoryRoot rev-parse HEAD 2>$null | Select-Object -Firs
 if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($commit)) {
     throw 'Unable to resolve release commit.'
 }
+$utf8 = [Text.UTF8Encoding]::new($false)
 
 function Invoke-JsonCommand {
     param(
@@ -48,19 +51,42 @@ function Invoke-JsonCommand {
     }
 }
 
+function Write-JsonFile {
+    param(
+        [Parameter(Mandatory = $true)]$Value,
+        [Parameter(Mandatory = $true)][string]$Path,
+        [int]$Depth = 12
+    )
+    [IO.File]::WriteAllText(
+        $Path,
+        ($Value | ConvertTo-Json -Depth $Depth),
+        $utf8
+    )
+}
+
 $cargo = Invoke-JsonCommand cargo @('metadata', '--locked', '--format-version', '1') $RepositoryRoot
 $components = [System.Collections.Generic.List[object]]::new()
 foreach ($package in $cargo.packages) {
+    $properties = [System.Collections.Generic.List[object]]::new()
+    $properties.Add([pscustomobject][ordered]@{
+        name = 'torca:ecosystem'
+        value = 'cargo'
+    })
+    if ($package.source) {
+        $properties.Add([pscustomobject][ordered]@{
+            name = 'torca:source'
+            value = $package.source
+        })
+    }
     $component = [ordered]@{
         type = 'library'
         name = $package.name
         version = $package.version
-        properties = @(
-            [ordered]@{ name = 'torca:ecosystem'; value = 'cargo' }
-        )
+        properties = @($properties)
     }
-    if ($package.license) { $component.licenses = @([ordered]@{ expression = $package.license }) }
-    if ($package.source) { $component.properties += [ordered]@{ name = 'torca:source'; value = $package.source } }
+    if ($package.license) {
+        $component['licenses'] = @([ordered]@{ expression = $package.license })
+    }
     $components.Add([pscustomobject]$component)
 }
 
@@ -112,10 +138,10 @@ $sbom = [ordered]@{
     components = $deduplicated
 }
 $sbomPath = Join-Path $OutputDirectory "torca-$($release.version)-sbom.cdx.json"
-$sbom | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $sbomPath -Encoding UTF8
+Write-JsonFile -Value $sbom -Path $sbomPath
 
 $flutterPath = Join-Path $OutputDirectory "torca-$($release.version)-flutter-inventory.json"
-$flutterInventories | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $flutterPath -Encoding UTF8
+Write-JsonFile -Value @($flutterInventories) -Path $flutterPath
 
 $artifactEntries = [System.Collections.Generic.List[object]]::new()
 if (Test-Path -LiteralPath $ArtifactRoot -PathType Container) {
@@ -128,7 +154,7 @@ if (Test-Path -LiteralPath $ArtifactRoot -PathType Container) {
     }
 }
 $checksumsPath = Join-Path $OutputDirectory "torca-$($release.version)-checksums.json"
-[ordered]@{
+$checksums = [ordered]@{
     schema = 1
     product = $release.product
     version = $release.version
@@ -136,7 +162,8 @@ $checksumsPath = Join-Path $OutputDirectory "torca-$($release.version)-checksums
     commit = $commit
     generatedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
     artifacts = @($artifactEntries)
-} | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $checksumsPath -Encoding UTF8
+}
+Write-JsonFile -Value $checksums -Path $checksumsPath -Depth 8
 
 Write-Host "Torca SBOM: $sbomPath"
 Write-Host "Torca Flutter inventory: $flutterPath"
