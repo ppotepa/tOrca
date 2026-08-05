@@ -143,10 +143,10 @@ class SequentialAppController extends base.AppController {
       if (retainedIdentity.isNotEmpty &&
           snapshot.identity.installationId.isNotEmpty &&
           retainedIdentity != snapshot.identity.installationId) {
-        _repository.invalidatePairingCache(markSnapshotStale: false);
         _repository.invalidateMessages();
       }
       state = state.copyWith(
+        applicationSnapshot: snapshot,
         peerServerStatus: snapshot.peerEndpointAvailable
             ? PeerServerStatus.ready
             : PeerServerStatus.starting,
@@ -163,6 +163,7 @@ class SequentialAppController extends base.AppController {
       _startup.observePeerEndpoint(snapshot.peerEndpointAvailable);
 
       state = state.copyWith(
+        applicationSnapshot: snapshot,
         startupSteps: _startup.stepsFor(SequentialStartupPhase.localData),
         peerServerStatus: snapshot.peerEndpointAvailable
             ? PeerServerStatus.ready
@@ -334,7 +335,6 @@ class SequentialAppController extends base.AppController {
           _repository.invalidateLocalCache();
           if (type == EngineContract.inviteReceived ||
               type == EngineContract.inviteStateChanged) {
-            _repository.invalidatePairingCache();
             _eventRefreshNeedsPairing = true;
           }
           final changeKind = type == EngineContract.changed
@@ -350,11 +350,6 @@ class SequentialAppController extends base.AppController {
             if (conversationId != null && conversationId.isNotEmpty) {
               _repository.invalidateMessages(conversationId);
               _eventMessageRefreshes.add(conversationId);
-            } else {
-              // A malformed or obsolete event cannot be safely routed. Recover by
-              // refreshing the application projection, without assigning it
-              // to the active conversation. Do not clear a pending pairing
-              // refresh here: unrelated events must never suppress an invite.
             }
           } else if (changeKind.startsWith('messages:')) {
             final conversationId = changeKind.substring('messages:'.length);
@@ -451,10 +446,6 @@ class SequentialAppController extends base.AppController {
         _eventRefreshNeedsPairing = false;
         final messageRefreshes = Set<String>.of(_eventMessageRefreshes);
         _eventMessageRefreshes.removeAll(messageRefreshes);
-        // Message projections are latency-sensitive and must be serialized.
-        // Refreshing the broad application snapshot first delayed the open
-        // chat behind contacts, pairing and endpoint queries and allowed a
-        // second event wave to race the first projection.
         for (final conversationId in messageRefreshes.toList()..sort()) {
           await _repository.messages(conversationId, force: true);
         }
