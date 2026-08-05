@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use url::Url;
 pub use torchat_storage::SecretBytes;
 
-use crate::command::PlatformKind;
+use crate::PlatformKind;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
