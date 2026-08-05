@@ -30,6 +30,10 @@ fn unsupported(operation: &str) -> crate::RuntimeError {
     ))
 }
 
+/// Transitional aggregate retained for existing adapters.
+///
+/// New domain code must depend on the capability traits or `RuntimeStoragePort`.
+/// Point lookups intentionally do not fall back to full collection scans.
 pub trait RuntimeStorage {
     fn identity(&self) -> RuntimeResult<Option<RuntimeIdentity>>;
     fn profile(&self) -> RuntimeResult<Option<RuntimeProfile>>;
@@ -39,32 +43,23 @@ pub trait RuntimeStorage {
     fn put_pairing_code(&mut self, code: InviteCode) -> RuntimeResult<()>;
 
     fn pairing_inbox(&self) -> RuntimeResult<Vec<PairingItem>>;
-    fn pairing_inbox_by_id(&self, pairing_id: &str) -> RuntimeResult<Option<PairingItem>> {
-        Ok(self
-            .pairing_inbox()?
-            .into_iter()
-            .find(|item| item.pairing_id == pairing_id))
+    fn pairing_inbox_by_id(&self, _pairing_id: &str) -> RuntimeResult<Option<PairingItem>> {
+        Err(unsupported("pairing_inbox_by_id"))
     }
     fn put_pairing_inbox(&mut self, item: PairingItem) -> RuntimeResult<()>;
 
     fn pairing_outbox(&self) -> RuntimeResult<Vec<PairingItem>>;
-    fn pairing_outbox_by_id(&self, pairing_id: &str) -> RuntimeResult<Option<PairingItem>> {
-        Ok(self
-            .pairing_outbox()?
-            .into_iter()
-            .find(|item| item.pairing_id == pairing_id))
+    fn pairing_outbox_by_id(&self, _pairing_id: &str) -> RuntimeResult<Option<PairingItem>> {
+        Err(unsupported("pairing_outbox_by_id"))
     }
     fn put_pairing_outbox(&mut self, item: PairingItem) -> RuntimeResult<()>;
 
     fn contacts(&self) -> RuntimeResult<Vec<ContactRecord>>;
     fn contact_by_installation_id(
         &self,
-        installation_id: &str,
+        _installation_id: &str,
     ) -> RuntimeResult<Option<ContactRecord>> {
-        Ok(self
-            .contacts()?
-            .into_iter()
-            .find(|contact| contact.installation_id == installation_id))
+        Err(unsupported("contact_by_installation_id"))
     }
     fn put_contact(&mut self, contact: ContactRecord) -> RuntimeResult<()>;
 
@@ -117,27 +112,21 @@ pub trait RuntimeStorage {
     }
 
     fn conversations(&self) -> RuntimeResult<Vec<ConversationSummary>>;
-    fn conversation_by_id(&self, id: &str) -> RuntimeResult<Option<ConversationSummary>> {
-        Ok(self
-            .conversations()?
-            .into_iter()
-            .find(|conversation| conversation.id == id))
+    fn conversation_by_id(&self, _id: &str) -> RuntimeResult<Option<ConversationSummary>> {
+        Err(unsupported("conversation_by_id"))
     }
     fn conversation_for_contact(
         &self,
-        installation_id: &str,
+        _installation_id: &str,
     ) -> RuntimeResult<Option<ConversationSummary>> {
-        Ok(self
-            .conversations()?
-            .into_iter()
-            .find(|conversation| conversation.contact_installation_id == installation_id))
+        Err(unsupported("conversation_for_contact"))
     }
     fn put_conversation(&mut self, conversation: ConversationSummary) -> RuntimeResult<()>;
     fn mark_conversation_read(&mut self, conversation_id: &str) -> RuntimeResult<()>;
 
     fn messages(&self, conversation_id: &str) -> RuntimeResult<Vec<ChatMessage>>;
-    fn message_by_id(&self, message_id: &str) -> RuntimeResult<Option<ChatMessage>> {
-        self.message(message_id)
+    fn message_by_id(&self, _message_id: &str) -> RuntimeResult<Option<ChatMessage>> {
+        Err(unsupported("message_by_id"))
     }
     fn put_message(&mut self, message: ChatMessage) -> RuntimeResult<()>;
     fn delete_message(&mut self, message_id: &str) -> RuntimeResult<()>;
@@ -227,15 +216,6 @@ pub trait RuntimeStorage {
     }
 
     fn message(&self, message_id: &str) -> RuntimeResult<Option<ChatMessage>> {
-        for conversation in self.conversations()? {
-            if let Some(message) = self
-                .messages(&conversation.id)?
-                .into_iter()
-                .find(|message| message.id == message_id)
-            {
-                return Ok(Some(message));
-            }
-        }
-        Ok(None)
+        self.message_by_id(message_id)
     }
 }
