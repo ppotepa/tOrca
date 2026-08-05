@@ -91,11 +91,11 @@ impl ClientEngineActor {
                 return match self
                     .with_runtime(|runtime| runtime.prepare_cancel_pairing(&pairing_id))
                 {
-                    Ok((prepared_pairing_id, runtime_events)) => self.defer_relay_effect(
+                    Ok((prepared, runtime_events)) => self.defer_relay_effect(
                         input_id,
                         deferred_context,
                         RelayEffectOperation::CancelPairing {
-                            pairing_id: prepared_pairing_id,
+                            pairing_id: prepared.pairing_id,
                         },
                         runtime_events,
                     ),
@@ -253,7 +253,10 @@ impl ClientEngineActor {
             RelayEffectResult::PairingCode(Ok(code)) => self
                 .with_runtime_idempotent(
                     idempotency.as_ref(),
-                    |runtime| runtime.commit_pairing_code(code.clone()),
+                    |runtime| {
+                        runtime.commit_pairing_code(code.clone())?;
+                        Ok(code.clone())
+                    },
                     |value| json_response(value),
                 )
                 .and_then(|(value, events)| Ok((json_response(value)?, events))),
