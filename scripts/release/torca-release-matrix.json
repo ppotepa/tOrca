@@ -1,0 +1,87 @@
+{
+  "schema": 2,
+  "product": "Torca",
+  "automated": [
+    "release-version",
+    "runtime-contract",
+    "single-baseline",
+    "source-size",
+    "rust-format",
+    "runtime-tests",
+    "engine-tests",
+    "ffi-tests",
+    "rust-clippy",
+    "rust-dependency-policy",
+    "diagnostic-sanitization",
+    "flutter-format",
+    "flutter-analyze",
+    "flutter-tests",
+    "android-release-build",
+    "android-clean-install-smoke",
+    "android-upgrade-preserves-data",
+    "android-cold-start-recovery",
+    "windows-release-build",
+    "windows-clean-profile-smoke",
+    "windows-profile-restart-preserves-data"
+  ],
+  "manual": [
+    {
+      "id": "pairing-windows-to-android-100",
+      "platforms": ["windows", "android"],
+      "requiredRuns": 100,
+      "description": "Pair Windows to Android with fresh identities, expired codes, duplicate submissions and reconnects; no duplicate contact or stuck invitation is allowed."
+    },
+    {
+      "id": "pairing-android-to-windows-100",
+      "platforms": ["android", "windows"],
+      "requiredRuns": 100,
+      "description": "Pair Android to Windows with fresh identities, expired codes, duplicate submissions and reconnects; no duplicate contact or stuck invitation is allowed."
+    },
+    {
+      "id": "offline-exactly-once-delivery",
+      "platforms": ["windows", "android"],
+      "description": "Queue messages while the recipient is offline, interrupt both clients around persistence and acknowledgement boundaries, and verify no loss or duplicate UI records."
+    },
+    {
+      "id": "relationship-removal-repair",
+      "platforms": ["windows", "android"],
+      "description": "Remove a relationship with both history policies, verify symmetric blocking, then pair again with fresh MLS state."
+    },
+    {
+      "id": "notification-routing",
+      "platforms": ["windows", "android"],
+      "description": "Verify deduplication, current-conversation suppression, cold-start routing and alert clearing."
+    },
+    {
+      "id": "upgrade-from-previous-beta",
+      "platforms": ["windows", "android"],
+      "description": "Upgrade a real previous-beta profile and verify identity, contacts, history, durable queues, attachment cache and preferences."
+    },
+    {
+      "id": "background-and-recovery-soak",
+      "platforms": ["windows", "android"],
+      "requiredHours": 8,
+      "description": "Exercise tray/background lifecycle, process termination, Tor loss and network changes without fatal UI state, unbounded memory growth or data loss."
+    },
+    {
+      "id": "image-storage-and-gallery",
+      "platforms": ["windows", "android"],
+      "description": "Verify size limits, encrypted cache, cancellation, retry, clearing and explicit gallery export."
+    },
+    {
+      "id": "diagnostic-export-privacy",
+      "platforms": ["windows", "android"],
+      "description": "Export diagnostics after real messaging and independently verify that plaintext, attachments, keys, pairing codes and capability tokens are absent."
+    },
+    {
+      "id": "android-background-restrictions",
+      "platforms": ["android"],
+      "description": "Exercise Doze, battery saver, restricted background, reboot, process kill and network transitions."
+    },
+    {
+      "id": "windows-tray-and-single-instance",
+      "platforms": ["windows"],
+      "description": "Verify tray lifecycle, explicit exit, autostart, sleep/hibernate, second launch and restart after upgrade."
+    }
+  ]
+}
