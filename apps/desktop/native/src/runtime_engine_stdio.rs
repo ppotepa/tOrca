@@ -15,6 +15,9 @@ use crate::{cli::Cli, identity_store, tor_runtime::TorRuntime};
 #[cfg(not(any(feature = "os-vault", feature = "torka-file-secrets")))]
 compile_error!("torchat-desktop requires either os-vault or torka-file-secrets");
 
+#[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+compile_error!("torchat-desktop supports Windows, Linux and macOS hosts only");
+
 #[cfg(feature = "os-vault")]
 struct DesktopMlsEpochAnchor {
     namespace: String,
@@ -213,7 +216,7 @@ fn decode_checkpoint(bytes: &[u8]) -> Result<AnchoredMlsCheckpoint, EngineError>
         let epoch = u64::from_be_bytes(
             bytes
                 .try_into()
-                .map_err(|_| EngineError::Storage("invalid legacy MLS anchor".to_owned()))?,
+                .map_err(|_| EngineError::Storage("invalid 8-byte MLS anchor".to_owned()))?,
         );
         return Ok(AnchoredMlsCheckpoint {
             state_version: epoch,
@@ -249,21 +252,19 @@ fn write_json_line(value: impl Serialize) -> Result<()> {
     Ok(())
 }
 
+#[cfg(target_os = "windows")]
 pub(crate) fn platform_kind() -> PlatformKind {
-    #[cfg(target_os = "windows")]
-    {
-        return PlatformKind::Windows;
-    }
-    #[cfg(target_os = "linux")]
-    {
-        return PlatformKind::Linux;
-    }
-    #[cfg(target_os = "macos")]
-    {
-        return PlatformKind::Macos;
-    }
-    #[allow(unreachable_code)]
+    PlatformKind::Windows
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn platform_kind() -> PlatformKind {
     PlatformKind::Linux
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn platform_kind() -> PlatformKind {
+    PlatformKind::Macos
 }
 
 pub(crate) fn relay_url(cli: &Cli) -> Result<Url> {
@@ -297,10 +298,6 @@ pub(crate) fn start_tor(
 pub fn run_stdio_engine(cli: Cli) -> Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async move {
-        #[cfg(feature = "os-vault")]
-        if let Some(legacy_path) = cli.import_legacy_identity.as_deref() {
-            identity_store::import_legacy_identity(legacy_path)?;
-        }
         let identity = identity_store::load_or_create(cli.identity_file.as_deref())?;
         let database_path = identity_store::state_path(cli.identity_file.as_deref())?;
         let database_key_path = identity_store::database_key_path(cli.identity_file.as_deref())?;
