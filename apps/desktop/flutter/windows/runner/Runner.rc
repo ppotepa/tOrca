@@ -65,9 +65,9 @@ BEGIN
             VALUE "CompanyName", "Torca Project" "\0"
             VALUE "FileDescription", "Torca private messenger" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "torca" "\0"
+            VALUE "InternalName", "torchat_desktop" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 Paweł Potępa and contributors" "\0"
-            VALUE "OriginalFilename", "torca.exe" "\0"
+            VALUE "OriginalFilename", "torchat_desktop.exe" "\0"
             VALUE "ProductName", "Torca" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
