@@ -4,6 +4,7 @@ mod message_records;
 pub mod migrations;
 mod operation_repository;
 mod pairing_records;
+mod point_lookup_repository;
 pub mod runtime_storage;
 mod settings;
 pub mod sqlite;
