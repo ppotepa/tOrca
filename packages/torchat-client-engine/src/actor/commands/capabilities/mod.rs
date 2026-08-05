@@ -1,0 +1,3 @@
+mod get_contact_endpoint_capability;
+mod revoke_contact_endpoint_capability;
+mod rotate_contact_endpoint_capability;
