@@ -10,6 +10,7 @@ pub mod features;
 pub mod logic;
 pub mod message_rules;
 pub mod models;
+pub mod point_lookup_storage;
 pub mod retry;
 pub mod runtime;
 pub mod session;
@@ -67,6 +68,7 @@ pub use pairing_rules::{
     transition_pairing_record,
 };
 pub use pairing_rules::{expire_pairing_state, pairing_can_archive, pairing_is_active};
+pub use point_lookup_storage::PointLookupStorage;
 pub use runtime::ClientRuntime;
 pub use session::RuntimeSession;
 pub use storage::{RelationshipTransition, RuntimeStorage};

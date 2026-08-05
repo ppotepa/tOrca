@@ -1,0 +1,9 @@
+Torca 0.3.9 — point lookup storage boundary
+
+Implemented:
+- PointLookupStorage for contacts, conversations, pairing records and messages,
+- collection scans are localized behind the storage adapter instead of feature code,
+- pairing feature can depend on point-oriented reads,
+- production storage can replace compatibility scans with direct SQL without changing domain APIs.
+
+Validation intentionally not run in this batch.
