@@ -490,6 +490,7 @@ function Build-TorChatWindowsClient {
         $secureStorageRoot = Join-Path $stagingDesktop 'windows\flutter\ephemeral\.plugin_symlinks\flutter_secure_storage_windows'
         $secureStorageCmake = Join-Path $secureStorageRoot 'windows\CMakeLists.txt'
         $secureStorageCpp = Join-Path $secureStorageRoot 'windows\flutter_secure_storage_windows_plugin.cpp'
+        $secureStorageSource = ''
         if (Test-Path -LiteralPath $secureStorageRoot) {
             $secureStorageItem = Get-Item -LiteralPath $secureStorageRoot -Force
             if (($secureStorageItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
@@ -517,8 +518,11 @@ function Build-TorChatWindowsClient {
             if ($secureStorageSource) {
                 $newCmakeText = $newCmakeText.Replace('${CMAKE_CURRENT_SOURCE_DIR}/include', (($secureStorageSource -replace '\\','/') + '/windows/include'))
             }
-            $headerInclude = (($secureStorageSource -replace '\\','/') + '/windows/include/flutter_secure_storage_windows/flutter_secure_storage_windows_plugin.h')
-            $newCppText = $cppText.Replace('#include "flutter_secure_storage_windows/flutter_secure_storage_windows_plugin.h"', ('#include "' + $headerInclude + '"')).Replace('#include "include/flutter_secure_storage_windows/flutter_secure_storage_windows_plugin.h"', ('#include "' + $headerInclude + '"'))
+            $newCppText = $cppText
+            if ($secureStorageSource) {
+                $headerInclude = (($secureStorageSource -replace '\\','/') + '/windows/include/flutter_secure_storage_windows/flutter_secure_storage_windows_plugin.h')
+                $newCppText = $newCppText.Replace('#include "flutter_secure_storage_windows/flutter_secure_storage_windows_plugin.h"', ('#include "' + $headerInclude + '"')).Replace('#include "include/flutter_secure_storage_windows/flutter_secure_storage_windows_plugin.h"', ('#include "' + $headerInclude + '"'))
+            }
             if ($newCmakeText -ne $cmakeText) {
                 [IO.File]::WriteAllText($secureStorageCmake, $newCmakeText, [Text.UTF8Encoding]::new($false))
             }
