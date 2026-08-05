@@ -49,7 +49,7 @@ pub trait ConversationStorage {
 
 pub trait MessageStorage {
     fn messages(&self, conversation_id: &str) -> RuntimeResult<Vec<ChatMessage>>;
-    fn message(&self, message_id: &str) -> RuntimeResult<Option<ChatMessage>>;
+    fn message_by_id(&self, message_id: &str) -> RuntimeResult<Option<ChatMessage>>;
     fn put_message(&mut self, message: ChatMessage) -> RuntimeResult<()>;
     fn delete_message(&mut self, message_id: &str) -> RuntimeResult<()>;
     fn pending_messages(&self) -> RuntimeResult<Vec<ChatMessage>>;
@@ -179,8 +179,8 @@ impl<T: RuntimeStorage + ?Sized> MessageStorage for T {
         RuntimeStorage::messages(self, conversation_id)
     }
 
-    fn message(&self, message_id: &str) -> RuntimeResult<Option<ChatMessage>> {
-        RuntimeStorage::message(self, message_id)
+    fn message_by_id(&self, message_id: &str) -> RuntimeResult<Option<ChatMessage>> {
+        RuntimeStorage::message_by_id(self, message_id)
     }
 
     fn put_message(&mut self, message: ChatMessage) -> RuntimeResult<()> {
