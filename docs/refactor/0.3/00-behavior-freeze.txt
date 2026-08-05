@@ -1,0 +1,514 @@
+TORCA 0.3 BEHAVIOR FREEZE
+=========================
+
+BATCH: 0.3.0
+BASE COMMIT: 604708230b2ed84ba3c71cf05651af2a2648a712
+PURPOSE: protect observable 0.2 behavior while ownership and implementation are
+moved between frontend and backend.
+
+STATUS LEGEND
+-------------
+
+COVERED       existing automated test identified
+PARTIAL       some automated coverage exists, additional scenario required
+MANUAL        release evidence currently required
+GAP           no adequate test identified; must be added before old path removal
+
+GENERAL INVARIANTS
+------------------
+
+1. One user intention produces at most one durable domain mutation.
+2. Replaying the same durable command_id returns the same logical result.
+3. Reusing a command_id with a different payload is rejected.
+4. A network failure never rolls back an already committed user intention.
+5. An event is never published before the corresponding durable commit.
+6. Restart recovery never creates duplicate contacts, conversations or messages.
+7. Flutter never becomes authoritative for pairing, delivery or relationship state.
+8. Normal messages never use rendezvous relay forwarding.
+9. Raw SQL remains in torchat-storage.
+10. Secrets and message plaintext do not appear in diagnostics or normal logs.
+
+PROFILE AND STARTUP
+-------------------
+
+BF-001 Clean profile startup
+Status: PARTIAL
+
+Given:
+- no existing identity, database or profile;
+When:
+- the application starts;
+Then:
+- one identity is generated;
+- encrypted storage opens;
+- onboarding is shown;
+- a second application identity is not generated during the same startup.
+
+BF-002 Existing profile startup
+Status: PARTIAL
+
+Given:
+- a valid existing profile and database;
+When:
+- the application restarts;
+Then:
+- installation identity remains unchanged;
+- profile, contacts and conversations are restored;
+- local data is usable even while Tor is still starting.
+
+BF-003 Tor unavailable during startup
+Status: MANUAL/PARTIAL
+
+Then:
+- local profile data remains available;
+- the UI shows degraded connection state rather than resetting data;
+- backend retry occurs without a Flutter domain retry loop.
+
+BF-004 Profile nickname update
+Status: COVERED/PARTIAL
+
+Then:
+- a valid nickname is persisted exactly once;
+- the authoritative snapshot revision advances;
+- invalid nickname input is rejected with a stable semantic error.
+
+PAIRING
+-------
+
+BF-010 Generate invite code
+Status: PARTIAL
+
+Then:
+- a fresh code and expiration are returned;
+- refresh creates a new rendezvous allocation;
+- stale idempotency state does not return an old code forever.
+
+BF-011 Submit valid invite code
+Status: PARTIAL
+
+Then:
+- one outgoing pairing workflow is created;
+- duplicate submission does not create duplicate workflows;
+- UI receives backend workflow state.
+
+BF-012 Invalid or expired invite code
+Status: PARTIAL
+
+Then:
+- no contact or conversation is created;
+- a stable invalid/expired result is returned;
+- retryability is explicit.
+
+BF-013 Incoming accept
+Status: GAP for full restart convergence
+
+Then:
+- local acceptance is persisted;
+- network response is executed after commit;
+- Welcome processing creates exactly one contact;
+- exactly one conversation is available;
+- workflow reaches completed without Flutter polling.
+
+BF-014 Incoming reject
+Status: PARTIAL
+
+Then:
+- rejection is idempotent;
+- remote peer receives rejection when transport is available;
+- no contact or conversation is created;
+- restart preserves final state.
+
+BF-015 Outgoing cancel
+Status: PARTIAL
+
+Then:
+- cancel is idempotent;
+- a cancelled workflow cannot later create a contact from a stale effect;
+- restart preserves cancelled state.
+
+BF-016 Pairing expiration
+Status: PARTIAL
+
+Then:
+- expiration is decided by backend clock;
+- expired workflow is not actionable;
+- Flutter does not run a separate expiration timer that changes domain state.
+
+BF-017 Crossed pairing
+Status: GAP/PARTIAL
+
+Given:
+- both installations submit pairing at approximately the same time;
+Then:
+- workflows converge to one relationship;
+- one contact exists on each side;
+- one conversation exists per relationship;
+- no duplicate MLS relationship is created.
+
+BF-018 Duplicate accept
+Status: GAP
+
+Then:
+- the same command_id replays the same result;
+- a new command_id for an already accepted workflow is harmless or conflicts
+  deterministically;
+- no second contact/conversation is created.
+
+BF-019 Duplicate Welcome
+Status: GAP
+
+Then:
+- Welcome application is idempotent;
+- contact, relationship and conversation uniqueness are preserved;
+- the workflow remains completed.
+
+BF-020 Restart after local accept before network send
+Status: GAP
+
+Then:
+- persisted intent is recovered;
+- engine reschedules the pending effect;
+- Flutter performs no repair action.
+
+BF-021 Restart after network send before Welcome
+Status: GAP
+
+Then:
+- workflow remains waiting for Welcome;
+- retry policy does not duplicate relationship state;
+- eventual Welcome converges.
+
+BF-022 Restart after Welcome before contact creation commit
+Status: GAP
+
+Then:
+- recovery resumes convergence;
+- one contact and one conversation are created;
+- no manual refresh loop is required.
+
+BF-023 Relay unavailable during pairing
+Status: PARTIAL/MANUAL
+
+Then:
+- durable workflow remains retryable;
+- retry/backoff belongs to backend;
+- the UI presents retryable state without scheduling domain retries.
+
+CONTACTS AND RELATIONSHIPS
+--------------------------
+
+BF-030 Verify contact
+Status: PARTIAL
+
+Then:
+- verification is explicit and persisted;
+- pairing completion does not require Flutter to automatically verify contact
+  unless this remains a documented product rule implemented in Rust.
+
+BF-031 Update contact settings
+Status: PARTIAL
+
+Then:
+- local alias, mute, block and transport policy remain consistent after restart;
+- settings do not mutate remote identity data.
+
+BF-032 Remove relationship preserving history
+Status: PARTIAL/MANUAL
+
+Then:
+- relationship is removed symmetrically according to protocol;
+- local history remains readable;
+- future transport is blocked until a new relationship is established.
+
+BF-033 Remove relationship deleting history
+Status: PARTIAL/MANUAL
+
+Then:
+- relationship, conversation and selected local history are removed atomically;
+- retry and ACK state survive restart;
+- no orphaned capability remains active.
+
+BF-034 Pair again after relationship removal
+Status: MANUAL/GAP
+
+Then:
+- a new relationship boundary and MLS state are used;
+- old capabilities and stale frames cannot reactivate the previous relationship.
+
+CONVERSATIONS AND MESSAGES
+--------------------------
+
+BF-040 Start/open conversation
+Status: PARTIAL
+
+Then:
+- one conversation exists per active relationship according to current product
+  semantics;
+- opening a conversation does not require polling;
+- active focus state is sent as an intention.
+
+BF-041 Send text message online
+Status: PARTIAL
+
+Then:
+- message is persisted before network delivery;
+- local UI shows one record;
+- peer receives one logical message;
+- state converges through queued/sending/sent/delivered/read as supported.
+
+BF-042 Send while recipient offline
+Status: MANUAL/PARTIAL
+
+Then:
+- message remains in durable retry queue;
+- sender restart does not lose it;
+- recipient eventually receives one logical message;
+- no duplicate UI record appears.
+
+BF-043 Restart sender after persistence before send
+Status: GAP/PARTIAL
+
+Then:
+- queued message is recovered;
+- backend retries using durable state;
+- Flutter does not reconstruct the queue.
+
+BF-044 Restart recipient after persistence before acknowledgement
+Status: GAP
+
+Then:
+- sender may retry the frame;
+- recipient deduplicates it;
+- one message remains visible;
+- acknowledgement eventually converges.
+
+BF-045 Duplicate peer frame
+Status: PARTIAL/GAP
+
+Then:
+- message identity deduplicates storage and UI projection;
+- receipt generation remains idempotent.
+
+BF-046 Retry failed message manually
+Status: PARTIAL
+
+Then:
+- UI sends one retry intention;
+- backend determines whether retry is allowed;
+- durable operation reuses correct identity/idempotency semantics.
+
+BF-047 Delete message locally
+Status: PARTIAL
+
+Then:
+- selected local record is removed;
+- remote history is not changed unless a future explicit protocol feature says
+  otherwise;
+- stale projection cannot resurrect the deleted local record.
+
+BF-048 Reply relationship
+Status: PARTIAL
+
+Then:
+- reply target remains valid or reports a stable missing/conflict error;
+- message ordering remains deterministic.
+
+RECEIPTS, PRESENCE AND TYPING
+-----------------------------
+
+BF-050 Delivery receipt
+Status: PARTIAL
+
+Then:
+- receipt is persisted/deduplicated;
+- restart does not lose pending receipt;
+- message status revision advances once per semantic transition.
+
+BF-051 Read receipt
+Status: PARTIAL
+
+Then:
+- read receipt respects user preference;
+- focus/visibility changes do not create duplicate receipts;
+- failed delivery follows backend retry policy.
+
+BF-052 Typing
+Status: PARTIAL
+
+Then:
+- typing remains ephemeral;
+- failure does not become a durable global application error;
+- no persisted workflow is created.
+
+BF-053 Presence
+Status: PARTIAL
+
+Then:
+- backend receives foreground/visibility intention;
+- user preference is respected;
+- lifecycle widget does not implement transport retry.
+
+PROJECTIONS
+-----------
+
+BF-060 Reject stale ApplicationSnapshot
+Status: PARTIAL/COVERED
+
+Then:
+- lower revision from the same store is rejected;
+- a snapshot from a new store/identity replaces old state;
+- message projections have independent revision rules.
+
+BF-061 Projection publication ordering
+Status: GAP/PARTIAL
+
+Then:
+- transaction commits before projection event;
+- one operation produces one coherent revision;
+- rollback publishes no successful change.
+
+BF-062 Event consumer backpressure
+Status: GAP
+
+Then:
+- a blocked public event consumer does not prevent command response completion;
+- bounded queues do not grow without limit;
+- shutdown resolves or fails all waiters.
+
+ANDROID LIFECYCLE
+-----------------
+
+BF-070 Foreground/background transition
+Status: MANUAL/PARTIAL
+
+Then:
+- engine remains owned by the foreground service;
+- UI reattaches to existing state;
+- presence/focus facts converge;
+- no second engine or identity is created.
+
+BF-071 Android process/UI recreation
+Status: MANUAL/PARTIAL
+
+Then:
+- service-owned engine survives supported UI recreation;
+- snapshot reattachment is atomic;
+- pairing and message state appear without manual navigation repair.
+
+BF-072 Doze, battery saver and restricted background
+Status: MANUAL
+
+Then:
+- limitation is surfaced clearly;
+- durable queues remain intact;
+- application recovers when execution resumes.
+
+BF-073 Android clean reset
+Status: PARTIAL
+
+Then:
+- database, secrets, Tor data, cache and preferences are removed;
+- process exits/restarts into onboarding;
+- partial reset cannot leave a readable database without its key.
+
+WINDOWS LIFECYCLE
+-----------------
+
+BF-080 Close window to tray
+Status: MANUAL/PARTIAL
+
+Then:
+- configured close behavior does not terminate the engine unexpectedly;
+- explicit exit remains available;
+- one application instance owns the runtime.
+
+BF-081 Sleep/hibernate/network transition
+Status: MANUAL
+
+Then:
+- Tor/peer state becomes degraded/offline and later reconnects;
+- durable queues are preserved;
+- no zombie sidecar remains.
+
+BF-082 Windows profile restart
+Status: PARTIAL
+
+Then:
+- profile and data survive normal restart/upgrade;
+- reset removes only known profile artifacts;
+- arbitrary paths or symlinks cannot be deleted by reset.
+
+NOTIFICATIONS
+-------------
+
+BF-090 Warm notification navigation
+Status: PARTIAL
+
+Then:
+- selecting notification opens the intended conversation;
+- notification is cleared;
+- navigation does not run a polling loop in presentation code.
+
+BF-091 Cold notification navigation
+Status: MANUAL/PARTIAL
+
+Then:
+- intent is retained until the authoritative conversation projection is ready;
+- coordinator opens it once;
+- no duplicate route or repeated refresh loop occurs.
+
+BF-092 Notification privacy
+Status: PARTIAL
+
+Then:
+- preview preference is respected;
+- default notification does not expose message plaintext;
+- duplicate stable notification IDs are suppressed.
+
+ATTACHMENTS AND DIAGNOSTICS
+---------------------------
+
+BF-100 Image attachment limits
+Status: COVERED/PARTIAL
+
+Then:
+- source size, dimensions, pixels, frame count and wire body limits are enforced;
+- forged metadata does not bypass JPEG validation;
+- unsupported/animated images are rejected.
+
+BF-101 Diagnostic export privacy
+Status: COVERED/PARTIAL/MANUAL
+
+Then:
+- export is local and user initiated;
+- no message plaintext, attachment content, private key, database key, pairing
+  code or capability secret is included;
+- no automatic upload occurs.
+
+RELEASE COMPATIBILITY
+---------------------
+
+BF-110 Open existing 0.2 profile
+Status: MANUAL/GAP for real fixture
+
+Then:
+- identity and encrypted database remain readable;
+- migrations are forward-only and atomic;
+- failure does not silently reset the profile.
+
+BF-111 Protocol compatibility during 0.3 refactor
+Status: GAP/PARTIAL
+
+Then:
+- moving ownership does not change wire names or payloads unless explicitly
+  versioned;
+- Rust, Dart and Kotlin generated contract remain synchronized.
+
+BATCH ACCEPTANCE RULE
+---------------------
+
+A refactor batch may remove an old implementation only when:
+- the relevant behavior above is COVERED or a new test is added;
+- GAP scenarios affected by the batch are implemented before removal;
+- tests not executed are recorded in the batch report;
+- no alternate compatibility implementation remains.
