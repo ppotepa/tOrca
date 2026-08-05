@@ -19,6 +19,7 @@ pub mod runtime;
 pub mod session;
 pub mod storage;
 pub mod storage_capabilities;
+pub mod storage_port;
 pub mod testing;
 pub mod transport;
 
@@ -89,6 +90,7 @@ pub use storage_capabilities::{
     MessageStorage, OperationStorage, PairingStorage, ProfileStorage, ReceiptStorage,
     RelationshipStorage,
 };
+pub use storage_port::RuntimeStoragePort;
 pub use transport::RuntimeTransport;
 
 #[cfg(test)]
