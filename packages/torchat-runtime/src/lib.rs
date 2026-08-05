@@ -7,9 +7,11 @@ pub mod collections;
 pub mod contract;
 pub mod error;
 pub mod features;
+pub mod ids;
 pub mod logic;
 pub mod message_rules;
 pub mod models;
+pub mod operations;
 pub mod point_lookup_storage;
 pub mod retry;
 pub mod runtime;
@@ -40,6 +42,10 @@ pub use error::{
     RuntimeError, RuntimeErrorCategory, RuntimeErrorCode, RuntimeProblem, RuntimeResult,
 };
 pub use features::pairing::rules as pairing_rules;
+pub use ids::{
+    CapabilityId, CommandId, ContactId, ConversationId, InstallationId, MessageId, OperationId,
+    PairingId, RemovalId,
+};
 pub use logic::RuntimeConversationUpdate;
 pub use logic::{
     contact_card_from_invite, contact_record_from_card, runtime_conversation_summary,
@@ -60,6 +66,7 @@ pub use models::{
     RuntimeIdentity, RuntimeProfile, RuntimeSendEffect, RuntimeTorStatus, VerificationState,
     WelcomeAcceptedResult, pairing_available_actions,
 };
+pub use operations::{DurableOperation, OperationState, OperationType};
 pub use pairing_rules::{
     PairingAction, RuntimePairingExpiryLike, RuntimePairingIdLike, RuntimePairingStateLike,
     RuntimePairingTransitionError, RuntimePairingTransitionLike, RuntimePairingUuidLike,
@@ -71,6 +78,7 @@ pub use pairing_rules::{
 };
 pub use pairing_rules::{expire_pairing_state, pairing_can_archive, pairing_is_active};
 pub use point_lookup_storage::PointLookupStorage;
+pub use retry::{RetryClass, RetryDecision, RetryPolicy, retry_delay_ms, retry_jitter_seed};
 pub use runtime::ClientRuntime;
 pub use session::RuntimeSession;
 pub use storage::{RelationshipTransition, RuntimeStorage};
