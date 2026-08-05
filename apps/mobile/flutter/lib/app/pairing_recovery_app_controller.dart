@@ -18,13 +18,22 @@ class PairingRecoveryAppController extends SequentialAppController {
   Future<void>? _autoTrustInFlight;
   bool _pairingSyncQueued = false;
   bool _sanitizingProblem = false;
+  bool _pairingMutationInFlight = false;
+  String? _pairingMutationError;
   DateTime? _lastPairingSync;
   String? _lastAutoOpenedContactId;
 
   @override
   base.AppState build() {
     final initial = super.build();
-    listenSelf((_, next) => _sanitizeTechnicalProblem(next.error));
+    listenSelf((_, next) {
+      // Keep a copy for pairing dialogs before diagnostic-only errors are
+      // sanitized from the global app state.
+      if (_pairingMutationInFlight && next.error.trim().isNotEmpty) {
+        _pairingMutationError = next.error;
+      }
+      _sanitizeTechnicalProblem(next.error);
+    });
     _pairingWatchdog = Timer.periodic(
       _watchdogInterval,
       (_) => _schedulePairingSync(force: false),
@@ -222,7 +231,20 @@ class PairingRecoveryAppController extends SequentialAppController {
     Future<void> Function() operation, {
     String? targetId,
   }) async {
-    await _runVoid(key, label, operation, targetId: targetId);
+    _pairingMutationError = null;
+    _pairingMutationInFlight = true;
+    try {
+      await _runVoid(key, label, operation, targetId: targetId);
+    } finally {
+      _pairingMutationInFlight = false;
+    }
+    // The base controller records platform/runtime failures in state instead
+    // of throwing them. Pairing dialogs need the failure to remain on screen
+    // and must not mark a request as resolved when the mutation failed.
+    final error = (_pairingMutationError ?? state.error).trim();
+    if (error.isNotEmpty) {
+      throw StateError(error);
+    }
     await _synchronizePairing(force: true);
   }
 

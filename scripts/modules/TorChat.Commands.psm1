@@ -79,7 +79,8 @@ function Invoke-TorChatAndroidBuildPlan {
         Write-TorChatInfo 'Skipping Android x86_64 engine; deployment target is physical/ARM64 Android.'
     }
     Invoke-TorChatStage -Context $Context -Id 'build.android.client' -Name 'Build Android APK' -Skip:$skip -Action {
-        Build-TorChatAndroidClient -Context $Context -EnvironmentState $EnvironmentState -Policy $BuildPolicy
+        $engineAbis = if ($ClientMode -eq 'emulator') { @('arm64-v8a','x86_64') } else { @('arm64-v8a') }
+        Build-TorChatAndroidClient -Context $Context -EnvironmentState $EnvironmentState -Policy $BuildPolicy -EngineAbis $engineAbis
     }
 }
 

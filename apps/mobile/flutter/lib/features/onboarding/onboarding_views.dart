@@ -183,15 +183,24 @@ class PairingCodeDialogState extends ConsumerState<PairingCodeDialog> {
         _completed = contactReady;
         _status = contactReady ? '' : context.l10n.uiPairingWaitingForMls;
       });
-    } catch (_) {
+    } catch (error) {
       if (mounted) {
         setState(() {
           _processing = false;
           _awaitingContact = false;
-          _error = context.l10n.uiOperationFailed;
+          _error = _pairingErrorMessage(error);
         });
       }
     }
+  }
+
+  String _pairingErrorMessage(Object error) {
+    final message = error
+        .toString()
+        .replaceFirst('Bad state: ', '')
+        .replaceFirst('Exception: ', '')
+        .trim();
+    return message.isEmpty ? context.l10n.uiOperationFailed : message;
   }
 
   Future<void> _waitForLocalDecision(String pairingId) async {
@@ -220,11 +229,11 @@ class PairingCodeDialogState extends ConsumerState<PairingCodeDialog> {
     try {
       await widget.onReject?.call(request);
       if (mounted) Navigator.pop(context, false);
-    } catch (_) {
+    } catch (error) {
       if (mounted) {
         setState(() {
           _processing = false;
-          _error = context.l10n.uiOperationFailed;
+          _error = _pairingErrorMessage(error);
         });
       }
     }
@@ -348,14 +357,23 @@ class _IncomingPairingDialogState extends State<IncomingPairingDialog> {
     try {
       await action();
       if (mounted) Navigator.of(context).pop();
-    } catch (_) {
+    } catch (error) {
       if (mounted) {
         setState(() {
           _busy = false;
-          _error = context.l10n.uiOperationFailed;
+          _error = _pairingErrorMessage(error);
         });
       }
     }
+  }
+
+  String _pairingErrorMessage(Object error) {
+    final message = error
+        .toString()
+        .replaceFirst('Bad state: ', '')
+        .replaceFirst('Exception: ', '')
+        .trim();
+    return message.isEmpty ? context.l10n.uiOperationFailed : message;
   }
 
   @override

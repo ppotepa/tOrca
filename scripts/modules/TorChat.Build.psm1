@@ -130,6 +130,13 @@ function Remove-TorChatDirectoryRobust {
             Start-Sleep -Milliseconds (250 * $attempt)
         }
     }
+    # Remove-Item can traverse Flutter's generated directory links and fail
+    # on a dangling child. Let Windows remove the exact staging tree without
+    # following those links, then verify the requested path is gone.
+    if ($env:OS -eq 'Windows_NT') {
+        & cmd.exe /c "rmdir /s /q `"$resolved`"" 2>$null | Out-Null
+        if (-not (Test-Path -LiteralPath $resolved)) { return }
+    }
     # Cleanup is best-effort. The destination is synchronized below and must
     # not make an otherwise valid Flutter build fail only because Windows,
     # Defender, or an indexer still owns the directory handle.
@@ -331,16 +338,23 @@ function Build-TorChatAndroidClient {
     param(
         [Parameter(Mandatory = $true)]$Context,
         [Parameter(Mandatory = $true)]$EnvironmentState,
-        [ValidateSet('smart','rebuild')][string]$Policy = 'smart'
+        [ValidateSet('smart','rebuild')][string]$Policy = 'smart',
+        [Parameter(Mandatory = $true)][string[]]$EngineAbis
     )
     Assert-TorChatTool -Name flutter
     Import-TorChatEnvironmentState -EnvironmentState $EnvironmentState -RequireOnion
     $variant = $Context.Configuration
     $artifact = Join-Path $Context.RepositoryRoot "apps\mobile\flutter\build\app\outputs\flutter-apk\app-$variant.apk"
-    $engineArtifacts = @(
-        (Join-Path $Context.RepositoryRoot 'apps\mobile\flutter\build\app\generated\jniLibs\arm64-v8a\libtorchat_client_engine.so'),
-        (Join-Path $Context.RepositoryRoot 'apps\mobile\flutter\build\app\generated\jniLibs\x86_64\libtorchat_client_engine.so')
-    )
+    $abiPlatforms = @{
+        'arm64-v8a' = 'android-arm64'
+        'x86_64' = 'android-x64'
+    }
+    if ($EngineAbis.Count -eq 0 -or @($EngineAbis | Where-Object { -not $abiPlatforms.ContainsKey($_) }).Count -gt 0) {
+        throw "Unsupported Android engine ABI selection: $($EngineAbis -join ', ')"
+    }
+    $engineArtifacts = @($EngineAbis | ForEach-Object {
+        Join-Path $Context.RepositoryRoot "apps\mobile\flutter\build\app\generated\jniLibs\$_\libtorchat_client_engine.so"
+    })
     foreach ($engineArtifact in $engineArtifacts) {
         if (-not (Test-Path -LiteralPath $engineArtifact)) {
             throw "Android engine ABI artifact missing before APK build: $engineArtifact"
@@ -356,7 +370,8 @@ function Build-TorChatAndroidClient {
         "environment=$($Context.Environment)",
         "onion=$($EnvironmentState.Values['TORCHAT_ONION_URL'])",
         "variant=$variant",
-        "torkaPairingCode=$($EnvironmentState.Values['TORCHAT_TORKA_PAIRING_CODE'])"
+        "torkaPairingCode=$($EnvironmentState.Values['TORCHAT_TORKA_PAIRING_CODE'])",
+        "androidAbis=$($EngineAbis -join ',')"
     ) + $engineFingerprints)
     if ($Policy -eq 'smart' -and (Test-TorChatBuildFresh -RepositoryRoot $Context.RepositoryRoot -Key "flutter-android-$variant" -Hash $hash -Artifacts @($artifact))) {
         return [pscustomobject]@{ State = 'Skipped'; Code = 'ANDROID_APK_FRESH'; Message = 'Android APK unchanged'; Artifact = $artifact }
@@ -369,6 +384,10 @@ function Build-TorChatAndroidClient {
     $env:TORCHAT_DEV_PROFILE = ''
     $env:TORCHAT_DEV_PAIR = 'false'
     try {
+        # Keep Flutter's engine dependency resolution aligned with the
+        # committed Gradle lockfile. The Rust JNI libraries are the ABI
+        # contract enforced above; Flutter itself may resolve its normal
+        # platform artifacts without requiring Rust libraries for every ABI.
         $arguments = @('build','apk',"--$variant")
         if (-not [string]::IsNullOrWhiteSpace($torkaPairingCode)) {
             $arguments += "--dart-define=TORCHAT_TORKA_PAIRING_CODE=$torkaPairingCode"
@@ -452,8 +471,8 @@ function Build-TorChatWindowsClient {
     $sourceArb = Join-Path $mobileRoot 'lib\locales\resources\app_en.arb'
     $stagedArb = Join-Path $stagingMobile 'lib\locales\resources\app_en.arb'
     if (-not (Test-Path -LiteralPath $stagedArb)) { throw "Windows Flutter staging copy omitted localization catalog: $stagedArb" }
-    $sourceArbHash = (Get-FileHash -LiteralPath $sourceArb -Algorithm SHA256).Hash
-    $stagedArbHash = (Get-FileHash -LiteralPath $stagedArb -Algorithm SHA256).Hash
+    $sourceArbHash = Get-TorChatFileSha256 -Path $sourceArb
+    $stagedArbHash = Get-TorChatFileSha256 -Path $stagedArb
     if ($sourceArbHash -ne $stagedArbHash) {
         throw "Windows Flutter staging copy produced a different app_en.arb (source $sourceArb, staged $stagedArb)."
     }
@@ -466,6 +485,8 @@ function Build-TorChatWindowsClient {
         # 4.1.0 declares its own include directory as INTERFACE while its
         # source uses a path rooted at include/, which breaks MSVC builds.
         [void](Invoke-TorChatNative -Context $Context -FilePath 'flutter' -ArgumentList @('pub','get') -WorkingDirectory $stagingDesktop -LogName 'flutter-windows-pub-get.log')
+        New-Item -ItemType Directory -Force -Path (Join-Path $stagingMobile 'build') | Out-Null
+        [void](Invoke-TorChatNative -Context $Context -FilePath 'flutter' -ArgumentList @('gen-l10n') -WorkingDirectory $stagingMobile -LogName 'flutter-windows-gen-l10n.log')
         $secureStorageRoot = Join-Path $stagingDesktop 'windows\flutter\ephemeral\.plugin_symlinks\flutter_secure_storage_windows'
         $secureStorageCmake = Join-Path $secureStorageRoot 'windows\CMakeLists.txt'
         $secureStorageCpp = Join-Path $secureStorageRoot 'windows\flutter_secure_storage_windows_plugin.cpp'
@@ -481,28 +502,23 @@ function Build-TorChatWindowsClient {
                 if ((Test-Path -LiteralPath $resolvedCmake) -and (Test-Path -LiteralPath $resolvedCpp)) {
                     $resolvedCmakeText = [IO.File]::ReadAllText($resolvedCmake)
                     $resolvedCppText = [IO.File]::ReadAllText($resolvedCpp)
-                    [IO.File]::WriteAllText($resolvedCmake, $resolvedCmakeText.Replace('target_include_directories(${PLUGIN_NAME} INTERFACE', 'target_include_directories(${PLUGIN_NAME} PUBLIC'), [Text.UTF8Encoding]::new($false))
-                    [IO.File]::WriteAllText($resolvedCpp, $resolvedCppText.Replace('#include "include/flutter_secure_storage_windows/flutter_secure_storage_windows_plugin.h"', '#include "flutter_secure_storage_windows/flutter_secure_storage_windows_plugin.h"'), [Text.UTF8Encoding]::new($false))
+                    $resolvedCmakeText = $resolvedCmakeText.Replace('target_include_directories(${PLUGIN_NAME} INTERFACE', 'target_include_directories(${PLUGIN_NAME} PRIVATE')
+                    $resolvedCmakeText = $resolvedCmakeText.Replace('${CMAKE_CURRENT_SOURCE_DIR}/include', (($secureStorageSource -replace '\\','/') + '/windows/include'))
+                    [IO.File]::WriteAllText($resolvedCmake, $resolvedCmakeText, [Text.UTF8Encoding]::new($false))
+                    $headerInclude = (($secureStorageSource -replace '\\','/') + '/windows/include/flutter_secure_storage_windows/flutter_secure_storage_windows_plugin.h')
+                    [IO.File]::WriteAllText($resolvedCpp, $resolvedCppText.Replace('#include "flutter_secure_storage_windows/flutter_secure_storage_windows_plugin.h"', ('#include "' + $headerInclude + '"')).Replace('#include "include/flutter_secure_storage_windows/flutter_secure_storage_windows_plugin.h"', ('#include "' + $headerInclude + '"')), [Text.UTF8Encoding]::new($false))
                 }
-                # Remove only this generated staging link. PowerShell can
-                # follow directory links on exFAT, so use rmdir for the link
-                # itself and verify that the target was not touched.
-                cmd.exe /c "rmdir `"$secureStorageRoot`"" | Out-Null
-                if (Test-Path -LiteralPath $secureStorageRoot) {
-                    throw "Could not replace staged flutter_secure_storage_windows link: $secureStorageRoot"
-                }
-                New-Item -ItemType Directory -Force -Path $secureStorageRoot | Out-Null
-                & robocopy $secureStorageSource $secureStorageRoot /E /NFL /NDL /NJH /NJS /NP | Out-Null
-                if ($LASTEXITCODE -gt 7) { throw "Failed to materialize staged flutter_secure_storage_windows plugin (robocopy exit $LASTEXITCODE)." }
-                $secureStorageCmake = Join-Path $secureStorageRoot 'windows\CMakeLists.txt'
-                $secureStorageCpp = Join-Path $secureStorageRoot 'windows\flutter_secure_storage_windows_plugin.cpp'
             }
         }
         if ((Test-Path -LiteralPath $secureStorageCmake) -and (Test-Path -LiteralPath $secureStorageCpp)) {
             $cmakeText = [IO.File]::ReadAllText($secureStorageCmake)
             $cppText = [IO.File]::ReadAllText($secureStorageCpp)
-            $newCmakeText = $cmakeText.Replace('target_include_directories(${PLUGIN_NAME} INTERFACE', 'target_include_directories(${PLUGIN_NAME} PUBLIC')
-            $newCppText = $cppText.Replace('#include "include/flutter_secure_storage_windows/flutter_secure_storage_windows_plugin.h"', '#include "flutter_secure_storage_windows/flutter_secure_storage_windows_plugin.h"')
+            $newCmakeText = $cmakeText.Replace('target_include_directories(${PLUGIN_NAME} INTERFACE', 'target_include_directories(${PLUGIN_NAME} PRIVATE')
+            if ($secureStorageSource) {
+                $newCmakeText = $newCmakeText.Replace('${CMAKE_CURRENT_SOURCE_DIR}/include', (($secureStorageSource -replace '\\','/') + '/windows/include'))
+            }
+            $headerInclude = (($secureStorageSource -replace '\\','/') + '/windows/include/flutter_secure_storage_windows/flutter_secure_storage_windows_plugin.h')
+            $newCppText = $cppText.Replace('#include "flutter_secure_storage_windows/flutter_secure_storage_windows_plugin.h"', ('#include "' + $headerInclude + '"')).Replace('#include "include/flutter_secure_storage_windows/flutter_secure_storage_windows_plugin.h"', ('#include "' + $headerInclude + '"'))
             if ($newCmakeText -ne $cmakeText) {
                 [IO.File]::WriteAllText($secureStorageCmake, $newCmakeText, [Text.UTF8Encoding]::new($false))
             }
@@ -512,6 +528,13 @@ function Build-TorChatWindowsClient {
             if (($newCmakeText -ne $cmakeText) -or ($newCppText -ne $cppText)) {
                 Write-TorChatInfo 'Applied MSVC include-path workaround to staged flutter_secure_storage_windows plugin.'
             }
+        }
+        $registrant = Join-Path $stagingDesktop 'windows\flutter\generated_plugin_registrant.cc'
+        if ($secureStorageSource -and (Test-Path -LiteralPath $registrant)) {
+            $registrantText = [IO.File]::ReadAllText($registrant)
+            $headerInclude = (($secureStorageSource -replace '\\','/') + '/windows/include/flutter_secure_storage_windows/flutter_secure_storage_windows_plugin.h')
+            $registrantText = $registrantText.Replace('#include <flutter_secure_storage_windows/flutter_secure_storage_windows_plugin.h>', ('#include "' + $headerInclude + '"'))
+            [IO.File]::WriteAllText($registrant, $registrantText, [Text.UTF8Encoding]::new($false))
         }
         # Force CMake to re-read the corrected plugin CMakeLists instead of
         # reusing a project generated from the broken package metadata.

@@ -92,9 +92,19 @@ function Get-TorChatEmbeddedTor {
     $actualHash = Get-TorChatFileSha256 -Path $archive
     if ($actualHash -ne $package.sha256) { throw "Tor package checksum mismatch. Expected $($package.sha256), got $actualHash." }
     if (-not (Test-Path -LiteralPath $binary)) {
-        Assert-TorChatTool -Name tar
+        $tarTool = 'tar'
+        if ($env:OS -eq 'Windows_NT') {
+            $nativeTar = Join-Path $env:WINDIR 'System32\tar.exe'
+            if (Test-Path -LiteralPath $nativeTar) {
+                $tarTool = $nativeTar
+            } else {
+                Assert-TorChatTool -Name tar
+            }
+        } else {
+            Assert-TorChatTool -Name tar
+        }
         New-Item -ItemType Directory -Force -Path $extractRoot | Out-Null
-        [void](Invoke-TorChatNative -Context $Context -FilePath 'tar' -ArgumentList @('-xf',$archive,'-C',$extractRoot) -LogName 'tor-extract.log')
+        [void](Invoke-TorChatNative -Context $Context -FilePath $tarTool -ArgumentList @('-xf',$archive,'-C',$extractRoot) -LogName 'tor-extract.log')
     }
     if (-not (Test-Path -LiteralPath $binary)) { throw "Tor executable missing after extraction: $binary" }
     [pscustomobject]@{
