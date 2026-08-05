@@ -1,6 +1,6 @@
 use crate::{
-    ChatMessage, ContactRecord, ConversationSummary, InviteCode, PairingItem, ReceiptSendEffect,
-    RuntimeIdentity, RuntimeProfile, RuntimeResult,
+    ChatMessage, ContactRecord, ConversationSummary, DurableOperation, InviteCode, OperationId,
+    PairingItem, ReceiptSendEffect, RuntimeIdentity, RuntimeProfile, RuntimeResult,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -209,6 +209,21 @@ pub trait RuntimeStorage {
         _contact_installation_id: &str,
     ) -> RuntimeResult<()> {
         Err(unsupported("revoke_peer_endpoint_capability"))
+    }
+
+    fn operation_by_id(
+        &self,
+        _operation_id: &OperationId,
+    ) -> RuntimeResult<Option<DurableOperation>> {
+        Err(unsupported("operation_by_id"))
+    }
+
+    fn put_operation(&mut self, _operation: DurableOperation) -> RuntimeResult<()> {
+        Err(unsupported("put_operation"))
+    }
+
+    fn pending_operations(&self) -> RuntimeResult<Vec<DurableOperation>> {
+        Err(unsupported("pending_operations"))
     }
 
     fn message(&self, message_id: &str) -> RuntimeResult<Option<ChatMessage>> {
