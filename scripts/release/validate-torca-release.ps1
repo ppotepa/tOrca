@@ -5,14 +5,15 @@ param(
     [string]$Device = '',
     [string]$OutputPath,
     [switch]$RequirePlatforms,
-    [switch]$BuildAndroidBundle
+    [switch]$BuildAndroidBundle,
+    [string]$UpdateKeyId,
+    [string]$UpdatePublicKey
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$repositoryRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$repositoryRoot = (Resolve-Path -LiteralPath $repositoryRoot).Path
+$repositoryRoot = (Resolve-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))).Path
 $versionPath = Join-Path $repositoryRoot 'release/version.json'
 $matrixPath = Join-Path $PSScriptRoot 'torca-release-matrix.json'
 foreach ($required in @($versionPath, $matrixPath)) {
@@ -25,12 +26,12 @@ $matrix = Get-Content -LiteralPath $matrixPath -Raw | ConvertFrom-Json
 $results = [System.Collections.Generic.List[object]]::new()
 $artifacts = [System.Collections.Generic.List[object]]::new()
 
-function Get-TorcaGitCommit {
+function Get-Commit {
     $value = (& git -C $repositoryRoot rev-parse HEAD 2>$null | Select-Object -First 1)
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($value)) {
         throw 'Unable to resolve the release commit.'
     }
-    return $value.Trim()
+    $value.Trim()
 }
 
 function Get-ToolVersion {
@@ -38,13 +39,11 @@ function Get-ToolVersion {
         [Parameter(Mandatory = $true)][string]$Executable,
         [string[]]$Arguments = @('--version')
     )
-    if (-not (Get-Command $Executable -ErrorAction SilentlyContinue)) {
-        return $null
-    }
+    if (-not (Get-Command $Executable -ErrorAction SilentlyContinue)) { return $null }
     try {
-        return ((& $Executable @Arguments 2>&1 | Select-Object -First 1) | Out-String).Trim()
+        ((& $Executable @Arguments 2>&1 | Select-Object -First 1) | Out-String).Trim()
     } catch {
-        return $null
+        $null
     }
 }
 
@@ -60,9 +59,7 @@ function Invoke-Native {
     Push-Location $WorkingDirectory
     try {
         & $Executable @Arguments
-        if ($LASTEXITCODE -ne 0) {
-            throw "$Executable exited with code $LASTEXITCODE"
-        }
+        if ($LASTEXITCODE -ne 0) { throw "$Executable exited with code $LASTEXITCODE" }
     } finally {
         Pop-Location
     }
@@ -106,29 +103,22 @@ function Invoke-Step {
 }
 
 function Skip-Step {
-    param(
-        [Parameter(Mandatory = $true)][string]$Id,
-        [Parameter(Mandatory = $true)][string]$Platform,
-        [Parameter(Mandatory = $true)][string]$Reason
-    )
+    param([string]$Id, [string]$Platform, [string]$Reason)
     Add-Result $Id $Platform skipped 0 $Reason
     Write-Host "[SKIP] ${Id}: $Reason" -ForegroundColor Yellow
 }
 
 function Add-Artifact {
-    param(
-        [Parameter(Mandatory = $true)][string]$Id,
-        [Parameter(Mandatory = $true)][string]$Path
-    )
+    param([string]$Id, [string]$Path)
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
         throw "Release artifact is missing: $Path"
     }
-    $item = Get-Item -LiteralPath $Path
+    $file = Get-Item -LiteralPath $Path
     $artifacts.Add([pscustomobject][ordered]@{
         id = $Id
-        path = [IO.Path]::GetRelativePath($repositoryRoot, $item.FullName).Replace('\', '/')
-        bytes = $item.Length
-        sha256 = (Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        path = [IO.Path]::GetRelativePath($repositoryRoot, $file.FullName).Replace('\', '/')
+        bytes = $file.Length
+        sha256 = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
     })
 }
 
@@ -140,26 +130,19 @@ function Resolve-AndroidDevice {
             ForEach-Object { ($_ -split '\s+')[0] } |
             Where-Object { $_ }
     )
-    if ($Device) {
-        return $devices | Where-Object { $_ -eq $Device } | Select-Object -First 1
-    }
-    return $devices | Select-Object -First 1
+    if ($Device) { return $devices | Where-Object { $_ -eq $Device } | Select-Object -First 1 }
+    $devices | Select-Object -First 1
 }
 
 function Assert-AndroidProcess {
-    param([Parameter(Mandatory = $true)][string]$DeviceId)
+    param([string]$DeviceId)
     Start-Sleep -Seconds 3
     $pidValue = (& adb -s $DeviceId shell pidof org.torchat.mobile 2>$null | Out-String).Trim()
-    if (-not $pidValue) {
-        throw 'Torca Android process did not remain alive after launch.'
-    }
+    if (-not $pidValue) { throw 'Torca Android process did not remain alive after launch.' }
 }
 
-function Start-WindowsSmokeProcess {
-    param(
-        [Parameter(Mandatory = $true)][string]$Executable,
-        [Parameter(Mandatory = $true)][string]$Profile
-    )
+function Start-WindowsSmoke {
+    param([string]$Executable, [string]$Profile)
     $process = Start-Process -FilePath $Executable -PassThru -WindowStyle Hidden `
         -Environment @{ APPDATA = $Profile; LOCALAPPDATA = $Profile }
     Start-Sleep -Seconds 5
@@ -172,13 +155,35 @@ function Start-WindowsSmokeProcess {
     }
 }
 
-$commit = Get-TorcaGitCommit
+$commit = Get-Commit
+$buildsPlatformArtifact = $Target -in @('all', 'android', 'windows')
+if ($buildsPlatformArtifact -and
+    ([string]::IsNullOrWhiteSpace($UpdateKeyId) -or
+     [string]::IsNullOrWhiteSpace($UpdatePublicKey))) {
+    throw 'Platform release builds require UpdateKeyId and UpdatePublicKey.'
+}
+try {
+    $decodedPublicKey = [Convert]::FromBase64String($UpdatePublicKey)
+    if ($buildsPlatformArtifact -and $decodedPublicKey.Length -ne 32) {
+        throw 'UpdatePublicKey must be a base64-encoded 32-byte Ed25519 public key.'
+    }
+} catch {
+    if ($buildsPlatformArtifact) { throw 'UpdatePublicKey is not valid base64 Ed25519 key material.' }
+}
+
 $dartDefines = @(
     "--dart-define=TORCA_VERSION=$($release.version)",
     "--dart-define=TORCA_BUILD=$($release.build)",
     "--dart-define=TORCA_CHANNEL=$($release.channel)",
     "--dart-define=TORCA_COMMIT=$commit"
 )
+if (-not [string]::IsNullOrWhiteSpace($UpdateKeyId)) {
+    $dartDefines += "--dart-define=TORCA_UPDATE_KEY_ID=$UpdateKeyId"
+}
+if (-not [string]::IsNullOrWhiteSpace($UpdatePublicKey)) {
+    $dartDefines += "--dart-define=TORCA_UPDATE_PUBLIC_KEY=$UpdatePublicKey"
+}
+
 $runCore = $Target -in @('all', 'core')
 $runAndroid = $Target -in @('all', 'android')
 $runWindows = $Target -in @('all', 'windows')
@@ -187,59 +192,50 @@ if ($runCore) {
     Invoke-Step 'release-version' 'core' {
         & (Join-Path $PSScriptRoot 'check-release-version.ps1') -RepositoryRoot $repositoryRoot
     }
+    Invoke-Step 'release-policy' 'core' {
+        & (Join-Path $repositoryRoot 'scripts/internal/check-release-policy.ps1') -RepositoryRoot $repositoryRoot
+    }
     Invoke-Step 'runtime-contract' 'core' {
         & (Join-Path $repositoryRoot 'scripts/internal/check-runtime-contract.ps1') -RepositoryRoot $repositoryRoot
     }
     Invoke-Step 'source-size' 'core' {
         & (Join-Path $repositoryRoot 'scripts/internal/check-source-size.ps1') -RepositoryRoot $repositoryRoot
     }
-    Invoke-Step 'rust-format' 'core' {
-        Invoke-Native cargo @('fmt', '--all', '--', '--check') $repositoryRoot
-    }
-    Invoke-Step 'runtime-tests' 'core' {
-        Invoke-Native cargo @('test', '-p', 'torchat-runtime') $repositoryRoot
-    }
-    Invoke-Step 'engine-tests' 'core' {
-        Invoke-Native cargo @('test', '-p', 'torchat-client-engine') $repositoryRoot
-    }
-    Invoke-Step 'ffi-tests' 'core' {
-        Invoke-Native cargo @('test', '-p', 'torchat-client-engine-ffi') $repositoryRoot
-    }
+    Invoke-Step 'rust-format' 'core' { Invoke-Native cargo @('fmt', '--all', '--', '--check') $repositoryRoot }
+    Invoke-Step 'runtime-tests' 'core' { Invoke-Native cargo @('test', '-p', 'torchat-runtime') $repositoryRoot }
+    Invoke-Step 'engine-tests' 'core' { Invoke-Native cargo @('test', '-p', 'torchat-client-engine') $repositoryRoot }
+    Invoke-Step 'ffi-tests' 'core' { Invoke-Native cargo @('test', '-p', 'torchat-client-engine-ffi') $repositoryRoot }
     Invoke-Step 'rust-clippy' 'core' {
         Invoke-Native cargo @(
             'clippy', '-p', 'torchat-runtime', '-p', 'torchat-client-engine',
             '-p', 'torchat-client-engine-ffi', '--all-targets', '--', '-D', 'warnings'
         ) $repositoryRoot
     }
-    Invoke-Step 'rust-dependency-policy' 'core' {
-        Invoke-Native cargo @('deny', 'check') $repositoryRoot
-    }
+    Invoke-Step 'rust-dependency-policy' 'core' { Invoke-Native cargo @('deny', 'check') $repositoryRoot }
     Invoke-Step 'diagnostic-sanitization' 'core' {
         & (Join-Path $repositoryRoot 'scripts/tests/test-diagnostic-sanitization.ps1')
-        if ($LASTEXITCODE -notin @(0, $null)) {
-            throw "Diagnostic sanitization exited with code $LASTEXITCODE."
-        }
+        if ($LASTEXITCODE -notin @(0, $null)) { throw "Diagnostic sanitization exited with code $LASTEXITCODE." }
     }
-    foreach ($flutterRoot in @('apps/mobile/flutter', 'apps/desktop/flutter')) {
-        $workingDirectory = Join-Path $repositoryRoot $flutterRoot
-        $platform = if ($flutterRoot -like '*mobile*') { 'flutter-mobile' } else { 'flutter-desktop' }
-        Invoke-Step "${platform}-format" $platform {
+    foreach ($entry in @(
+        @{ id = 'flutter-mobile'; path = 'apps/mobile/flutter' },
+        @{ id = 'flutter-desktop'; path = 'apps/desktop/flutter' }
+    )) {
+        $workingDirectory = Join-Path $repositoryRoot $entry.path
+        Invoke-Step "$($entry.id)-format" $entry.id {
             Invoke-Native dart @('format', '--output=none', '--set-exit-if-changed', 'lib', 'test') $workingDirectory
         }
-        Invoke-Step "${platform}-analyze" $platform {
+        Invoke-Step "$($entry.id)-analyze" $entry.id {
             Invoke-Native flutter @('pub', 'get') $workingDirectory
             Invoke-Native flutter @('analyze') $workingDirectory
         }
-        Invoke-Step "${platform}-tests" $platform {
-            Invoke-Native flutter @('test') $workingDirectory
-        }
+        Invoke-Step "$($entry.id)-tests" $entry.id { Invoke-Native flutter @('test') $workingDirectory }
     }
 }
 
 if ($runAndroid) {
     $mobileRoot = Join-Path $repositoryRoot 'apps/mobile/flutter'
     Invoke-Step 'android-release-build' 'android' {
-        Invoke-Native flutter (@('pub', 'get')) $mobileRoot
+        Invoke-Native flutter @('pub', 'get') $mobileRoot
         Invoke-Native flutter (@('build', 'apk', '--release') + $dartDefines) $mobileRoot
         if ($BuildAndroidBundle) {
             Invoke-Native flutter (@('build', 'appbundle', '--release') + $dartDefines) $mobileRoot
@@ -251,11 +247,7 @@ if ($runAndroid) {
     if ($BuildAndroidBundle -and (Test-Path -LiteralPath $bundle)) { Add-Artifact 'android-aab' $bundle }
 
     $resolvedDevice = Resolve-AndroidDevice
-    $deviceSteps = @(
-        'android-clean-install-smoke',
-        'android-upgrade-preserves-data',
-        'android-cold-start-recovery'
-    )
+    $deviceSteps = @('android-clean-install-smoke', 'android-upgrade-preserves-data', 'android-cold-start-recovery')
     if ($resolvedDevice) {
         Invoke-Step 'android-clean-install-smoke' 'android' {
             & adb -s $resolvedDevice uninstall org.torchat.mobile 2>$null | Out-Null
@@ -286,19 +278,14 @@ if ($runAndroid) {
     } else {
         $reason = 'No authorized Android device is available.'
         foreach ($step in $deviceSteps) {
-            if ($RequirePlatforms) { Add-Result $step android failed 0 $reason }
-            else { Skip-Step $step android $reason }
+            if ($RequirePlatforms) { Add-Result $step android failed 0 $reason } else { Skip-Step $step android $reason }
         }
     }
 }
 
 if ($runWindows) {
     $desktopRoot = Join-Path $repositoryRoot 'apps/desktop/flutter'
-    $windowsSteps = @(
-        'windows-release-build',
-        'windows-clean-profile-smoke',
-        'windows-profile-restart-preserves-data'
-    )
+    $windowsSteps = @('windows-release-build', 'windows-clean-profile-smoke', 'windows-profile-restart-preserves-data')
     if ($env:OS -eq 'Windows_NT') {
         Invoke-Step 'windows-release-build' 'windows' {
             Invoke-Native flutter @('config', '--enable-windows-desktop') $desktopRoot
@@ -310,17 +297,17 @@ if ($runWindows) {
         Invoke-Step 'windows-clean-profile-smoke' 'windows' {
             $profile = Join-Path ([IO.Path]::GetTempPath()) ("torca-profile-" + [guid]::NewGuid().ToString('N'))
             New-Item -ItemType Directory -Force -Path $profile | Out-Null
-            try { Start-WindowsSmokeProcess $executable $profile }
+            try { Start-WindowsSmoke $executable $profile }
             finally { Remove-Item -LiteralPath $profile -Recurse -Force -ErrorAction SilentlyContinue }
         }
         Invoke-Step 'windows-profile-restart-preserves-data' 'windows' {
             $profile = Join-Path ([IO.Path]::GetTempPath()) ("torca-upgrade-" + [guid]::NewGuid().ToString('N'))
             New-Item -ItemType Directory -Force -Path $profile | Out-Null
             try {
-                Start-WindowsSmokeProcess $executable $profile
+                Start-WindowsSmoke $executable $profile
                 $marker = Join-Path $profile 'torca-release-upgrade-marker.txt'
                 'torca-release-upgrade-marker' | Set-Content -LiteralPath $marker -Encoding UTF8
-                Start-WindowsSmokeProcess $executable $profile
+                Start-WindowsSmoke $executable $profile
                 if ((Get-Content -LiteralPath $marker -Raw).Trim() -ne 'torca-release-upgrade-marker') {
                     throw 'Windows profile was not preserved across restart.'
                 }
@@ -331,8 +318,7 @@ if ($runWindows) {
     } else {
         $reason = 'Windows release validation requires a Windows host.'
         foreach ($step in $windowsSteps) {
-            if ($RequirePlatforms) { Add-Result $step windows failed 0 $reason }
-            else { Skip-Step $step windows $reason }
+            if ($RequirePlatforms) { Add-Result $step windows failed 0 $reason } else { Skip-Step $step windows $reason }
         }
     }
 }
@@ -344,7 +330,6 @@ if (-not $OutputPath) {
     $OutputPath = Join-Path $outputRoot "torca-$($release.version)-matrix-$stamp.json"
 }
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $OutputPath) | Out-Null
-
 $failed = @($results | Where-Object status -eq 'failed')
 $skipped = @($results | Where-Object status -eq 'skipped')
 $report = [ordered]@{
@@ -353,6 +338,7 @@ $report = [ordered]@{
     version = $release.version
     build = [int]$release.build
     channel = $release.channel
+    updateKeyId = $UpdateKeyId
     generatedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
     commit = $commit
     host = [ordered]@{
@@ -361,11 +347,11 @@ $report = [ordered]@{
         powershell = $PSVersionTable.PSVersion.ToString()
     }
     tools = [ordered]@{
-        rustc = Get-ToolVersion rustc
-        cargo = Get-ToolVersion cargo
-        flutter = Get-ToolVersion flutter
-        dart = Get-ToolVersion dart
-        adb = Get-ToolVersion adb @('version')
+        rustc = Get-ToolVersion -Executable rustc
+        cargo = Get-ToolVersion -Executable cargo
+        flutter = Get-ToolVersion -Executable flutter
+        dart = Get-ToolVersion -Executable dart
+        adb = Get-ToolVersion -Executable adb -Arguments @('version')
     }
     target = $Target
     requirePlatforms = [bool]$RequirePlatforms
@@ -379,6 +365,7 @@ $report = [ordered]@{
     steps = @($results)
     manual = @($matrix.manual)
 }
-$report | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $OutputPath -Encoding UTF8
+$utf8 = [Text.UTF8Encoding]::new($false)
+[IO.File]::WriteAllText($OutputPath, ($report | ConvertTo-Json -Depth 12), $utf8)
 Write-Host "Torca release report: $OutputPath"
 if (-not $report.passed) { exit 1 }
