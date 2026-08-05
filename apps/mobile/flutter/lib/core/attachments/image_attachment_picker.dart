@@ -3,28 +3,29 @@ import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 
+import 'image_attachment_policy.dart';
 import 'image_message_codec.dart';
-
-const maximumSourceImageBytes = 20 * 1024 * 1024;
 
 Future<List<PreparedImageAttachment>?> pickPreparedImageAttachments() async {
   final result = await FilePicker.pickFiles(
     type: FileType.custom,
     allowedExtensions: const ['jpg', 'jpeg', 'png', 'webp'],
     allowMultiple: true,
-    withData: true,
+    withData: false,
     lockParentWindow: true,
   );
   if (result == null || result.files.isEmpty) return null;
-  if (result.files.length > 4) {
-    throw StateError('At most 4 images can be selected at once.');
+  if (result.files.length > ImageAttachmentPolicy.maximumAttachmentsPerMessage) {
+    throw StateError(
+      'At most ${ImageAttachmentPolicy.maximumAttachmentsPerMessage} images can be selected at once.',
+    );
   }
+
   final prepared = <PreparedImageAttachment>[];
   for (final file in result.files) {
+    ImageAttachmentPolicy.validateSourceLength(file.size);
     final source = await _readBytes(file);
-    if (source.lengthInBytes > maximumSourceImageBytes) {
-      throw StateError('A source image can be at most 20 MiB.');
-    }
+    ImageAttachmentPolicy.validateSourceLength(source.lengthInBytes);
     prepared.add(await prepareImageAttachment(source));
   }
   return prepared;
