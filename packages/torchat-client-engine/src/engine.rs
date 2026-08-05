@@ -6,7 +6,7 @@ use crate::{
     ClientEngineActor, EngineCommand, EngineCommandEnvelope, EngineConfig, EngineError,
     EngineEvent, EngineFatalError, EngineResult, PlatformFact, ResponseResult,
     event::EngineEventReceiver,
-    input::EngineInputEnvelope,
+    input::{EngineInputEnvelope, EngineInputSource},
     logging::StartupJournal,
     output::{PendingResponseRegistry, spawn_event_router},
 };
@@ -19,6 +19,7 @@ const ENGINE_RESPONSE_TIMEOUT: Duration = Duration::from_secs(75);
 #[derive(Clone)]
 pub struct EngineCommandSender {
     inbox: mpsc::Sender<EngineInputEnvelope>,
+    source: EngineInputSource,
 }
 
 impl EngineCommandSender {
@@ -26,7 +27,10 @@ impl EngineCommandSender {
         &self,
         envelope: EngineCommandEnvelope,
     ) -> Result<(), mpsc::error::SendError<EngineCommandEnvelope>> {
-        let input = EngineInputEnvelope::command(unix_ms(), envelope);
+        let mut input = EngineInputEnvelope::command(unix_ms(), envelope);
+        if input.source == EngineInputSource::ClientApi {
+            input.source = self.source;
+        }
         self.inbox.send(input).await.map_err(|error| {
             let envelope = error
                 .0
@@ -34,6 +38,11 @@ impl EngineCommandSender {
                 .expect("command sender only submits command or platform inputs");
             mpsc::error::SendError(envelope)
         })
+    }
+
+    fn with_source(mut self, source: EngineInputSource) -> Self {
+        self.source = source;
+        self
     }
 }
 
@@ -262,7 +271,11 @@ impl ClientEngine {
         EngineEventReceiver,
         CancellationToken,
     ) {
-        (self.commands, self.events, self.shutdown)
+        (
+            self.commands.with_source(EngineInputSource::Ffi),
+            self.events,
+            self.shutdown,
+        )
     }
 }
 
@@ -275,6 +288,7 @@ fn unified_inbox_channel() -> (
     (
         EngineCommandSender {
             inbox: inbox_tx.clone(),
+            source: EngineInputSource::ClientApi,
         },
         inbox_rx,
         inbox_tx,
