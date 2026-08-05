@@ -39,3 +39,24 @@ fn processing_contract_keeps_outputs_explicit() {
         assert!(source.contains(symbol), "missing processing symbol: {symbol}");
     }
 }
+
+#[test]
+fn client_commands_enter_the_unified_inbox_before_actor_dispatch() {
+    let source = fs::read_to_string(crate_root().join("src/engine.rs"))
+        .expect("engine source is readable");
+
+    for symbol in [
+        "struct EngineCommandSender",
+        "mpsc::Sender<EngineInputEnvelope>",
+        "EngineInputEnvelope::command",
+        "fn unified_command_channel",
+        "ENGINE_INBOX_CAPACITY",
+    ] {
+        assert!(source.contains(symbol), "missing unified command ingress symbol: {symbol}");
+    }
+
+    assert!(
+        !source.contains("commands: mpsc::Sender<EngineCommandEnvelope>"),
+        "ClientEngine must not own the legacy raw command sender",
+    );
+}
