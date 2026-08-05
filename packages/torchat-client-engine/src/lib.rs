@@ -5,14 +5,13 @@ pub mod engine;
 pub mod error;
 pub mod event;
 pub mod fault_injection;
-#[allow(dead_code)]
 mod input;
 mod logging;
 pub mod peer;
-#[allow(dead_code)]
 mod processing;
 pub mod probing;
 pub mod relay;
+mod scheduler;
 pub mod storage;
 
 pub use actor::ClientEngineActor;
