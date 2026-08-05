@@ -7,11 +7,12 @@ import 'platform/platform_services.dart';
 export 'app/torca_app.dart' show ControllerHomePage, TorcaApp, TorChatMobileApp;
 
 Future<void> main({PlatformServices? platformServices}) async {
-  if (platformServices != null) {
-    PlatformServices.current = platformServices;
-  }
   WidgetsFlutterBinding.ensureInitialized();
   await initializeDateFormatting();
-  if (!await PlatformServices.current.windowLifecycle.initialize()) return;
-  runApp(const TorcaApp());
+  final services = platformServices ?? PlatformServices();
+  // Compatibility bridge for platform adapters not yet migrated to providers.
+  // New application code receives these services through TorcaApp overrides.
+  PlatformServices.current = services;
+  if (!await services.windowLifecycle.initialize()) return;
+  runApp(TorcaApp(platformServices: services));
 }

@@ -24,6 +24,7 @@ import '../locales/generated/app_localizations.dart';
 import '../locales/presentation/app_localizations_x.dart';
 import '../locales/presentation/state_problem_localizer.dart';
 import '../platform/platform_services.dart';
+import '../platform/providers/platform_port_providers.dart';
 import '../shared/widgets/toast_host.dart';
 import 'app_controller.dart';
 import 'application_snapshot_provider.dart';
@@ -34,16 +35,23 @@ part 'application_dialogs.dart';
 part 'application_root.dart';
 
 class TorcaApp extends StatelessWidget {
-  const TorcaApp({super.key, this.runtime});
+  TorcaApp({
+    super.key,
+    this.runtime,
+    PlatformServices? platformServices,
+  }) : platformServices = platformServices ?? PlatformServices();
 
   final ClientRuntime? runtime;
+  final PlatformServices platformServices;
 
   @override
   Widget build(BuildContext context) {
+    final resolvedRuntime = runtime ?? platformServices.runtimeBridgeFactory();
     return ProviderScope(
-      overrides: runtime == null
-          ? const []
-          : [clientRuntimeProvider.overrideWithValue(runtime!)],
+      overrides: [
+        platformServicesProvider.overrideWithValue(platformServices),
+        clientRuntimeProvider.overrideWithValue(resolvedRuntime),
+      ],
       child: const _TorcaAppView(),
     );
   }
@@ -52,7 +60,11 @@ class TorcaApp extends StatelessWidget {
 /// Temporary public constructor name retained for existing desktop embedding.
 /// Both entrypoints use the same Torca application shell.
 class TorChatMobileApp extends TorcaApp {
-  const TorChatMobileApp({super.key, super.runtime});
+  TorChatMobileApp({
+    super.key,
+    super.runtime,
+    super.platformServices,
+  });
 }
 
 class _TorcaAppView extends ConsumerWidget {
