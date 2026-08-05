@@ -17,7 +17,6 @@ import '../../locales/presentation/theme_localizer.dart';
 import '../../platform/platform_services.dart';
 import '../../shared/widgets/action_section.dart';
 import '../../shared/widgets/action_tile.dart';
-import '../../shared/widgets/callout_card.dart';
 import '../../shared/widgets/info_tile.dart';
 import '../../shared/widgets/themed_switch_list_tile.dart';
 import 'image_storage_settings_section.dart';
@@ -453,7 +452,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
           const Divider(),
           const ImageStorageSettingsSection(),
           const Divider(),
-          const ReleaseInformationSection(),
+          ReleaseInformationSection(onResetUnavailable: widget.onReset),
           const Divider(),
           ActionSection(
             title: l10n.settingsIdentitySection,
@@ -464,28 +463,6 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
               busyLabel: l10n.settingsSavingProfile,
               subtitle: '@${widget.nickname}',
               onTap: widget.onEditProfile,
-            ),
-          ),
-          const Divider(),
-          ActionSection(
-            title: l10n.settingsLocalDataSection,
-            child: CalloutCard(
-              leading: ThemedIcon(
-                Icons.delete_outline,
-                color: Theme.of(context).colorScheme.error,
-              ),
-              title: l10n.settingsResetDemoData,
-              subtitle: l10n.settingsRequiresConfirmation,
-              borderColor: Theme.of(context)
-                  .colorScheme
-                  .error
-                  .withValues(alpha: .60),
-              backgroundColor: Theme.of(context).colorScheme.errorContainer,
-              child: ActionTile(
-                title: l10n.settingsClearLocalState,
-                subtitle: l10n.settingsClearLocalStateDescription,
-                onTap: widget.onReset,
-              ),
             ),
           ),
         ],
