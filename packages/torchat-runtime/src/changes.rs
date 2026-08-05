@@ -2,6 +2,8 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
+use crate::contract::RuntimeEvent;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ChangeSections(u16);
@@ -103,6 +105,112 @@ impl ChangeSet {
         self.sections.insert(ChangeSections::MESSAGES);
         self.entities.message_ids.insert(id.into());
         self
+    }
+
+    pub fn from_runtime_event(event: &RuntimeEvent) -> Self {
+        match event {
+            RuntimeEvent::RuntimeReady { .. }
+            | RuntimeEvent::TorStatus { .. }
+            | RuntimeEvent::TransportStatusChanged { .. }
+            | RuntimeEvent::PeerEndpointChanged { .. }
+            | RuntimeEvent::PeerConnectionChanged { .. } => {
+                Self::section(ChangeSections::TRANSPORT)
+            }
+            RuntimeEvent::ProfileReady { .. } => Self::section(ChangeSections::PROFILE),
+            RuntimeEvent::InviteReceived { pairing_id, .. }
+            | RuntimeEvent::InviteStateChanged { pairing_id, .. } => pairing_id
+                .as_deref()
+                .map(|id| Self::none().with_pairing(id))
+                .unwrap_or_else(|| Self::section(ChangeSections::PAIRINGS)),
+            RuntimeEvent::MessageReceived {
+                message_id,
+                conversation_id,
+                ..
+            }
+            | RuntimeEvent::MessageStateChanged {
+                message_id,
+                conversation_id,
+                ..
+            } => {
+                let mut changes = message_id
+                    .map(|id| Self::none().with_message(id.to_string()))
+                    .unwrap_or_else(|| Self::section(ChangeSections::MESSAGES));
+                if let Some(conversation_id) = conversation_id {
+                    changes = changes.with_conversation(conversation_id.clone());
+                }
+                changes
+            }
+            RuntimeEvent::ConversationReadChanged {
+                conversation_id, ..
+            } => conversation_id
+                .as_deref()
+                .map(|id| {
+                    let mut changes = Self::section(ChangeSections::RECEIPTS);
+                    changes = changes.with_conversation(id);
+                    changes
+                })
+                .unwrap_or_else(|| Self::section(ChangeSections::RECEIPTS)),
+            RuntimeEvent::TypingChanged {
+                conversation_id, ..
+            }
+            | RuntimeEvent::ConversationFocusChanged {
+                conversation_id, ..
+            } => Self::section(ChangeSections::PRESENCE)
+                .with_conversation(conversation_id.clone()),
+            RuntimeEvent::PresenceChanged { contact_id, .. } => {
+                let mut changes = Self::section(ChangeSections::PRESENCE);
+                changes.entities.contact_ids.insert(contact_id.clone());
+                changes
+            }
+            RuntimeEvent::ContactCapabilityChanged { contact_id, .. } => {
+                let mut changes = Self::section(ChangeSections::CAPABILITIES);
+                changes.entities.contact_ids.insert(contact_id.clone());
+                changes
+            }
+            RuntimeEvent::Changed { kind } => match kind.as_deref() {
+                Some("profile") => Self::section(ChangeSections::PROFILE),
+                Some("pairing") | Some("pairings") => Self::section(ChangeSections::PAIRINGS),
+                Some("contact") | Some("contacts") => Self::section(ChangeSections::CONTACTS),
+                Some("relationship") | Some("relationships") => {
+                    Self::section(ChangeSections::RELATIONSHIPS)
+                }
+                Some("conversation") | Some("conversations") => {
+                    Self::section(ChangeSections::CONVERSATIONS)
+                }
+                Some("message") | Some("messages") => Self::section(ChangeSections::MESSAGES),
+                Some("receipt") | Some("receipts") => Self::section(ChangeSections::RECEIPTS),
+                Some("presence") => Self::section(ChangeSections::PRESENCE),
+                Some("transport") => Self::section(ChangeSections::TRANSPORT),
+                Some("capability") | Some("capabilities") => {
+                    Self::section(ChangeSections::CAPABILITIES)
+                }
+                _ => Self::section(ChangeSections::OPERATIONS),
+            },
+            RuntimeEvent::ProjectionChanged {
+                application,
+                conversation_ids,
+                ..
+            } => {
+                let mut changes = if *application {
+                    Self::section(ChangeSections::OPERATIONS)
+                } else {
+                    Self::none()
+                };
+                for conversation_id in conversation_ids {
+                    changes = changes.with_conversation(conversation_id.clone());
+                }
+                changes
+            }
+            RuntimeEvent::RuntimeError { .. } | RuntimeEvent::RuntimeLog { .. } => Self::none(),
+        }
+    }
+
+    pub fn from_runtime_events<'a>(events: impl IntoIterator<Item = &'a RuntimeEvent>) -> Self {
+        let mut changes = Self::none();
+        for event in events {
+            changes.merge(Self::from_runtime_event(event));
+        }
+        changes
     }
 }
 

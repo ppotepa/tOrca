@@ -1,0 +1,11 @@
+Torca 0.3.6 — ChangeSet and revision publication
+
+Implemented:
+- runtime ChangeSet is derived from RuntimeEvent values,
+- changed entity identifiers are aggregated per command/effect outcome,
+- EngineProcessingResult carries one semantic ChangeSet,
+- pending runtime events are routed through the same aggregation boundary,
+- response publication remains after runtime event collection,
+- no duplicate ChangeSet implementation remains.
+
+Validation intentionally not run in this batch.

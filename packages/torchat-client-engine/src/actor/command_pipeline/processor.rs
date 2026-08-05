@@ -83,12 +83,8 @@ impl ClientEngineActor {
                         if let Some(snapshot) = connection_snapshot {
                             result.events.push(EngineEvent::Connection { snapshot });
                         }
-                        result.events.extend(
-                            runtime_events
-                                .into_iter()
-                                .map(|event| EngineEvent::Runtime { event }),
-                        );
-                        result.events.append(&mut self.pending_engine_events);
+                        result.extend_runtime_events(runtime_events);
+                        result.append_engine_events(&mut self.pending_engine_events);
                         if let Some(command_id) = command_id.as_deref()
                             && let Ok((_, revision)) = self.projection_head()
                             && let Ok(result_json) = serde_json::to_string(&payload)
@@ -181,12 +177,8 @@ impl ClientEngineActor {
         result.scheduler_plan_changed = true;
         match operation_result {
             Ok((payload, runtime_events)) => {
-                result.events.extend(
-                    runtime_events
-                        .into_iter()
-                        .map(|event| EngineEvent::Runtime { event }),
-                );
-                result.events.append(&mut self.pending_engine_events);
+                result.extend_runtime_events(runtime_events);
+                result.append_engine_events(&mut self.pending_engine_events);
                 result.events.push(EngineEvent::Response {
                     request_id: context.request_id,
                     result: ResponseResult::Ok { payload },
