@@ -13,9 +13,7 @@ void main() {
     final runtime = _SnapshotRuntime();
     final repository = RuntimeRepository(runtime);
 
-    final snapshot = await repository.applicationSnapshot(
-      includePairing: true,
-    );
+    final snapshot = await repository.applicationSnapshot();
 
     expect(snapshot.profile.nickname, 'Alice');
     expect(snapshot.contacts.single.nickname, 'Bob');
@@ -28,14 +26,11 @@ void main() {
     expect(runtime.listPairingsCalls, 0);
   });
 
-  test('forced pairing refresh still performs one projection request', () async {
+  test('forced application refresh performs one projection request', () async {
     final runtime = _SnapshotRuntime();
     final repository = RuntimeRepository(runtime);
 
-    final snapshot = await repository.applicationSnapshot(
-      includePairing: true,
-      force: true,
-    );
+    final snapshot = await repository.applicationSnapshot(force: true);
 
     expect(snapshot.pairingInbox.single.origin, PairingOrigin.inbox);
     expect(snapshot.pairingOutbox.single.origin, PairingOrigin.outbox);
@@ -83,7 +78,7 @@ void main() {
       final runtime = _SnapshotRuntime();
       final repository = RuntimeRepository(runtime);
 
-      final refresh = repository.refresh(includePairing: true);
+      final refresh = repository.refresh();
       repository.invalidateLocalCache();
       final result = await refresh;
 
