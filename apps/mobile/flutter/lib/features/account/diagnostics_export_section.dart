@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:torchat_flutter_ui/async/async_operation_state.dart';
 import 'package:torchat_flutter_ui/async/busy_surface.dart';
 
 import '../../platform/platform_services.dart';
@@ -51,13 +52,17 @@ class _DiagnosticsExportSectionState extends State<DiagnosticsExportSection> {
   @override
   Widget build(BuildContext context) {
     final polish = Localizations.localeOf(context).languageCode == 'pl';
+    final operation = AsyncOperationState(
+      phase: _exporting
+          ? AsyncOperationPhase.running
+          : AsyncOperationPhase.idle,
+      label: polish ? 'Eksportowanie diagnostyki' : 'Exporting diagnostics',
+    );
     return ActionSection(
       title: polish ? 'DIAGNOSTYKA' : 'DIAGNOSTICS',
       child: BusySurface(
-        state: _exporting
-            ? const AsyncOperationState.running(label: 'Exporting diagnostics')
-            : const AsyncOperationState.idle(),
-        label: polish ? 'Eksportowanie diagnostyki' : 'Exporting diagnostics',
+        state: operation,
+        label: operation.label,
         child: ActionTile(
           leading: const Icon(Icons.bug_report_outlined),
           title: polish ? 'Eksportuj diagnostykę' : 'Export diagnostics',
