@@ -38,9 +38,10 @@ $ignoredPathPatterns = @(
     '(^|/)migrations/',
     '(^|/)sql/migrations/',
     '(^|/)generated/',
-    # Frozen compatibility snapshot retained while the active engine uses the
-    # split unified actor modules. New production code must not be added here.
-    '^packages/torchat-client-engine/src/actor/legacy(?:\.rs|/)',
+    # Actor construction and shared state still live in this historical file.
+    # The dead actor/legacy/ snapshot directory has been removed; all new
+    # command and pipeline modules are checked normally.
+    '^packages/torchat-client-engine/src/actor/legacy\.rs$',
     '\.g\.dart$',
     'Cargo\.lock$'
 )
