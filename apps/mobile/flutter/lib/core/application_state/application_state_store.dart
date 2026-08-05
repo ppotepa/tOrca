@@ -32,14 +32,18 @@ class ApplicationStateStore {
   final Map<String, List<ChatMessage>> _messages =
       <String, List<ChatMessage>>{};
   final Map<String, int> _messageRevisions = <String, int>{};
-  List<PairingItem> _legacyPairingInbox = const <PairingItem>[];
-  List<PairingItem> _legacyPairingOutbox = const <PairingItem>[];
 
   ApplicationSnapshot? get current => _current;
 
   bool get hasSnapshot => _current != null;
 
   bool get isStale => _stale;
+
+  List<PairingItem> get pairingInbox =>
+      _current?.pairingInbox ?? const <PairingItem>[];
+
+  List<PairingItem> get pairingOutbox =>
+      _current?.pairingOutbox ?? const <PairingItem>[];
 
   Stream<ApplicationSnapshot?> get changes => _changes.stream;
 
@@ -165,29 +169,6 @@ class ApplicationStateStore {
     return 0;
   }
 
-  List<PairingItem> get pairingInbox {
-    final snapshot = _current;
-    if (snapshot != null && snapshot.schemaVersion >= 2) {
-      return snapshot.pairingInbox;
-    }
-    return _legacyPairingInbox;
-  }
-
-  List<PairingItem> get pairingOutbox {
-    final snapshot = _current;
-    if (snapshot != null && snapshot.schemaVersion >= 2) {
-      return snapshot.pairingOutbox;
-    }
-    return _legacyPairingOutbox;
-  }
-
-  /// Transitional schema-1 fallback. Schema-2 projections carry pairing in
-  /// the authoritative application snapshot and ignore this cache.
-  void setPairing(List<PairingItem> inbox, List<PairingItem> outbox) {
-    _legacyPairingInbox = List<PairingItem>.unmodifiable(inbox);
-    _legacyPairingOutbox = List<PairingItem>.unmodifiable(outbox);
-  }
-
   bool hydrate(ApplicationSnapshot snapshot) {
     final current = _current;
     final currentIdentity = current?.identity.installationId.trim() ?? '';
@@ -198,8 +179,6 @@ class ApplicationStateStore {
         currentIdentity != nextIdentity) {
       _current = null;
       _stale = false;
-      _legacyPairingInbox = const <PairingItem>[];
-      _legacyPairingOutbox = const <PairingItem>[];
       _changes.add(null);
     } else if (current != null) {
       final currentStore = current.projectionStoreId.trim();
@@ -226,10 +205,6 @@ class ApplicationStateStore {
     }
     _current = snapshot;
     _stale = false;
-    if (snapshot.schemaVersion >= 2) {
-      _legacyPairingInbox = const <PairingItem>[];
-      _legacyPairingOutbox = const <PairingItem>[];
-    }
     _changes.add(snapshot);
     _logSnapshot('published', snapshot);
     return true;
@@ -272,8 +247,6 @@ class ApplicationStateStore {
     _stale = false;
     _messages.clear();
     _messageRevisions.clear();
-    _legacyPairingInbox = const <PairingItem>[];
-    _legacyPairingOutbox = const <PairingItem>[];
     _changes.add(null);
   }
 }
