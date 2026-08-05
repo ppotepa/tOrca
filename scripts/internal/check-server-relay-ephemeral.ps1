@@ -4,7 +4,7 @@ param()
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 
-$serverRoot = Join-Path $repoRoot 'server\torchat-server'
+$serverRoot = Join-Path $repoRoot 'services\torchat-relay'
 $cargo = Get-Content -Raw (Join-Path $serverRoot 'Cargo.toml')
 foreach ($needle in @('postgres', 'rusqlite', 'sqlx', 'diesel', 'sled')) {
     if ($cargo -match "(?i)\b$needle\b") { throw "Relay server has datastore dependency: $needle" }

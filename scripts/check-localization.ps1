@@ -5,7 +5,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$mobileRoot = Join-Path $repoRoot 'mobile'
+$mobileRoot = Join-Path $repoRoot 'apps\mobile\flutter'
 
 function Invoke-Checked {
     param(

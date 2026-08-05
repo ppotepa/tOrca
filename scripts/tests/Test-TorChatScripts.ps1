@@ -43,6 +43,12 @@ $removedEntryPoints = @(
     'run-windows.ps1',
     'collect-logs.ps1'
 )
+$removedLegacyBuildScripts = @(
+    'internal\build-cache.ps1',
+    'internal\build-android-core.ps1',
+    'internal\build-clients.ps1',
+    'internal\build-desktop-runtime.ps1'
+)
 foreach ($adapterName in $removedEntryPoints) {
     $adapterPath = Join-Path $scriptsRoot $adapterName
     if (Test-Path -LiteralPath $adapterPath) {
@@ -77,6 +83,19 @@ foreach ($contract in $startupContracts) {
         Message = $contract.Message
     })
     Write-Host ("[FAIL] torchat.ps1 {0}" -f $contract.Message) -ForegroundColor Red
+}
+foreach ($relativePath in $removedLegacyBuildScripts) {
+    $legacyPath = Join-Path $scriptsRoot $relativePath
+    if (Test-Path -LiteralPath $legacyPath) {
+        $record = [pscustomobject]@{
+            File = $legacyPath
+            Line = 0
+            Column = 0
+            Message = 'Removed duplicate build implementation was restored. Use scripts/modules.'
+        }
+        [void]$failures.Add($record)
+        Write-Host ("[FAIL] {0} {1}" -f $relativePath, $record.Message) -ForegroundColor Red
+    }
 }
 
 $windowsModulePath = Join-Path $scriptsRoot 'modules\TorChat.Windows.psm1'

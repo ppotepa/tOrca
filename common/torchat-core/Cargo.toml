@@ -26,3 +26,4 @@ hkdf = "0.12"
 thiserror = "2"
 uuid = { version = "1", features = ["serde", "v4"] }
 x25519-dalek = { version = "2", features = ["static_secrets"] }
+torchat-crypto = { path = "../../packages/torchat-crypto" }

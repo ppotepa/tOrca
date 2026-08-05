@@ -64,9 +64,10 @@ def main() -> int:
     root = args.root.resolve()
     findings: list[str] = []
     referenced: set[Path] = set()
-    for source_root, test in ((root / "common/torchat-client-engine/src", False),
-                              (root / "common/torchat-client-engine/tests", True),
-                              (root / "server/torchat-server/src", False)):
+    for source_root, test in ((root / "packages/torchat-client-engine/src", False),
+                              (root / "packages/torchat-storage/src", False),
+                              (root / "packages/torchat-client-engine/tests", True),
+                              (root / "services/torchat-relay/src", False)):
         if source_root.exists():
             for path in source_root.rglob("*.rs"):
                 text = path.read_text(encoding="utf-8")
@@ -75,8 +76,8 @@ def main() -> int:
                     if candidate.suffix.lower() == ".sql":
                         referenced.add(candidate)
                 findings.extend(check_rust(path, root, test))
-    for sql_root, client in ((root / "common/torchat-client-engine/sql", True),
-                             (root / "server/torchat-server/sql", False)):
+    for sql_root, client in ((root / "packages/torchat-storage/sql", True),
+                             (root / "services/torchat-relay/sql", False)):
         for path in sql_root.rglob("*.sql"):
             findings.extend(check_sql_file(path, root, client, "migrations" in path.parts))
             if "migrations" not in path.parts and path.resolve() not in referenced:

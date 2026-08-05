@@ -1,0 +1,16 @@
+[package]
+name = "torchat-rendezvous-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Client-side WebSocket rendezvous transport for pairing"
+
+[dependencies]
+futures-util = "=0.3.32"
+tokio = { version = "1", features = ["io-util", "macros", "net"] }
+tokio-socks = "0.5"
+tokio-tungstenite = "0.29"
+torchat-relay-protocol = { path = "../torchat-relay-protocol" }
+url = "2"
+uuid = { version = "1", features = ["serde", "v4"] }
+serde_json = "1"

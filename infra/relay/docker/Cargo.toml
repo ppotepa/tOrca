@@ -1,0 +1,12 @@
+[workspace]
+resolver = "2"
+members = [
+    "common/torchat-core",
+    "packages/torchat-relay-protocol",
+    "services/torchat-relay",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"

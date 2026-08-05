@@ -34,7 +34,7 @@ function Collect-TorChatDiagnostics {
         }
         if ($dockerReady) {
             Invoke-TorChatDiagnosticCapture -Path (Join-Path $root 'docker-ps.txt') -Action { docker @($compose.Arguments + @('ps','-a')) }
-            foreach ($service in @('server','tor','torka')) {
+            foreach ($service in @('relay','tor','torka')) {
                 Invoke-TorChatDiagnosticCapture -Path (Join-Path $root "docker-$service.log") -Action { docker @($compose.Arguments + @('logs','--timestamps','--no-color','--tail','2000',$service)) }
             }
             Invoke-TorChatDiagnosticCapture -Path (Join-Path $root 'docker-info.txt') -Action { docker info }
@@ -48,7 +48,7 @@ function Collect-TorChatDiagnostics {
         New-Item -ItemType Directory -Force -Path $desktopDiagnostics | Out-Null
         Invoke-TorChatDiagnosticCapture -Path (Join-Path $root 'windows-processes.txt') -Action {
             Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-                Where-Object { $_.Name -in @('torchat_mobile.exe','torchat-desktop.exe','tor.exe','adb.exe') } |
+                Where-Object { $_.Name -in @('torchat_desktop.exe','torchat-desktop.exe','tor.exe','adb.exe') } |
                 Select-Object Name,ProcessId,ParentProcessId,ExecutablePath,CommandLine |
                 Format-List
         }

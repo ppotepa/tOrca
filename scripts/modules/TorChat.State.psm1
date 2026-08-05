@@ -86,7 +86,18 @@ function Clear-TorChatBuildState {
         }
     }
     if ($Artifacts) {
-        $mobileBuild = Join-Path $RepositoryRoot 'mobile\build'
+        if ($env:OS -eq 'Windows_NT') {
+            $gradleWrapper = Join-Path $RepositoryRoot 'apps\mobile\flutter\android\gradlew.bat'
+            if (Test-Path -LiteralPath $gradleWrapper) {
+                Push-Location (Split-Path -Parent $gradleWrapper)
+                try {
+                    & $gradleWrapper '--stop' *> $null
+                } finally {
+                    Pop-Location
+                }
+            }
+        }
+        $mobileBuild = Join-Path $RepositoryRoot 'apps\mobile\flutter\build'
         if (Test-Path -LiteralPath $mobileBuild) {
             Remove-TorChatDirectoryRobust -Path $mobileBuild -Description 'mobile build directory'
         }

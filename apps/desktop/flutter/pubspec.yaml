@@ -1,0 +1,31 @@
+name: torchat_desktop
+description: TorChat desktop Flutter composition root.
+publish_to: none
+version: 0.1.0
+
+environment:
+  sdk: '>=3.8.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  torchat_mobile:
+    path: ../../mobile/flutter
+  torchat_flutter_ui:
+    path: ../../../packages/torchat-flutter-ui
+
+  shared_preferences: ^2.3.3
+  launch_at_startup: ^0.5.1
+  local_notifier: ^0.1.6
+  tray_manager: ^0.5.3
+  window_manager: ^0.5.2
+
+dev_dependencies:
+  flutter_lints: ^6.0.0
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+  assets:
+    - windows/runner/resources/app_icon.ico

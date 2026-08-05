@@ -3,7 +3,7 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$arbRoot = Join-Path $repoRoot 'mobile\lib\locales\resources'
+$arbRoot = Join-Path $repoRoot 'apps\mobile\flutter\lib\locales\resources'
 $english = Get-Content (Join-Path $arbRoot 'app_en.arb') -Raw | ConvertFrom-Json
 $polish = Get-Content (Join-Path $arbRoot 'app_pl.arb') -Raw | ConvertFrom-Json
 
@@ -31,9 +31,9 @@ foreach ($key in $englishKeys) {
 
 $forbiddenPattern = '["''](Nowa wiadomość|Nowe zaproszenie)["'']'
 $productionRoots = @(
-    (Join-Path $repoRoot 'mobile\lib'),
-    (Join-Path $repoRoot 'mobile\android\app\src\main\kotlin'),
-    (Join-Path $repoRoot 'common\torchat-client-engine\src')
+    (Join-Path $repoRoot 'apps\mobile\flutter\lib'),
+    (Join-Path $repoRoot 'apps\mobile\flutter\android\app\src\main\kotlin'),
+    (Join-Path $repoRoot 'packages\torchat-client-engine\src')
 )
 foreach ($root in $productionRoots) {
     foreach ($match in (Get-ChildItem $root -Recurse -File | Select-String -Pattern $forbiddenPattern)) {

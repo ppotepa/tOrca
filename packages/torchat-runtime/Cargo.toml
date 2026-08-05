@@ -1,0 +1,19 @@
+[package]
+name = "torchat-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Internal shared TorChat client domain runtime"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+torchat-domain = { path = "../torchat-domain" }
+torchat-core = { path = "../../common/torchat-core" }
+uuid = { version = "1", features = ["serde", "v4", "v7"] }
+
+[dev-dependencies]
+pretty_assertions = "1"

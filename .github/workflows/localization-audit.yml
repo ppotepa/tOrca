@@ -44,8 +44,8 @@ jobs:
               return Object.keys(metadata.placeholders || {}).sort();
             }
 
-            const en = JSON.parse(await readFile('mobile/lib/locales/resources/app_en.arb'));
-            const pl = JSON.parse(await readFile('mobile/lib/locales/resources/app_pl.arb'));
+            const en = JSON.parse(await readFile('apps/mobile/flutter/lib/locales/resources/app_en.arb'));
+            const pl = JSON.parse(await readFile('apps/mobile/flutter/lib/locales/resources/app_pl.arb'));
             if (en['@@locale'] !== 'en' || pl['@@locale'] !== 'pl') {
               throw new Error('ARB locale declarations are invalid');
             }
@@ -79,12 +79,12 @@ jobs:
               .filter((entry) => entry.type === 'blob')
               .map((entry) => entry.path)
               .filter((path) =>
-                (path === 'mobile/lib/main.dart' ||
-                  path.startsWith('mobile/lib/features/') ||
-                  path.startsWith('mobile/lib/shared/widgets/') ||
-                  path.startsWith('mobile/lib/locales/presentation/') ||
-                  path.startsWith('mobile/lib/locales/application/') ||
-                  path.startsWith('mobile/android/app/src/main/kotlin/')) &&
+                (path === 'apps/mobile/flutter/lib/main.dart' ||
+                  path.startsWith('apps/mobile/flutter/lib/features/') ||
+                  path.startsWith('apps/mobile/flutter/lib/shared/widgets/') ||
+                  path.startsWith('apps/mobile/flutter/lib/locales/presentation/') ||
+                  path.startsWith('apps/mobile/flutter/lib/locales/application/') ||
+                  path.startsWith('apps/mobile/flutter/android/app/src/main/kotlin/')) &&
                 (path.endsWith('.dart') || path.endsWith('.kt')),
               );
 

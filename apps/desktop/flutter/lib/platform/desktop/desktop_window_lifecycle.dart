@@ -1,0 +1,263 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:ui';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:tray_manager/tray_manager.dart';
+import 'package:window_manager/window_manager.dart';
+import 'package:torchat_mobile/platform/platform_services.dart';
+
+import 'package:torchat_mobile/locales/domain/app_locale_preference.dart';
+import 'package:torchat_mobile/locales/generated/app_localizations.dart';
+import 'desktop_navigation_intent.dart';
+
+const _windowWidthKey = 'torchat.desktop.window.width';
+const _windowHeightKey = 'torchat.desktop.window.height';
+const _windowXKey = 'torchat.desktop.window.x';
+const _windowYKey = 'torchat.desktop.window.y';
+const _singleInstancePort = 49631;
+const _activationMessage = 'activate';
+const _localePreferenceKey = 'torchat.locale.preference';
+
+bool get isDesktopPlatform =>
+    Platform.isWindows || Platform.isLinux || Platform.isMacOS;
+
+class DesktopWindowLifecycle with WindowListener, TrayListener {
+  DesktopWindowLifecycle._();
+
+  static final DesktopWindowLifecycle instance = DesktopWindowLifecycle._();
+
+  static Future<bool>? _initialization;
+  Timer? _persistDebounce;
+  ServerSocket? _activationServer;
+  bool _allowClose = false;
+  bool _trayReady = false;
+
+  static Future<bool> initialize() {
+    if (!isDesktopPlatform) return Future<bool>.value(true);
+    if (Platform.environment['FLUTTER_TEST'] == 'true') {
+      return Future<bool>.value(true);
+    }
+    return _initialization ??= instance._initialize();
+  }
+
+  static Future<void> refreshLocale(AppLocalePreference preference) async {
+    if (!isDesktopPlatform || Platform.environment['FLUTTER_TEST'] == 'true') {
+      return;
+    }
+    if (!await initialize()) return;
+    await instance._applyLocale(preference);
+  }
+
+  Future<bool> _initialize() async {
+    if (!await _acquireSingleInstance()) return false;
+
+    try {
+      await windowManager.ensureInitialized();
+    } on MissingPluginException {
+      return true;
+    }
+    final preferences = await SharedPreferences.getInstance();
+    final localePreference = AppLocalePreference.fromStorage(
+          preferences.getString(_localePreferenceKey),
+        ) ??
+        AppLocalePreference.system;
+    final l10n = await _loadLocalizations(localePreference);
+    final storedWidth = preferences.getDouble(_windowWidthKey);
+    final storedHeight = preferences.getDouble(_windowHeightKey);
+    final storedX = preferences.getDouble(_windowXKey);
+    final storedY = preferences.getDouble(_windowYKey);
+
+    final size = Size(
+      (storedWidth ?? 1280).clamp(900, 3840).toDouble(),
+      (storedHeight ?? 820).clamp(640, 2160).toDouble(),
+    );
+    final options = WindowOptions(
+      size: size,
+      minimumSize: const Size(900, 640),
+      center: storedX == null || storedY == null,
+      title: l10n.appTitle,
+      backgroundColor: Colors.transparent,
+    );
+
+    await windowManager.waitUntilReadyToShow(options, () async {
+      if (storedX != null && storedY != null) {
+        await windowManager.setPosition(Offset(storedX, storedY));
+      }
+      await windowManager.setPreventClose(true);
+      windowManager.addListener(this);
+      await _initializeTray(l10n);
+      await windowManager.show();
+      await windowManager.focus();
+    });
+    return true;
+  }
+
+  Future<bool> _acquireSingleInstance() async {
+    try {
+      _activationServer = await ServerSocket.bind(
+        InternetAddress.loopbackIPv4,
+        _singleInstancePort,
+        shared: false,
+      );
+      _activationServer!.listen((socket) {
+        socket.cast<List<int>>().transform(utf8.decoder).listen((message) {
+          if (message.trim() == _activationMessage) {
+            unawaited(showWindow());
+          }
+        });
+      });
+      return true;
+    } on SocketException {
+      try {
+        final socket = await Socket.connect(
+          InternetAddress.loopbackIPv4,
+          _singleInstancePort,
+          timeout: const Duration(seconds: 1),
+        );
+        socket.write(_activationMessage);
+        await socket.flush();
+        await socket.close();
+      } on Object {
+        // The first instance may still be starting.
+      }
+      return false;
+    }
+  }
+
+  Future<void> _initializeTray(AppLocalizations l10n) async {
+    if (_trayReady) return;
+    final executableDirectory = File(Platform.resolvedExecutable).parent.path;
+    final iconPath = Platform.isWindows
+        ? '$executableDirectory${Platform.pathSeparator}data${Platform.pathSeparator}flutter_assets${Platform.pathSeparator}windows${Platform.pathSeparator}runner${Platform.pathSeparator}resources${Platform.pathSeparator}app_icon.ico'
+        : 'windows/runner/resources/app_icon.ico';
+
+    await trayManager.setIcon(iconPath);
+    await _setLocalizedTray(l10n);
+    trayManager.addListener(this);
+    _trayReady = true;
+  }
+
+  Future<void> _applyLocale(AppLocalePreference preference) async {
+    final l10n = await _loadLocalizations(preference);
+    await windowManager.setTitle(l10n.appTitle);
+    if (_trayReady) await _setLocalizedTray(l10n);
+  }
+
+  Future<void> _setLocalizedTray(AppLocalizations l10n) async {
+    await trayManager.setToolTip(l10n.appTitle);
+    await trayManager.setContextMenu(
+      Menu(
+        items: [
+          MenuItem(key: 'show', label: l10n.uiShowApp),
+          MenuItem(key: 'settings', label: l10n.settingsTitle),
+          MenuItem.separator(),
+          MenuItem(key: 'exit', label: l10n.uiExitApp),
+        ],
+      ),
+    );
+  }
+
+  Future<AppLocalizations> _loadLocalizations(
+    AppLocalePreference preference,
+  ) async {
+    final requested = preference.locale ?? PlatformDispatcher.instance.locale;
+    final locale = AppLocalizations.supportedLocales.firstWhere(
+      (candidate) => candidate.languageCode == requested.languageCode,
+      orElse: () => const Locale('en'),
+    );
+    return AppLocalizations.delegate.load(locale);
+  }
+
+  Future<void> showWindow() async {
+    if (!isDesktopPlatform) return;
+    await windowManager.show();
+    if (await windowManager.isMinimized()) {
+      await windowManager.restore();
+    }
+    await windowManager.focus();
+  }
+
+  Future<void> exitApplication() async {
+    if (!isDesktopPlatform) return;
+    _allowClose = true;
+    await _persistNow();
+    trayManager.removeListener(this);
+    await trayManager.destroy();
+    await _activationServer?.close();
+    await windowManager.setPreventClose(false);
+    await windowManager.close();
+  }
+
+  @override
+  void onTrayIconMouseDown() {
+    unawaited(showWindow());
+  }
+
+  @override
+  void onTrayMenuItemClick(MenuItem menuItem) {
+    switch (menuItem.key) {
+      case 'show':
+        unawaited(showWindow());
+      case 'settings':
+        unawaited(showWindow());
+        DesktopNavigationIntents.openSettings();
+      case 'exit':
+        unawaited(exitApplication());
+    }
+  }
+
+  @override
+  void onWindowClose() {
+    if (_allowClose) return;
+    if (_trayReady) {
+      unawaited(windowManager.hide());
+    } else {
+      unawaited(windowManager.minimize());
+    }
+  }
+
+  @override
+  void onWindowMove() => _schedulePersist();
+
+  @override
+  void onWindowResize() => _schedulePersist();
+
+  void _schedulePersist() {
+    _persistDebounce?.cancel();
+    _persistDebounce = Timer(const Duration(milliseconds: 350), _persistNow);
+  }
+
+  Future<void> _persistNow() async {
+    if (!isDesktopPlatform) return;
+    final maximized = await windowManager.isMaximized();
+    final minimized = await windowManager.isMinimized();
+    if (maximized || minimized) return;
+    final size = await windowManager.getSize();
+    final position = await windowManager.getPosition();
+    final preferences = await SharedPreferences.getInstance();
+    await Future.wait([
+      preferences.setDouble(_windowWidthKey, size.width),
+      preferences.setDouble(_windowHeightKey, size.height),
+      preferences.setDouble(_windowXKey, position.dx),
+      preferences.setDouble(_windowYKey, position.dy),
+    ]);
+  }
+}
+
+final class DesktopWindowLifecycleService implements WindowLifecycleService {
+  const DesktopWindowLifecycleService();
+
+  @override
+  Future<bool> initialize() => DesktopWindowLifecycle.initialize();
+
+  @override
+  Future<void> showWindow() => DesktopWindowLifecycle.instance.showWindow();
+
+  @override
+  Future<void> refreshLocale(AppLocalePreference preference) =>
+      DesktopWindowLifecycle.refreshLocale(preference);
+}

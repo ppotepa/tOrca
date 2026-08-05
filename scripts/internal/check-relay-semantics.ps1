@@ -4,10 +4,10 @@ param()
 $ErrorActionPreference = 'Stop'
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot '..\..')
 $roots = @(
-    (Join-Path $repoRoot 'mobile\lib'),
+    (Join-Path $repoRoot 'apps\mobile\flutter\lib'),
     (Join-Path $repoRoot 'protocol'),
-    (Join-Path $repoRoot 'common\torchat-client-engine\src'),
-    (Join-Path $repoRoot 'common\torchat-client-runtime\src')
+    (Join-Path $repoRoot 'packages\torchat-client-engine\src'),
+    (Join-Path $repoRoot 'packages\torchat-runtime\src')
 )
 $forbidden = @(
     '(?i)offline\s+delivery',
@@ -36,7 +36,7 @@ $legacySymbols = @(
     'RelayServerFrame::RecipientOffline'
 )
 foreach ($symbol in $legacySymbols) {
-    $hits = rg -n -F --glob '!**/target/**' $symbol (Join-Path $repoRoot 'common') 2>$null
+    $hits = rg -n -F --glob '!**/target/**' $symbol (Join-Path $repoRoot 'packages') 2>$null
     if ($hits) { throw "Legacy relay transport symbol remains: $symbol`n$hits" }
 }
 Write-Output 'Relay semantics check passed: no offline-delivery promise or legacy relay transport symbol found.'

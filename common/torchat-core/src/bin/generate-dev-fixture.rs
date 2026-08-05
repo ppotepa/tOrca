@@ -1,6 +1,6 @@
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::Serialize;
-use torchat_core::mls::MlsMember;
+use torchat_crypto::mls::MlsMember;
 
 #[derive(Serialize)]
 struct Fixture {
@@ -24,7 +24,8 @@ fn main() {
         peer_snapshot: URL_SAFE_NO_PAD.encode(peer_chat.snapshot().expect("peer snapshot")),
     })
     .expect("fixture json");
-    std::fs::create_dir_all("protocol/dev-fixtures").expect("fixture directory");
-    std::fs::write("protocol/dev-fixtures/android-peer.json", &fixture).expect("fixture file");
+    std::fs::create_dir_all("tests/fixtures/protocol").expect("fixture directory");
+    std::fs::write("tests/fixtures/protocol/android-peer.json", &fixture)
+        .expect("fixture file");
     println!("{fixture}");
 }

@@ -84,12 +84,15 @@ require a stable `command_id` so retries remain idempotent.
 ## Repository layout
 
 - `common/torchat-core` — identities, protocol types and MLS primitives.
-- `common/torchat-client-runtime` — domain workflows and projections.
-- `common/torchat-client-engine` — actor, persistence, retry and transports.
-- `common/torchat-client-engine-ffi` — native ABI for platform hosts.
-- `mobile` — Flutter UI and Android host integration.
-- `desktop` — Windows host and runtime bridge.
-- `server/torchat-server` — in-memory untrusted pairing rendezvous broker.
+- `packages/torchat-runtime` — domain workflows and projections.
+- `packages/torchat-client-engine` — actor, persistence, retry and transports.
+- `packages/torchat-client-engine-ffi` — native ABI for platform hosts.
+- `apps/mobile/flutter` — Flutter UI and Android host integration.
+- `packages/torchat-flutter-ui` — shared Flutter theme and presentation primitives.
+- `packages/torchat-domain` — runtime-independent client-domain vocabulary and rules.
+- `packages/torchat-crypto` — pure cryptographic primitives for pairing.
+- `apps/desktop/native` — Windows host and runtime bridge.
+- `services/torchat-relay` — in-memory untrusted pairing rendezvous broker.
 - `infra` — Docker and Tor deployment configuration.
 - `scripts` — development, deployment and validation entrypoints.
 

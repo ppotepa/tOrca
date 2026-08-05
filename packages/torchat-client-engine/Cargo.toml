@@ -1,0 +1,33 @@
+[package]
+name = "torchat-client-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Shared TorChat client engine boundary"
+
+[dependencies]
+base64 = "0.22"
+futures-util = "=0.3.32"
+getrandom = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls", "socks"] }
+rusqlite.workspace = true
+secrecy = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_bytes = "0.11"
+serde_json = "1"
+sha2 = "0.10"
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "sync", "time"] }
+tokio-socks = "0.5"
+tokio-tungstenite = "0.29"
+tokio-util = "0.7"
+torchat-runtime = { path = "../torchat-runtime" }
+torchat-core = { path = "../../common/torchat-core" }
+torchat-protocol = { path = "../torchat-protocol" }
+torchat-crypto = { path = "../torchat-crypto" }
+torchat-relay-protocol = { path = "../torchat-relay-protocol" }
+torchat-rendezvous-client = { path = "../torchat-rendezvous-client" }
+torchat-storage = { path = "../torchat-storage" }
+torchat-peer = { path = "../torchat-peer" }
+url = { version = "2", features = ["serde"] }
+uuid = { version = "1", features = ["serde", "v4"] }
+zeroize = "1"

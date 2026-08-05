@@ -45,7 +45,7 @@ function Invoke-TorChatPreflight {
             Assert-TorChatTool -Name flutter
         }
         if ($Command -eq 'test' -and $Target -in @('android','all')) {
-            Assert-TorChatTool -Name (Join-Path $Context.RepositoryRoot 'mobile\\android\\gradlew.bat')
+            Assert-TorChatTool -Name (Join-Path $Context.RepositoryRoot 'apps\\mobile\\flutter\\android\\gradlew.bat')
         }
 
         $needsAdb = ($Command -in @('deploy','run','stop','clean','device')) -and
@@ -271,7 +271,7 @@ function Invoke-TorChatDeployCommand {
         $variant = if ($Context.Configuration -eq 'release') { 'Release' } else { 'Debug' }
         $profile = if ($Context.Configuration -eq 'release') { 'release' } else { 'debug' }
         $engine = Join-Path $Context.RepositoryRoot "target\$profile\torchat-desktop.exe"
-        $runner = Join-Path $Context.RepositoryRoot "mobile\build\windows\x64\runner\$variant\torchat_mobile.exe"
+        $runner = Join-Path $Context.RepositoryRoot "apps\desktop\flutter\build\windows\x64\runner\$variant\torchat_desktop.exe"
         if ((Test-Path -LiteralPath $engine) -and (Test-Path -LiteralPath $runner)) { return }
 
         if ($BuildPolicy -eq 'skip') {
@@ -336,7 +336,7 @@ function Invoke-TorChatDeployCommand {
         $devices = @([string[]]$resolveResult.Data.Devices)
         $Context.Metadata['AndroidDevice'] = if ($Device -eq 'all') { 'all' } else { $devices[0] }
 
-        $artifact = Join-Path $Context.RepositoryRoot "mobile\build\app\outputs\flutter-apk\app-$($Context.Configuration).apk"
+        $artifact = Join-Path $Context.RepositoryRoot "apps\mobile\flutter\build\app\outputs\flutter-apk\app-$($Context.Configuration).apk"
         foreach ($resolvedDevice in $devices) {
             $safeDevice = ($resolvedDevice -replace '[^A-Za-z0-9]', '_')
             $Context.Metadata['AndroidDevice'] = $resolvedDevice
@@ -503,21 +503,21 @@ function Invoke-TorChatTestCommand {
 
     if ($Target -in @('runtime','all')) {
         Invoke-TorChatStage -Context $Context -Id 'test.runtime' -Name 'Test shared runtime' -Action {
-            [void](Invoke-TorChatNative -Context $Context -FilePath 'cargo' -ArgumentList @('test','-p','torchat-client-runtime') -WorkingDirectory $Context.RepositoryRoot -LogName 'cargo-test-runtime.log')
-            [pscustomobject]@{ State = 'Ready'; Code = 'TEST_RUNTIME_OK'; Message = 'torchat-client-runtime tests passed' }
+            [void](Invoke-TorChatNative -Context $Context -FilePath 'cargo' -ArgumentList @('test','-p','torchat-runtime') -WorkingDirectory $Context.RepositoryRoot -LogName 'cargo-test-runtime.log')
+            [pscustomobject]@{ State = 'Ready'; Code = 'TEST_RUNTIME_OK'; Message = 'torchat-runtime tests passed' }
         }
     }
 
     if ($Target -in @('flutter','all')) {
         Invoke-TorChatStage -Context $Context -Id 'test.flutter' -Name 'Analyze Flutter client' -Action {
-            [void](Invoke-TorChatNative -Context $Context -FilePath 'flutter' -ArgumentList @('analyze','lib') -WorkingDirectory (Join-Path $Context.RepositoryRoot 'mobile') -LogName 'flutter-analyze.log')
+            [void](Invoke-TorChatNative -Context $Context -FilePath 'flutter' -ArgumentList @('analyze','lib') -WorkingDirectory (Join-Path $Context.RepositoryRoot 'apps\mobile\flutter') -LogName 'flutter-analyze.log')
             [pscustomobject]@{ State = 'Ready'; Code = 'TEST_FLUTTER_OK'; Message = 'Flutter analyze passed' }
         }
     }
 
     if ($Target -in @('android','all')) {
         Invoke-TorChatStage -Context $Context -Id 'test.android' -Name 'Compile Android Kotlin' -Action {
-            [void](Invoke-TorChatNative -Context $Context -FilePath (Join-Path $Context.RepositoryRoot 'mobile\\android\\gradlew.bat') -ArgumentList @(':app:compileDebugKotlin') -WorkingDirectory (Join-Path $Context.RepositoryRoot 'mobile\\android') -LogName 'android-compile-debug-kotlin.log')
+            [void](Invoke-TorChatNative -Context $Context -FilePath (Join-Path $Context.RepositoryRoot 'apps\\mobile\\flutter\\android\\gradlew.bat') -ArgumentList @(':app:compileDebugKotlin') -WorkingDirectory (Join-Path $Context.RepositoryRoot 'apps\\mobile\\flutter\\android') -LogName 'android-compile-debug-kotlin.log')
             [pscustomobject]@{ State = 'Ready'; Code = 'TEST_ANDROID_OK'; Message = 'Android Kotlin compile passed' }
         }
     }

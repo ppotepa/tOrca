@@ -1,8 +1,8 @@
 services:
-  server:
+  relay:
     build:
       context: ../..
-      dockerfile: infra/docker/Dockerfile.server
+      dockerfile: infra/relay/docker/Dockerfile
     environment:
       TORCHAT_BIND: 0.0.0.0:8080
     ports:
@@ -22,7 +22,7 @@ services:
       context: .
       dockerfile: Dockerfile.tor
     depends_on:
-      server:
+      relay:
         condition: service_started
     volumes:
       - tor_dev:/var/lib/tor

@@ -1446,7 +1446,9 @@ name = "torchat-core"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "chacha20poly1305",
  "ed25519-dalek",
+ "hkdf",
  "hmac",
  "openmls",
  "openmls_basic_credential",
@@ -1458,7 +1460,27 @@ dependencies = [
  "serde_json",
  "sha2",
  "thiserror",
+ "torchat-crypto",
  "uuid",
+ "x25519-dalek",
+]
+
+[[package]]
+name = "torchat-crypto"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "chacha20poly1305",
+ "hkdf",
+ "openmls",
+ "openmls_basic_credential",
+ "openmls_rust_crypto",
+ "openmls_traits",
+ "rand_core 0.6.4",
+ "serde",
+ "serde_json",
+ "sha2",
+ "x25519-dalek",
 ]
 
 [[package]]
@@ -1468,6 +1490,17 @@ dependencies = [
  "base64",
  "libfuzzer-sys",
  "torchat-core",
+ "torchat-crypto",
+ "torchat-protocol",
+]
+
+[[package]]
+name = "torchat-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "uuid",
 ]
 
 [[package]]

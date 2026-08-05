@@ -2784,8 +2784,14 @@ dependencies = [
  "tokio-socks",
  "tokio-tungstenite",
  "tokio-util",
- "torchat-client-runtime",
  "torchat-core",
+ "torchat-crypto",
+ "torchat-peer",
+ "torchat-protocol",
+ "torchat-relay-protocol",
+ "torchat-rendezvous-client",
+ "torchat-runtime",
+ "torchat-storage",
  "url",
  "uuid",
  "zeroize",
@@ -2800,17 +2806,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "torchat-client-engine",
-]
-
-[[package]]
-name = "torchat-client-runtime"
-version = "0.1.0"
-dependencies = [
- "pretty_assertions",
- "serde",
- "serde_json",
- "torchat-core",
- "uuid",
+ "torchat-crypto",
 ]
 
 [[package]]
@@ -2839,7 +2835,26 @@ dependencies = [
  "serde_json",
  "sha2",
  "thiserror 2.0.19",
+ "torchat-crypto",
  "uuid",
+ "x25519-dalek",
+]
+
+[[package]]
+name = "torchat-crypto"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "chacha20poly1305",
+ "hkdf",
+ "openmls",
+ "openmls_basic_credential",
+ "openmls_rust_crypto",
+ "openmls_traits",
+ "rand_core 0.6.4",
+ "serde",
+ "serde_json",
+ "sha2",
  "x25519-dalek",
 ]
 
@@ -2859,13 +2874,48 @@ dependencies = [
  "tokio",
  "torchat-client-engine",
  "torchat-core",
+ "torchat-crypto",
  "url",
  "uuid",
  "zeroize",
 ]
 
 [[package]]
-name = "torchat-server"
+name = "torchat-domain"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "torchat-peer"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "futures-util",
+ "getrandom 0.3.4",
+ "serde_json",
+ "tokio",
+ "tokio-socks",
+ "tokio-tungstenite",
+ "tokio-util",
+ "torchat-core",
+ "torchat-runtime",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "torchat-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "torchat-relay"
 version = "0.1.0"
 dependencies = [
  "axum",
@@ -2877,10 +2927,62 @@ dependencies = [
  "serde_json",
  "sha2",
  "tokio",
- "torchat-core",
+ "torchat-relay-protocol",
  "tracing",
  "tracing-subscriber",
  "uuid",
+]
+
+[[package]]
+name = "torchat-relay-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "torchat-rendezvous-client"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "serde_json",
+ "tokio",
+ "tokio-socks",
+ "tokio-tungstenite",
+ "torchat-relay-protocol",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "torchat-runtime"
+version = "0.1.0"
+dependencies = [
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "torchat-core",
+ "torchat-domain",
+ "uuid",
+]
+
+[[package]]
+name = "torchat-storage"
+version = "0.1.0"
+dependencies = [
+ "rusqlite",
+ "serde",
+ "serde_bytes",
+ "serde_json",
+ "sha2",
+ "torchat-core",
+ "torchat-domain",
+ "torchat-runtime",
+ "url",
+ "uuid",
+ "zeroize",
 ]
 
 [[package]]

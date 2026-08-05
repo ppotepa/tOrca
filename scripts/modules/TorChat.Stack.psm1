@@ -256,9 +256,9 @@ function Reset-TorChatStackState {
     # A client-database reset keeps the published hidden service running. Tor is
     # stopped only for an explicit onion rotation. The relay has no database.
     $resetServices = if ($OnionPolicy -eq 'rotate') {
-        @('server','tor','torka')
+        @('relay','tor','torka')
     } else {
-        @('server','torka')
+        @('relay','torka')
     }
     [void](Invoke-TorChatCompose -Context $Context -ComposeContext $ComposeContext -Arguments (@('stop') + $resetServices) -LogName 'docker-reset-stop.log' -AllowedExitCodes @(0))
     [void](Invoke-TorChatCompose -Context $Context -ComposeContext $ComposeContext -Arguments (@('rm','-f') + $resetServices) -LogName 'docker-reset-rm.log' -AllowedExitCodes @(0))
@@ -295,7 +295,7 @@ function Start-TorChatStack {
     # Resolve the relay onion before starting Torka. A compose environment is
     # fixed at container creation time, so starting the peer before this point
     # would give it an empty or stale TORCHAT_ONION_URL after an onion rotate.
-    [void](Invoke-TorChatCompose -Context $Context -ComposeContext $compose -Arguments @('up','-d','--remove-orphans','server','tor') -LogName 'docker-up.log')
+    [void](Invoke-TorChatCompose -Context $Context -ComposeContext $compose -Arguments @('up','-d','--remove-orphans','relay','tor') -LogName 'docker-up.log')
     [void](Wait-TorChatHttpHealth -Context $Context -Url ("http://127.0.0.1:{0}/health" -f $EnvironmentState.Values['TORCHAT_HTTP_PORT']) -TimeoutSeconds 90)
 
     $previousOnion = [string]$EnvironmentState.Values['TORCHAT_ONION_URL']
@@ -305,7 +305,7 @@ function Start-TorChatStack {
     Import-TorChatEnvironmentState -EnvironmentState $EnvironmentState -RequireOnion
 
     if ($previousOnion -ne $onionUrl) {
-        [void](Invoke-TorChatCompose -Context $Context -ComposeContext $compose -Arguments @('up','-d','--force-recreate','server','torka') -LogName 'docker-server-recreate.log')
+        [void](Invoke-TorChatCompose -Context $Context -ComposeContext $compose -Arguments @('up','-d','--force-recreate','relay','torka') -LogName 'docker-relay-recreate.log')
         [void](Wait-TorChatHttpHealth -Context $Context -Url ("http://127.0.0.1:{0}/health" -f $EnvironmentState.Values['TORCHAT_HTTP_PORT']) -TimeoutSeconds 90)
     } else {
         # Torka is a stateful development client. `docker compose up -d` does
