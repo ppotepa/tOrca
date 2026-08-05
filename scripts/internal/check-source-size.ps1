@@ -38,10 +38,6 @@ $ignoredPathPatterns = @(
     '(^|/)migrations/',
     '(^|/)sql/migrations/',
     '(^|/)generated/',
-    # Actor construction and shared state still live in this historical file.
-    # The dead actor/legacy/ snapshot directory has been removed; all new
-    # command and pipeline modules are checked normally.
-    '^packages/torchat-client-engine/src/actor/legacy\.rs$',
     '\.g\.dart$',
     'Cargo\.lock$'
 )
@@ -57,6 +53,7 @@ $testPathPatterns = @(
 # Existing oversized files are explicit debt. They may shrink, but they may not
 # grow while the refactor is in progress.
 $oversizedBaselines = @{
+    'packages/torchat-client-engine/src/actor/state.rs' = 1260
     'packages/torchat-client-engine/src/actor/connection.rs' = 503
     'packages/torchat-client-engine/src/actor/peer_events.rs' = 511
     'packages/torchat-peer/src/peer/inbound.rs' = 521
@@ -74,8 +71,6 @@ $oversizedBaselines = @{
     'common/torchat-core/src/relay.rs' = 541
     'apps/mobile/flutter/android/app/src/main/kotlin/org/torchat/mobile/MainActivity.kt' = 525
     'apps/mobile/flutter/lib/features/chats/release_chat_view.dart' = 1124
-    # Bounded lifecycle disposal/focus state added during R2; refactor remains
-    # tracked by the ratchet and cannot grow beyond this new baseline.
     'apps/mobile/flutter/lib/app/app_controller_base.dart' = 958
     'apps/mobile/flutter/lib/app/sequential_app_controller.dart' = 602
     'packages/torchat-flutter-ui/lib/theme/families/retro_theme.dart' = 722
