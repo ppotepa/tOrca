@@ -22,6 +22,10 @@ fn read(path: impl AsRef<Path>) -> String {
     fs::read_to_string(path).expect("source file is readable")
 }
 
+fn read_tree(path: &Path) -> String {
+    rust_files_below(path).into_iter().map(read).collect::<String>()
+}
+
 #[test]
 fn command_contract_is_split_without_changing_public_types() {
     let root = crate_root().join("src/contract");
@@ -50,8 +54,11 @@ fn command_contract_is_split_without_changing_public_types() {
 
 #[test]
 fn unified_input_keeps_correlation_and_causation_metadata() {
-    let input = read(crate_root().join("src/input.rs"));
-    let derived = read(crate_root().join("src/input_derived.rs"));
+    let input_root = crate_root().join("src/input");
+    let input = read_tree(&input_root);
+    for file in ["mod.rs", "envelope.rs", "source.rs", "timer.rs", "derived.rs"] {
+        assert!(input_root.join(file).is_file(), "missing input file: {file}");
+    }
     for symbol in [
         "struct EngineInputEnvelope",
         "input_id: uuid::Uuid",
@@ -59,11 +66,13 @@ fn unified_input_keeps_correlation_and_causation_metadata() {
         "causation_id: Option<uuid::Uuid>",
         "enum EngineInput",
         "enum EngineTimerKind",
+        "fn effect_outcome_correlated",
+        "fn relay_event_caused",
     ] {
         assert!(input.contains(symbol), "missing input symbol: {symbol}");
     }
-    assert!(derived.contains("fn effect_outcome_correlated"));
-    assert!(derived.contains("fn relay_event_caused"));
+    assert!(!crate_root().join("src/input.rs").exists());
+    assert!(!crate_root().join("src/input_derived.rs").exists());
 }
 
 #[test]
@@ -138,10 +147,7 @@ fn command_pipeline_owns_idempotency_responses_and_effect_outcomes() {
 
 #[test]
 fn rendezvous_io_runs_only_in_the_split_effect_worker() {
-    let pairing_sources = rust_files_below(&crate_root().join("src/actor/commands/pairing"))
-        .into_iter()
-        .map(read)
-        .collect::<String>();
+    let pairing_sources = read_tree(&crate_root().join("src/actor/commands/pairing"));
     let preparation = read(crate_root().join("src/actor/command_pipeline/relay_effect.rs"));
     let worker = read(crate_root().join("src/effects/relay/worker.rs"));
     let placeholder = read(crate_root().join("src/effects/relay/placeholder.rs"));
@@ -167,31 +173,41 @@ fn rendezvous_io_runs_only_in_the_split_effect_worker() {
 
 #[test]
 fn timers_and_relay_frames_reenter_the_unified_input_pipeline() {
-    let scheduler = read(crate_root().join("src/scheduler.rs"));
+    let scheduler_root = crate_root().join("src/scheduler");
+    let scheduler = read_tree(&scheduler_root);
     let actor = read(crate_root().join("src/actor/unified.rs"));
     let handlers = read(crate_root().join("src/actor/unified_handlers.rs"));
 
+    for file in ["mod.rs", "plan.rs", "worker.rs"] {
+        assert!(scheduler_root.join(file).is_file(), "missing scheduler file: {file}");
+    }
     assert!(scheduler.contains("generation: u64"));
     assert!(scheduler.contains("EngineInputEnvelope::timer"));
     assert!(actor.contains("generation != scheduler_generation"));
     assert!(actor.contains("derived_inputs.pop_front"));
     assert!(handlers.contains("EngineInputEnvelope::relay_event_caused"));
+    assert!(!crate_root().join("src/scheduler.rs").exists());
 }
 
 #[test]
 fn response_resolution_precedes_public_event_backpressure() {
-    let output = read(crate_root().join("src/output.rs"));
-    let router = output
-        .split("fn spawn_event_router")
-        .nth(1)
-        .expect("event router exists");
+    let output_root = crate_root().join("src/output");
+    for file in ["mod.rs", "event_router.rs", "publisher.rs", "response_registry.rs"] {
+        assert!(output_root.join(file).is_file(), "missing output file: {file}");
+    }
+    let router = read(output_root.join("event_router.rs"));
     assert!(router.find("pending.complete").expect("response completion exists")
         < router.find("publish_tx.send(event)").expect("event publishing exists"));
+    assert!(!crate_root().join("src/output.rs").exists());
 }
 
 #[test]
-fn dead_legacy_snapshot_and_platform_specific_queue_are_absent() {
+fn legacy_snapshots_and_platform_specific_queue_are_absent() {
+    let actor_mod = read(crate_root().join("src/actor/mod.rs"));
     assert!(!crate_root().join("src/actor/legacy").exists());
+    assert!(!actor_mod.contains("include!(\"legacy.rs\")"));
+    assert!(!crate_root().join("src/actor/legacy.rs").exists());
+
     let flutter = read(crate_root().join("../../apps/mobile/flutter/lib/client_runtime.dart"));
     assert!(!flutter.contains("_SerializedClientRuntime"));
     assert!(!flutter.contains("Platform.isWindows"));
