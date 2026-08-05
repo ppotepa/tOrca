@@ -1,5 +1,30 @@
 // Generated from common/client-engine-contract.json. Do not edit manually.
 
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeneratedCommandRequest {
+    #[serde(rename = "type")]
+    pub command_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command_id: Option<String>,
+    #[serde(default)]
+    pub payload: serde_json::Value,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeneratedCommandResponse {
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payload: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retryable: Option<bool>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CommandContract {
     pub public_method: &'static str,
