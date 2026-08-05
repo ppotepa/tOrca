@@ -27,10 +27,10 @@ impl ClientEngineActor {
         Ok(identity)
     }
 
-    /// Read the application projection from one SQLite transaction.  The
-    /// projection stamp is read from the same transaction as contacts,
-    /// conversations and pairing state, so Flutter never has to assemble a
-    /// mixed-revision snapshot with `Future.wait`.
+    /// Read the complete application projection from one SQLite transaction.
+    /// Pairing collections and their summary share the same projection stamp as
+    /// contacts and conversations, so Flutter never assembles mixed revisions
+    /// from independent requests.
     pub(super) fn application_snapshot(&mut self) -> EngineResult<ApplicationSnapshot> {
         let mut storage = SqliteRuntimeStorage::new(self.database.transaction()?);
         let identity = storage
@@ -40,8 +40,8 @@ impl ClientEngineActor {
         let profile = storage.profile().map_err(runtime_error)?;
         let contacts = storage.contacts().map_err(runtime_error)?;
         let conversations = storage.conversations().map_err(runtime_error)?;
-        let inbox = storage.pairing_inbox().map_err(runtime_error)?;
-        let outbox = storage.pairing_outbox().map_err(runtime_error)?;
+        let pairing_inbox = storage.pairing_inbox().map_err(runtime_error)?;
+        let pairing_outbox = storage.pairing_outbox().map_err(runtime_error)?;
         let (store_id, revision) = storage.projection_head().map_err(runtime_error)?;
         storage.rollback().map_err(runtime_error)?;
         Ok(ApplicationSnapshot {
@@ -53,15 +53,17 @@ impl ClientEngineActor {
             contacts,
             conversations,
             pairing_summary: PairingSummary {
-                pending_inbox: inbox
+                pending_inbox: pairing_inbox
                     .iter()
                     .filter(|item| item.state.is_outstanding())
                     .count() as u32,
-                pending_outbox: outbox
+                pending_outbox: pairing_outbox
                     .iter()
                     .filter(|item| item.state.is_outstanding())
                     .count() as u32,
             },
+            pairing_inbox,
+            pairing_outbox,
             peer_endpoint_available: self.local_peer_endpoint.is_some(),
             ui_checkpoint: UiCheckpoint::default(),
             projection: ProjectionStamp {
@@ -76,6 +78,7 @@ impl ClientEngineActor {
     pub(super) fn projection_head(&self) -> EngineResult<(String, u64)> {
         self.database.projection_head()
     }
+
     pub(super) fn list_contacts(
         &mut self,
     ) -> EngineResult<Vec<torchat_runtime::ContactRecord>> {
