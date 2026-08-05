@@ -5,6 +5,11 @@ ABI, staging, cache, and device policy decisions belong in
 `scripts/modules/`; internal scripts are validation or low-level technical
 helpers invoked by the CLI or CI.
 
+`check-single-baseline.ps1` enforces one canonical production implementation.
+It rejects historical or compatibility implementation names, `V2` application
+symbols, and `allow(dead_code)`. Wire-protocol versions, schema versions, and
+database migrations remain explicitly versioned.
+
 The following historical standalone build implementations were removed because
 they duplicated the module implementation and had no callers:
 
