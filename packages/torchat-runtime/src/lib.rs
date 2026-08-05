@@ -36,7 +36,9 @@ pub use contract::{
     RuntimeEvent, RuntimeStatusPhase, RuntimeType, StartupReadinessSnapshot, TransportComponent,
     TransportProbeState,
 };
-pub use error::{RuntimeError, RuntimeResult};
+pub use error::{
+    RuntimeError, RuntimeErrorCategory, RuntimeErrorCode, RuntimeProblem, RuntimeResult,
+};
 pub use features::pairing::rules as pairing_rules;
 pub use logic::RuntimeConversationUpdate;
 pub use logic::{
