@@ -28,7 +28,7 @@ final class LocalDiagnosticsExportService implements DiagnosticsExportService {
         .replaceAll(':', '')
         .replaceAll('.', '-');
     final fileName = 'torca-diagnostics-$timestamp.json.gz';
-    final selectedPath = await FilePicker.platform.saveFile(
+    final selectedPath = await FilePicker.saveFile(
       dialogTitle: 'Save Torca diagnostics',
       fileName: fileName,
       type: FileType.custom,
@@ -57,7 +57,7 @@ final class LocalDiagnosticsExportService implements DiagnosticsExportService {
       },
     };
     final encoded = utf8.encode(const JsonEncoder.withIndent('  ').convert(payload));
-    final compressed = const GZipCodec(level: 9).encode(encoded);
+    final compressed = GZipCodec(level: 9).encode(encoded);
 
     var destination = selectedPath;
     if (!destination.toLowerCase().endsWith('.gz')) {

@@ -719,7 +719,7 @@ packages:
       path: "../../mobile/flutter"
       relative: true
     source: path
-    version: "0.1.0+1"
+    version: "0.2.0-beta.1+2"
   tray_manager:
     dependency: "direct main"
     description:

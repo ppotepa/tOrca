@@ -32,7 +32,7 @@ final class LocalSignedUpdateCheckService implements UpdateCheckService {
     if (!TorcaReleaseInfo.canVerifyUpdates) {
       throw StateError('This Torca build has no update verification key.');
     }
-    final selected = await FilePicker.platform.pickFiles(
+    final selected = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: const <String>['json'],
       allowMultiple: false,

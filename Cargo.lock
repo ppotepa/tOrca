@@ -2768,7 +2768,7 @@ dependencies = [
 
 [[package]]
 name = "torchat-client-engine"
-version = "0.1.0"
+version = "0.2.0-beta.1"
 dependencies = [
  "base64",
  "futures-util",
@@ -2799,7 +2799,7 @@ dependencies = [
 
 [[package]]
 name = "torchat-client-engine-ffi"
-version = "0.1.0"
+version = "0.2.0-beta.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -2811,14 +2811,14 @@ dependencies = [
 
 [[package]]
 name = "torchat-contract-gen"
-version = "0.1.0"
+version = "0.2.0-beta.1"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "torchat-core"
-version = "0.1.0"
+version = "0.2.0-beta.1"
 dependencies = [
  "base64",
  "chacha20poly1305",
@@ -2842,7 +2842,7 @@ dependencies = [
 
 [[package]]
 name = "torchat-crypto"
-version = "0.1.0"
+version = "0.2.0-beta.1"
 dependencies = [
  "base64",
  "chacha20poly1305",
@@ -2860,7 +2860,7 @@ dependencies = [
 
 [[package]]
 name = "torchat-desktop"
-version = "0.1.0"
+version = "0.2.0-beta.1"
 dependencies = [
  "anyhow",
  "base64",
@@ -2882,14 +2882,14 @@ dependencies = [
 
 [[package]]
 name = "torchat-domain"
-version = "0.1.0"
+version = "0.2.0-beta.1"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "torchat-peer"
-version = "0.1.0"
+version = "0.2.0-beta.1"
 dependencies = [
  "base64",
  "futures-util",
@@ -2907,7 +2907,7 @@ dependencies = [
 
 [[package]]
 name = "torchat-protocol"
-version = "0.1.0"
+version = "0.2.0-beta.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -2916,7 +2916,7 @@ dependencies = [
 
 [[package]]
 name = "torchat-relay"
-version = "0.1.0"
+version = "0.2.0-beta.1"
 dependencies = [
  "axum",
  "base64",
@@ -2935,7 +2935,7 @@ dependencies = [
 
 [[package]]
 name = "torchat-relay-protocol"
-version = "0.1.0"
+version = "0.2.0-beta.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -2944,7 +2944,7 @@ dependencies = [
 
 [[package]]
 name = "torchat-rendezvous-client"
-version = "0.1.0"
+version = "0.2.0-beta.1"
 dependencies = [
  "futures-util",
  "serde_json",
@@ -2958,7 +2958,7 @@ dependencies = [
 
 [[package]]
 name = "torchat-runtime"
-version = "0.1.0"
+version = "0.2.0-beta.1"
 dependencies = [
  "pretty_assertions",
  "serde",
@@ -2970,7 +2970,7 @@ dependencies = [
 
 [[package]]
 name = "torchat-storage"
-version = "0.1.0"
+version = "0.2.0-beta.1"
 dependencies = [
  "rusqlite",
  "serde",
