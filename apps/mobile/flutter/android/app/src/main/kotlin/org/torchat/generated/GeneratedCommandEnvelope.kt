@@ -4,15 +4,6 @@ package org.torchat.generated
 
 import org.json.JSONObject
 
-data class GeneratedCommandRequest(
-    val type: String,
-    val commandId: String? = null,
-    val payload: JSONObject = JSONObject(),
-)
+data class GeneratedCommandRequest(val type: String, val commandId: String? = null, val payload: JSONObject = JSONObject())
 
-data class GeneratedCommandResponse(
-    val status: String,
-    val payload: Any? = null,
-    val code: String? = null,
-    val retryable: Boolean? = null,
-)
+data class GeneratedCommandResponse(val status: String, val payload: Any? = null, val code: String? = null, val retryable: Boolean? = null)
