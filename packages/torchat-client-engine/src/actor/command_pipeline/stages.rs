@@ -35,12 +35,23 @@ pub struct CommandPipelineTrace {
 impl CommandPipelineTrace {
     pub fn complete(&mut self, stage: CommandPipelineStage) {
         if let Some(previous) = self.completed.last().copied() {
-            debug_assert!(previous < stage, "command pipeline stages must be monotonic");
+            assert!(
+                previous < stage,
+                "command pipeline stages must be monotonic: {previous:?} -> {stage:?}"
+            );
         }
+        assert!(
+            COMMAND_PIPELINE_ORDER.contains(&stage),
+            "unknown command pipeline stage: {stage:?}"
+        );
         self.completed.push(stage);
     }
 
     pub fn completed(&self) -> &[CommandPipelineStage] {
         &self.completed
+    }
+
+    pub fn reached(&self, stage: CommandPipelineStage) -> bool {
+        self.completed.binary_search(&stage).is_ok()
     }
 }
