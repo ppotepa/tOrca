@@ -1,5 +1,6 @@
 package org.torchat.mobile
 
+import android.app.ActivityManager
 import android.app.NotificationManager
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -69,7 +70,7 @@ class MainActivity : FlutterActivity() {
         runCatching { ContextCompat.startForegroundService(this, serviceIntent) }
             .onFailure { error ->
                 Log.e(
-                    "TorChat-Engine",
+                    "Torca-Engine",
                     "Unable to request TorChatForegroundService start: ${error.message}",
                     error,
                 )
@@ -194,6 +195,7 @@ class MainActivity : FlutterActivity() {
     private fun handle(call: MethodCall, result: MethodChannel.Result) {
         activeCommandId = call.argument<String>(EngineContract.COMMAND_ID)
         when (call.method) {
+            "resetLocalProfile" -> resetLocalProfile(result)
             EngineContract.CONNECT -> connect(result)
             EngineContract.GET_IDENTITY -> submitQueryResult(result, EngineContract.COMMAND_GET_IDENTITY)
             EngineContract.GET_PROFILE -> submitQueryResult(result, EngineContract.COMMAND_GET_PROFILE)
@@ -455,6 +457,21 @@ class MainActivity : FlutterActivity() {
             }
             else -> result.notImplemented()
         }
+    }
+
+    private fun resetLocalProfile(result: MethodChannel.Result) {
+        result.success(null)
+        mainHandler.postDelayed({
+            runCatching {
+                stopService(Intent(this, TorChatForegroundService::class.java))
+                val manager = getSystemService(ActivityManager::class.java)
+                check(manager.clearApplicationUserData()) {
+                    "Android refused to clear Torca application data"
+                }
+            }.onFailure { error ->
+                Log.e("Torca-Reset", "Unable to clear Torca application data", error)
+            }
+        }, 250L)
     }
 
     private fun submitPairingCommand(
