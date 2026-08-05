@@ -15,6 +15,7 @@ use crate::{
 pub const ENGINE_INBOX_CAPACITY: usize = 512;
 pub const COMMAND_CHANNEL_CAPACITY: usize = ENGINE_INBOX_CAPACITY;
 pub const WORKER_OUTCOME_CHANNEL_CAPACITY: usize = 256;
+const ENGINE_RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Clone)]
 pub struct EngineCommandSender {
@@ -67,26 +68,18 @@ impl ClientEngine {
         anchor: Box<dyn MlsEpochAnchor<Error = EngineError> + Send>,
     ) -> EngineResult<Self> {
         let (command_tx, command_rx) = unified_command_channel();
-        let (actor_event_tx, mut actor_event_rx) = mpsc::channel(WORKER_OUTCOME_CHANNEL_CAPACITY);
+        let (actor_event_tx, actor_event_rx) = mpsc::channel(WORKER_OUTCOME_CHANNEL_CAPACITY);
         let (event_tx, event_rx) = mpsc::channel(WORKER_OUTCOME_CHANNEL_CAPACITY);
         let shutdown = CancellationToken::new();
         let pending_responses: Arc<Mutex<HashMap<String, oneshot::Sender<ResponseResult>>>> =
             Arc::new(Mutex::new(HashMap::new()));
         let actor = ClientEngineActor::new_with_owned_anchor(config, anchor)?;
-        let public_events = event_tx.clone();
-        let pending = Arc::clone(&pending_responses);
-        tokio::spawn(async move {
-            while let Some(event) = actor_event_rx.recv().await {
-                if let EngineEvent::Response { request_id, result } = &event
-                    && let Some(reply) = pending.lock().await.remove(request_id)
-                {
-                    let _ = reply.send(result.clone());
-                }
-                if public_events.send(event).await.is_err() {
-                    break;
-                }
-            }
-        });
+        spawn_event_router(
+            actor_event_rx,
+            event_tx,
+            Arc::clone(&pending_responses),
+            None,
+        );
         let fatal_events = actor_event_tx.clone();
         let actor_shutdown = shutdown.clone();
         tokio::spawn(async move {
@@ -114,7 +107,7 @@ impl ClientEngine {
         anchor: Option<&mut dyn MlsEpochAnchor<Error = EngineError>>,
     ) -> EngineResult<Self> {
         let (command_tx, command_rx) = unified_command_channel();
-        let (actor_event_tx, mut actor_event_rx) = mpsc::channel(WORKER_OUTCOME_CHANNEL_CAPACITY);
+        let (actor_event_tx, actor_event_rx) = mpsc::channel(WORKER_OUTCOME_CHANNEL_CAPACITY);
         let (event_tx, event_rx) = mpsc::channel(WORKER_OUTCOME_CHANNEL_CAPACITY);
         let shutdown = CancellationToken::new();
         let pending_responses: Arc<Mutex<HashMap<String, oneshot::Sender<ResponseResult>>>> =
@@ -131,21 +124,12 @@ impl ClientEngine {
                 return Err(error);
             }
         };
-        let public_events = event_tx.clone();
-        let pending = Arc::clone(&pending_responses);
-        tokio::spawn(async move {
-            while let Some(event) = actor_event_rx.recv().await {
-                journal.record(&event);
-                if let EngineEvent::Response { request_id, result } = &event
-                    && let Some(reply) = pending.lock().await.remove(request_id)
-                {
-                    let _ = reply.send(result.clone());
-                }
-                if public_events.send(event).await.is_err() {
-                    break;
-                }
-            }
-        });
+        spawn_event_router(
+            actor_event_rx,
+            event_tx,
+            Arc::clone(&pending_responses),
+            Some(journal),
+        );
         let fatal_events = actor_event_tx.clone();
         let actor_shutdown = shutdown.clone();
         tokio::spawn(async move {
@@ -232,9 +216,14 @@ impl ClientEngine {
             return Err(error);
         }
 
-        reply_rx
-            .await
-            .map_err(|_| EngineError::Closed("engine response channel is closed"))
+        match tokio::time::timeout(ENGINE_RESPONSE_TIMEOUT, reply_rx).await {
+            Ok(Ok(result)) => Ok(result),
+            Ok(Err(_)) => Err(EngineError::Closed("engine response channel is closed")),
+            Err(_) => {
+                self.pending_responses.lock().await.remove(&request_id);
+                Err(EngineError::Closed("engine response timed out"))
+            }
+        }
     }
 
     pub async fn submit_platform_fact(
@@ -291,6 +280,37 @@ fn unified_command_channel() -> (
         }
     });
     (EngineCommandSender { inbox: inbox_tx }, command_rx)
+}
+
+fn spawn_event_router(
+    mut actor_events: mpsc::Receiver<EngineEvent>,
+    public_events: mpsc::Sender<EngineEvent>,
+    pending: Arc<Mutex<HashMap<String, oneshot::Sender<ResponseResult>>>>,
+    mut journal: Option<StartupJournal>,
+) {
+    let (publish_tx, mut publish_rx) = mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        while let Some(event) = actor_events.recv().await {
+            if let Some(journal) = journal.as_mut() {
+                journal.record(&event);
+            }
+            if let EngineEvent::Response { request_id, result } = &event
+                && let Some(reply) = pending.lock().await.remove(request_id)
+            {
+                let _ = reply.send(result.clone());
+            }
+            if publish_tx.send(event).is_err() {
+                break;
+            }
+        }
+    });
+    tokio::spawn(async move {
+        while let Some(event) = publish_rx.recv().await {
+            if public_events.send(event).await.is_err() {
+                break;
+            }
+        }
+    });
 }
 
 fn unix_ms() -> i64 {
