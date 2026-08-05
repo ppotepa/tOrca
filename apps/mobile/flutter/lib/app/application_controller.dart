@@ -12,6 +12,9 @@ import '../client_runtime.dart';
 import '../core/connection/app_state_connection.dart';
 import '../core/connection/connection_readiness.dart';
 import '../core/presence/contact_presence_store.dart';
+import '../core/problems/runtime_problem.dart';
+import '../core/problems/runtime_problem_classifier.dart';
+import '../core/problems/runtime_problem_from_error.dart';
 import '../core/runtime/runtime_repository.dart';
 import '../locales/domain/user_problem.dart';
 import '../locales/domain/user_problem_code.dart';
@@ -187,28 +190,33 @@ class ApplicationController extends Notifier<AppState>
   }
 
   UserProblem problemForError(Object error) {
-    final normalized = error.toString().toLowerCase();
-    final code = normalized.contains('pairing code expired') ||
-            normalized.contains('pairing code expired or invalid')
-        ? UserProblemCode.pairingCodeInvalid
-        : normalized.contains('stale welcome') ||
-              normalized.contains('old invitation') ||
-              normalized.contains('pairing request not found') ||
-              normalized.contains('invalid welcome signature') ||
-              normalized.contains('signature is invalid') ||
-              (normalized.contains('identity') &&
-                  normalized.contains('does not match'))
-        ? UserProblemCode.pairingWelcomeStale
-        : normalized.contains('relay transport error') ||
-              normalized.contains('gateway')
-        ? UserProblemCode.pairingGatewayUnavailable
-        : normalized.contains('connection') ||
-              normalized.contains('tor') ||
-              normalized.contains('acknowledgement') ||
-              normalized.contains('peer endpoint')
-        ? UserProblemCode.connectionUnavailable
-        : UserProblemCode.operationFailed;
-    return UserProblem(code: code, arguments: {'raw': error.toString()});
+    final runtimeProblem = runtimeProblemFromError(error);
+    final classification = classifyRuntimeProblem(runtimeProblem);
+    final code = switch (runtimeProblem.code) {
+      RuntimeErrorCode.invalidInput => UserProblemCode.pairingCodeInvalid,
+      RuntimeErrorCode.transportUnavailable ||
+      RuntimeErrorCode.temporarilyUnavailable =>
+        UserProblemCode.connectionUnavailable,
+      RuntimeErrorCode.notFound || RuntimeErrorCode.conflict =>
+        UserProblemCode.operationFailed,
+      RuntimeErrorCode.storageFailed ||
+      RuntimeErrorCode.cryptoFailed ||
+      RuntimeErrorCode.unsupported ||
+      RuntimeErrorCode.internal =>
+        classification.disposition == RuntimeProblemDisposition.connectionStatus
+            ? UserProblemCode.connectionUnavailable
+            : UserProblemCode.operationFailed,
+    };
+    return UserProblem(
+      code: code,
+      arguments: {
+        'runtimeCode': runtimeProblem.code.wireValue,
+        'runtimeCategory': runtimeProblem.category.wireValue,
+        if (runtimeProblem.operationId != null)
+          'operationId': runtimeProblem.operationId!,
+        if (runtimeProblem.entityId != null) 'entityId': runtimeProblem.entityId!,
+      },
+    );
   }
 
   List<StartupStep> _startupSteps(

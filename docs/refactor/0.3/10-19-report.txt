@@ -1,0 +1,43 @@
+Torca 0.3 architecture integration report
+
+Scope
+- direct point lookup boundary and parameterized SQLite queries
+- capability-based runtime storage ports
+- runtime feature boundaries
+- stable runtime problem contract
+- canonical command metadata and generated projections
+- explicit command pipeline stages
+- durable operations model and SQLite schema/repository
+- deterministic SQL catalog generator
+- Flutter platform/error boundaries
+- versioned FFI ABI
+
+Implemented
+1. RuntimeStorage point lookup defaults no longer perform full collection scans.
+2. PointLookupStorage is the canonical point-read port used by feature modules.
+3. ClientDatabase implements PointLookupStorage with parameterized SQL files.
+4. RuntimeStoragePort composes the narrow storage capabilities for new domain code.
+5. ClientRuntimeFeatureFacade routes contacts, conversations and messaging through feature modules.
+6. RuntimeProblem provides stable code/category/retryable/operation/entity/diagnostic fields.
+7. Flutter maps structured problems instead of classifying message text.
+8. client-engine-contract.json owns canonical command metadata.
+9. Rust, Dart and Kotlin generated command metadata are present.
+10. Command pipeline order is explicit and commandId/idempotency policy is enforced from generated metadata.
+11. DurableOperation, typed IDs and RetryPolicy are shared runtime concepts.
+12. Migration 004 and the SQLite operation repository persist restartable operations.
+13. SQL lookup and operation statements live in parameterized .sql files.
+14. generate_sql_catalog.py provides deterministic SQL discovery/catalog generation.
+15. ABI version/status and ownership/thread/shutdown rules are documented.
+16. Architecture ratchets reject text-based error classification, storage scans/no-ops, missing generated metadata and unintegrated repositories.
+
+Compatibility boundary
+- RuntimeStorage remains as a transitional aggregate for existing adapters.
+- New feature code must depend on individual capabilities or RuntimeStoragePort.
+- Existing public ClientRuntime methods remain source-compatible while their implementation is migrated feature by feature.
+
+Not executed
+- builds
+- tests
+- analyzers
+- platform packaging
+- GitHub Actions/workflows

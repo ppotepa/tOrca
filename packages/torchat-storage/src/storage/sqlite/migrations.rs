@@ -24,4 +24,9 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "003_pairing_session_identity.sql",
         sql: include_str!("../../../sql/migrations/003_pairing_session_identity.sql"),
     },
+    Migration {
+        version: 4,
+        name: "004_durable_operations.sql",
+        sql: include_str!("../../../sql/migrations/004_durable_operations.sql"),
+    },
 ];

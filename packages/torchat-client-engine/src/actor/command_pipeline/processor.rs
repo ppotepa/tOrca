@@ -1,9 +1,11 @@
 use super::super::*;
+use super::stages::{CommandPipelineStage, CommandPipelineTrace};
 
 use crate::{
     effects::{
         DeferredCommandContext, EngineEffectOutcome, RelayEffectOutcome, RelayEffectResult,
     },
+    generated::command_contract::command_contract,
     processing::{EngineProcessingResult, ProcessingControl},
 };
 
@@ -13,6 +15,7 @@ impl ClientEngineActor {
         input_id: uuid::Uuid,
         envelope: EngineCommandEnvelope,
     ) -> EngineProcessingResult {
+        let mut trace = CommandPipelineTrace::default();
         let should_stop = matches!(&envelope.command, EngineCommand::Shutdown);
         let command_id = envelope.command_id.clone();
         let command_type = serde_json::to_value(&envelope.command)
@@ -24,14 +27,38 @@ impl ClientEngineActor {
                     .map(str::to_owned)
             })
             .unwrap_or_else(|| "unknown".to_owned());
+        trace.complete(CommandPipelineStage::Validate);
+
+        let Some(contract) = command_contract(&command_type) else {
+            return self.command_error_result(
+                envelope.request_id,
+                EngineError::InvalidCommand(format!(
+                    "command type is not present in the generated contract: {command_type}"
+                )),
+            );
+        };
+
+        if contract.requires_command_id && command_id.as_deref().is_none_or(str::is_empty) {
+            return self.command_error_result(
+                envelope.request_id,
+                EngineError::InvalidCommand(format!(
+                    "durable command {} requires commandId",
+                    contract.wire_name
+                )),
+            );
+        }
+        trace.complete(CommandPipelineStage::EnforceCommandId);
+
         let command_descriptor = idempotency_descriptor(&envelope.command, &command_type);
         let mut result = EngineProcessingResult::empty();
         result.scheduler_plan_changed = true;
 
-        if let Some(command_id) = command_id.as_deref()
+        if contract.idempotent
+            && let Some(command_id) = command_id.as_deref()
             && let Ok(Some((stored_type, result_json, _revision))) =
                 self.database.load_processed_command(command_id)
         {
+            trace.complete(CommandPipelineStage::CheckIdempotency);
             let stored_result = if stored_type != command_descriptor {
                 ResponseResult::Error {
                     code: "idempotency_conflict".to_owned(),
@@ -46,6 +73,7 @@ impl ClientEngineActor {
                     },
                 }
             };
+            trace.complete(CommandPipelineStage::EncodeResponse);
             result.events.push(EngineEvent::Response {
                 request_id: envelope.request_id,
                 result: stored_result,
@@ -55,6 +83,7 @@ impl ClientEngineActor {
             }
             return result;
         }
+        trace.complete(CommandPipelineStage::CheckIdempotency);
 
         let deferred_context = DeferredCommandContext {
             request_id: envelope.request_id.clone(),
@@ -78,14 +107,21 @@ impl ClientEngineActor {
                         command_descriptor: command_descriptor.clone(),
                     }
                 });
+                trace.complete(CommandPipelineStage::OpenTransaction);
+                trace.complete(CommandPipelineStage::Execute);
                 match self.handle_command(command, idempotency.as_ref()) {
                     Ok((payload, runtime_events, connection_snapshot)) => {
+                        trace.complete(CommandPipelineStage::Persist);
                         if let Some(snapshot) = connection_snapshot {
                             result.events.push(EngineEvent::Connection { snapshot });
                         }
                         result.extend_runtime_events(runtime_events);
                         result.append_engine_events(&mut self.pending_engine_events);
-                        if let Some(command_id) = command_id.as_deref()
+                        trace.complete(CommandPipelineStage::CollectChanges);
+                        trace.complete(CommandPipelineStage::Commit);
+                        trace.complete(CommandPipelineStage::ScheduleEffects);
+                        if contract.idempotent
+                            && let Some(command_id) = command_id.as_deref()
                             && let Ok((_, revision)) = self.projection_head()
                             && let Ok(result_json) = serde_json::to_string(&payload)
                         {
@@ -96,6 +132,8 @@ impl ClientEngineActor {
                                 revision,
                             );
                         }
+                        trace.complete(CommandPipelineStage::PublishRevision);
+                        trace.complete(CommandPipelineStage::EncodeResponse);
                         result.events.push(EngineEvent::Response {
                             request_id: envelope.request_id,
                             result: ResponseResult::Ok { payload },
