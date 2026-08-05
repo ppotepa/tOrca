@@ -400,36 +400,34 @@ impl ClientEngineActor {
                     |value| json_response(value),
                 )
                 .and_then(|(value, events)| Ok((json_response(value)?, events))),
-            RelayEffectResult::PairingCancelled(Ok(())) => {
-                let pairing_id = pairing_id_from_descriptor(&context.command_descriptor);
-                match pairing_id {
-                    Some(pairing_id) => {
-                        let prepared = self
-                            .with_runtime(|runtime| runtime.prepare_cancel_pairing(&pairing_id));
-                        match prepared {
-                            Ok((_, mut events)) => self
-                                .with_runtime_idempotent(
-                                    idempotency.as_ref(),
-                                    |runtime| runtime.confirm_pairing_cancelled(&pairing_id),
-                                    |_| Ok(ResponsePayload::Empty),
-                                )
-                                .map(|(_, confirm_events)| {
-                                    events.extend(confirm_events);
-                                    (ResponsePayload::Empty, events)
-                                }),
-                            Err(error) => Err(error),
-                        }
-                    }
-                    None => Err(EngineError::InvalidCommand(
-                        "cancel pairing effect lost its pairing id".to_owned(),
-                    )),
+            RelayEffectResult::PairingCancelled {
+                pairing_id,
+                result: Ok(()),
+            } => {
+                let prepared =
+                    self.with_runtime(|runtime| runtime.prepare_cancel_pairing(&pairing_id));
+                match prepared {
+                    Ok((_, mut events)) => self
+                        .with_runtime_idempotent(
+                            idempotency.as_ref(),
+                            |runtime| runtime.confirm_pairing_cancelled(&pairing_id),
+                            |_| Ok(ResponsePayload::Empty),
+                        )
+                        .map(|(_, confirm_events)| {
+                            events.extend(confirm_events);
+                            (ResponsePayload::Empty, events)
+                        }),
+                    Err(error) => Err(error),
                 }
             }
             RelayEffectResult::PairingCode(Err(error))
-            | RelayEffectResult::PairingSubmitted(Err(error))
-            | RelayEffectResult::PairingCancelled(Err(error)) => {
+            | RelayEffectResult::PairingSubmitted(Err(error)) => {
                 Err(EngineError::Transport(error))
             }
+            RelayEffectResult::PairingCancelled {
+                result: Err(error),
+                ..
+            } => Err(EngineError::Transport(error)),
         };
 
         let mut result = EngineProcessingResult::empty();
@@ -671,11 +669,6 @@ impl ClientEngineActor {
             Duration::from_secs(120)
         }
     }
-}
-
-fn pairing_id_from_descriptor(descriptor: &str) -> Option<String> {
-    let _ = descriptor;
-    None
 }
 
 fn spawn_peer_ingress(
