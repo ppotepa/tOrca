@@ -5,8 +5,12 @@ pub mod engine;
 pub mod error;
 pub mod event;
 pub mod fault_injection;
+#[allow(dead_code)]
+mod input;
 mod logging;
 pub mod peer;
+#[allow(dead_code)]
+mod processing;
 pub mod probing;
 pub mod relay;
 pub mod storage;
@@ -14,7 +18,7 @@ pub mod storage;
 pub use actor::ClientEngineActor;
 pub use command::{EngineCommand, EngineCommandEnvelope, PlatformFact, PlatformKind, TorPhase};
 pub use config::EngineConfig;
-pub use engine::ClientEngine;
+pub use engine::{ClientEngine, EngineCommandSender};
 pub mod client_api;
 pub use client_api::PairingList;
 pub use error::{EngineError, EngineResult};

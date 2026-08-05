@@ -1,8 +1,8 @@
 use std::sync::Mutex;
 
-use tokio::{runtime::Runtime, sync::mpsc};
+use tokio::runtime::Runtime;
 use tokio_util::sync::CancellationToken;
-use torchat_client_engine::{EngineCommandEnvelope, event::EngineEventReceiver};
+use torchat_client_engine::{EngineCommandSender, event::EngineEventReceiver};
 
 pub struct EngineHandle {
     pub runtime: Runtime,
@@ -14,7 +14,7 @@ pub struct EngineHandle {
 }
 
 pub struct EngineHandleCommandState {
-    pub commands: mpsc::Sender<EngineCommandEnvelope>,
+    pub commands: EngineCommandSender,
     pub shutdown_token: CancellationToken,
     pub started: bool,
     pub shutdown: bool,
