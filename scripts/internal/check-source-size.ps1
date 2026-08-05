@@ -38,6 +38,9 @@ $ignoredPathPatterns = @(
     '(^|/)migrations/',
     '(^|/)sql/migrations/',
     '(^|/)generated/',
+    # Frozen compatibility snapshot retained while the active engine uses the
+    # split unified actor modules. New production code must not be added here.
+    '^packages/torchat-client-engine/src/actor/legacy(?:\.rs|/)',
     '\.g\.dart$',
     'Cargo\.lock$'
 )
@@ -53,7 +56,6 @@ $testPathPatterns = @(
 # Existing oversized files are explicit debt. They may shrink, but they may not
 # grow while the refactor is in progress.
 $oversizedBaselines = @{
-    'packages/torchat-client-engine/src/actor/mod.rs' = 5399
     'packages/torchat-client-engine/src/actor/connection.rs' = 503
     'packages/torchat-client-engine/src/actor/peer_events.rs' = 511
     'packages/torchat-peer/src/peer/inbound.rs' = 521
@@ -79,12 +81,12 @@ $oversizedBaselines = @{
     'apps/mobile/flutter/lib/features/account/settings_view.dart' = 524
     'apps/mobile/flutter/lib/features/contacts/contacts_view.dart' = 765
     'apps/mobile/flutter/lib/features/onboarding/onboarding_views.dart' = 572
-'apps/mobile/flutter/lib/platform/desktop/desktop_workspace.dart' = 807
+    'apps/mobile/flutter/lib/platform/desktop/desktop_workspace.dart' = 807
     'packages/torchat-flutter-ui/lib/core/models/domain.dart' = 1052
     'apps/mobile/flutter/android/app/src/main/kotlin/org/torchat/mobile/TorChatForegroundService.kt' = 1039
     'apps/mobile/flutter/lib/core/runtime/runtime_repository.dart' = 875
     'apps/mobile/flutter/lib/main.dart' = 738
-'apps/desktop/flutter/lib/platform/desktop/windows_runtime.dart' = 701
+    'apps/desktop/flutter/lib/platform/desktop/windows_runtime.dart' = 701
     'scripts/zip.ps1' = 753
     'services/torchat-relay/src/main.rs' = 687
     'apps/desktop/native/src/runtime_engine_stdio.rs' = 594
@@ -214,4 +216,3 @@ if ($failures.Count -gt 0) {
 }
 
 Write-Host "[torchat] source-size check passed with $($warnings.Count) warning(s)."
-
