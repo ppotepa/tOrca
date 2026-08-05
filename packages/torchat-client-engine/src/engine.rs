@@ -12,7 +12,6 @@ use crate::{
 };
 
 pub const ENGINE_INBOX_CAPACITY: usize = 512;
-pub const COMMAND_CHANNEL_CAPACITY: usize = ENGINE_INBOX_CAPACITY;
 pub const WORKER_OUTCOME_CHANNEL_CAPACITY: usize = 256;
 const ENGINE_RESPONSE_TIMEOUT: Duration = Duration::from_secs(75);
 
