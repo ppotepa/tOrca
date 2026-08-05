@@ -1,36 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../core/release/release_info.dart';
 import '../../shared/widgets/action_section.dart';
 import '../../shared/widgets/action_tile.dart';
-
-abstract final class TorcaReleaseInfo {
-  static const product = 'Torca';
-  static const version = String.fromEnvironment(
-    'TORCA_VERSION',
-    defaultValue: 'development',
-  );
-  static const build = String.fromEnvironment(
-    'TORCA_BUILD',
-    defaultValue: 'local',
-  );
-  static const channel = String.fromEnvironment(
-    'TORCA_CHANNEL',
-    defaultValue: 'development',
-  );
-  static const commit = String.fromEnvironment(
-    'TORCA_COMMIT',
-    defaultValue: 'unknown',
-  );
-
-  static String get shortCommit =>
-      commit.length <= 12 ? commit : commit.substring(0, 12);
-
-  static String get displayVersion => '$version+$build';
-
-  static String get diagnosticLabel =>
-      '$product $displayVersion\nChannel: $channel\nCommit: $commit';
-}
 
 class ReleaseInformationSection extends StatelessWidget {
   const ReleaseInformationSection({super.key});
