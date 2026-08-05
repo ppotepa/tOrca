@@ -18,6 +18,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import org.torchat.generated.EngineContract
 
 class MainActivity : FlutterActivity() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -134,8 +135,8 @@ class MainActivity : FlutterActivity() {
         if (conversationId.isEmpty()) return
 
         val event = mapOf<String, Any?>(
-            "type" to NotificationNavigation.EVENT_TYPE,
-            "conversationId" to conversationId,
+            EngineContract.TYPE to NotificationNavigation.EVENT_TYPE,
+            EngineContract.CONVERSATION_ID to conversationId,
             "notificationId" to notificationId.toString(),
         )
         if (eventSink == null) {
