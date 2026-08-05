@@ -4,6 +4,7 @@ pub mod config;
 pub mod engine;
 pub mod error;
 pub mod event;
+mod effects;
 pub mod fault_injection;
 mod input;
 mod logging;
