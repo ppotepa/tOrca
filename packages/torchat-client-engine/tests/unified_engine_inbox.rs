@@ -71,6 +71,7 @@ fn unified_input_keeps_correlation_and_causation_metadata() {
     ] {
         assert!(input.contains(symbol), "missing input symbol: {symbol}");
     }
+    assert!(!input_root.join("envelope.rs").exists() || !read(input_root.join("envelope.rs")).contains("pub(crate) fn effect_outcome("));
     assert!(!crate_root().join("src/input.rs").exists());
     assert!(!crate_root().join("src/input_derived.rs").exists());
 }
@@ -85,6 +86,7 @@ fn engine_has_one_command_inbox_and_one_state_mutating_receiver() {
     assert!(engine.contains(".run_unified("));
     assert!(!engine.contains("commands: mpsc::Sender<EngineCommandEnvelope>"));
     assert!(!engine.contains("actor.run("));
+    assert!(!engine.contains("COMMAND_CHANNEL_CAPACITY"));
 
     assert!(actor.contains("inbox.recv().await"));
     assert!(actor.contains("fn process_unified_input"));
@@ -98,6 +100,19 @@ fn engine_has_one_command_inbox_and_one_state_mutating_receiver() {
     assert!(!loop_body.contains("tokio::select!"));
     assert!(!loop_body.contains("peer_events.recv()"));
     assert!(!loop_body.contains("sleep_until("));
+}
+
+#[test]
+fn actor_has_one_canonical_loop_and_no_historical_source_file() {
+    let actor_root = crate_root().join("src/actor");
+    assert!(actor_root.join("state.rs").is_file());
+    assert!(!actor_root.join("legacy.rs").exists());
+    assert!(!actor_root.join("legacy").exists());
+
+    let state = read(actor_root.join("state.rs"));
+    let unified = read(actor_root.join("unified.rs"));
+    assert!(!state.contains("pub async fn run("));
+    assert!(unified.contains("pub async fn run_unified("));
 }
 
 #[test]
@@ -172,6 +187,23 @@ fn rendezvous_io_runs_only_in_the_split_effect_worker() {
 }
 
 #[test]
+fn runtime_and_relay_expose_only_the_canonical_pairing_path() {
+    let runtime_root = crate_root().join("../torchat-runtime/src");
+    let runtime = read(runtime_root.join("runtime.rs"));
+    let runtime_transport = read(runtime_root.join("transport.rs"));
+    let relay = read(crate_root().join("src/relay/mod.rs"));
+
+    assert!(!runtime.contains("pub fn set_nickname("));
+    assert!(!runtime.contains("pub fn refresh_pairing_code("));
+    assert!(!runtime.contains("pub fn submit_pairing_code("));
+    assert!(!runtime_transport.contains("fn refresh_pairing_code("));
+    assert!(!runtime_transport.contains("fn submit_pairing_code("));
+    assert!(!runtime_transport.contains("fn pairing_inbox("));
+    assert!(!relay.contains("fn submit_pairing_code(&mut self"));
+    assert!(relay.contains("fn submit_pairing_code_with_offer("));
+}
+
+#[test]
 fn timers_and_relay_frames_reenter_the_unified_input_pipeline() {
     let scheduler_root = crate_root().join("src/scheduler");
     let scheduler = read_tree(&scheduler_root);
@@ -202,13 +234,15 @@ fn response_resolution_precedes_public_event_backpressure() {
 }
 
 #[test]
-fn dead_snapshot_directory_and_platform_specific_queue_are_absent() {
-    assert!(!crate_root().join("src/actor/legacy").exists());
+fn dead_code_is_not_suppressed_and_unused_builder_is_absent() {
+    let lib = read(crate_root().join("src/lib.rs"));
+    let processing = read(crate_root().join("src/processing.rs"));
+    assert!(!lib.contains("allow(dead_code)"));
+    assert!(!processing.contains("EngineProcessingResultBuilder"));
+}
 
-    let engine = read(crate_root().join("src/engine.rs"));
-    assert!(!engine.contains("actor.run("));
-    assert!(engine.contains(".run_unified("));
-
+#[test]
+fn platform_specific_command_queue_is_absent() {
     let flutter = read(crate_root().join("../../apps/mobile/flutter/lib/client_runtime.dart"));
     assert!(!flutter.contains("_SerializedClientRuntime"));
     assert!(!flutter.contains("Platform.isWindows"));
