@@ -26,6 +26,13 @@ pub enum RelayEvent {
 }
 
 pub trait EngineRelay: Send {
+    /// Returns false only while ownership of the concrete relay has been
+    /// transferred to a blocking effect worker. This prevents two workers
+    /// from racing and later restoring stale relay instances into the actor.
+    fn can_start_effect(&self) -> bool {
+        true
+    }
+
     fn set_socks5_url(&mut self, socks5_url: Option<String>);
     fn invalidate_session(&mut self) {}
     fn shutdown(&mut self);
@@ -47,4 +54,3 @@ pub trait EngineRelay: Send {
     ) -> RuntimeResult<PairingItem>;
     fn cancel_pairing(&mut self, pairing_id: &str) -> RuntimeResult<()>;
 }
-
