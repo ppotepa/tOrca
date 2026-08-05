@@ -1,8 +1,7 @@
 use rusqlite::{OptionalExtension, Row, params};
 use serde::de::DeserializeOwned;
 use torchat_runtime::{
-    DurableOperation, OperationId, OperationState, OperationStorage, OperationType, RuntimeError,
-    RuntimeErrorCode, RuntimeResult,
+    DurableOperation, OperationId, OperationStorage, RuntimeError, RuntimeResult,
 };
 
 use super::ClientDatabase;
@@ -115,5 +114,3 @@ fn parse_enum<T: DeserializeOwned>(value: &str) -> RuntimeResult<T> {
 fn storage_error(error: rusqlite::Error) -> RuntimeError {
     RuntimeError::Storage(format!("{error:#}"))
 }
-
-const _: fn(OperationType, OperationState, RuntimeErrorCode) = |_, _, _| {};
