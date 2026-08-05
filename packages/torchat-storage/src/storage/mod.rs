@@ -2,6 +2,7 @@ mod contact_records;
 mod message_queries;
 mod message_records;
 pub mod migrations;
+mod operation_repository;
 mod pairing_records;
 pub mod runtime_storage;
 mod settings;
