@@ -5,8 +5,7 @@ use crate::{
     processing::EngineProcessingResult,
 };
 use torchat_runtime::{
-    ClientRuntimeFeatureFacade, RuntimeClock,
-    features::operations::ClientRuntimeOperationsFacade,
+    ClientRuntimeFeatureFacade, RuntimeClock, features::operations::ClientRuntimeOperationsFacade,
 };
 
 impl ClientEngineActor {

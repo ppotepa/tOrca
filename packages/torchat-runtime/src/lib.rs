@@ -108,10 +108,19 @@ mod tests {
         assert_eq!(fixture.profile.nickname, "Alice");
         assert_eq!(fixture.contact.verification, VerificationState::Verified);
         assert_eq!(fixture.conversation.status, ConversationState::Active);
-        assert_eq!(fixture.message.state, crate::models::MessageState::Delivered);
-        assert_eq!(fixture.message_send_effect.recipient_installation_id, "installation-bob");
+        assert_eq!(
+            fixture.message.state,
+            crate::models::MessageState::Delivered
+        );
+        assert_eq!(
+            fixture.message_send_effect.recipient_installation_id,
+            "installation-bob"
+        );
         assert_eq!(fixture.message_transport_outcomes.len(), 3);
-        assert_eq!(fixture.pairing_preparation.recipient_installation_id, "installation-bob");
+        assert_eq!(
+            fixture.pairing_preparation.recipient_installation_id,
+            "installation-bob"
+        );
         assert_eq!(fixture.pairing_send_effects.len(), 2);
         assert_eq!(fixture.pairing_peer_outcomes.len(), 3);
         assert_eq!(fixture.pairing_sync_result.acknowledgements.len(), 1);
@@ -119,8 +128,16 @@ mod tests {
         assert_eq!(fixture.pairing_outbox_item.state, InviteState::Pending);
 
         let events: Vec<RuntimeEvent> = fixture.events.clone();
-        assert!(events.iter().any(|event| matches!(event, RuntimeEvent::RuntimeReady { protocol: 1 })));
-        assert!(events.iter().any(|event| matches!(event, RuntimeEvent::TorStatus { .. })));
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, RuntimeEvent::RuntimeReady { protocol: 1 }))
+        );
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, RuntimeEvent::TorStatus { .. }))
+        );
     }
 
     #[test]
@@ -131,9 +148,10 @@ mod tests {
 
     #[test]
     fn fixture_canonical_tor_status_includes_retry_attempt() {
-        let fixture: serde_json::Value =
-            serde_json::from_str(include_str!("../../../common/internal-runtime-fixtures.json"))
-                .expect("fixture should parse");
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../common/internal-runtime-fixtures.json"
+        ))
+        .expect("fixture should parse");
 
         let retry_attempt = fixture["events"][1]["retryAttempt"]
             .as_i64()

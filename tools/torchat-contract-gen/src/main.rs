@@ -144,7 +144,10 @@ fn render_rust(manifest: &Manifest) -> String {
          \tpub handler_key: &'static str,\n\
          }\n\n",
     );
-    output.push_str(&format!("pub const PROTOCOL: u16 = {};\n\n", manifest.protocol));
+    output.push_str(&format!(
+        "pub const PROTOCOL: u16 = {};\n\n",
+        manifest.protocol
+    ));
     output.push_str("pub const COMMANDS: &[CommandContract] = &[\n");
     for command in &manifest.commands {
         output.push_str(&format!(
@@ -181,7 +184,10 @@ fn render_dart_metadata(manifest: &Manifest) -> String {
          \tfinal String handlerKey;\n\
          }\n\n",
     );
-    output.push_str(&format!("const generatedProtocol = {};\n\n", manifest.protocol));
+    output.push_str(&format!(
+        "const generatedProtocol = {};\n\n",
+        manifest.protocol
+    ));
     output.push_str("const generatedCommands = <GeneratedCommandContract>[\n");
     for command in &manifest.commands {
         output.push_str(&format!(
@@ -238,7 +244,10 @@ fn render_kotlin_metadata(manifest: &Manifest) -> String {
          )\n\n\
          object GeneratedCommandContracts {{\n"
     );
-    output.push_str(&format!("    const val PROTOCOL: Int = {}\n", manifest.protocol));
+    output.push_str(&format!(
+        "    const val PROTOCOL: Int = {}\n",
+        manifest.protocol
+    ));
     output.push_str("    val all: List<GeneratedCommandContract> = listOf(\n");
     for command in &manifest.commands {
         output.push_str(&format!(

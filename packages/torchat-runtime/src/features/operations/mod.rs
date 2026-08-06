@@ -116,11 +116,7 @@ where
         if decision.terminal {
             operation.fail_permanently(error_code, now_ms);
         } else {
-            operation.schedule_retry(
-                decision.retry_at.unwrap_or(now_ms),
-                error_code,
-                now_ms,
-            );
+            operation.schedule_retry(decision.retry_at.unwrap_or(now_ms), error_code, now_ms);
         }
         self.persist_changed(operation)
     }

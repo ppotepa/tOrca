@@ -68,8 +68,7 @@ final class DefaultNotificationService implements NotificationService {
   Future<void> clear(String notificationId) async {}
 }
 
-final class DefaultNavigationIntentService
-    implements NavigationIntentService {
+final class DefaultNavigationIntentService implements NavigationIntentService {
   const DefaultNavigationIntentService();
 
   static final Stream<DesktopNavigationIntent> _stream =
@@ -89,14 +88,15 @@ final class PlatformServices {
     DiagnosticsExportService? diagnostics,
     ProfileResetService? profileReset,
     UpdateCheckService? updates,
-  })  : windowLifecycle = windowLifecycle ?? const DefaultWindowLifecycleService(),
-        notifications = notifications ?? const DefaultNotificationService(),
-        navigation = navigation ?? const DefaultNavigationIntentService(),
-        runtimeBridgeFactory = runtimeBridgeFactory ?? MobileBridge.new,
-        autostart = autostart ?? const DefaultAutostartService(),
-        diagnostics = diagnostics ?? const LocalDiagnosticsExportService(),
-        profileReset = profileReset ?? const MobileProfileResetService(),
-        updates = updates ?? const LocalSignedUpdateCheckService();
+  }) : windowLifecycle =
+           windowLifecycle ?? const DefaultWindowLifecycleService(),
+       notifications = notifications ?? const DefaultNotificationService(),
+       navigation = navigation ?? const DefaultNavigationIntentService(),
+       runtimeBridgeFactory = runtimeBridgeFactory ?? MobileBridge.new,
+       autostart = autostart ?? const DefaultAutostartService(),
+       diagnostics = diagnostics ?? const LocalDiagnosticsExportService(),
+       profileReset = profileReset ?? const MobileProfileResetService(),
+       updates = updates ?? const LocalSignedUpdateCheckService();
 
   final WindowLifecycleService windowLifecycle;
   final NotificationService notifications;

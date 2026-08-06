@@ -6,10 +6,7 @@ use std::{
 };
 
 use reqwest::Url;
-use torchat_core::{
-    ContactInvite, Identity,
-    relay::RelayPayloadV1,
-};
+use torchat_core::{ContactInvite, Identity, relay::RelayPayloadV1};
 use torchat_crypto::rendezvous as rendezvous_crypto;
 use torchat_relay_protocol::{RendezvousClientFrame, RendezvousServerFrame};
 use torchat_runtime::{InviteCode, InviteState, PairingItem, RuntimeError, RuntimeResult};
@@ -187,8 +184,7 @@ impl SharedRelayActor {
             .recv_timeout(Duration::from_secs(30))
             .map_err(|error| {
                 RuntimeError::Unavailable(format!("rendezvous response timeout: {error}"))
-            })?
-        {
+            })? {
             RendezvousEvent::Frame(frame) => Ok(frame),
             RendezvousEvent::Error(error) => {
                 self.commands = None;
@@ -388,7 +384,9 @@ impl EngineRelay for SharedRelayActor {
                 .ok()?;
                 let offer = String::from_utf8(offer).ok()?;
                 self.remember_invite_pairing(pairing_id, &offer);
-                Some(RelayEvent::Envelope(envelope_for_payload(pairing_id, offer)))
+                Some(RelayEvent::Envelope(envelope_for_payload(
+                    pairing_id, offer,
+                )))
             }
             RendezvousServerFrame::PairingAccepted {
                 pairing_id,
@@ -484,6 +482,28 @@ impl EngineRelay for SharedRelayActor {
     }
 }
 
+fn envelope_for_payload(
+    message_id: Uuid,
+    ciphertext: String,
+) -> torchat_core::relay::RelayEnvelope {
+    let (sender, recipient) = match RelayPayloadV1::decode(&ciphertext) {
+        Ok(RelayPayloadV1::Welcome {
+            sender, recipient, ..
+        })
+        | Ok(RelayPayloadV1::WelcomeApplied {
+            sender, recipient, ..
+        }) => (sender.installation_id, recipient),
+        _ => (String::new(), String::new()),
+    };
+    torchat_core::relay::RelayEnvelope {
+        version: torchat_core::PROTOCOL_VERSION,
+        message_id,
+        sender,
+        recipient,
+        ciphertext,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -521,27 +541,5 @@ mod tests {
         assert_eq!(relay.pairing_id_for_message(invite_id), pairing_id);
         let unrelated = Uuid::new_v4();
         assert_eq!(relay.pairing_id_for_message(unrelated), unrelated);
-    }
-}
-
-fn envelope_for_payload(
-    message_id: Uuid,
-    ciphertext: String,
-) -> torchat_core::relay::RelayEnvelope {
-    let (sender, recipient) = match RelayPayloadV1::decode(&ciphertext) {
-        Ok(RelayPayloadV1::Welcome {
-            sender, recipient, ..
-        })
-        | Ok(RelayPayloadV1::WelcomeApplied {
-            sender, recipient, ..
-        }) => (sender.installation_id, recipient),
-        _ => (String::new(), String::new()),
-    };
-    torchat_core::relay::RelayEnvelope {
-        version: torchat_core::PROTOCOL_VERSION,
-        message_id,
-        sender,
-        recipient,
-        ciphertext,
     }
 }

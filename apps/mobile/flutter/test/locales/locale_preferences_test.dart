@@ -13,7 +13,9 @@ void main() {
     await store.save(AppLocalePreference.polish);
     expect(store.load(), AppLocalePreference.polish);
     expect(
-      (await SharedPreferences.getInstance()).getString(LocalePreferencesStore.key),
+      (await SharedPreferences.getInstance()).getString(
+        LocalePreferencesStore.key,
+      ),
       'pl',
     );
   });

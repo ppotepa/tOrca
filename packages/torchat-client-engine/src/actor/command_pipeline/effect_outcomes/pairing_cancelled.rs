@@ -23,11 +23,7 @@ impl ClientEngineActor {
                 let state = runtime
                     .feature_confirm_pairing_cancelled(&pairing_id)?
                     .value;
-                runtime.feature_complete_pairing_operation(
-                    &operation_id,
-                    &pairing_id,
-                    now_ms,
-                )?;
+                runtime.feature_complete_pairing_operation(&operation_id, &pairing_id, now_ms)?;
                 Ok(state)
             },
             |_| Ok(ResponsePayload::Empty),

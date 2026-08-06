@@ -11,10 +11,9 @@ use serde_json::json;
 use crate::{
     abi::FfiStatus,
     c_api::{
-        MlsEpochGetCallback, MlsEpochSetCallback, OpaqueEngineHandle,
-        torchat_client_engine_free, torchat_client_engine_free_string,
-        torchat_client_engine_last_error, torchat_client_engine_new,
-        torchat_client_engine_new_with_mls_epoch_anchor,
+        MlsEpochGetCallback, MlsEpochSetCallback, OpaqueEngineHandle, torchat_client_engine_free,
+        torchat_client_engine_free_string, torchat_client_engine_last_error,
+        torchat_client_engine_new, torchat_client_engine_new_with_mls_epoch_anchor,
         torchat_client_engine_platform_fact_json, torchat_client_engine_poll_json,
         torchat_client_engine_shutdown, torchat_client_engine_start,
         torchat_client_engine_submit_json,
@@ -105,6 +104,10 @@ pub extern "C" fn torca_engine_last_problem_json() -> *mut c_char {
 }
 
 #[unsafe(no_mangle)]
+/// # Safety
+///
+/// `config_json` must be non-null while `config_len` is nonzero, and
+/// `out_handle` must point to writable storage.
 pub unsafe extern "C" fn torca_engine_new_v1(
     config_json: *const u8,
     config_len: usize,
@@ -136,6 +139,11 @@ pub unsafe extern "C" fn torca_engine_new_v1(
 }
 
 #[unsafe(no_mangle)]
+/// # Safety
+///
+/// `config_json` must be non-null while `config_len` is nonzero, and
+/// `out_handle` must point to writable storage. Any provided callbacks must
+/// remain valid for the lifetime of the returned engine handle.
 pub unsafe extern "C" fn torca_engine_new_with_mls_epoch_anchor_v1(
     config_json: *const u8,
     config_len: usize,
@@ -174,6 +182,10 @@ pub unsafe extern "C" fn torca_engine_new_with_mls_epoch_anchor_v1(
 }
 
 #[unsafe(no_mangle)]
+/// # Safety
+///
+/// `handle` must be a valid engine handle returned by a prior constructor and
+/// not yet freed.
 pub unsafe extern "C" fn torca_engine_start_v1(handle: *mut OpaqueEngineHandle) -> i32 {
     protected_status(|| {
         if handle.is_null() {
@@ -191,6 +203,10 @@ pub unsafe extern "C" fn torca_engine_start_v1(handle: *mut OpaqueEngineHandle) 
 }
 
 #[unsafe(no_mangle)]
+/// # Safety
+///
+/// `handle` must be a valid, not-yet-freed engine handle. `request_json` must
+/// be non-null while `request_len` is nonzero.
 pub unsafe extern "C" fn torca_engine_submit_json_v1(
     handle: *mut OpaqueEngineHandle,
     request_json: *const u8,
@@ -219,6 +235,10 @@ pub unsafe extern "C" fn torca_engine_submit_json_v1(
 }
 
 #[unsafe(no_mangle)]
+/// # Safety
+///
+/// `handle` must be a valid, not-yet-freed engine handle. `fact_json` must be
+/// non-null while `fact_len` is nonzero.
 pub unsafe extern "C" fn torca_engine_platform_fact_json_v1(
     handle: *mut OpaqueEngineHandle,
     fact_json: *const u8,
@@ -247,6 +267,10 @@ pub unsafe extern "C" fn torca_engine_platform_fact_json_v1(
 }
 
 #[unsafe(no_mangle)]
+/// # Safety
+///
+/// `handle` must be a valid, not-yet-freed engine handle. `out_json` must point
+/// to writable storage; the caller assumes ownership of any string it receives.
 pub unsafe extern "C" fn torca_engine_poll_json_v1(
     handle: *mut OpaqueEngineHandle,
     timeout_ms: u64,
@@ -275,6 +299,10 @@ pub unsafe extern "C" fn torca_engine_poll_json_v1(
 }
 
 #[unsafe(no_mangle)]
+/// # Safety
+///
+/// `handle` must be a valid engine handle obtained from a constructor and not
+/// yet freed.
 pub unsafe extern "C" fn torca_engine_shutdown_v1(handle: *mut OpaqueEngineHandle) -> i32 {
     protected_status(|| {
         if handle.is_null() {
@@ -287,12 +315,17 @@ pub unsafe extern "C" fn torca_engine_shutdown_v1(handle: *mut OpaqueEngineHandl
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn torca_engine_free_v1(
-    handle: *mut *mut OpaqueEngineHandle,
-) -> i32 {
+/// # Safety
+///
+/// `handle` must point to a valid engine-handle pointer. The engine is freed
+/// and the pointer is nulled; the caller must not use the handle afterwards.
+pub unsafe extern "C" fn torca_engine_free_v1(handle: *mut *mut OpaqueEngineHandle) -> i32 {
     protected_status(|| {
         if handle.is_null() {
-            set_problem(FfiStatus::InvalidArgument, "handle pointer must not be null");
+            set_problem(
+                FfiStatus::InvalidArgument,
+                "handle pointer must not be null",
+            );
             return FfiStatus::InvalidArgument;
         }
         let value = *handle;

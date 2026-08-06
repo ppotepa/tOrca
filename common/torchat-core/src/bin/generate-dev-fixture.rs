@@ -25,7 +25,6 @@ fn main() {
     })
     .expect("fixture json");
     std::fs::create_dir_all("tests/fixtures/protocol").expect("fixture directory");
-    std::fs::write("tests/fixtures/protocol/android-peer.json", &fixture)
-        .expect("fixture file");
+    std::fs::write("tests/fixtures/protocol/android-peer.json", &fixture).expect("fixture file");
     println!("{fixture}");
 }

@@ -123,13 +123,13 @@ impl ClientEngineActor {
         match kind {
             EngineTimerKind::RelayPoll => {
                 while let Some(event) = self.relay.poll_event() {
-                    result.derived_inputs.push(
-                        EngineInputEnvelope::relay_event_caused(
+                    result
+                        .derived_inputs
+                        .push(EngineInputEnvelope::relay_event_caused(
                             unix_ms(),
                             causation_id,
                             event,
-                        ),
-                    );
+                        ));
                 }
                 self.relay_poll_at = Instant::now() + self.relay_poll_interval();
             }

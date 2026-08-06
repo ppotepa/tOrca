@@ -17,8 +17,7 @@ pub fn message_state_after_transport_outcome(
     use MessageState::{Delivered, Failed, Queued, Read, Sending, Sent};
     use MessageTransportOutcome::{
         Delivered as OutcomeDelivered, PeerAuthenticationFailed, PeerDelivered, PeerPersisted,
-        PeerRejected, PeerUnavailable, PermanentFailure,
-        RetryableFailure,
+        PeerRejected, PeerUnavailable, PermanentFailure, RetryableFailure,
     };
 
     match outcome {

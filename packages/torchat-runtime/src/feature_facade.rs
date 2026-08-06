@@ -6,9 +6,9 @@ use crate::{
     RelationshipTransition, RuntimeClock, RuntimeError, RuntimeEvent, RuntimeResult,
     RuntimeSendEffect, RuntimeStorage, RuntimeTransport,
     features::{
-        contacts::ContactsFeature, conversations::ConversationsFeature, messaging::MessagingFeature,
-        pairing::PairingFeature, peer::PeerFeature, presence::PresenceFeature,
-        receipts::ReceiptsFeature, relationships::RelationshipsFeature,
+        contacts::ContactsFeature, conversations::ConversationsFeature,
+        messaging::MessagingFeature, pairing::PairingFeature, peer::PeerFeature,
+        presence::PresenceFeature, receipts::ReceiptsFeature, relationships::RelationshipsFeature,
     },
 };
 
@@ -60,18 +60,12 @@ pub trait ClientRuntimeFeatureFacade {
         &mut self,
         conversation_id: &str,
     ) -> RuntimeResult<FeatureResult<()>>;
-    fn feature_message_by_id(
-        &mut self,
-        message_id: &str,
-    ) -> RuntimeResult<Option<ChatMessage>>;
+    fn feature_message_by_id(&mut self, message_id: &str) -> RuntimeResult<Option<ChatMessage>>;
     fn feature_save_message(
         &mut self,
         message: ChatMessage,
     ) -> RuntimeResult<FeatureResult<ChatMessage>>;
-    fn feature_delete_message(
-        &mut self,
-        message_id: &str,
-    ) -> RuntimeResult<FeatureResult<()>>;
+    fn feature_delete_message(&mut self, message_id: &str) -> RuntimeResult<FeatureResult<()>>;
     fn feature_prepare_accept_pairing(
         &mut self,
         pairing_id: &str,
@@ -182,8 +176,8 @@ where
         now_ms: i64,
     ) -> RuntimeResult<FeatureResult<()>> {
         let contact_result = ContactsFeature::new(self.storage_mut()).verify(installation_id)?;
-        let conversation_result =
-            ConversationsFeature::new(self.storage_mut()).activate_for_contact(installation_id, now_ms)?;
+        let conversation_result = ConversationsFeature::new(self.storage_mut())
+            .activate_for_contact(installation_id, now_ms)?;
         let mut changes = contact_result.changes;
         changes.merge(conversation_result.changes);
         if changes.sections.is_empty() {
@@ -227,8 +221,8 @@ where
         ContactsFeature::new(self.storage_mut())
             .by_installation_id(contact_id)?
             .ok_or_else(|| RuntimeError::NotFound("contact does not exist".to_owned()))?;
-        let conversation =
-            ConversationsFeature::new(self.storage_mut()).activate_for_contact(contact_id, now_ms)?;
+        let conversation = ConversationsFeature::new(self.storage_mut())
+            .activate_for_contact(contact_id, now_ms)?;
         if conversation.changes.sections.is_empty() {
             return Ok(FeatureResult::unchanged(true));
         }
@@ -245,10 +239,7 @@ where
         ConversationsFeature::new(self.storage_mut()).mark_read(conversation_id)
     }
 
-    fn feature_message_by_id(
-        &mut self,
-        message_id: &str,
-    ) -> RuntimeResult<Option<ChatMessage>> {
+    fn feature_message_by_id(&mut self, message_id: &str) -> RuntimeResult<Option<ChatMessage>> {
         MessagingFeature::new(self.storage_mut()).by_id(message_id)
     }
 
@@ -259,10 +250,7 @@ where
         MessagingFeature::new(self.storage_mut()).save(message)
     }
 
-    fn feature_delete_message(
-        &mut self,
-        message_id: &str,
-    ) -> RuntimeResult<FeatureResult<()>> {
+    fn feature_delete_message(&mut self, message_id: &str) -> RuntimeResult<FeatureResult<()>> {
         MessagingFeature::new(self.storage_mut()).delete(message_id)
     }
 
@@ -284,10 +272,11 @@ where
     ) -> RuntimeResult<FeatureResult<InviteState>> {
         let result = PairingFeature::new(self.storage_mut()).accept(pairing_id)?;
         if !result.changes.sections.is_empty() {
-            self.session_mut().push_event(RuntimeEvent::InviteStateChanged {
-                pairing_id: Some(pairing_id.to_owned()),
-                state: Some(result.value),
-            });
+            self.session_mut()
+                .push_event(RuntimeEvent::InviteStateChanged {
+                    pairing_id: Some(pairing_id.to_owned()),
+                    state: Some(result.value),
+                });
         }
         Ok(result)
     }
@@ -299,10 +288,11 @@ where
     ) -> RuntimeResult<FeatureResult<(RuntimeSendEffect, InviteState)>> {
         let result = PairingFeature::new(self.storage_mut()).reject(pairing_id, now_secs)?;
         if !result.changes.sections.is_empty() {
-            self.session_mut().push_event(RuntimeEvent::InviteStateChanged {
-                pairing_id: Some(pairing_id.to_owned()),
-                state: Some(result.value.1),
-            });
+            self.session_mut()
+                .push_event(RuntimeEvent::InviteStateChanged {
+                    pairing_id: Some(pairing_id.to_owned()),
+                    state: Some(result.value.1),
+                });
         }
         Ok(result)
     }
@@ -312,10 +302,11 @@ where
         pairing_id: &str,
     ) -> RuntimeResult<FeatureResult<InviteState>> {
         let result = PairingFeature::new(self.storage_mut()).archive(pairing_id)?;
-        self.session_mut().push_event(RuntimeEvent::InviteStateChanged {
-            pairing_id: Some(pairing_id.to_owned()),
-            state: Some(result.value),
-        });
+        self.session_mut()
+            .push_event(RuntimeEvent::InviteStateChanged {
+                pairing_id: Some(pairing_id.to_owned()),
+                state: Some(result.value),
+            });
         Ok(result)
     }
 
@@ -332,10 +323,11 @@ where
     ) -> RuntimeResult<FeatureResult<InviteState>> {
         let result = PairingFeature::new(self.storage_mut()).confirm_cancel(pairing_id)?;
         if !result.changes.sections.is_empty() {
-            self.session_mut().push_event(RuntimeEvent::InviteStateChanged {
-                pairing_id: Some(pairing_id.to_owned()),
-                state: Some(result.value),
-            });
+            self.session_mut()
+                .push_event(RuntimeEvent::InviteStateChanged {
+                    pairing_id: Some(pairing_id.to_owned()),
+                    state: Some(result.value),
+                });
         }
         Ok(result)
     }
@@ -345,12 +337,14 @@ where
         pairing_id: &str,
         outcome: PairingPeerOutcome,
     ) -> RuntimeResult<FeatureResult<InviteState>> {
-        let result = PairingFeature::new(self.storage_mut()).apply_peer_outcome(pairing_id, outcome)?;
+        let result =
+            PairingFeature::new(self.storage_mut()).apply_peer_outcome(pairing_id, outcome)?;
         if !result.changes.sections.is_empty() {
-            self.session_mut().push_event(RuntimeEvent::InviteStateChanged {
-                pairing_id: Some(pairing_id.to_owned()),
-                state: Some(result.value),
-            });
+            self.session_mut()
+                .push_event(RuntimeEvent::InviteStateChanged {
+                    pairing_id: Some(pairing_id.to_owned()),
+                    state: Some(result.value),
+                });
         }
         Ok(result)
     }

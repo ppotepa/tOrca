@@ -50,10 +50,14 @@ extension _ApplicationDialogs on _ControllerHomePageState {
           onChanged: (_) {},
           checkRequest: () async {
             await controller.refreshData();
-            return ref.read(appControllerProvider).inbox.firstOrNullWhere(
-              (item) =>
-                  item.requiresLocalDecision && !_pairingUi.isResolved(item.id),
-            );
+            return ref
+                .read(appControllerProvider)
+                .inbox
+                .firstOrNullWhere(
+                  (item) =>
+                      item.requiresLocalDecision &&
+                      !_pairingUi.isResolved(item.id),
+                );
           },
           onAccept: (request) async {
             await controller.acceptPairing(request.id);

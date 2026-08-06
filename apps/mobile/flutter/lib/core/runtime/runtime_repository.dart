@@ -13,7 +13,7 @@ export 'runtime_repository_models.dart';
 
 class RuntimeRepository {
   RuntimeRepository(this._runtime)
-      : _projectionProvider = _requireProjectionProvider(_runtime);
+    : _projectionProvider = _requireProjectionProvider(_runtime);
 
   static const int _messageCacheLimit = 5;
 
@@ -23,16 +23,7 @@ class RuntimeRepository {
 
   static RuntimeProjectionProvider _requireProjectionProvider(
     ClientRuntime runtime,
-  ) {
-    if (runtime case final RuntimeProjectionProvider provider) {
-      return provider;
-    }
-    throw ArgumentError.value(
-      runtime,
-      'runtime',
-      'Torca requires an authoritative RuntimeProjectionProvider',
-    );
-  }
+  ) => runtime as RuntimeProjectionProvider;
 
   ApplicationSnapshot? get currentApplicationSnapshot =>
       applicationState.current;
@@ -225,9 +216,7 @@ class RuntimeRepository {
     return _snapshotGeneration;
   }
 
-  Future<RuntimeRefreshSnapshot> refresh({
-    bool bypassCooldown = false,
-  }) async {
+  Future<RuntimeRefreshSnapshot> refresh({bool bypassCooldown = false}) async {
     final application = await applicationSnapshot(force: true);
     final local = RuntimeLocalSnapshot(
       contacts: application.contacts,
@@ -331,9 +320,9 @@ class RuntimeRepository {
 
   void _refreshApplicationSnapshotInBackground() {
     unawaited(
-      applicationSnapshot(force: true)
-          .then<void>((_) {})
-          .catchError((Object _, StackTrace _) {}),
+      applicationSnapshot(
+        force: true,
+      ).then<void>((_) {}).catchError((Object _, StackTrace _) {}),
     );
   }
 

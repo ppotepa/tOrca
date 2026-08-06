@@ -108,7 +108,9 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
   }
 
   void _showSettingsError({required String deduplicationKey}) {
-    ref.read(uiNotificationCenterProvider.notifier).showError(
+    ref
+        .read(uiNotificationCenterProvider.notifier)
+        .showError(
           context.l10n.uiSettingsSaveFailed,
           deduplicationKey: deduplicationKey,
         );
@@ -170,7 +172,9 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
     } on _AutostartConfirmationException {
       if (!mounted) return;
       setState(() => _autostart = previous);
-      ref.read(uiNotificationCenterProvider.notifier).showError(
+      ref
+          .read(uiNotificationCenterProvider.notifier)
+          .showError(
             context.l10n.uiWindowsAutostartNotConfirmed,
             deduplicationKey: 'setting:autostart:not-confirmed',
           );

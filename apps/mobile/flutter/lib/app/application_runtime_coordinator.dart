@@ -11,6 +11,7 @@ import '../core/startup/sequential_startup_orchestrator.dart';
 import '../locales/domain/user_problem.dart';
 import '../shared/formatters/operation_status.dart';
 import 'application_state.dart';
+
 class ApplicationRuntimeCoordinator {
   ApplicationRuntimeCoordinator({
     required ClientRuntime runtime,
@@ -50,6 +51,7 @@ class ApplicationRuntimeCoordinator {
       timer.cancel();
     }
   }
+
   final SequentialStartupOrchestrator _startup =
       SequentialStartupOrchestrator();
   final Map<String, Timer> _typingExpiry = {};

@@ -1,10 +1,7 @@
 use super::*;
 use torchat_runtime::{
     MessageTransportOutcome,
-    features::{
-        messaging::ClientRuntimeMessagingFacade,
-        pairing::PairingFeature,
-    },
+    features::{messaging::ClientRuntimeMessagingFacade, pairing::PairingFeature},
 };
 
 impl ClientEngineActor {
@@ -36,8 +33,7 @@ impl ClientEngineActor {
     ) -> EngineResult<Vec<torchat_runtime::RuntimeEvent>> {
         let retry_at = if matches!(
             outcome,
-            MessageTransportOutcome::PeerUnavailable
-                | MessageTransportOutcome::RetryableFailure
+            MessageTransportOutcome::PeerUnavailable | MessageTransportOutcome::RetryableFailure
         ) {
             let attempt = self
                 .database
@@ -48,19 +44,13 @@ impl ClientEngineActor {
         } else {
             None
         };
-        self.apply_message_delivery_outcome_with_error(
-            message_id,
-            outcome,
-            None,
-            retry_at,
-        )
+        self.apply_message_delivery_outcome_with_error(message_id, outcome, None, retry_at)
     }
 
     pub(super) fn flush_pending_message_deliveries(&mut self) -> EngineResult<()> {
         let now_ms = self.clock.now_ms();
-        let (effects, runtime_events) = self.with_runtime(|runtime| {
-            runtime.feature_prepare_pending_message_deliveries(now_ms)
-        })?;
+        let (effects, runtime_events) = self
+            .with_runtime(|runtime| runtime.feature_prepare_pending_message_deliveries(now_ms))?;
         self.pending_engine_events.extend(
             runtime_events
                 .into_iter()

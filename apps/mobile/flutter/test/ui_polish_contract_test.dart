@@ -68,7 +68,7 @@ void main() {
 
   test('new conversations use the canonical runtime projection', () {
     final commands = File(
-      'lib/app/application_controller_commands.dart',
+      'lib/app/application_controller.dart',
     ).readAsStringSync();
 
     expect(commands, isNot(contains('ConversationSummary(')));

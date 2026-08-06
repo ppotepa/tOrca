@@ -72,11 +72,7 @@ abstract interface class RuntimeConversationCapability {
 }
 
 abstract interface class RuntimeMessagingCapability {
-  Future<void> sendMessage(
-    String id,
-    String text, {
-    String? replyToMessageId,
-  });
+  Future<void> sendMessage(String id, String text, {String? replyToMessageId});
   Future<void> retryMessage(String messageId);
   Future<void> retryDeadLetter(String kind, String id);
   Future<List<Map<String, dynamic>>> listDeadLetters();

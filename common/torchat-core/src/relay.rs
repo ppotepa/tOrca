@@ -139,6 +139,7 @@ impl RelayPayloadV1 {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn welcome_with_endpoint(
         identity: &Identity,
         nickname: &str,
@@ -449,6 +450,7 @@ impl RelayPayloadV1 {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn welcome_signing_bytes(
     sender: &ContactCard,
     recipient: &str,

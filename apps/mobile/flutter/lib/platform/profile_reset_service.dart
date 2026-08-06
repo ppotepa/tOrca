@@ -20,6 +20,8 @@ final class UnsupportedProfileResetService implements ProfileResetService {
 
   @override
   Future<void> resetLocalProfile() {
-    throw UnsupportedError('Local profile reset is unavailable on this platform.');
+    throw UnsupportedError(
+      'Local profile reset is unavailable on this platform.',
+    );
   }
 }

@@ -23,7 +23,10 @@ fn read(path: impl AsRef<Path>) -> String {
 }
 
 fn read_tree(path: &Path) -> String {
-    rust_files_below(path).into_iter().map(read).collect::<String>()
+    rust_files_below(path)
+        .into_iter()
+        .map(read)
+        .collect::<String>()
 }
 
 #[test]
@@ -48,7 +51,10 @@ fn command_contract_is_split_without_changing_public_types() {
         "PlatformKind",
         "TorPhase",
     ] {
-        assert!(exports.contains(symbol), "missing public re-export: {symbol}");
+        assert!(
+            exports.contains(symbol),
+            "missing public re-export: {symbol}"
+        );
     }
 }
 
@@ -56,8 +62,17 @@ fn command_contract_is_split_without_changing_public_types() {
 fn unified_input_keeps_correlation_and_causation_metadata() {
     let input_root = crate_root().join("src/input");
     let input = read_tree(&input_root);
-    for file in ["mod.rs", "envelope.rs", "source.rs", "timer.rs", "derived.rs"] {
-        assert!(input_root.join(file).is_file(), "missing input file: {file}");
+    for file in [
+        "mod.rs",
+        "envelope.rs",
+        "source.rs",
+        "timer.rs",
+        "derived.rs",
+    ] {
+        assert!(
+            input_root.join(file).is_file(),
+            "missing input file: {file}"
+        );
     }
     for symbol in [
         "struct EngineInputEnvelope",
@@ -134,7 +149,10 @@ fn command_router_only_delegates() {
         "pending_engine_events.push",
         "EngineEvent::Response",
     ] {
-        assert!(!router.contains(forbidden), "router contains logic: {forbidden}");
+        assert!(
+            !router.contains(forbidden),
+            "router contains logic: {forbidden}"
+        );
     }
 }
 
@@ -145,7 +163,11 @@ fn every_command_handler_is_small_and_does_not_publish_rpc_responses() {
 
     for path in files {
         let source = read(&path);
-        assert!(!source.contains("EngineEvent::Response"), "{}", path.display());
+        assert!(
+            !source.contains("EngineEvent::Response"),
+            "{}",
+            path.display()
+        );
         assert!(!source.contains("spawn_blocking"), "{}", path.display());
     }
 }
@@ -161,7 +183,10 @@ fn command_pipeline_owns_idempotency_responses_and_effect_outcomes() {
         "take_deferred_control",
         "command_error_result",
     ] {
-        assert!(processor.contains(symbol), "missing pipeline symbol: {symbol}");
+        assert!(
+            processor.contains(symbol),
+            "missing pipeline symbol: {symbol}"
+        );
     }
     assert!(!crate_root().join("src/actor/unified_command.rs").exists());
 }
@@ -217,7 +242,10 @@ fn timers_and_relay_frames_reenter_the_input_pipeline() {
     let handlers = read(crate_root().join("src/actor/input_handlers.rs"));
 
     for file in ["mod.rs", "plan.rs", "worker.rs"] {
-        assert!(scheduler_root.join(file).is_file(), "missing scheduler file: {file}");
+        assert!(
+            scheduler_root.join(file).is_file(),
+            "missing scheduler file: {file}"
+        );
     }
     assert!(scheduler.contains("generation: u64"));
     assert!(scheduler.contains("EngineInputEnvelope::timer"));
@@ -230,12 +258,26 @@ fn timers_and_relay_frames_reenter_the_input_pipeline() {
 #[test]
 fn response_resolution_precedes_public_event_backpressure() {
     let output_root = crate_root().join("src/output");
-    for file in ["mod.rs", "event_router.rs", "publisher.rs", "response_registry.rs"] {
-        assert!(output_root.join(file).is_file(), "missing output file: {file}");
+    for file in [
+        "mod.rs",
+        "event_router.rs",
+        "publisher.rs",
+        "response_registry.rs",
+    ] {
+        assert!(
+            output_root.join(file).is_file(),
+            "missing output file: {file}"
+        );
     }
     let router = read(output_root.join("event_router.rs"));
-    assert!(router.find("pending.complete").expect("response completion exists")
-        < router.find("publish_tx.send(event)").expect("event publishing exists"));
+    assert!(
+        router
+            .find("pending.complete")
+            .expect("response completion exists")
+            < router
+                .find("publish_tx.send(event)")
+                .expect("event publishing exists")
+    );
     assert!(!crate_root().join("src/output.rs").exists());
 }
 

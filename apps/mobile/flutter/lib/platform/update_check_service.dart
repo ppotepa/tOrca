@@ -49,7 +49,9 @@ final class LocalSignedUpdateCheckService implements UpdateCheckService {
       base64Decode(TorcaReleaseInfo.updatePublicKey),
     );
     if (publicKeyBytes.length != 32) {
-      throw const FormatException('Torca update public key must contain 32 bytes.');
+      throw const FormatException(
+        'Torca update public key must contain 32 bytes.',
+      );
     }
     final manifestBytes = await File(path).readAsBytes();
     if (manifestBytes.lengthInBytes > 1024 * 1024) {
@@ -57,10 +59,7 @@ final class LocalSignedUpdateCheckService implements UpdateCheckService {
     }
     final manifest = await TorcaUpdateManifest.verifyAndParse(
       manifestBytes,
-      publicKey: SimplePublicKey(
-        publicKeyBytes,
-        type: KeyPairType.ed25519,
-      ),
+      publicKey: SimplePublicKey(publicKeyBytes, type: KeyPairType.ed25519),
       expectedKeyId: TorcaReleaseInfo.updateKeyId,
     );
     final currentBuild = TorcaReleaseInfo.numericBuild;
@@ -70,8 +69,8 @@ final class LocalSignedUpdateCheckService implements UpdateCheckService {
     final platform = Platform.isAndroid
         ? 'android'
         : Platform.isWindows
-            ? 'windows'
-            : Platform.operatingSystem;
+        ? 'windows'
+        : Platform.operatingSystem;
     final architecture = Platform.isWindows ? 'x64' : null;
     return UpdateCheckResult(
       manifest: manifest,

@@ -20,8 +20,8 @@ String? localizedOperationLabel(AppLocalizations l10n, String action) =>
       OperationAction.submitPairing => l10n.processingPairingCode,
       OperationAction.acceptPairing => l10n.accepting,
       OperationAction.rejectPairing => l10n.pairingSavingDecision,
-      OperationAction.archivePairing || OperationAction.cancelPairing =>
-        l10n.settingsSaving,
+      OperationAction.archivePairing ||
+      OperationAction.cancelPairing => l10n.settingsSaving,
       OperationAction.startConversation => l10n.chatStarting,
       OperationAction.sendMessage => l10n.messageStateSending,
       OperationAction.verifyContact => l10n.pairingSavingDecision,

@@ -12,11 +12,9 @@ macro_rules! typed_id {
             pub fn parse(value: impl Into<String>) -> Result<Self, crate::RuntimeError> {
                 let value = value.into();
                 if value.trim().is_empty() {
-                    return Err(crate::RuntimeError::InvalidParams(concat!(
-                        stringify!($name),
-                        " must not be empty"
-                    )
-                    .to_owned()));
+                    return Err(crate::RuntimeError::InvalidParams(
+                        concat!(stringify!($name), " must not be empty").to_owned(),
+                    ));
                 }
                 Ok(Self(value))
             }

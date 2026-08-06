@@ -1,8 +1,4 @@
-use crate::{
-    EngineEvent,
-    effects::EngineEffectEnvelope,
-    input::EngineInputEnvelope,
-};
+use crate::{EngineEvent, effects::EngineEffectEnvelope, input::EngineInputEnvelope};
 use torchat_runtime::{ChangeSet, RuntimeEvent};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -39,22 +35,19 @@ impl EngineProcessingResult {
         result
     }
 
-    pub(crate) fn extend_runtime_events(
-        &mut self,
-        events: impl IntoIterator<Item = RuntimeEvent>,
-    ) {
+    pub(crate) fn extend_runtime_events(&mut self, events: impl IntoIterator<Item = RuntimeEvent>) {
         for event in events {
             self.changes.merge(ChangeSet::from_runtime_event(&event));
             self.events.push(EngineEvent::Runtime { event });
         }
     }
 
-    pub(crate) fn extend_engine_events(
-        &mut self,
-        events: impl IntoIterator<Item = EngineEvent>,
-    ) {
+    pub(crate) fn extend_engine_events(&mut self, events: impl IntoIterator<Item = EngineEvent>) {
         for event in events {
-            if let EngineEvent::Runtime { event: runtime_event } = &event {
+            if let EngineEvent::Runtime {
+                event: runtime_event,
+            } = &event
+            {
                 self.changes
                     .merge(ChangeSet::from_runtime_event(runtime_event));
             }

@@ -118,10 +118,8 @@ pub fn load_or_create(path: Option<&Path>) -> Result<Identity> {
             identity_path.display()
         );
     }
-    let store = OsVaultSecretStore::for_installation(
-        &identity_path,
-        DesktopSecretKind::IdentityPrivateKey,
-    );
+    let store =
+        OsVaultSecretStore::for_installation(&identity_path, DesktopSecretKind::IdentityPrivateKey);
     if let Some(bytes) = store.read()? {
         let private_key: [u8; 32] = bytes
             .as_slice()
@@ -151,16 +149,10 @@ pub fn reset_profile(path: Option<&Path>, tor_data_dir: Option<&Path>) -> Result
 
     #[cfg(feature = "os-vault")]
     {
-        OsVaultSecretStore::for_installation(
-            &identity_path,
-            DesktopSecretKind::IdentityPrivateKey,
-        )
-        .remove()?;
-        OsVaultSecretStore::for_installation(
-            &key_path,
-            DesktopSecretKind::DatabaseKeyActive,
-        )
-        .remove()?;
+        OsVaultSecretStore::for_installation(&identity_path, DesktopSecretKind::IdentityPrivateKey)
+            .remove()?;
+        OsVaultSecretStore::for_installation(&key_path, DesktopSecretKind::DatabaseKeyActive)
+            .remove()?;
     }
     #[cfg(all(not(feature = "os-vault"), feature = "torka-file-secrets"))]
     {
@@ -173,11 +165,7 @@ pub fn reset_profile(path: Option<&Path>, tor_data_dir: Option<&Path>) -> Result
     remove_profile_files(&identity_path, &database_path, &key_path)
 }
 
-fn remove_profile_files(
-    identity_path: &Path,
-    database_path: &Path,
-    key_path: &Path,
-) -> Result<()> {
+fn remove_profile_files(identity_path: &Path, database_path: &Path, key_path: &Path) -> Result<()> {
     let database_name = database_path
         .file_name()
         .context("database path has no file name")?
@@ -256,8 +244,7 @@ mod tests {
 
     #[test]
     fn identity_is_stable_when_reloaded() {
-        let path =
-            std::env::temp_dir().join(format!("torca-desktop-{}.key", uuid::Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!("torca-desktop-{}.key", uuid::Uuid::new_v4()));
         let first = load_or_create(Some(&path)).unwrap();
         let second = load_or_create(Some(&path)).unwrap();
         assert_eq!(first.installation_id(), second.installation_id());
@@ -267,8 +254,7 @@ mod tests {
 
     #[test]
     fn database_key_is_independent_and_stable() {
-        let root =
-            std::env::temp_dir().join(format!("torca-desktop-key-{}", uuid::Uuid::new_v4()));
+        let root = std::env::temp_dir().join(format!("torca-desktop-key-{}", uuid::Uuid::new_v4()));
         let key_path = root.join("client.db.key");
         let first = load_or_create_database_key(&key_path).unwrap();
         assert_eq!(first.len(), 32);

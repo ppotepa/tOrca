@@ -1,1 +1,3 @@
-pub use torchat_peer::{PeerError, PeerDeliveryTag, PeerOutboundCommand, PeerTransportEvent, PeerTransportHandle};
+pub use torchat_peer::{
+    PeerDeliveryTag, PeerError, PeerOutboundCommand, PeerTransportEvent, PeerTransportHandle,
+};

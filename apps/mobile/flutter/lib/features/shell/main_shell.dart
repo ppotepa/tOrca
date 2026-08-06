@@ -330,8 +330,9 @@ class MainShell extends ConsumerWidget {
                       NavigationDestination(
                         icon: CounterBadge(
                           count: unreadContactCount,
-                          semanticLabel: context.l10n
-                              .uiUnreadContactsSemantics(unreadContactCount),
+                          semanticLabel: context.l10n.uiUnreadContactsSemantics(
+                            unreadContactCount,
+                          ),
                           child: const ThemedIcon(Icons.chat_bubble_outline),
                         ),
                         label: context.l10n.uiChats,

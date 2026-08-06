@@ -53,21 +53,27 @@ impl RetryPolicy {
                 terminal: false,
             },
             RetryClass::ShortBackoff => RetryDecision {
-                retry_at: Some(
-                    now_ms.saturating_add(self.delay(self.short_base_ms, attempt, jitter_seed)),
-                ),
+                retry_at: Some(now_ms.saturating_add(self.delay(
+                    self.short_base_ms,
+                    attempt,
+                    jitter_seed,
+                ))),
                 terminal: false,
             },
             RetryClass::NetworkBackoff => RetryDecision {
-                retry_at: Some(
-                    now_ms.saturating_add(self.delay(self.network_base_ms, attempt, jitter_seed)),
-                ),
+                retry_at: Some(now_ms.saturating_add(self.delay(
+                    self.network_base_ms,
+                    attempt,
+                    jitter_seed,
+                ))),
                 terminal: false,
             },
             RetryClass::TorBackoff => RetryDecision {
-                retry_at: Some(
-                    now_ms.saturating_add(self.delay(self.tor_base_ms, attempt, jitter_seed)),
-                ),
+                retry_at: Some(now_ms.saturating_add(self.delay(
+                    self.tor_base_ms,
+                    attempt,
+                    jitter_seed,
+                ))),
                 terminal: false,
             },
             RetryClass::ManualOnly => RetryDecision {

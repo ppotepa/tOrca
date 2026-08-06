@@ -56,11 +56,7 @@ where
                 .with_command_descriptor(command_descriptor)
             });
 
-        self.validate_existing_operation(
-            &operation,
-            installation_id,
-            command_descriptor,
-        )?;
+        self.validate_existing_operation(&operation, installation_id, command_descriptor)?;
 
         if operation.state == OperationState::Completed {
             return Ok(FeatureResult::unchanged(operation));

@@ -155,8 +155,7 @@ impl ChangeSet {
             }
             | RuntimeEvent::ConversationFocusChanged {
                 conversation_id, ..
-            } => Self::section(ChangeSections::PRESENCE)
-                .with_conversation(conversation_id.clone()),
+            } => Self::section(ChangeSections::PRESENCE).with_conversation(conversation_id.clone()),
             RuntimeEvent::PresenceChanged { contact_id, .. } => {
                 let mut changes = Self::section(ChangeSections::PRESENCE);
                 changes.entities.contact_ids.insert(contact_id.clone());

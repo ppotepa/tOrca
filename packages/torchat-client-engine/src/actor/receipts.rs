@@ -177,18 +177,6 @@ impl ClientEngineActor {
         Ok(())
     }
 
-    pub(super) fn apply_message_transport_outcome(
-        &mut self,
-        message_id: &str,
-        outcome: MessageTransportOutcome,
-    ) -> EngineResult<Vec<torchat_runtime::RuntimeEvent>> {
-        let parsed = uuid::Uuid::parse_str(message_id)
-            .map_err(|error| EngineError::InvalidCommand(error.to_string()))?;
-        let (_, runtime_events) =
-            self.with_runtime(|runtime| runtime.apply_message_transport_outcome(parsed, outcome))?;
-        Ok(runtime_events)
-    }
-
     pub(super) fn flush_pending_receipt_effects(&mut self) -> EngineResult<()> {
         let (effects, _) =
             self.with_runtime(|runtime| runtime.prepare_pending_receipt_effects())?;

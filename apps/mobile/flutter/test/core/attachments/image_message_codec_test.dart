@@ -32,26 +32,29 @@ void main() {
     expect(image.decodeJpg(prepared.bytes), isNotNull);
   });
 
-  test('message body round-trips and validates the actual JPEG header', () async {
-    final source = image.Image(width: 16, height: 16);
-    image.fill(source, color: image.ColorRgb8(20, 40, 60));
-    final prepared = await prepareImageAttachment(
-      Uint8List.fromList(image.encodePng(source)),
-    );
+  test(
+    'message body round-trips and validates the actual JPEG header',
+    () async {
+      final source = image.Image(width: 16, height: 16);
+      image.fill(source, color: image.ColorRgb8(20, 40, 60));
+      final prepared = await prepareImageAttachment(
+        Uint8List.fromList(image.encodePng(source)),
+      );
 
-    final body = prepared.toMessageBody();
-    final decoded = decodeImageMessageBody(body);
+      final body = prepared.toMessageBody();
+      final decoded = decodeImageMessageBody(body);
 
-    expect(isImageMessageBody(body), isTrue);
-    expect(
-      body.length,
-      lessThanOrEqualTo(ImageAttachmentPolicy.maximumMessageBodyCharacters),
-    );
-    expect(decoded, isNotNull);
-    expect(decoded!.bytes, prepared.bytes);
-    expect(decoded.width, prepared.width);
-    expect(decoded.height, prepared.height);
-  });
+      expect(isImageMessageBody(body), isTrue);
+      expect(
+        body.length,
+        lessThanOrEqualTo(ImageAttachmentPolicy.maximumMessageBodyCharacters),
+      );
+      expect(decoded, isNotNull);
+      expect(decoded!.bytes, prepared.bytes);
+      expect(decoded.width, prepared.width);
+      expect(decoded.height, prepared.height);
+    },
+  );
 
   test('rejects malformed, forged and oversized image messages', () {
     expect(decodeImageMessageBody('hello'), isNull);
@@ -66,13 +69,14 @@ void main() {
       throwsStateError,
     );
 
-    final forged = '$imageMessagePrefix${jsonEncode(<String, Object>{
-      'mime': 'image/jpeg',
-      'width': 1,
-      'height': 1,
-      'size': 4,
-      'data': base64Encode(const <int>[1, 2, 3, 4]),
-    })}';
+    final forged =
+        '$imageMessagePrefix${jsonEncode(<String, Object>{
+          'mime': 'image/jpeg',
+          'width': 1,
+          'height': 1,
+          'size': 4,
+          'data': base64Encode(const <int>[1, 2, 3, 4]),
+        })}';
     expect(decodeImageMessageBody(forged), isNull);
 
     final oversizedData = List<String>.filled(
@@ -80,10 +84,7 @@ void main() {
       'x',
       growable: false,
     ).join();
-    expect(
-      decodeImageMessageBody('$imageMessagePrefix$oversizedData'),
-      isNull,
-    );
+    expect(decodeImageMessageBody('$imageMessagePrefix$oversizedData'), isNull);
   });
 
   test('policy rejects decompression-bomb geometry and animation', () {

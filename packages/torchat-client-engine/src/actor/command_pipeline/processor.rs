@@ -2,9 +2,7 @@ use super::super::*;
 use super::stages::{CommandPipelineStage, CommandPipelineTrace};
 
 use crate::{
-    effects::{
-        DeferredCommandContext, EngineEffectOutcome, RelayEffectOutcome, RelayEffectResult,
-    },
+    effects::{DeferredCommandContext, EngineEffectOutcome, RelayEffectOutcome, RelayEffectResult},
     generated::command_contract::command_contract,
     processing::{EngineProcessingResult, ProcessingControl},
 };
@@ -112,10 +110,12 @@ impl ClientEngineActor {
             }
             command => {
                 let idempotency = if contract.idempotent {
-                    command_id.as_ref().map(|command_id| IdempotencyCommitContext {
-                        command_id: command_id.clone(),
-                        command_descriptor: command_descriptor.clone(),
-                    })
+                    command_id
+                        .as_ref()
+                        .map(|command_id| IdempotencyCommitContext {
+                            command_id: command_id.clone(),
+                            command_descriptor: command_descriptor.clone(),
+                        })
                 } else {
                     None
                 };
@@ -220,12 +220,13 @@ impl ClientEngineActor {
         if deferred_control.invalidate_session {
             self.relay.invalidate_session();
         }
-        let idempotency = context.command_id.as_ref().map(|command_id| {
-            IdempotencyCommitContext {
+        let idempotency = context
+            .command_id
+            .as_ref()
+            .map(|command_id| IdempotencyCommitContext {
                 command_id: command_id.clone(),
                 command_descriptor: context.command_descriptor.clone(),
-            }
-        });
+            });
         let operation_result = match effect_result {
             RelayEffectResult::PairingCode(Ok(code)) => {
                 self.commit_pairing_code_outcome(idempotency.as_ref(), code)

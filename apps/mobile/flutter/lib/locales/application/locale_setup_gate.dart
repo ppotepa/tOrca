@@ -14,9 +14,8 @@ class LocaleSetupGate extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final localeState = ref.watch(localeControllerProvider);
     return localeState.when(
-      loading: () => const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      ),
+      loading: () =>
+          const Scaffold(body: Center(child: CircularProgressIndicator())),
       error: (_, _) => Scaffold(
         body: Center(
           child: Padding(

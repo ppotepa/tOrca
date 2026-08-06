@@ -83,7 +83,8 @@ class _ConnectionStatusLampState extends State<ConnectionStatusLamp>
   Widget build(BuildContext context) {
     final tor = _torState;
     final p2p = _p2pState;
-    final label = 'Tor: ${_lampLabel(context, tor)} · P2P: ${_lampLabel(context, p2p)}';
+    final label =
+        'Tor: ${_lampLabel(context, tor)} · P2P: ${_lampLabel(context, p2p)}';
     final semanticLabel =
         'Tor: ${_lampStateName(tor)} · P2P: ${_lampStateName(p2p)}';
     final animationsDisabled = MediaQuery.disableAnimationsOf(context);

@@ -27,7 +27,10 @@ pub(crate) fn spawn_event_router(
             }
         }
         pending_on_close
-            .fail_all("engine_closed", "engine stopped before producing a response")
+            .fail_all(
+                "engine_closed",
+                "engine stopped before producing a response",
+            )
             .await;
     });
 }

@@ -1,7 +1,4 @@
-use crate::{
-    effects::EngineEffectOutcome,
-    relay::RelayEvent,
-};
+use crate::{effects::EngineEffectOutcome, relay::RelayEvent};
 
 use super::{EngineInput, EngineInputEnvelope, EngineInputSource};
 

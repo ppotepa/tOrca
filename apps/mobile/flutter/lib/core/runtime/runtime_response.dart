@@ -28,9 +28,7 @@ class EngineResponse {
         final problemValue = result['problem'];
         if (problemValue is Map) {
           problem = RuntimeProblem.fromJson(
-            problemValue.map(
-              (key, item) => MapEntry(key.toString(), item),
-            ),
+            problemValue.map((key, item) => MapEntry(key.toString(), item)),
           );
         }
       }

@@ -63,7 +63,8 @@ final class TorcaVersion implements Comparable<TorcaVersion> {
   }
 
   @override
-  String toString() => '$major.$minor.$patch${preRelease == null ? '' : '-$preRelease'}';
+  String toString() =>
+      '$major.$minor.$patch${preRelease == null ? '' : '-$preRelease'}';
 }
 
 final class TorcaUpdateArtifact {
@@ -129,7 +130,9 @@ final class TorcaUpdateManifest {
   }) async {
     final decoded = jsonDecode(utf8.decode(envelopeBytes));
     if (decoded is! Map) {
-      throw const FormatException('Update manifest envelope must be an object.');
+      throw const FormatException(
+        'Update manifest envelope must be an object.',
+      );
     }
     final envelope = decoded.cast<String, Object?>();
     if (_requiredInt(envelope, 'schema') != 1 ||
@@ -140,13 +143,17 @@ final class TorcaUpdateManifest {
     if (keyId != expectedKeyId) {
       throw const FormatException('Update manifest signing key is unexpected.');
     }
-    final payload = Uint8List.fromList(base64Decode(_requiredString(envelope, 'payload')));
+    final payload = Uint8List.fromList(
+      base64Decode(_requiredString(envelope, 'payload')),
+    );
     final signature = Signature(
       base64Decode(_requiredString(envelope, 'signature')),
       publicKey: publicKey,
     );
     final verified = await Ed25519().verify(payload, signature: signature);
-    if (!verified) throw const FormatException('Update manifest signature is invalid.');
+    if (!verified) {
+      throw const FormatException('Update manifest signature is invalid.');
+    }
 
     final payloadValue = jsonDecode(utf8.decode(payload));
     if (payloadValue is! Map) {
@@ -166,15 +173,20 @@ final class TorcaUpdateManifest {
       build: _requiredInt(json, 'build'),
       channel: _requiredString(json, 'channel'),
       commit: _requiredString(json, 'commit'),
-      publishedAtUtc: DateTime.parse(_requiredString(json, 'publishedAtUtc')).toUtc(),
-      minimumSupportedVersion:
-          TorcaVersion.parse(_requiredString(json, 'minimumSupportedVersion')),
+      publishedAtUtc: DateTime.parse(
+        _requiredString(json, 'publishedAtUtc'),
+      ).toUtc(),
+      minimumSupportedVersion: TorcaVersion.parse(
+        _requiredString(json, 'minimumSupportedVersion'),
+      ),
       mandatory: json['mandatory'] == true,
       releaseNotesUrl: _optionalUri(json['releaseNotesUrl']),
       artifacts: artifactsValue
-          .map((value) => TorcaUpdateArtifact.fromJson(
-                (value as Map).cast<String, Object?>(),
-              ))
+          .map(
+            (value) => TorcaUpdateArtifact.fromJson(
+              (value as Map).cast<String, Object?>(),
+            ),
+          )
           .toList(growable: false),
       keyId: keyId,
     );
@@ -223,7 +235,9 @@ String _requiredString(Map<String, Object?> json, String key) {
 int _requiredInt(Map<String, Object?> json, String key) {
   final value = json[key];
   if (value is int && value >= 0) return value;
-  throw FormatException('Update manifest field $key must be a non-negative integer.');
+  throw FormatException(
+    'Update manifest field $key must be a non-negative integer.',
+  );
 }
 
 Uri? _optionalUri(Object? value) {

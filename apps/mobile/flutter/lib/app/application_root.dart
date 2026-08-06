@@ -28,7 +28,10 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     if (isDesktopPlatform) {
-      _desktopNavigationSubscription = PlatformServices.current.navigation.stream
+      _desktopNavigationSubscription = PlatformServices
+          .current
+          .navigation
+          .stream
           .listen((intent) {
             if (!mounted) return;
             if (intent == DesktopNavigationIntent.openSettings) {
@@ -48,9 +51,7 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
   Future<void> _attachAndInitialize() async {
     final runtime = ref.read(clientRuntimeProvider);
     Map<String, dynamic>? snapshot;
-    if (runtime is RuntimeAttachmentProvider) {
-      snapshot = await runtime.runtimeSnapshot();
-    }
+    snapshot = await runtime.runtimeSnapshot();
     final profile = snapshot?['profile'];
     if (profile is Map) {
       final nickname = profile['nickname']?.toString().trim() ?? '';
@@ -108,8 +109,8 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
           ? _l10n.uiUnknownUser
           : peerName;
       final message = switch (item.status) {
-        InviteState.accepted || InviteState.completed =>
-          _l10n.uiPairingAccepted(name),
+        InviteState.accepted ||
+        InviteState.completed => _l10n.uiPairingAccepted(name),
         InviteState.rejected => _l10n.uiPairingRejected(name),
         InviteState.expired => _l10n.uiPairingExpired,
         InviteState.cancelled => _l10n.uiPairingCancelled,
@@ -144,10 +145,12 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
       final name = contact.displayName.trim().isEmpty
           ? _l10n.newContact
           : contact.displayName;
-      ref.read(uiNotificationCenterProvider.notifier).showSuccess(
-        _l10n.uiContactAdded(name),
-        deduplicationKey: 'contact-added:${contact.id}',
-      );
+      ref
+          .read(uiNotificationCenterProvider.notifier)
+          .showSuccess(
+            _l10n.uiContactAdded(name),
+            deduplicationKey: 'contact-added:${contact.id}',
+          );
     }
   }
 
@@ -170,7 +173,9 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
         ref.read(appControllerProvider.notifier).reattachPresence();
         _backgroundDebounce?.cancel();
         _backgroundDebounce = null;
-        unawaited(ref.read(appControllerProvider.notifier).updateVisibility(true));
+        unawaited(
+          ref.read(appControllerProvider.notifier).updateVisibility(true),
+        );
       case AppLifecycleState.inactive:
         break;
       case AppLifecycleState.hidden:
@@ -282,7 +287,12 @@ class _ControllerHomePageState extends ConsumerState<ControllerHomePage>
         error: localizedError,
         onSave: () async {
           await controller.setNickname(_nickname.text);
-          if (ref.read(appControllerProvider).profile.nickname.trim().isNotEmpty) {
+          if (ref
+              .read(appControllerProvider)
+              .profile
+              .nickname
+              .trim()
+              .isNotEmpty) {
             _nickname.clear();
           }
         },

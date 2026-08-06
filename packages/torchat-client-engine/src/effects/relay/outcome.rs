@@ -4,6 +4,7 @@ use crate::EngineRelay;
 
 use super::DeferredCommandContext;
 
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum RelayEffectResult {
     PairingCode(Result<InviteCode, String>),
     PairingSubmitted(Result<PairingItem, String>),
@@ -14,6 +15,7 @@ pub(crate) enum RelayEffectResult {
     WorkerFailed(String),
 }
 
+#[allow(dead_code)]
 pub(crate) struct RelayEffectOutcome {
     pub effect_id: uuid::Uuid,
     pub context: DeferredCommandContext,

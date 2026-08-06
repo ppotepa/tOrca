@@ -11,9 +11,6 @@ impl<'a> PresenceFeature<'a> {
 
     pub fn publish(&mut self, event: RuntimeEvent) -> FeatureResult<()> {
         self.session.push_event(event);
-        FeatureResult::changed(
-            (),
-            ChangeSet::section(ChangeSections::PRESENCE),
-        )
+        FeatureResult::changed((), ChangeSet::section(ChangeSections::PRESENCE))
     }
 }

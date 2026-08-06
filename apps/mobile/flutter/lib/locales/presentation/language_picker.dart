@@ -10,19 +10,31 @@ class LanguagePicker extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final preference = ref.watch(localeControllerProvider).valueOrNull?.preference ??
+    final preference =
+        ref.watch(localeControllerProvider).valueOrNull?.preference ??
         AppLocalePreference.system;
     return SegmentedButton<AppLocalePreference>(
       segments: [
-        ButtonSegment(value: AppLocalePreference.system, label: Text(context.l10n.languageSystem)),
-        ButtonSegment(value: AppLocalePreference.polish, label: Text(context.l10n.languagePolish)),
-        ButtonSegment(value: AppLocalePreference.english, label: Text(context.l10n.languageEnglish)),
+        ButtonSegment(
+          value: AppLocalePreference.system,
+          label: Text(context.l10n.languageSystem),
+        ),
+        ButtonSegment(
+          value: AppLocalePreference.polish,
+          label: Text(context.l10n.languagePolish),
+        ),
+        ButtonSegment(
+          value: AppLocalePreference.english,
+          label: Text(context.l10n.languageEnglish),
+        ),
       ],
       selected: {preference},
       showSelectedIcon: false,
       onSelectionChanged: (selected) {
         if (selected.isNotEmpty) {
-          ref.read(localeControllerProvider.notifier).setPreference(selected.first);
+          ref
+              .read(localeControllerProvider.notifier)
+              .setPreference(selected.first);
         }
       },
     );

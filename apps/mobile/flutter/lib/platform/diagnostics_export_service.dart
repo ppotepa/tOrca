@@ -56,7 +56,9 @@ final class LocalDiagnosticsExportService implements DiagnosticsExportService {
         'capabilityTokensIncluded': false,
       },
     };
-    final encoded = utf8.encode(const JsonEncoder.withIndent('  ').convert(payload));
+    final encoded = utf8.encode(
+      const JsonEncoder.withIndent('  ').convert(payload),
+    );
     final compressed = GZipCodec(level: 9).encode(encoded);
 
     var destination = selectedPath;
@@ -67,13 +69,21 @@ final class LocalDiagnosticsExportService implements DiagnosticsExportService {
       final output = File(destination);
       await output.parent.create(recursive: true);
       await output.writeAsBytes(compressed, flush: true);
-      return DiagnosticsExportResult(path: output.path, bytes: compressed.length);
+      return DiagnosticsExportResult(
+        path: output.path,
+        bytes: compressed.length,
+      );
     } on FileSystemException {
       final fallbackRoot = await getApplicationDocumentsDirectory();
-      final fallback = File('${fallbackRoot.path}${Platform.pathSeparator}$fileName');
+      final fallback = File(
+        '${fallbackRoot.path}${Platform.pathSeparator}$fileName',
+      );
       await fallback.parent.create(recursive: true);
       await fallback.writeAsBytes(compressed, flush: true);
-      return DiagnosticsExportResult(path: fallback.path, bytes: compressed.length);
+      return DiagnosticsExportResult(
+        path: fallback.path,
+        bytes: compressed.length,
+      );
     }
   }
 }

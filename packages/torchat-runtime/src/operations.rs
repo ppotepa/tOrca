@@ -85,12 +85,7 @@ impl DurableOperation {
         self.error_code = None;
     }
 
-    pub fn schedule_retry(
-        &mut self,
-        retry_at: i64,
-        error_code: RuntimeErrorCode,
-        now_ms: i64,
-    ) {
+    pub fn schedule_retry(&mut self, retry_at: i64, error_code: RuntimeErrorCode, now_ms: i64) {
         self.state = OperationState::WaitingForRetry;
         self.updated_at = now_ms;
         self.retry_at = Some(retry_at);

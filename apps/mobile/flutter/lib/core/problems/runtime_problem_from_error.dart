@@ -32,13 +32,13 @@ RuntimeProblem runtimeProblemFromError(Object error) {
 }
 
 RuntimeErrorCategory _categoryForCode(RuntimeErrorCode code) => switch (code) {
-      RuntimeErrorCode.invalidInput => RuntimeErrorCategory.validation,
-      RuntimeErrorCode.notFound || RuntimeErrorCode.conflict =>
-        RuntimeErrorCategory.domain,
-      RuntimeErrorCode.temporarilyUnavailable || RuntimeErrorCode.unsupported =>
-        RuntimeErrorCategory.availability,
-      RuntimeErrorCode.transportUnavailable => RuntimeErrorCategory.transport,
-      RuntimeErrorCode.storageFailed => RuntimeErrorCategory.persistence,
-      RuntimeErrorCode.cryptoFailed => RuntimeErrorCategory.security,
-      RuntimeErrorCode.internal => RuntimeErrorCategory.internal,
-    };
+  RuntimeErrorCode.invalidInput => RuntimeErrorCategory.validation,
+  RuntimeErrorCode.notFound ||
+  RuntimeErrorCode.conflict => RuntimeErrorCategory.domain,
+  RuntimeErrorCode.temporarilyUnavailable ||
+  RuntimeErrorCode.unsupported => RuntimeErrorCategory.availability,
+  RuntimeErrorCode.transportUnavailable => RuntimeErrorCategory.transport,
+  RuntimeErrorCode.storageFailed => RuntimeErrorCategory.persistence,
+  RuntimeErrorCode.cryptoFailed => RuntimeErrorCategory.security,
+  RuntimeErrorCode.internal => RuntimeErrorCategory.internal,
+};

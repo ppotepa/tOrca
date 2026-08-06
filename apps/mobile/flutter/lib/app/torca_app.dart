@@ -35,11 +35,8 @@ part 'application_dialogs.dart';
 part 'application_root.dart';
 
 class TorcaApp extends StatelessWidget {
-  TorcaApp({
-    super.key,
-    this.runtime,
-    PlatformServices? platformServices,
-  }) : platformServices = platformServices ?? PlatformServices();
+  TorcaApp({super.key, this.runtime, PlatformServices? platformServices})
+    : platformServices = platformServices ?? PlatformServices();
 
   final ClientRuntime? runtime;
   final PlatformServices platformServices;
@@ -60,11 +57,7 @@ class TorcaApp extends StatelessWidget {
 /// Temporary public constructor name retained for existing desktop embedding.
 /// Both entrypoints use the same Torca application shell.
 class TorChatMobileApp extends TorcaApp {
-  TorChatMobileApp({
-    super.key,
-    super.runtime,
-    super.platformServices,
-  });
+  TorChatMobileApp({super.key, super.runtime, super.platformServices});
 }
 
 class _TorcaAppView extends ConsumerWidget {

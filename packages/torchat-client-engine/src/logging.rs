@@ -93,8 +93,7 @@ impl StartupJournal {
                 event: torchat_runtime::RuntimeEvent::RuntimeLog { message },
             } => self.write("info", "engine", "runtime_log", None, message),
             EngineEvent::Runtime {
-                event:
-                    torchat_runtime::RuntimeEvent::PeerEndpointChanged { contact_id, status },
+                event: torchat_runtime::RuntimeEvent::PeerEndpointChanged { contact_id, status },
             } => self.write(
                 if matches!(status, torchat_runtime::PeerEndpointStatus::Verified) {
                     "info"

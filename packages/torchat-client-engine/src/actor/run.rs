@@ -11,6 +11,7 @@ use crate::{
 };
 
 impl ClientEngineActor {
+    #[allow(private_interfaces)]
     pub async fn run(
         mut self,
         mut inbox: mpsc::Receiver<EngineInputEnvelope>,
@@ -186,15 +187,10 @@ fn spawn_peer_ingress(
     });
 }
 
-fn spawn_shutdown_ingress(
-    shutdown: CancellationToken,
-    inbox: mpsc::Sender<EngineInputEnvelope>,
-) {
+fn spawn_shutdown_ingress(shutdown: CancellationToken, inbox: mpsc::Sender<EngineInputEnvelope>) {
     tokio::spawn(async move {
         shutdown.cancelled().await;
-        let _ = inbox
-            .send(EngineInputEnvelope::shutdown(unix_ms()))
-            .await;
+        let _ = inbox.send(EngineInputEnvelope::shutdown(unix_ms())).await;
     });
 }
 

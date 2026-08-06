@@ -123,15 +123,13 @@ class ConnectionReadiness {
   bool canPerform(ConnectionOperation operation) => switch (operation) {
     ConnectionOperation.readLocalData => localCoreReady,
     ConnectionOperation.diagnose => localCoreReady,
-    ConnectionOperation.pair => localCoreReady && tor.ready && onionService.ready,
+    ConnectionOperation.pair =>
+      localCoreReady && tor.ready && onionService.ready,
     ConnectionOperation.sendP2p => localCoreReady && peerListener.ready,
   };
 
   bool get startupComponentsReady =>
-      localCoreReady &&
-      tor.ready &&
-      peerListener.ready &&
-      onionService.ready;
+      localCoreReady && tor.ready && peerListener.ready && onionService.ready;
 
   bool get onboardingReady => localCoreReady;
 
@@ -223,12 +221,7 @@ class ConnectionReadiness {
   }
 }
 
-enum ConnectionOperation {
-  readLocalData,
-  diagnose,
-  pair,
-  sendP2p,
-}
+enum ConnectionOperation { readLocalData, diagnose, pair, sendP2p }
 
 ConnectionComponentStatus _gateByStartupStep(
   ConnectionComponentStatus raw,

@@ -155,8 +155,8 @@ pub(crate) fn prepare_accept(
     let retrying = matches!(item.state, InviteState::Accepted | InviteState::Completed);
     if !retrying
         && contacts
-        .iter()
-        .any(|contact| contact.installation_id == sender.installation_id && !contact.blocked)
+            .iter()
+            .any(|contact| contact.installation_id == sender.installation_id && !contact.blocked)
     {
         return Err(RuntimeError::Conflict(
             "contact already exists; remove it before pairing again".to_owned(),

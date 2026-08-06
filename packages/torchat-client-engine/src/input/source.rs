@@ -9,6 +9,7 @@ pub(crate) enum EngineInputSource {
     EffectWorker,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum EngineInputKind {
     Command,

@@ -1,6 +1,4 @@
-use crate::{
-    ChangeSet, FeatureResult, InviteCode, PairingStorage, ProfileStorage, RuntimeResult,
-};
+use crate::{ChangeSet, FeatureResult, InviteCode, PairingStorage, ProfileStorage, RuntimeResult};
 
 pub struct PairingPreparationFeature<'a, S> {
     storage: &'a mut S,
@@ -19,10 +17,7 @@ where
         crate::features::pairing::process::require_profile_ready(profile.as_ref())
     }
 
-    pub fn commit_code(
-        &mut self,
-        code: InviteCode,
-    ) -> RuntimeResult<FeatureResult<InviteCode>> {
+    pub fn commit_code(&mut self, code: InviteCode) -> RuntimeResult<FeatureResult<InviteCode>> {
         self.storage.put_pairing_code(code.clone())?;
         Ok(FeatureResult::changed(
             code,

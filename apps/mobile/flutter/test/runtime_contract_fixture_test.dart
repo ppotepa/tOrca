@@ -9,7 +9,9 @@ void main() {
   RuntimeFixture fixture() => RuntimeFixture.fromMap(
     Map<String, dynamic>.from(
       jsonDecode(
-            File('../../../common/internal-runtime-fixtures.json').readAsStringSync(),
+            File(
+              '../../../common/internal-runtime-fixtures.json',
+            ).readAsStringSync(),
           )
           as Map,
     ),

@@ -1,4 +1,6 @@
-use crate::{ChangeSections, ChangeSet, FeatureResult, ReceiptSendEffect, ReceiptStorage, RuntimeResult};
+use crate::{
+    ChangeSections, ChangeSet, FeatureResult, ReceiptSendEffect, ReceiptStorage, RuntimeResult,
+};
 
 pub struct ReceiptsFeature<'a, S> {
     storage: &'a S,
@@ -17,9 +19,6 @@ where
     }
 
     pub fn changed() -> FeatureResult<()> {
-        FeatureResult::changed(
-            (),
-            ChangeSet::section(ChangeSections::RECEIPTS),
-        )
+        FeatureResult::changed((), ChangeSet::section(ChangeSections::RECEIPTS))
     }
 }

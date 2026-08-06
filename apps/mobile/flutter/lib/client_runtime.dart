@@ -92,17 +92,11 @@ final class _SessionAwareClientRuntime
   final ClientRuntime _delegate;
 
   @override
-  Future<void> disposeRuntime() async {
-    final delegate = _delegate;
-    if (delegate is RuntimeDisposable) await delegate.disposeRuntime();
-  }
+  Future<void> disposeRuntime() => _delegate.disposeRuntime();
 
   @override
-  Future<ApplicationSnapshot?> applicationSnapshot() async {
-    final delegate = _delegate;
-    if (delegate is! RuntimeProjectionCapability) return null;
-    return delegate.applicationSnapshot();
-  }
+  Future<ApplicationSnapshot?> applicationSnapshot() =>
+      _delegate.applicationSnapshot();
 
   RuntimePairingQueryCapability get _pairingQueries => _delegate;
 
@@ -114,11 +108,8 @@ final class _SessionAwareClientRuntime
   Future<List<PairingItem>> listPairings() => _pairingQueries.listPairings();
 
   @override
-  Future<Map<String, dynamic>?> runtimeSnapshot() async {
-    final delegate = _delegate;
-    if (delegate is! RuntimeAttachmentProvider) return null;
-    return delegate.runtimeSnapshot();
-  }
+  Future<Map<String, dynamic>?> runtimeSnapshot() =>
+      _delegate.runtimeSnapshot();
 
   @override
   Stream<RuntimeEvent> get events => _delegate.events;

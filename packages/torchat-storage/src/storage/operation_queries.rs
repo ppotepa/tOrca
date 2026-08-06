@@ -2,10 +2,8 @@ use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::de::DeserializeOwned;
 use torchat_runtime::{DurableOperation, OperationId, RuntimeError, RuntimeResult};
 
-const UPSERT_OPERATION: &str =
-    include_str!("../../sql/commands/operations/upsert_operation.sql");
-const OPERATION_BY_ID: &str =
-    include_str!("../../sql/queries/operations/operation_by_id.sql");
+const UPSERT_OPERATION: &str = include_str!("../../sql/commands/operations/upsert_operation.sql");
+const OPERATION_BY_ID: &str = include_str!("../../sql/queries/operations/operation_by_id.sql");
 const PENDING_OPERATIONS: &str =
     include_str!("../../sql/queries/operations/pending_operations.sql");
 
@@ -44,9 +42,7 @@ pub(super) fn put_operation(
     Ok(())
 }
 
-pub(super) fn pending_operations(
-    connection: &Connection,
-) -> RuntimeResult<Vec<DurableOperation>> {
+pub(super) fn pending_operations(connection: &Connection) -> RuntimeResult<Vec<DurableOperation>> {
     let mut statement = connection
         .prepare(PENDING_OPERATIONS)
         .map_err(storage_error)?;
@@ -74,7 +70,9 @@ fn decode_operation(row: &Row<'_>) -> rusqlite::Result<RuntimeResult<DurableOper
                 .get::<_, i64>("attempt_count")
                 .map_err(storage_error)?
                 .try_into()
-                .map_err(|_| RuntimeError::Storage("negative operation attempt count".to_owned()))?,
+                .map_err(|_| {
+                    RuntimeError::Storage("negative operation attempt count".to_owned())
+                })?,
             retry_at: row.get("retry_at").map_err(storage_error)?,
             error_code: error_code.as_deref().map(parse_enum).transpose()?,
             command_descriptor: row.get("command_descriptor").map_err(storage_error)?,

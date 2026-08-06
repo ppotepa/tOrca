@@ -46,12 +46,4 @@ impl CommandPipelineTrace {
         );
         self.completed.push(stage);
     }
-
-    pub fn completed(&self) -> &[CommandPipelineStage] {
-        &self.completed
-    }
-
-    pub fn reached(&self, stage: CommandPipelineStage) -> bool {
-        self.completed.binary_search(&stage).is_ok()
-    }
 }

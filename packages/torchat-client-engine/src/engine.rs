@@ -109,12 +109,7 @@ impl ClientEngine {
         let shutdown = CancellationToken::new();
         let pending_responses = PendingResponseRegistry::default();
         let actor = ClientEngineActor::new_with_owned_anchor(config, anchor)?;
-        spawn_event_router(
-            actor_event_rx,
-            event_tx,
-            pending_responses.clone(),
-            None,
-        );
+        spawn_event_router(actor_event_rx, event_tx, pending_responses.clone(), None);
         let fatal_events = actor_event_tx.clone();
         let actor_shutdown = shutdown.clone();
         tokio::spawn(async move {
@@ -291,13 +286,7 @@ impl ClientEngine {
         self.shutdown.cancel();
     }
 
-    pub fn into_parts(
-        self,
-    ) -> (
-        EngineCommandSender,
-        EngineEventReceiver,
-        CancellationToken,
-    ) {
+    pub fn into_parts(self) -> (EngineCommandSender, EngineEventReceiver, CancellationToken) {
         let Self {
             commands,
             events,

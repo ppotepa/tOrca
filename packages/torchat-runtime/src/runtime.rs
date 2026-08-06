@@ -766,14 +766,14 @@ where
             .ok_or_else(|| RuntimeError::NotFound("contact does not exist".to_owned()))?;
         contact.verification = crate::VerificationState::Verified;
         self.storage.put_contact(contact)?;
-        let existing_conversation = self
-            .storage
-            .conversations()?
-            .into_iter()
-            .find(|conversation| {
-                conversation.contact_installation_id == installation_id
-                    || conversation.id == installation_id
-            });
+        let existing_conversation =
+            self.storage
+                .conversations()?
+                .into_iter()
+                .find(|conversation| {
+                    conversation.contact_installation_id == installation_id
+                        || conversation.id == installation_id
+                });
         let mut conversation = existing_conversation.unwrap_or_else(|| ConversationSummary {
             id: installation_id.to_owned(),
             contact_installation_id: installation_id.to_owned(),
@@ -862,14 +862,14 @@ where
             contact.nickname = fallback_contact_nickname(&contact.installation_id);
         }
         self.storage.put_contact(contact.clone())?;
-        let existing_conversation = self
-            .storage
-            .conversations()?
-            .into_iter()
-            .find(|conversation| {
-                conversation.contact_installation_id == contact.installation_id
-                    || conversation.id == contact.installation_id
-            });
+        let existing_conversation =
+            self.storage
+                .conversations()?
+                .into_iter()
+                .find(|conversation| {
+                    conversation.contact_installation_id == contact.installation_id
+                        || conversation.id == contact.installation_id
+                });
         let mut conversation = existing_conversation.unwrap_or_else(|| ConversationSummary {
             id: contact.installation_id.clone(),
             contact_installation_id: contact.installation_id.clone(),
@@ -2184,7 +2184,9 @@ mod tests {
             runtime.storage.pairing_inbox().unwrap()[0].state,
             InviteState::Pending
         );
-        runtime.accept_received_pairing("pairing-rendezvous").unwrap();
+        runtime
+            .accept_received_pairing("pairing-rendezvous")
+            .unwrap();
         runtime.finalize_pairing("pairing-rendezvous").unwrap();
         let completed = &runtime.storage.pairing_inbox().unwrap()[0];
         assert_eq!(completed.state, InviteState::Completed);
@@ -2481,7 +2483,10 @@ mod tests {
 
         assert_eq!(effect.conversation_id, "peer-1");
         assert_eq!(effect.body, "hello");
-        assert_eq!(runtime.messages("peer-1").unwrap()[0].state, MessageState::Sending);
+        assert_eq!(
+            runtime.messages("peer-1").unwrap()[0].state,
+            MessageState::Sending
+        );
     }
 
     #[test]
@@ -2638,12 +2643,14 @@ mod tests {
             .apply_message_transport_outcome(Uuid::from_u128(1), MessageTransportOutcome::Delivered)
             .unwrap();
 
-        assert!(runtime
-            .apply_message_transport_outcome(
-                Uuid::from_u128(1),
-                MessageTransportOutcome::RetryableFailure,
-            )
-            .is_err());
+        assert!(
+            runtime
+                .apply_message_transport_outcome(
+                    Uuid::from_u128(1),
+                    MessageTransportOutcome::RetryableFailure,
+                )
+                .is_err()
+        );
     }
 
     #[test]
@@ -2791,7 +2798,10 @@ mod tests {
 
         let effects = runtime.prepare_pending_message_sends().unwrap();
         assert_eq!(effects.len(), 1);
-        assert_eq!(runtime.messages("peer-1").unwrap()[0].state, MessageState::Sending);
+        assert_eq!(
+            runtime.messages("peer-1").unwrap()[0].state,
+            MessageState::Sending
+        );
     }
 
     #[test]

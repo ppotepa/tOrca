@@ -258,10 +258,7 @@ class _ConnectionComponentTile extends StatelessWidget {
     };
     return _StatusTile(
       icon: _icon(status.component),
-      title: localizeConnectionComponentTitle(
-        context.l10n,
-        status.component,
-      ),
+      title: localizeConnectionComponentTitle(context.l10n, status.component),
       state: localizedState,
       tone: tone,
       detail: localizeConnectionComponentDescription(

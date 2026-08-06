@@ -463,21 +463,20 @@ async fn process_frame(
             side_token,
             encrypted_response,
         } => {
-            if let Some(bridge) = bridges.get(&pairing_id) {
-                if bridge.owner == id
-                    && bridge.owner_token_hash == hash(&side_token)
-                    && encrypted_response.len() <= MAX_PAIRING_BLOB_BYTES
-                {
-                    send(
-                        connections,
-                        bridge.joiner,
-                        RendezvousServerFrame::PairingAccepted {
-                            pairing_id,
-                            encrypted_response,
-                        },
-                    )
-                    .await;
-                }
+            if let Some(bridge) = bridges.get(&pairing_id)
+                && bridge.owner == id
+                && bridge.owner_token_hash == hash(&side_token)
+                && encrypted_response.len() <= MAX_PAIRING_BLOB_BYTES
+            {
+                send(
+                    connections,
+                    bridge.joiner,
+                    RendezvousServerFrame::PairingAccepted {
+                        pairing_id,
+                        encrypted_response,
+                    },
+                )
+                .await;
             }
         }
         RendezvousClientFrame::RejectPairing {
@@ -583,10 +582,10 @@ async fn finish_pairing(
         }
         let _ = send(connections, b.owner, frame.clone()).await;
         let _ = send(connections, b.joiner, frame).await;
-        if let Some(slot) = slots.remove(&b.slot_hash) {
-            if let Some(c) = connections.get_mut(&slot.owner) {
-                c.slots = c.slots.saturating_sub(1);
-            }
+        if let Some(slot) = slots.remove(&b.slot_hash)
+            && let Some(c) = connections.get_mut(&slot.owner)
+        {
+            c.slots = c.slots.saturating_sub(1);
         }
     }
 }

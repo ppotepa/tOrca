@@ -3,11 +3,8 @@ import 'package:torchat_flutter_ui/core/application_state/application_snapshot.d
 import 'package:torchat_flutter_ui/core/models/domain.dart';
 import 'package:torchat_mobile/core/application_state/application_state_store.dart';
 
-PairingItem pairing(String id, PairingOrigin origin) => PairingItem(
-  id: id,
-  status: InviteState.pending,
-  origin: origin,
-);
+PairingItem pairing(String id, PairingOrigin origin) =>
+    PairingItem(id: id, status: InviteState.pending, origin: origin);
 
 void main() {
   test('equal revision cannot replace authoritative pairing collections', () {

@@ -36,13 +36,13 @@ abstract final class TorcaReleaseInfo {
       updateKeyId.isNotEmpty && updatePublicKey.isNotEmpty;
 
   static Map<String, Object> get diagnosticMetadata => <String, Object>{
-        'product': product,
-        'version': version,
-        'build': build,
-        'channel': channel,
-        'commit': commit,
-        'updateKeyId': updateKeyId.isEmpty ? 'not-configured' : updateKeyId,
-      };
+    'product': product,
+    'version': version,
+    'build': build,
+    'channel': channel,
+    'commit': commit,
+    'updateKeyId': updateKeyId.isEmpty ? 'not-configured' : updateKeyId,
+  };
 
   static String get diagnosticLabel =>
       '$product $displayVersion\nChannel: $channel\nCommit: $commit';

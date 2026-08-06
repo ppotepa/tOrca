@@ -2,13 +2,13 @@ use super::super::*;
 
 use crate::{
     effects::{
-        DeferredCommandContext, EngineEffectEnvelope, RelayEffectOperation,
-        RelayEffectPlaceholder,
+        DeferredCommandContext, EngineEffectEnvelope, RelayEffectOperation, RelayEffectPlaceholder,
     },
     processing::EngineProcessingResult,
 };
 
 impl ClientEngineActor {
+    #[allow(clippy::result_large_err)]
     pub(in crate::actor) fn ensure_relay_effect_available(
         &mut self,
         request_id: String,
@@ -29,10 +29,7 @@ impl ClientEngineActor {
         operation: RelayEffectOperation,
         runtime_events: Vec<torchat_runtime::RuntimeEvent>,
     ) -> EngineProcessingResult {
-        let relay = std::mem::replace(
-            &mut self.relay,
-            Box::new(RelayEffectPlaceholder::default()),
-        );
+        let relay = std::mem::replace(&mut self.relay, Box::new(RelayEffectPlaceholder::default()));
         let mut result = EngineProcessingResult::empty();
         result.events.extend(
             runtime_events
@@ -57,13 +54,9 @@ impl ClientEngineActor {
             self.with_runtime(|runtime| runtime.prepare_submit_pairing_code(code))?;
         let pairing_id = uuid::Uuid::new_v4();
         let invite = self.build_contact_invite(None)?;
-        let offer = RelayPayloadV1::pairing_offer(
-            pairing_id.to_string(),
-            String::new(),
-            invite,
-        )
-        .encode()
-        .map_err(EngineError::InvalidCommand)?;
+        let offer = RelayPayloadV1::pairing_offer(pairing_id.to_string(), String::new(), invite)
+            .encode()
+            .map_err(EngineError::InvalidCommand)?;
         Ok((
             RelayEffectOperation::SubmitPairingCode {
                 code: normalized,

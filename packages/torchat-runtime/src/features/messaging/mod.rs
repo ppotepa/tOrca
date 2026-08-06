@@ -1,8 +1,8 @@
 use crate::{
     ChangeSet, ChatMessage, ClientRuntime, ContactStorage, ConversationStorage, FeatureResult,
     MessageReply, MessageSendEffect, MessageState, MessageStorage, MessageTransportOutcome,
-    OperationStorage, PointLookupStorage, RuntimeClock, RuntimeError, RuntimeErrorCode, RuntimeEvent,
-    RuntimeResult, RuntimeStorage, RuntimeTransport, VerificationState,
+    OperationStorage, PointLookupStorage, RuntimeClock, RuntimeError, RuntimeErrorCode,
+    RuntimeEvent, RuntimeResult, RuntimeStorage, RuntimeTransport, VerificationState,
     features::operations::OperationsFeature, message_state_after_transport_outcome,
     message_state_on_send_prepare, runtime_conversation_summary_on_outgoing,
 };
@@ -72,10 +72,7 @@ where
         Ok(FeatureResult::changed(message, changes))
     }
 
-    pub fn delete(
-        &mut self,
-        message_id: &str,
-    ) -> RuntimeResult<FeatureResult<()>> {
+    pub fn delete(&mut self, message_id: &str) -> RuntimeResult<FeatureResult<()>> {
         let result = self.delete_with_context(message_id)?;
         Ok(FeatureResult {
             value: (),
@@ -168,8 +165,9 @@ where
         let text = normalize_message_text(&text)?;
         let reply_to = reply_to_message_id
             .map(|message_id| {
-                PointLookupStorage::message_by_id(self.storage, message_id)?
-                    .ok_or_else(|| RuntimeError::NotFound("reply message does not exist".to_owned()))
+                PointLookupStorage::message_by_id(self.storage, message_id)?.ok_or_else(|| {
+                    RuntimeError::NotFound("reply message does not exist".to_owned())
+                })
             })
             .transpose()?
             .map(|message| {
@@ -266,9 +264,7 @@ where
         Ok(result)
     }
 
-    pub fn prepare_pending(
-        &mut self,
-    ) -> RuntimeResult<Vec<FeatureResult<MessageRetryResult>>> {
+    pub fn prepare_pending(&mut self) -> RuntimeResult<Vec<FeatureResult<MessageRetryResult>>> {
         let messages = self.storage.pending_messages()?;
         let mut prepared = Vec::new();
         for message in messages.into_iter().filter(|message| {
@@ -522,26 +518,27 @@ where
             MessageTransportOutcome::PeerUnavailable
             | MessageTransportOutcome::RetryableFailure => {
                 let retry_at = retry_at.unwrap_or(now_ms);
-                self.storage_mut()
-                    .requeue_outbound_delivery(message_id, retry_at, error_detail.unwrap_or("retry"))?;
-                OperationsFeature::new(self.storage_mut()).retry_message_delivery(
+                self.storage_mut().requeue_outbound_delivery(
                     message_id,
                     retry_at,
-                    RuntimeErrorCode::TransportUnavailable,
-                    now_ms,
-                )?
-                .changes
+                    error_detail.unwrap_or("retry"),
+                )?;
+                OperationsFeature::new(self.storage_mut())
+                    .retry_message_delivery(
+                        message_id,
+                        retry_at,
+                        RuntimeErrorCode::TransportUnavailable,
+                        now_ms,
+                    )?
+                    .changes
             }
             MessageTransportOutcome::PermanentFailure
             | MessageTransportOutcome::PeerAuthenticationFailed
             | MessageTransportOutcome::PeerRejected => {
                 self.storage_mut().complete_outbound_delivery(message_id)?;
-                OperationsFeature::new(self.storage_mut()).fail_message_delivery(
-                    message_id,
-                    outcome_error_code(outcome),
-                    now_ms,
-                )?
-                .changes
+                OperationsFeature::new(self.storage_mut())
+                    .fail_message_delivery(message_id, outcome_error_code(outcome), now_ms)?
+                    .changes
             }
             MessageTransportOutcome::Delivered
             | MessageTransportOutcome::PeerPersisted
@@ -559,11 +556,12 @@ where
             error_detail,
         )?;
         if !message.changes.sections.is_empty() {
-            self.session_mut().push_event(RuntimeEvent::MessageStateChanged {
-                message_id: Some(parse_message_id(&message.value.id)?),
-                conversation_id: Some(message.value.conversation_id.clone()),
-                state: Some(message.value.state.clone()),
-            });
+            self.session_mut()
+                .push_event(RuntimeEvent::MessageStateChanged {
+                    message_id: Some(parse_message_id(&message.value.id)?),
+                    conversation_id: Some(message.value.conversation_id.clone()),
+                    state: Some(message.value.state.clone()),
+                });
         }
         let mut changes = message.changes;
         changes.merge(operation_changes);
@@ -579,11 +577,12 @@ where
         message_id: &str,
     ) -> RuntimeResult<FeatureResult<()>> {
         let result = MessagingFeature::new(self.storage_mut()).delete_with_context(message_id)?;
-        self.session_mut().push_event(RuntimeEvent::MessageStateChanged {
-            message_id: Some(result.value.message_id),
-            conversation_id: Some(result.value.conversation_id),
-            state: None,
-        });
+        self.session_mut()
+            .push_event(RuntimeEvent::MessageStateChanged {
+                message_id: Some(result.value.message_id),
+                conversation_id: Some(result.value.conversation_id),
+                state: None,
+            });
         Ok(FeatureResult {
             value: (),
             changes: result.changes,
@@ -628,9 +627,8 @@ fn normalize_message_text(text: &str) -> RuntimeResult<String> {
 }
 
 fn parse_message_id(message_id: &str) -> RuntimeResult<uuid::Uuid> {
-    uuid::Uuid::parse_str(message_id).map_err(|_| {
-        RuntimeError::InvalidParams("message id is not a valid UUID".to_owned())
-    })
+    uuid::Uuid::parse_str(message_id)
+        .map_err(|_| RuntimeError::InvalidParams("message id is not a valid UUID".to_owned()))
 }
 
 fn delivery_sequence(message_id: uuid::Uuid) -> u64 {

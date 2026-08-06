@@ -1,6 +1,4 @@
-use torchat_runtime::{
-    MessageSendEffect, PairingSendEffect, PairingSendKind, RuntimeSendEffect,
-};
+use torchat_runtime::{MessageSendEffect, PairingSendEffect, PairingSendKind, RuntimeSendEffect};
 
 #[test]
 fn runtime_send_effect_serializes_like_existing_transport_payloads() {

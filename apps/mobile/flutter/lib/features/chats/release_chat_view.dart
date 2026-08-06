@@ -385,8 +385,9 @@ class _ReleaseChatViewState extends ConsumerState<ReleaseChatView> {
       final remaining = maxComposerAttachments - _draftAttachments.length;
       if (prepared.length > remaining) {
         setState(() {
-          _attachmentError =
-              context.l10n.uiAttachmentLimitExceeded(maxComposerAttachments);
+          _attachmentError = context.l10n.uiAttachmentLimitExceeded(
+            maxComposerAttachments,
+          );
         });
         return;
       }

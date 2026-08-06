@@ -4,7 +4,7 @@ pub mod rules;
 pub use crate::point_lookup_storage::PointLookupStorage;
 pub use crate::storage_capabilities::PairingStorage;
 
-use crate::pairing_rules::{normalize_pairing_item, PairingAction};
+use crate::pairing_rules::{PairingAction, normalize_pairing_item};
 use crate::{
     ChangeSet, ContactRecord, FeatureResult, InviteState, PairingCancelEffect, PairingItem,
     PairingPeerOutcome, PairingPreparation, RuntimeError, RuntimeResult, RuntimeSendEffect,
@@ -72,8 +72,7 @@ where
     ) -> RuntimeResult<FeatureResult<(RuntimeSendEffect, InviteState)>> {
         let item = self.inbox_required(pairing_id)?;
         let already_rejected = item.state == InviteState::Rejected;
-        let (updated_item, recipient_installation_id) =
-            process::prepare_reject(item, now_secs)?;
+        let (updated_item, recipient_installation_id) = process::prepare_reject(item, now_secs)?;
         let state = updated_item.state;
         if !already_rejected {
             self.storage.put_pairing_inbox(updated_item)?;
@@ -158,10 +157,7 @@ where
         ))
     }
 
-    pub fn pending_send_effects(
-        &self,
-        now_secs: i64,
-    ) -> RuntimeResult<Vec<RuntimeSendEffect>> {
+    pub fn pending_send_effects(&self, now_secs: i64) -> RuntimeResult<Vec<RuntimeSendEffect>> {
         process::pending_send_effects(self.storage.pairing_inbox()?, now_secs)
     }
 

@@ -8,11 +8,12 @@ impl ClientEngineActor {
         pairing_id: String,
     ) -> CommandHandlerResult {
         let now_secs = self.clock.now_secs();
-        let (_preparation, mut runtime_events): (PairingPreparation, _) = self.with_runtime(
-            |runtime| runtime.feature_prepare_accept_pairing(&pairing_id, now_secs),
-        )?;
-        let (offer, mut read_events) = self
-            .with_runtime(|runtime| runtime.feature_pairing_offer_payload(&pairing_id))?;
+        let (_preparation, mut runtime_events): (PairingPreparation, _) =
+            self.with_runtime(|runtime| {
+                runtime.feature_prepare_accept_pairing(&pairing_id, now_secs)
+            })?;
+        let (offer, mut read_events) =
+            self.with_runtime(|runtime| runtime.feature_pairing_offer_payload(&pairing_id))?;
         runtime_events.append(&mut read_events);
         let mut accept_events = self.accept_invite(&offer)?;
         runtime_events.append(&mut accept_events);

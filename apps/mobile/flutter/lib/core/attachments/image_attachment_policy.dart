@@ -36,7 +36,7 @@ abstract final class ImageAttachmentPolicy {
     }
     if (width > maximumWidth || height > maximumHeight) {
       throw StateError(
-        'The selected image dimensions exceed ${maximumWidth}×$maximumHeight.',
+        'The selected image dimensions exceed $maximumWidth×$maximumHeight.',
       );
     }
     if (width * height > maximumPixels) {

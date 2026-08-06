@@ -1,6 +1,4 @@
-use torchat_runtime::{
-    DurableOperation, OperationId, OperationStorage, RuntimeResult,
-};
+use torchat_runtime::{DurableOperation, OperationId, OperationStorage, RuntimeResult};
 
 use super::{ClientDatabase, operation_queries};
 

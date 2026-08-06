@@ -6,5 +6,6 @@ export '../core/connection/app_state_connection.dart';
 export 'application_controller.dart';
 export 'application_state.dart';
 
-final appControllerProvider =
-    NotifierProvider<ApplicationController, AppState>(ApplicationController.new);
+final appControllerProvider = NotifierProvider<ApplicationController, AppState>(
+  ApplicationController.new,
+);

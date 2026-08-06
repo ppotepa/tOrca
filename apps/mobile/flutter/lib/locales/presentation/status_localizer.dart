@@ -106,17 +106,15 @@ String localizePeerConnectionStatus(
   PeerConnectionStatus.offline => l10n.contactPeerOffline,
 };
 
-String localizeContactPeerLink(
-  AppLocalizations l10n,
-  ContactPeerLink status,
-) => switch (status) {
-  ContactPeerLink.connected => l10n.contactPeerConnected,
-  ContactPeerLink.connecting => l10n.contactPeerConnecting,
-  ContactPeerLink.authenticating => l10n.contactPeerAuthenticating,
-  ContactPeerLink.backoff => l10n.contactPeerBackoff,
-  ContactPeerLink.offline => l10n.contactPeerOffline,
-  ContactPeerLink.unknown => l10n.contactAvailabilityUnknown,
-};
+String localizeContactPeerLink(AppLocalizations l10n, ContactPeerLink status) =>
+    switch (status) {
+      ContactPeerLink.connected => l10n.contactPeerConnected,
+      ContactPeerLink.connecting => l10n.contactPeerConnecting,
+      ContactPeerLink.authenticating => l10n.contactPeerAuthenticating,
+      ContactPeerLink.backoff => l10n.contactPeerBackoff,
+      ContactPeerLink.offline => l10n.contactPeerOffline,
+      ContactPeerLink.unknown => l10n.contactAvailabilityUnknown,
+    };
 
 String localizeTransportPolicy(
   AppLocalizations l10n,

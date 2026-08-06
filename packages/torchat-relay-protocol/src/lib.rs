@@ -118,9 +118,11 @@ mod tests {
             requested_ttl_seconds: 120,
         };
         let encoded = serde_json::to_vec(&frame).unwrap();
-        assert!(String::from_utf8(encoded.clone())
-            .unwrap()
-            .contains("create_pairing_slot"));
+        assert!(
+            String::from_utf8(encoded.clone())
+                .unwrap()
+                .contains("create_pairing_slot")
+        );
         assert!(matches!(
             serde_json::from_slice::<RendezvousClientFrame>(&encoded).unwrap(),
             RendezvousClientFrame::CreatePairingSlot { .. }

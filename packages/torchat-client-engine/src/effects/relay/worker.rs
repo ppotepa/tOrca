@@ -1,13 +1,10 @@
 use tokio::sync::mpsc;
 
-use crate::{
-    EngineRelay,
-    input::EngineInputEnvelope,
-};
+use crate::{EngineRelay, input::EngineInputEnvelope};
 
 use super::{
-    EngineEffect, EngineEffectEnvelope, EngineEffectOutcome, RelayEffect,
-    RelayEffectOperation, RelayEffectOutcome, RelayEffectResult,
+    EngineEffect, EngineEffectEnvelope, EngineEffectOutcome, RelayEffect, RelayEffectOperation,
+    RelayEffectOutcome, RelayEffectResult,
 };
 
 pub(crate) fn spawn_engine_effect(
@@ -32,9 +29,7 @@ pub(crate) fn spawn_engine_effect(
                     execute_relay_operation(relay.as_mut(), operation)
                 }))
                 .unwrap_or_else(|_| {
-                    RelayEffectResult::WorkerFailed(
-                        "rendezvous effect worker panicked".to_owned(),
-                    )
+                    RelayEffectResult::WorkerFailed("rendezvous effect worker panicked".to_owned())
                 });
                 let outcome = EngineEffectOutcome::Relay(RelayEffectOutcome {
                     effect_id,
@@ -42,14 +37,12 @@ pub(crate) fn spawn_engine_effect(
                     relay,
                     result,
                 });
-                let _ = inbox.blocking_send(
-                    EngineInputEnvelope::effect_outcome_correlated(
-                        unix_ms(),
-                        causation_id,
-                        correlation_id,
-                        outcome,
-                    ),
-                );
+                let _ = inbox.blocking_send(EngineInputEnvelope::effect_outcome_correlated(
+                    unix_ms(),
+                    causation_id,
+                    correlation_id,
+                    outcome,
+                ));
             });
         }
     }

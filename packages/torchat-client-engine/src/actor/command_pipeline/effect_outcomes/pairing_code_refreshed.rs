@@ -9,14 +9,17 @@ impl ClientEngineActor {
         self.with_runtime_idempotent(
             idempotency,
             |runtime| {
-                let result = torchat_runtime::features::pairing_preparation::PairingPreparationFeature::new(
-                    runtime.storage_mut(),
-                )
-                .commit_code(code.clone())?;
+                let result =
+                    torchat_runtime::features::pairing_preparation::PairingPreparationFeature::new(
+                        runtime.storage_mut(),
+                    )
+                    .commit_code(code.clone())?;
                 if !result.changes.sections.is_empty() {
-                    runtime.session_mut().push_event(torchat_runtime::RuntimeEvent::Changed {
-                        kind: Some("pairings".to_owned()),
-                    });
+                    runtime
+                        .session_mut()
+                        .push_event(torchat_runtime::RuntimeEvent::Changed {
+                            kind: Some("pairings".to_owned()),
+                        });
                 }
                 Ok(result.value)
             },

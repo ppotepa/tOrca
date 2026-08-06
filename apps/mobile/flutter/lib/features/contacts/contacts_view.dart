@@ -54,7 +54,8 @@ class ContactsView extends ConsumerWidget {
     bool,
     bool,
     ContactTransportPolicy,
-  ) onUpdateContactSettings;
+  )
+  onUpdateContactSettings;
   final String fingerprint;
   final String ownInvite;
   final bool canPair;
@@ -459,9 +460,7 @@ class ContactsView extends ConsumerWidget {
                               return const LinearProgressIndicator();
                             }
                             if (snapshot.hasError) {
-                              return Text(
-                                context.l10n.uiDeadLetterUnavailable,
-                              );
+                              return Text(context.l10n.uiDeadLetterUnavailable);
                             }
                             final records = snapshot.data ?? const [];
                             if (records.isEmpty) {

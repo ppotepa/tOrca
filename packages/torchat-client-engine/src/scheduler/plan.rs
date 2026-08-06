@@ -11,15 +11,6 @@ pub(crate) struct EngineSchedulerPlan {
 }
 
 impl EngineSchedulerPlan {
-    pub(crate) fn idle(generation: u64) -> Self {
-        Self {
-            generation,
-            relay_poll_at: None,
-            peer_probe_at: None,
-            retry_at: None,
-        }
-    }
-
     pub(super) fn next_deadline(self) -> Option<Instant> {
         [self.relay_poll_at, self.peer_probe_at, self.retry_at]
             .into_iter()

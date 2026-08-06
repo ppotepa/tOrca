@@ -2,9 +2,10 @@ use rusqlite::{Connection, OptionalExtension, Row};
 use serde::de::DeserializeOwned;
 use torchat_runtime::{
     ChatMessage, ContactRecord, ContactTransportPolicy, ConversationState, ConversationSummary,
-    InviteState, MessageReply, MessageState, PairingItem, PeerConnectionStatus,
-    PeerEndpointStatus, RuntimeError, RuntimeResult, VerificationState, pairing_available_actions,
+    InviteState, MessageReply, MessageState, PairingItem, PeerConnectionStatus, PeerEndpointStatus,
+    RuntimeError, RuntimeResult, VerificationState,
     logic::{fallback_contact_nickname, normalized_contact_nickname},
+    pairing_available_actions,
 };
 
 const CONTACT_BY_INSTALLATION_ID: &str =
@@ -13,8 +14,7 @@ const CONVERSATION_BY_ID: &str =
     include_str!("../../sql/queries/conversations/conversation_by_id.sql");
 const CONVERSATION_FOR_CONTACT: &str =
     include_str!("../../sql/queries/conversations/conversation_for_contact.sql");
-const PAIRING_INBOX_BY_ID: &str =
-    include_str!("../../sql/queries/pairing/pairing_inbox_by_id.sql");
+const PAIRING_INBOX_BY_ID: &str = include_str!("../../sql/queries/pairing/pairing_inbox_by_id.sql");
 const PAIRING_OUTBOX_BY_ID: &str =
     include_str!("../../sql/queries/pairing/pairing_outbox_by_id.sql");
 const MESSAGE_BY_ID: &str = include_str!("../../sql/queries/messages/message_by_id.sql");
@@ -24,7 +24,11 @@ pub(super) fn contact_by_installation_id(
     installation_id: &str,
 ) -> RuntimeResult<Option<ContactRecord>> {
     connection
-        .query_row(CONTACT_BY_INSTALLATION_ID, [installation_id], decode_contact)
+        .query_row(
+            CONTACT_BY_INSTALLATION_ID,
+            [installation_id],
+            decode_contact,
+        )
         .optional()
         .map_err(storage_error)?
         .transpose()
@@ -46,7 +50,11 @@ pub(super) fn conversation_for_contact(
     installation_id: &str,
 ) -> RuntimeResult<Option<ConversationSummary>> {
     connection
-        .query_row(CONVERSATION_FOR_CONTACT, [installation_id], decode_conversation)
+        .query_row(
+            CONVERSATION_FOR_CONTACT,
+            [installation_id],
+            decode_conversation,
+        )
         .optional()
         .map_err(storage_error)?
         .transpose()
@@ -128,9 +136,7 @@ fn decode_conversation(row: &Row<'_>) -> rusqlite::Result<RuntimeResult<Conversa
     Ok((|| {
         Ok(ConversationSummary {
             id: row.get("id").map_err(storage_error)?,
-            contact_installation_id: row
-                .get("contact_installation_id")
-                .map_err(storage_error)?,
+            contact_installation_id: row.get("contact_installation_id").map_err(storage_error)?,
             status: parse_enum::<ConversationState>(&state)?,
             last_message_preview: row.get("last_message_preview").map_err(storage_error)?,
             last_message_at: row.get("last_message_at").map_err(storage_error)?,

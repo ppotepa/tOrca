@@ -83,6 +83,12 @@ jobs:
       - name: Formatting
         run: cargo fmt --all --check
 
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Build workspace
+        run: cargo build --workspace
+
       - name: Check architecture crates
         run: >-
           cargo check
@@ -90,6 +96,9 @@ jobs:
           -p torchat-storage
           -p torchat-client-engine
           -p torchat-client-engine-ffi
+
+      - name: Test workspace
+        run: cargo test --workspace
 
       - name: Test architecture crates
         run: >-
@@ -118,6 +127,9 @@ jobs:
 
       - name: Resolve dependencies
         run: flutter pub get
+
+      - name: Format
+        run: dart format --output=none --set-exit-if-changed lib test
 
       - name: Analyze
         run: flutter analyze

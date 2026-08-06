@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use url::Url;
 pub use torchat_storage::SecretBytes;
+use url::Url;
 
 use crate::PlatformKind;
 

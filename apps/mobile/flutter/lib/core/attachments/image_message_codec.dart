@@ -31,13 +31,8 @@ class PreparedImageAttachment {
     if (size <= 0 || size > ImageAttachmentPolicy.maximumEncodedBytes) {
       throw StateError('The prepared image exceeds the wire-size limit.');
     }
-    final body = '$imageMessagePrefix${jsonEncode(<String, Object>{
-      'mime': 'image/jpeg',
-      'width': width,
-      'height': height,
-      'size': size,
-      'data': base64Encode(bytes),
-    })}';
+    final body =
+        '$imageMessagePrefix${jsonEncode(<String, Object>{'mime': 'image/jpeg', 'width': width, 'height': height, 'size': size, 'data': base64Encode(bytes)})}';
     if (body.length > ImageAttachmentPolicy.maximumMessageBodyCharacters) {
       throw StateError('The prepared image message exceeds the wire limit.');
     }

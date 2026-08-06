@@ -38,7 +38,8 @@ void main() {
     expect(
       violations,
       isEmpty,
-      reason: 'Pairing must remain part of the atomic ApplicationSnapshot '
+      reason:
+          'Pairing must remain part of the atomic ApplicationSnapshot '
           'projection. Do not reintroduce a pairing-specific cache, controller '
           'copy, setter, or invalidation path. Violations:\n'
           '${violations.join('\n')}',

@@ -1,10 +1,4 @@
-enum ConnectionComponent {
-  engine,
-  localData,
-  tor,
-  peerListener,
-  onionService,
-}
+enum ConnectionComponent { engine, localData, tor, peerListener, onionService }
 
 enum ConnectionComponentState { pending, starting, ready, degraded, failed }
 
@@ -56,4 +50,3 @@ class ConnectionComponentStatus {
     generation: generation ?? this.generation,
   );
 }
-

@@ -1,7 +1,5 @@
 use super::super::{CommandHandlerResult, *};
-use torchat_runtime::{
-    RuntimeClock, features::messaging::ClientRuntimeMessagingFacade,
-};
+use torchat_runtime::{RuntimeClock, features::messaging::ClientRuntimeMessagingFacade};
 
 impl ClientEngineActor {
     pub(in crate::actor) fn command_retry_message(
@@ -10,9 +8,7 @@ impl ClientEngineActor {
         message_id: String,
     ) -> CommandHandlerResult {
         let idempotency = idempotency.ok_or_else(|| {
-            EngineError::InvalidCommand(
-                "retry message requires a durable operation id".to_owned(),
-            )
+            EngineError::InvalidCommand("retry message requires a durable operation id".to_owned())
         })?;
         let operation_id = idempotency.command_id.clone();
         let command_descriptor = idempotency.command_descriptor.clone();

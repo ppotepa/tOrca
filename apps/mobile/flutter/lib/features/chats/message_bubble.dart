@@ -11,14 +11,15 @@ import '../../shared/widgets/message_delivery_surface.dart';
 import '../../locales/presentation/app_localizations_x.dart';
 import '../../locales/generated/app_localizations.dart';
 
-String _messageStateLabel(AppLocalizations l10n, MessageState state) => switch (state) {
-  MessageState.queued => l10n.messageStateQueued,
-  MessageState.sending => l10n.messageStateSending,
-  MessageState.sent => l10n.messageStateSent,
-  MessageState.delivered => l10n.messageStateDelivered,
-  MessageState.read => l10n.messageStateRead,
-  MessageState.failed => l10n.messageStateFailed,
-};
+String _messageStateLabel(AppLocalizations l10n, MessageState state) =>
+    switch (state) {
+      MessageState.queued => l10n.messageStateQueued,
+      MessageState.sending => l10n.messageStateSending,
+      MessageState.sent => l10n.messageStateSent,
+      MessageState.delivered => l10n.messageStateDelivered,
+      MessageState.read => l10n.messageStateRead,
+      MessageState.failed => l10n.messageStateFailed,
+    };
 
 class MessageBubble extends ConsumerWidget {
   const MessageBubble({
@@ -160,10 +161,7 @@ class MessageBubble extends ConsumerWidget {
         PopupMenuItem(value: 'copy', child: Text(l10n.messageCopy)),
         if (message.outgoing && message.state == MessageState.failed)
           PopupMenuItem(value: 'retry', child: Text(l10n.messageRetry)),
-        PopupMenuItem(
-          value: 'delete',
-          child: Text(l10n.messageDeleteLocal),
-        ),
+        PopupMenuItem(value: 'delete', child: Text(l10n.messageDeleteLocal)),
       ],
     );
     switch (action) {

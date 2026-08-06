@@ -260,7 +260,7 @@ impl ClientEngineActor {
                     self.requeue_after_disconnect()?;
                     self.relay.set_socks5_url(self.socks5_url.clone());
                     self.connection_state = ConnectionState::Connecting;
-                    if self.connect_requested {}
+                    
                     let _ = self.queue_endpoint_update_probes();
                 }
                 Ok(Vec::new())

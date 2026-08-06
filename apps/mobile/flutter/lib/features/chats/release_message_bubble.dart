@@ -115,14 +115,18 @@ class _ReleaseMessageBubbleState extends ConsumerState<ReleaseMessageBubble> {
     try {
       await ImageGalleryService.saveJpeg(bytes, messageId: message.id);
       if (mounted) {
-        ref.read(uiNotificationCenterProvider.notifier).showSuccess(
+        ref
+            .read(uiNotificationCenterProvider.notifier)
+            .showSuccess(
               context.l10n.uiImageSavedToGallery,
               deduplicationKey: 'image-saved:${message.id}',
             );
       }
     } catch (error) {
       if (mounted) {
-        ref.read(uiNotificationCenterProvider.notifier).showError(
+        ref
+            .read(uiNotificationCenterProvider.notifier)
+            .showError(
               context.l10n.uiImageSaveFailed,
               deduplicationKey:
                   'image-save-error:${message.id}:${error.runtimeType}',

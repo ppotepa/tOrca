@@ -64,7 +64,6 @@ void main() {
   test('application controller does not schedule pairing recovery', () {
     final sources = <String>[
       File('lib/app/application_controller.dart').readAsStringSync(),
-      File('lib/app/application_controller_commands.dart').readAsStringSync(),
       File('lib/app/application_runtime_coordinator.dart').readAsStringSync(),
     ].join('\n');
 

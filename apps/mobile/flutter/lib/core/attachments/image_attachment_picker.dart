@@ -15,7 +15,8 @@ Future<List<PreparedImageAttachment>?> pickPreparedImageAttachments() async {
     lockParentWindow: true,
   );
   if (result == null || result.files.isEmpty) return null;
-  if (result.files.length > ImageAttachmentPolicy.maximumAttachmentsPerMessage) {
+  if (result.files.length >
+      ImageAttachmentPolicy.maximumAttachmentsPerMessage) {
     throw StateError(
       'At most ${ImageAttachmentPolicy.maximumAttachmentsPerMessage} images can be selected at once.',
     );

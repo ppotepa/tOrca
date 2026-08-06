@@ -387,10 +387,7 @@ class NicknameScreen extends StatelessWidget {
     body: SafeArea(
       child: Column(
         children: [
-          ConnectionStatusLamp(
-            phase: transport.phase,
-            desktop: true,
-          ),
+          ConnectionStatusLamp(phase: transport.phase, desktop: true),
           Expanded(
             child: Padding(
               padding: const EdgeInsets.all(24),

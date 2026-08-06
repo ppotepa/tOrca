@@ -52,11 +52,12 @@ where
             changes.merge(operation_changes);
         }
         self.storage_mut().complete_outbound_delivery(message_id)?;
-        self.session_mut().push_event(RuntimeEvent::MessageStateChanged {
-            message_id: Some(deleted.value.message_id),
-            conversation_id: Some(deleted.value.conversation_id),
-            state: None,
-        });
+        self.session_mut()
+            .push_event(RuntimeEvent::MessageStateChanged {
+                message_id: Some(deleted.value.message_id),
+                conversation_id: Some(deleted.value.conversation_id),
+                state: None,
+            });
         Ok(FeatureResult {
             value: (),
             changes,

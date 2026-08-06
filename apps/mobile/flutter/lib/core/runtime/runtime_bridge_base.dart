@@ -362,6 +362,7 @@ mixin RuntimeBridgeMethods implements ClientRuntime, RuntimeProjectionProvider {
     RuntimeArguments.deadLetter(kind, id),
   );
 
+  @override
   Future<List<Map<String, dynamic>>> listDeadLetters() async {
     final raw = await callRuntime(EngineContract.listDeadLetters);
     if (raw is! List) return const [];
@@ -385,6 +386,7 @@ mixin RuntimeBridgeMethods implements ClientRuntime, RuntimeProjectionProvider {
     RuntimeArguments.typing(conversationId, typing),
   );
 
+  @override
   Future<void> setConversationFocus(String conversationId, bool focused) =>
       callRuntime(
         EngineContract.setConversationFocus,

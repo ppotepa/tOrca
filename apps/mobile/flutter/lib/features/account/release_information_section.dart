@@ -45,7 +45,8 @@ class _ReleaseInformationSectionState
     if (_checkingUpdate) return;
     setState(() => _checkingUpdate = true);
     try {
-      final result = await PlatformServices.current.updates.selectAndVerifyManifest();
+      final result = await PlatformServices.current.updates
+          .selectAndVerifyManifest();
       if (!mounted || result == null) return;
       if (!result.updateAvailable) {
         _showMessage(
@@ -138,7 +139,9 @@ class _ReleaseInformationSectionState
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: Text(_polish ? 'Ostateczne potwierdzenie' : 'Final confirmation'),
+          title: Text(
+            _polish ? 'Ostateczne potwierdzenie' : 'Final confirmation',
+          ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -202,62 +205,61 @@ class _ReleaseInformationSectionState
 
   @override
   Widget build(BuildContext context) => ActionSection(
-        title: _polish ? 'WERSJA TESTOWA I WSPARCIE' : 'TEST RELEASE AND SUPPORT',
-        child: Column(
-          children: [
-            ActionTile(
-              leading: const Icon(Icons.info_outline),
-              title:
-                  '${TorcaReleaseInfo.product} ${TorcaReleaseInfo.displayVersion}',
-              subtitle: _polish
-                  ? 'Kanał: ${TorcaReleaseInfo.channel} · commit ${TorcaReleaseInfo.shortCommit}'
-                  : 'Channel: ${TorcaReleaseInfo.channel} · commit ${TorcaReleaseInfo.shortCommit}',
-              onTap: _copy,
-            ),
-            const Divider(height: 1),
-            ActionTile(
-              leading: const Icon(Icons.system_update_alt_outlined),
-              title: _polish
-                  ? 'Sprawdź plik aktualizacji'
-                  : 'Check update manifest',
-              subtitle: _polish
-                  ? 'Weryfikuje lokalny manifest i podpis Ed25519 bez połączenia sieciowego.'
-                  : 'Verifies a local manifest and Ed25519 signature without a network connection.',
-              busy: _checkingUpdate,
-              busyLabel: _polish
-                  ? 'Weryfikowanie aktualizacji…'
-                  : 'Verifying update…',
-              onTap: _checkUpdate,
-            ),
-            const Divider(height: 1),
-            ActionTile(
-              leading: const Icon(Icons.bug_report_outlined),
-              title:
-                  _polish ? 'Eksportuj diagnostykę' : 'Export diagnostics',
-              subtitle: _polish
-                  ? 'Lokalny, skompresowany plik bez wiadomości, załączników i kluczy.'
-                  : 'Local compressed file without messages, attachments or keys.',
-              busy: _exportingDiagnostics,
-              busyLabel: _polish
-                  ? 'Eksportowanie diagnostyki…'
-                  : 'Exporting diagnostics…',
-              onTap: _exportDiagnostics,
-            ),
-            const Divider(height: 1),
-            ActionTile(
-              leading: Icon(
-                Icons.delete_forever_outlined,
-                color: Theme.of(context).colorScheme.error,
-              ),
-              title: _polish ? 'Usuń lokalny profil' : 'Delete local profile',
-              subtitle: _polish
-                  ? 'Usuwa wszystkie dane i klucze Torca z tego urządzenia.'
-                  : 'Removes all Torca data and keys from this device.',
-              busy: _resettingProfile,
-              busyLabel: _polish ? 'Usuwanie profilu…' : 'Deleting profile…',
-              onTap: _resetProfile,
-            ),
-          ],
+    title: _polish ? 'WERSJA TESTOWA I WSPARCIE' : 'TEST RELEASE AND SUPPORT',
+    child: Column(
+      children: [
+        ActionTile(
+          leading: const Icon(Icons.info_outline),
+          title:
+              '${TorcaReleaseInfo.product} ${TorcaReleaseInfo.displayVersion}',
+          subtitle: _polish
+              ? 'Kanał: ${TorcaReleaseInfo.channel} · commit ${TorcaReleaseInfo.shortCommit}'
+              : 'Channel: ${TorcaReleaseInfo.channel} · commit ${TorcaReleaseInfo.shortCommit}',
+          onTap: _copy,
         ),
-      );
+        const Divider(height: 1),
+        ActionTile(
+          leading: const Icon(Icons.system_update_alt_outlined),
+          title: _polish
+              ? 'Sprawdź plik aktualizacji'
+              : 'Check update manifest',
+          subtitle: _polish
+              ? 'Weryfikuje lokalny manifest i podpis Ed25519 bez połączenia sieciowego.'
+              : 'Verifies a local manifest and Ed25519 signature without a network connection.',
+          busy: _checkingUpdate,
+          busyLabel: _polish
+              ? 'Weryfikowanie aktualizacji…'
+              : 'Verifying update…',
+          onTap: _checkUpdate,
+        ),
+        const Divider(height: 1),
+        ActionTile(
+          leading: const Icon(Icons.bug_report_outlined),
+          title: _polish ? 'Eksportuj diagnostykę' : 'Export diagnostics',
+          subtitle: _polish
+              ? 'Lokalny, skompresowany plik bez wiadomości, załączników i kluczy.'
+              : 'Local compressed file without messages, attachments or keys.',
+          busy: _exportingDiagnostics,
+          busyLabel: _polish
+              ? 'Eksportowanie diagnostyki…'
+              : 'Exporting diagnostics…',
+          onTap: _exportDiagnostics,
+        ),
+        const Divider(height: 1),
+        ActionTile(
+          leading: Icon(
+            Icons.delete_forever_outlined,
+            color: Theme.of(context).colorScheme.error,
+          ),
+          title: _polish ? 'Usuń lokalny profil' : 'Delete local profile',
+          subtitle: _polish
+              ? 'Usuwa wszystkie dane i klucze Torca z tego urządzenia.'
+              : 'Removes all Torca data and keys from this device.',
+          busy: _resettingProfile,
+          busyLabel: _polish ? 'Usuwanie profilu…' : 'Deleting profile…',
+          onTap: _resetProfile,
+        ),
+      ],
+    ),
+  );
 }

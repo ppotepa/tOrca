@@ -112,10 +112,7 @@ class _ImageStorageSettingsSectionState
   void _showError(String message, String operation) {
     ref
         .read(uiNotificationCenterProvider.notifier)
-        .showError(
-          message,
-          deduplicationKey: 'image-cache-error:$operation',
-        );
+        .showError(message, deduplicationKey: 'image-cache-error:$operation');
   }
 
   @override

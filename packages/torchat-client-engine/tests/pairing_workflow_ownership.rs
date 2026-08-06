@@ -1,6 +1,9 @@
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
-fn read(root: &PathBuf, relative: &str) -> String {
+fn read(root: &Path, relative: &str) -> String {
     fs::read_to_string(root.join(relative))
         .unwrap_or_else(|error| panic!("read {relative}: {error}"))
 }
@@ -9,10 +12,7 @@ fn read(root: &PathBuf, relative: &str) -> String {
 fn pairing_recovery_is_owned_by_engine_and_runtime() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let pairing = read(&root, "src/actor/pairing.rs");
-    let accept = read(
-        &root,
-        "src/actor/commands/pairing/accept_pairing.rs",
-    );
+    let accept = read(&root, "src/actor/commands/pairing/accept_pairing.rs");
 
     assert!(
         pairing.contains("fn retry_pending_welcomes"),

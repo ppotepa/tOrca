@@ -1,8 +1,6 @@
 use crate::{
-    EngineCommand, EngineCommandEnvelope, PlatformFact,
-    effects::EngineEffectOutcome,
-    peer::PeerTransportEvent,
-    relay::RelayEvent,
+    EngineCommand, EngineCommandEnvelope, PlatformFact, effects::EngineEffectOutcome,
+    peer::PeerTransportEvent, relay::RelayEvent,
 };
 
 use super::{EngineInputKind, EngineInputSource, EngineTimerKind};
@@ -13,6 +11,7 @@ pub(crate) struct CommandRequestContext {
     pub command_id: Option<String>,
 }
 
+#[allow(dead_code)]
 pub(crate) struct EngineInputEnvelope {
     pub input_id: uuid::Uuid,
     pub correlation_id: Option<String>,
@@ -22,6 +21,7 @@ pub(crate) struct EngineInputEnvelope {
     pub input: EngineInput,
 }
 
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum EngineInput {
     Command(EngineCommandEnvelope),
     PeerEvent(PeerTransportEvent),
@@ -80,17 +80,6 @@ impl EngineInputEnvelope {
         }
     }
 
-    pub(crate) fn relay_event(enqueued_at_ms: i64, event: RelayEvent) -> Self {
-        Self {
-            input_id: uuid::Uuid::new_v4(),
-            correlation_id: None,
-            causation_id: None,
-            source: EngineInputSource::Relay,
-            enqueued_at_ms,
-            input: EngineInput::RelayEvent(event),
-        }
-    }
-
     pub(crate) fn platform_fact(
         enqueued_at_ms: i64,
         request: Option<CommandRequestContext>,
@@ -107,11 +96,7 @@ impl EngineInputEnvelope {
         }
     }
 
-    pub(crate) fn timer(
-        enqueued_at_ms: i64,
-        kind: EngineTimerKind,
-        generation: u64,
-    ) -> Self {
+    pub(crate) fn timer(enqueued_at_ms: i64, kind: EngineTimerKind, generation: u64) -> Self {
         Self {
             input_id: uuid::Uuid::new_v4(),
             correlation_id: None,
@@ -148,6 +133,7 @@ impl EngineInputEnvelope {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn kind(&self) -> EngineInputKind {
         match &self.input {
             EngineInput::Command(_) => EngineInputKind::Command,
@@ -192,7 +178,9 @@ mod tests {
             },
         );
         assert_eq!(input.kind(), EngineInputKind::PlatformFact);
-        let restored = input.into_command_envelope().expect("platform command restored");
+        let restored = input
+            .into_command_envelope()
+            .expect("platform command restored");
         assert_eq!(restored.request_id, "request-platform");
     }
 }

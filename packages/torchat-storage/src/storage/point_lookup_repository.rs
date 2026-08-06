@@ -26,17 +26,11 @@ impl ClientDatabase {
         point_lookup_queries::conversation_for_contact(self.connection(), installation_id)
     }
 
-    pub fn pairing_inbox_by_id(
-        &self,
-        pairing_id: &str,
-    ) -> RuntimeResult<Option<PairingItem>> {
+    pub fn pairing_inbox_by_id(&self, pairing_id: &str) -> RuntimeResult<Option<PairingItem>> {
         point_lookup_queries::pairing_inbox_by_id(self.connection(), pairing_id)
     }
 
-    pub fn pairing_outbox_by_id(
-        &self,
-        pairing_id: &str,
-    ) -> RuntimeResult<Option<PairingItem>> {
+    pub fn pairing_outbox_by_id(&self, pairing_id: &str) -> RuntimeResult<Option<PairingItem>> {
         point_lookup_queries::pairing_outbox_by_id(self.connection(), pairing_id)
     }
 

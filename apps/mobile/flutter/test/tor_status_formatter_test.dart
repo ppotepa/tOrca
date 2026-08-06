@@ -5,10 +5,7 @@ void main() {
   test('tor status helper maps phases, labels and tone consistently', () {
     expect(TransportPhase.fromValue('connecting'), TransportPhase.connecting);
     expect(() => TransportPhase.fromValue('ready'), throwsFormatException);
-    expect(
-      TransportPhase.fromValue('bootstrapping').name,
-      'bootstrapping',
-    );
+    expect(TransportPhase.fromValue('bootstrapping').name, 'bootstrapping');
     expect(TransportPhase.connected.isConnected, isTrue);
     expect(TransportPhase.degraded.isWarning, isTrue);
     expect(TransportPhase.offline.isError, isTrue);

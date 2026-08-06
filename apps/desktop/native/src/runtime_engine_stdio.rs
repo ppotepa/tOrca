@@ -4,8 +4,7 @@ use sha2::{Digest, Sha256};
 use std::io::{BufRead, Write};
 use torchat_client_engine::{
     ClientEngine, EngineCommand, EngineCommandEnvelope, EngineConfig, EngineError, EngineEvent,
-    EngineFatalError, PlatformAction, PlatformFact, PlatformKind,
-    config::SecretBytes,
+    EngineFatalError, PlatformAction, PlatformFact, PlatformKind, config::SecretBytes,
 };
 use torchat_crypto::anti_rollback::{AnchoredMlsCheckpoint, MlsEpochAnchor};
 use url::Url;

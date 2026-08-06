@@ -35,6 +35,8 @@ class LocaleController extends AsyncNotifier<LocaleState> {
       _nativeBridge.setPreference(preference),
       PlatformServices.current.windowLifecycle.refreshLocale(preference),
     ]);
-    state = AsyncData(LocaleState(preference: preference, setupCompleted: true));
+    state = AsyncData(
+      LocaleState(preference: preference, setupCompleted: true),
+    );
   }
 }

@@ -60,10 +60,7 @@ where
         self.save(contact)
     }
 
-    pub fn verify(
-        &mut self,
-        installation_id: &str,
-    ) -> RuntimeResult<FeatureResult<ContactRecord>> {
+    pub fn verify(&mut self, installation_id: &str) -> RuntimeResult<FeatureResult<ContactRecord>> {
         let mut contact = self
             .storage
             .contact_by_installation_id(installation_id)?

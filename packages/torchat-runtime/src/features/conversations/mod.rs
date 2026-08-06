@@ -20,10 +20,7 @@ where
         self.storage.conversation_by_id(conversation_id)
     }
 
-    pub fn for_contact(
-        &self,
-        installation_id: &str,
-    ) -> RuntimeResult<Option<ConversationSummary>> {
+    pub fn for_contact(&self, installation_id: &str) -> RuntimeResult<Option<ConversationSummary>> {
         self.storage.conversation_for_contact(installation_id)
     }
 
@@ -93,8 +90,7 @@ where
         if !focused || !self.session().conversation_is_attended(conversation_id) {
             return Ok(FeatureResult::unchanged(()));
         }
-        let conversation =
-            ConversationsFeature::new(self.storage_mut()).by_id(conversation_id)?;
+        let conversation = ConversationsFeature::new(self.storage_mut()).by_id(conversation_id)?;
         let Some(conversation) = conversation else {
             return Ok(FeatureResult::unchanged(()));
         };

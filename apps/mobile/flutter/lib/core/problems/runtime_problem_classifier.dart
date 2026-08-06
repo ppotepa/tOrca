@@ -19,23 +19,21 @@ final class RuntimeProblemClassification {
   String get code => problem.code.wireValue;
 
   bool get userVisible => switch (disposition) {
-        RuntimeProblemDisposition.fatal ||
-        RuntimeProblemDisposition.localOperation =>
-          true,
-        RuntimeProblemDisposition.connectionStatus ||
-        RuntimeProblemDisposition.diagnosticOnly =>
-          false,
-      };
+    RuntimeProblemDisposition.fatal ||
+    RuntimeProblemDisposition.localOperation => true,
+    RuntimeProblemDisposition.connectionStatus ||
+    RuntimeProblemDisposition.diagnosticOnly => false,
+  };
 }
 
 RuntimeProblemClassification classifyRuntimeProblem(RuntimeProblem problem) {
   final disposition = switch (problem.category) {
     RuntimeErrorCategory.transport || RuntimeErrorCategory.availability =>
       RuntimeProblemDisposition.connectionStatus,
-    RuntimeErrorCategory.persistence || RuntimeErrorCategory.security =>
-      RuntimeProblemDisposition.fatal,
-    RuntimeErrorCategory.validation || RuntimeErrorCategory.domain =>
-      RuntimeProblemDisposition.localOperation,
+    RuntimeErrorCategory.persistence ||
+    RuntimeErrorCategory.security => RuntimeProblemDisposition.fatal,
+    RuntimeErrorCategory.validation ||
+    RuntimeErrorCategory.domain => RuntimeProblemDisposition.localOperation,
     RuntimeErrorCategory.internal => RuntimeProblemDisposition.fatal,
   };
 

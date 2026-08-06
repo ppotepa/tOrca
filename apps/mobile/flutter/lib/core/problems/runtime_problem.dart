@@ -13,9 +13,9 @@ enum RuntimeErrorCode {
   final String wireValue;
 
   static RuntimeErrorCode parse(String value) => values.firstWhere(
-        (candidate) => candidate.wireValue == value,
-        orElse: () => RuntimeErrorCode.internal,
-      );
+    (candidate) => candidate.wireValue == value,
+    orElse: () => RuntimeErrorCode.internal,
+  );
 }
 
 enum RuntimeErrorCategory {
@@ -31,9 +31,9 @@ enum RuntimeErrorCategory {
   final String wireValue;
 
   static RuntimeErrorCategory parse(String value) => values.firstWhere(
-        (candidate) => candidate.wireValue == value,
-        orElse: () => RuntimeErrorCategory.internal,
-      );
+    (candidate) => candidate.wireValue == value,
+    orElse: () => RuntimeErrorCategory.internal,
+  );
 }
 
 final class RuntimeProblem {

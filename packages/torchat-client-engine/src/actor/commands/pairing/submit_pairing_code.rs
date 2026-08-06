@@ -1,9 +1,6 @@
 use super::super::super::*;
 
-use crate::{
-    effects::DeferredCommandContext,
-    processing::EngineProcessingResult,
-};
+use crate::{effects::DeferredCommandContext, processing::EngineProcessingResult};
 
 impl ClientEngineActor {
     pub(in crate::actor) fn command_submit_pairing_code(
