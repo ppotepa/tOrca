@@ -1,46 +1,16 @@
 import 'dart:async';
 import 'dart:io';
 
-import '../client_runtime.dart';
-import '../locales/domain/app_locale_preference.dart';
+import '../core/platform/platform_ports.dart';
 import 'android/mobile_bridge.dart';
 import 'diagnostics_export_service.dart';
 import 'profile_reset_service.dart';
 import 'update_check_service.dart';
 
+export '../core/platform/platform_ports.dart';
+
 bool get isDesktopPlatform =>
     Platform.isWindows || Platform.isLinux || Platform.isMacOS;
-
-enum DesktopNavigationIntent { openSettings }
-
-abstract interface class WindowLifecycleService {
-  Future<bool> initialize();
-
-  Future<void> showWindow();
-
-  Future<void> refreshLocale(AppLocalePreference preference);
-}
-
-abstract interface class NotificationService {
-  Future<void> show(
-    NotificationRequestedEvent event, {
-    required String? selectedConversationId,
-  });
-
-  Future<void> clear(String notificationId);
-}
-
-abstract interface class NavigationIntentService {
-  Stream<DesktopNavigationIntent> get stream;
-}
-
-abstract interface class AutostartService {
-  bool get isSupported;
-
-  Future<bool> isEnabled();
-
-  Future<void> setEnabled(bool enabled);
-}
 
 final class DefaultWindowLifecycleService implements WindowLifecycleService {
   const DefaultWindowLifecycleService();
@@ -52,7 +22,7 @@ final class DefaultWindowLifecycleService implements WindowLifecycleService {
   Future<void> showWindow() async {}
 
   @override
-  Future<void> refreshLocale(AppLocalePreference preference) async {}
+  Future<void> refreshLocale(preference) async {}
 }
 
 final class DefaultNotificationService implements NotificationService {
@@ -60,7 +30,7 @@ final class DefaultNotificationService implements NotificationService {
 
   @override
   Future<void> show(
-    NotificationRequestedEvent event, {
+    event, {
     required String? selectedConversationId,
   }) async {}
 
@@ -106,11 +76,7 @@ final class PlatformServices {
   final DiagnosticsExportService diagnostics;
   final ProfileResetService profileReset;
   final UpdateCheckService updates;
-
-  static PlatformServices current = PlatformServices();
 }
-
-typedef RuntimeBridgeFactory = ClientRuntime Function();
 
 final class DefaultAutostartService implements AutostartService {
   const DefaultAutostartService();
