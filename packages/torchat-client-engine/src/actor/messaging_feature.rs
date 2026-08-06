@@ -28,20 +28,10 @@ impl ClientEngineActor {
         let now_ms = self.clock.now_ms();
         let next_attempt_at = now_ms + retry_backoff_ms(0);
         let ack_deadline = Some(now_ms + 60_000);
-        let operation_id = idempotency.map(|context| context.command_id.clone());
 
         let transaction_result = self.with_runtime_idempotent(
             idempotency,
             |runtime| {
-                if let Some(operation_id) = operation_id.as_deref() {
-                    torchat_runtime::ClientOperationFeatureFacade::feature_begin_operation(
-                        runtime,
-                        operation_id,
-                        torchat_runtime::OperationType::MessageDelivery,
-                        conversation_id,
-                        now_ms,
-                    )?;
-                }
                 let feature = torchat_runtime::ClientRuntimeFeatureFacade::feature_queue_message(
                     runtime,
                     conversation_id,
@@ -50,6 +40,13 @@ impl ClientEngineActor {
                     now_ms,
                 )?;
                 let effect = feature.value;
+                torchat_runtime::ClientOperationFeatureFacade::feature_begin_operation(
+                    runtime,
+                    &effect.message_id,
+                    torchat_runtime::OperationType::MessageDelivery,
+                    &effect.message_id,
+                    now_ms,
+                )?;
                 let stored = torchat_runtime::ClientRuntimeFeatureFacade::feature_message_by_id(
                     runtime,
                     &effect.message_id,
@@ -129,39 +126,9 @@ impl ClientEngineActor {
         let envelope_id = uuid::Uuid::parse_str(&effect.message_id)
             .map_err(|error| EngineError::InvalidCommand(error.to_string()))?;
         let sequence = stable_message_sequence(envelope_id);
-        match self.dispatch_outbound_message(&effect, envelope_id, sequence, payload) {
-            Ok(mut events) => {
-                runtime_events.append(&mut events);
-                if let Some(operation_id) = operation_id.as_deref() {
-                    let completed_at = self.clock.now_ms();
-                    let (_, mut operation_events) = self.with_runtime(|runtime| {
-                        torchat_runtime::ClientOperationFeatureFacade::feature_complete_operation(
-                            runtime,
-                            operation_id,
-                            completed_at,
-                        )
-                        .map(|_| ())
-                    })?;
-                    runtime_events.append(&mut operation_events);
-                }
-                Ok((effect, runtime_events))
-            }
-            Err(error) => {
-                if let Some(operation_id) = operation_id.as_deref() {
-                    let failed_at = self.clock.now_ms();
-                    let _ = self.with_runtime(|runtime| {
-                        torchat_runtime::ClientOperationFeatureFacade::feature_retry_operation(
-                            runtime,
-                            operation_id,
-                            torchat_runtime::RetryClass::NetworkBackoff,
-                            torchat_runtime::RuntimeErrorCode::TransportUnavailable,
-                            failed_at,
-                        )
-                        .map(|_| ())
-                    });
-                }
-                Err(error)
-            }
-        }
+        let mut dispatch_events =
+            self.dispatch_outbound_message(&effect, envelope_id, sequence, payload)?;
+        runtime_events.append(&mut dispatch_events);
+        Ok((effect, runtime_events))
     }
 }
