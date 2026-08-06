@@ -45,6 +45,10 @@ jobs:
         shell: pwsh
         run: ./scripts/internal/check-durable-operation-resume.ps1
 
+      - name: Validate messaging feature commands
+        shell: pwsh
+        run: ./scripts/internal/check-messaging-feature.ps1
+
       - name: Validate SQL catalog generator
         run: python -m py_compile scripts/internal/generate_sql_catalog.py
 

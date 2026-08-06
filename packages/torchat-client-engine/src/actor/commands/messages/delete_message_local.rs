@@ -1,4 +1,5 @@
 use super::super::{CommandHandlerResult, *};
+use torchat_runtime::features::messaging::ClientRuntimeMessagingFacade;
 
 impl ClientEngineActor {
     pub(in crate::actor) fn command_delete_message_local(
@@ -8,7 +9,7 @@ impl ClientEngineActor {
     ) -> CommandHandlerResult {
         let (_, runtime_events) = self.with_runtime_idempotent(
             idempotency,
-            |runtime| runtime.delete_message_local(&message_id),
+            |runtime| runtime.feature_delete_message_local(&message_id),
             |_| Ok(ResponsePayload::Empty),
         )?;
         Ok((ResponsePayload::Empty, runtime_events, None))
