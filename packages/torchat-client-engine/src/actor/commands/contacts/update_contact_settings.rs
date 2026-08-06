@@ -14,16 +14,15 @@ impl ClientEngineActor {
         let (contact, runtime_events) = self.with_runtime_idempotent(
             idempotency,
             |runtime| {
-                let mut contact = runtime.update_contact_settings(
+                torchat_runtime::ClientRuntimeFeatureFacade::feature_update_contact_settings(
+                    runtime,
                     &installation_id,
                     local_alias,
                     muted,
                     blocked,
-                )?;
-                if let Some(policy) = transport_policy {
-                    contact = runtime.set_contact_transport_policy(&installation_id, policy)?;
-                }
-                Ok(contact)
+                    transport_policy,
+                )
+                .map(|result| result.value)
             },
             |value| json_response(value),
         )?;
