@@ -21,12 +21,19 @@ foreach ($required in @('RuntimeProblem', 'RuntimeErrorCode', 'retryable', 'diag
 }
 
 $storage = Get-Content -Raw -LiteralPath (Require-File 'packages/torchat-runtime/src/storage.rs')
-foreach ($forbidden in @(
+# Forbidden compatibility stubs. The multi-line pattern is assembled into a
+# variable first: PowerShell otherwise splits an @() array element on the
+# embedded newline, which yields a false positive matching only the method
+# signature line (e.g. an Err(unsupported) trait default mistaken for an
+# Ok(()) no-op stub).
+$forbiddenExpediteStub = 'fn expedite_retry_after_ready(&mut self) -> RuntimeResult<()> {' + [Environment]::NewLine + '        Ok(())'
+$forbiddenStorageStubs = @(
     'Ok(Vec::new())',
     '.into_iter().find(',
     'for conversation in self.conversations()',
-    'fn expedite_retry_after_ready(&mut self) -> RuntimeResult<()> {' + [Environment]::NewLine + '        Ok(())'
-)) {
+    $forbiddenExpediteStub
+)
+foreach ($forbidden in $forbiddenStorageStubs) {
     if ($storage.Contains($forbidden)) {
         throw "RuntimeStorage contains a forbidden compatibility implementation: $forbidden"
     }
