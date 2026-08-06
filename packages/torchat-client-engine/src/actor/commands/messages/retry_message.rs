@@ -10,13 +10,6 @@ impl ClientEngineActor {
         let (effect, runtime_events) = self.with_runtime_idempotent(
             idempotency,
             |runtime| {
-                torchat_runtime::ClientOperationFeatureFacade::feature_begin_operation(
-                    runtime,
-                    &message_id,
-                    torchat_runtime::OperationType::MessageDelivery,
-                    &message_id,
-                    now_ms,
-                )?;
                 torchat_runtime::ClientRuntimeFeatureFacade::feature_retry_message(
                     runtime,
                     &message_id,
