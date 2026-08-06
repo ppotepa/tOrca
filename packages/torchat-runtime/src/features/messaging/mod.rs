@@ -61,7 +61,7 @@ where
     }
 
     pub fn by_id(&self, message_id: &str) -> RuntimeResult<Option<ChatMessage>> {
-        self.storage.message_by_id(message_id)
+        PointLookupStorage::message_by_id(self.storage, message_id)
     }
 
     pub fn save(&mut self, message: ChatMessage) -> RuntimeResult<FeatureResult<ChatMessage>> {
@@ -88,9 +88,7 @@ where
         &mut self,
         message_id: &str,
     ) -> RuntimeResult<FeatureResult<MessageDeleteResult>> {
-        let message = self
-            .storage
-            .message_by_id(message_id)?
+        let message = PointLookupStorage::message_by_id(self.storage, message_id)?
             .ok_or_else(|| RuntimeError::NotFound("message does not exist".to_owned()))?;
         let parsed_message_id = parse_message_id(&message.id)?;
         self.storage.delete_message(message_id)?;
@@ -113,9 +111,7 @@ where
         retry_at: Option<i64>,
         error_detail: Option<&str>,
     ) -> RuntimeResult<FeatureResult<ChatMessage>> {
-        let mut message = self
-            .storage
-            .message_by_id(message_id)?
+        let mut message = PointLookupStorage::message_by_id(self.storage, message_id)?
             .ok_or_else(|| RuntimeError::NotFound("message does not exist".to_owned()))?;
         if !message.outgoing {
             return Err(RuntimeError::Conflict(
@@ -172,8 +168,7 @@ where
         let text = normalize_message_text(&text)?;
         let reply_to = reply_to_message_id
             .map(|message_id| {
-                self.storage
-                    .message_by_id(message_id)?
+                PointLookupStorage::message_by_id(self.storage, message_id)?
                     .ok_or_else(|| RuntimeError::NotFound("reply message does not exist".to_owned()))
             })
             .transpose()?
@@ -249,9 +244,7 @@ where
         message_id: &str,
         now_ms: i64,
     ) -> RuntimeResult<FeatureResult<MessageRetryResult>> {
-        let mut message = self
-            .storage
-            .message_by_id(message_id)?
+        let mut message = PointLookupStorage::message_by_id(self.storage, message_id)?
             .ok_or_else(|| RuntimeError::NotFound("message does not exist".to_owned()))?;
         if !message.outgoing {
             return Err(RuntimeError::Conflict(

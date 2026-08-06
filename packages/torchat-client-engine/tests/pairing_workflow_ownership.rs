@@ -43,9 +43,10 @@ fn pairing_recovery_is_owned_by_engine_and_runtime() {
         "successful pairing must persist its conversation in Rust"
     );
     assert!(
-        accept.contains("prepare_accept_pairing")
-            && accept.contains("accept_invite")
-            && accept.contains("accept_received_pairing"),
+        accept.contains("feature_prepare_accept_pairing")
+            && accept.contains("feature_pairing_offer_payload")
+            && accept.contains("feature_accept_pairing")
+            && accept.contains("accept_invite"),
         "accept command must execute one backend workflow"
     );
 }

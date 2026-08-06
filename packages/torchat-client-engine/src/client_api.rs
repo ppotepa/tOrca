@@ -61,7 +61,7 @@ impl ClientEngine {
                     "engine returned an empty response for a typed query".to_owned(),
                 ));
             }
-            crate::ResponseResult::Error { code, message } => {
+            crate::ResponseResult::Error { code, message, .. } => {
                 return Err(crate::EngineError::InvalidCommand(format!(
                     "{code}: {message}"
                 )));

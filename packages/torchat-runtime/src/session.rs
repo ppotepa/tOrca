@@ -81,7 +81,7 @@ impl RuntimeSession {
         }
     }
 
-    pub(crate) fn push_event(&mut self, event: RuntimeEvent) {
+    pub fn push_event(&mut self, event: RuntimeEvent) {
         if self.transaction_depth > 0 {
             self.staged_events.push(event);
         } else {

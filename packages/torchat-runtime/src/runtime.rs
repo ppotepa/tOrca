@@ -1515,6 +1515,13 @@ mod tests {
                 .cloned()
                 .collect())
         }
+        fn message_by_id(&self, message_id: &str) -> RuntimeResult<Option<ChatMessage>> {
+            Ok(self
+                .messages
+                .iter()
+                .find(|value| value.id == message_id)
+                .cloned())
+        }
         fn put_message(&mut self, message: ChatMessage) -> RuntimeResult<()> {
             self.messages.retain(|value| value.id != message.id);
             self.messages.push(message);

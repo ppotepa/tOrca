@@ -175,9 +175,9 @@ fn rendezvous_io_runs_only_in_the_split_effect_worker() {
     let outcome = read(crate_root().join("src/effects/relay/outcome.rs"));
 
     for symbol in [
-        "runtime.prepare_refresh_pairing_code()",
+        "prepare_refresh_code()",
         "runtime.prepare_submit_pairing_code(code)",
-        "runtime.prepare_cancel_pairing(&pairing_id)",
+        "feature_prepare_cancel_pairing(&pairing_id)",
     ] {
         assert!(pairing_sources.contains(symbol) || preparation.contains(symbol));
     }
