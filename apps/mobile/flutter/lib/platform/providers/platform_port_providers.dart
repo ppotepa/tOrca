@@ -1,8 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../client_runtime.dart';
+import '../../core/platform/platform_ports.dart';
 import '../diagnostics_export_service.dart';
-import '../platform_services.dart';
+import '../platform_services.dart' show PlatformServices;
 import '../profile_reset_service.dart';
 import '../update_check_service.dart';
 
