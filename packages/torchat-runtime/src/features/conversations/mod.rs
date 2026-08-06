@@ -1,6 +1,7 @@
 use crate::{
-    ChangeSet, ConversationState, ConversationStorage, ConversationSummary, FeatureResult,
-    PointLookupStorage, RuntimeResult,
+    ChangeSet, ClientRuntime, ConversationState, ConversationStorage, ConversationSummary,
+    FeatureResult, PointLookupStorage, RuntimeClock, RuntimeEvent, RuntimeResult, RuntimeStorage,
+    RuntimeTransport,
 };
 
 pub struct ConversationsFeature<'a, S> {
@@ -65,5 +66,47 @@ where
             (),
             ChangeSet::default().with_conversation(conversation_id),
         ))
+    }
+}
+
+pub trait ClientRuntimeConversationFacade {
+    fn feature_set_conversation_focus(
+        &mut self,
+        conversation_id: &str,
+        focused: bool,
+    ) -> RuntimeResult<FeatureResult<()>>;
+}
+
+impl<S, T, C> ClientRuntimeConversationFacade for ClientRuntime<S, T, C>
+where
+    S: RuntimeStorage + ConversationStorage + PointLookupStorage,
+    T: RuntimeTransport,
+    C: RuntimeClock,
+{
+    fn feature_set_conversation_focus(
+        &mut self,
+        conversation_id: &str,
+        focused: bool,
+    ) -> RuntimeResult<FeatureResult<()>> {
+        self.session_mut()
+            .set_conversation_focus(conversation_id, focused);
+        if !focused || !self.session().conversation_is_attended(conversation_id) {
+            return Ok(FeatureResult::unchanged(()));
+        }
+        let conversation =
+            ConversationsFeature::new(self.storage_mut()).by_id(conversation_id)?;
+        let Some(conversation) = conversation else {
+            return Ok(FeatureResult::unchanged(()));
+        };
+        if conversation.unread_count == 0 {
+            return Ok(FeatureResult::unchanged(()));
+        }
+        let result = ConversationsFeature::new(self.storage_mut()).mark_read(conversation_id)?;
+        self.session_mut()
+            .push_event(RuntimeEvent::ConversationReadChanged {
+                conversation_id: Some(conversation_id.to_owned()),
+                unread_count: Some(0),
+            });
+        Ok(result)
     }
 }

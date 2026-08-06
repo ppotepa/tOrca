@@ -49,6 +49,10 @@ jobs:
         shell: pwsh
         run: ./scripts/internal/check-messaging-feature.ps1
 
+      - name: Validate conversation focus feature
+        shell: pwsh
+        run: ./scripts/internal/check-conversation-focus.ps1
+
       - name: Validate SQL catalog generator
         run: python -m py_compile scripts/internal/generate_sql_catalog.py
 
