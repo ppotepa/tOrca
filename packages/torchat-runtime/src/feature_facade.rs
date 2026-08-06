@@ -1,9 +1,10 @@
 use crate::{
     CapabilityStorage, ChangeSections, ChangeSet, ChatMessage, ClientRuntime, ContactRecord,
     ContactStorage, ContactTransportPolicy, ConversationState, ConversationStorage,
-    ConversationSummary, FeatureResult, MessageStorage, PointLookupStorage, ReceiptSendEffect,
-    ReceiptStorage, RelationshipStorage, RelationshipTransition, RuntimeClock, RuntimeEvent,
-    RuntimeResult, RuntimeSession, RuntimeTransport,
+    ConversationSummary, FeatureResult, MessageReply, MessageSendEffect, MessageStorage,
+    MessageTransportOutcome, PointLookupStorage, ReceiptSendEffect, ReceiptStorage,
+    RelationshipStorage, RelationshipTransition, RuntimeClock, RuntimeEvent, RuntimeResult,
+    RuntimeSession, RuntimeTransport,
     features::{
         contacts::ContactsFeature, conversations::ConversationsFeature, messaging::MessagingFeature,
         peer::PeerFeature, presence::PresenceFeature, receipts::ReceiptsFeature,
@@ -71,6 +72,37 @@ pub trait ClientRuntimeFeatureFacade {
         &mut self,
         message_id: &str,
     ) -> RuntimeResult<FeatureResult<()>>;
+    fn feature_queue_message(
+        &mut self,
+        conversation_id: &str,
+        text: String,
+        reply_to_message_id: Option<&str>,
+        now_ms: i64,
+    ) -> RuntimeResult<FeatureResult<MessageSendEffect>>;
+    fn feature_retry_message(
+        &mut self,
+        message_id: &str,
+        now_ms: i64,
+    ) -> RuntimeResult<FeatureResult<MessageSendEffect>>;
+    fn feature_apply_message_read(
+        &mut self,
+        message_id: &str,
+    ) -> RuntimeResult<FeatureResult<ChatMessage>>;
+    fn feature_apply_message_transport_outcome(
+        &mut self,
+        message_id: &str,
+        outcome: MessageTransportOutcome,
+    ) -> RuntimeResult<FeatureResult<ChatMessage>>;
+    fn feature_receive_message(
+        &mut self,
+        conversation_id: &str,
+        body: String,
+        message_id: Option<uuid::Uuid>,
+        reply_to: Option<MessageReply>,
+        attended: bool,
+        now_ms: i64,
+    ) -> RuntimeResult<FeatureResult<ChatMessage>>;
+    fn feature_pending_message_sends(&mut self) -> RuntimeResult<Vec<MessageSendEffect>>;
     fn feature_apply_relationship(
         &mut self,
         transition: RelationshipTransition,
@@ -237,6 +269,84 @@ where
         let result = MessagingFeature::new(self.storage_mut()).delete(message_id)?;
         publish_changes(self.session_mut(), &result.changes);
         Ok(result)
+    }
+
+    fn feature_queue_message(
+        &mut self,
+        conversation_id: &str,
+        text: String,
+        reply_to_message_id: Option<&str>,
+        now_ms: i64,
+    ) -> RuntimeResult<FeatureResult<MessageSendEffect>> {
+        let result = MessagingFeature::new(self.storage_mut()).queue_outgoing(
+            conversation_id,
+            text,
+            reply_to_message_id,
+            now_ms,
+        )?;
+        publish_changes(self.session_mut(), &result.changes);
+        Ok(result)
+    }
+
+    fn feature_retry_message(
+        &mut self,
+        message_id: &str,
+        now_ms: i64,
+    ) -> RuntimeResult<FeatureResult<MessageSendEffect>> {
+        let result = MessagingFeature::new(self.storage_mut()).retry(message_id, now_ms)?;
+        publish_changes(self.session_mut(), &result.changes);
+        Ok(result)
+    }
+
+    fn feature_apply_message_read(
+        &mut self,
+        message_id: &str,
+    ) -> RuntimeResult<FeatureResult<ChatMessage>> {
+        let result = MessagingFeature::new(self.storage_mut()).apply_read(message_id)?;
+        publish_changes(self.session_mut(), &result.changes);
+        Ok(result)
+    }
+
+    fn feature_apply_message_transport_outcome(
+        &mut self,
+        message_id: &str,
+        outcome: MessageTransportOutcome,
+    ) -> RuntimeResult<FeatureResult<ChatMessage>> {
+        let result = MessagingFeature::new(self.storage_mut())
+            .apply_transport_outcome(message_id, outcome)?;
+        publish_changes(self.session_mut(), &result.changes);
+        Ok(result)
+    }
+
+    fn feature_receive_message(
+        &mut self,
+        conversation_id: &str,
+        body: String,
+        message_id: Option<uuid::Uuid>,
+        reply_to: Option<MessageReply>,
+        attended: bool,
+        now_ms: i64,
+    ) -> RuntimeResult<FeatureResult<ChatMessage>> {
+        let result = MessagingFeature::new(self.storage_mut()).receive(
+            conversation_id,
+            body,
+            message_id,
+            reply_to,
+            attended,
+            now_ms,
+        )?;
+        publish_changes(self.session_mut(), &result.changes);
+        Ok(result)
+    }
+
+    fn feature_pending_message_sends(&mut self) -> RuntimeResult<Vec<MessageSendEffect>> {
+        let effects = MessagingFeature::new(self.storage_mut()).pending_send_effects()?;
+        if !effects.is_empty() {
+            self.session_mut().push_event(RuntimeEvent::Changed {
+                kind: Some("messages".to_owned()),
+            });
+        }
+        Ok(effects)
     }
 
     fn feature_apply_relationship(
