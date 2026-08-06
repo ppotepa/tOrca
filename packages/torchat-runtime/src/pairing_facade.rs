@@ -2,7 +2,7 @@ use crate::{
     ClientRuntime, ContactStorage, FeatureResult, InviteCode, PairingCancelEffect, PairingItem,
     PairingPeerOutcome, PairingPreparation, PairingStorage, PointLookupStorage, ProfileStorage,
     RuntimeClock, RuntimeEvent, RuntimeResult, RuntimeSendEffect, RuntimeStorage, RuntimeTransport,
-    features::pairing::PairingFeature,
+    features::pairing::{PairingFeature, ReceivedPairingOffer, receive_offer},
 };
 
 pub trait ClientPairingFeatureFacade {
@@ -20,6 +20,11 @@ pub trait ClientPairingFeatureFacade {
         &mut self,
         item: PairingItem,
     ) -> RuntimeResult<FeatureResult<PairingItem>>;
+    fn feature_receive_pairing_offer(
+        &mut self,
+        item: PairingItem,
+        now_secs: i64,
+    ) -> RuntimeResult<FeatureResult<ReceivedPairingOffer>>;
     fn feature_pending_pairing_send_effects(
         &mut self,
         now_secs: i64,
@@ -128,6 +133,32 @@ where
         let pairing_id = item.pairing_id.clone();
         let result = PairingFeature::new(self.storage_mut()).commit_submitted(item)?;
         publish_pairing_change(self, Some(&pairing_id), &result);
+        Ok(result)
+    }
+
+    fn feature_receive_pairing_offer(
+        &mut self,
+        item: PairingItem,
+        now_secs: i64,
+    ) -> RuntimeResult<FeatureResult<ReceivedPairingOffer>> {
+        let result = receive_offer(self.storage_mut(), item, now_secs)?;
+        if result.value.inserted {
+            self.session_mut().push_event(RuntimeEvent::InviteReceived {
+                pairing_id: Some(result.value.item.pairing_id.clone()),
+                nickname: result
+                    .value
+                    .item
+                    .sender
+                    .as_ref()
+                    .map(|sender| sender.nickname.clone()),
+            });
+        } else {
+            publish_pairing_change(
+                self,
+                Some(&result.value.item.pairing_id),
+                &result,
+            );
+        }
         Ok(result)
     }
 
