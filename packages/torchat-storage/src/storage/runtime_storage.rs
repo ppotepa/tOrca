@@ -1,7 +1,7 @@
 use rusqlite::{OptionalExtension, Transaction, params};
 use sha2::{Digest, Sha256};
 pub use torchat_runtime::RelationshipTransition;
-use torchat_runtime::{
+pub(crate) use torchat_runtime::{
     ChatMessage, ContactRecord, ConversationSummary, InviteCode, PairingItem, PeerConnectionStatus,
     PeerEndpointStatus, ReceiptSendEffect, RuntimeError, RuntimeIdentity, RuntimeProfile,
     RuntimeResult, RuntimeStorage, VerificationState,
@@ -798,7 +798,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
             let superseded = self
                 .tx()
                 .query_row(
-                    include_str!("../../../sql/queries/pairing/has_superseded_pairing_outbox.sql"),
+                    include_str!("../../sql/queries/pairing/has_superseded_pairing_outbox.sql"),
                     params![pair_key, item.pairing_id],
                     |_| Ok(()),
                 )
@@ -909,7 +909,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
             let superseded = self
                 .tx()
                 .query_row(
-                    include_str!("../../../sql/queries/pairing/has_superseded_pairing_inbox.sql"),
+                    include_str!("../../sql/queries/pairing/has_superseded_pairing_inbox.sql"),
                     params![pair_key, item.pairing_id],
                     |_| Ok(()),
                 )
@@ -1380,10 +1380,6 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
     }
 }
 
-mod transactional_message_delivery;
-mod transactional_operation_storage;
-mod transactional_point_lookup;
-
 fn engine_storage_error(error: rusqlite::Error) -> crate::EngineError {
     crate::EngineError::Storage(format!("{error:#}"))
 }
@@ -1392,6 +1388,6 @@ fn storage_engine_error(error: crate::EngineError) -> RuntimeError {
     RuntimeError::Storage(error.to_string())
 }
 
-fn storage_error(error: rusqlite::Error) -> RuntimeError {
+pub(crate) fn storage_error(error: rusqlite::Error) -> RuntimeError {
     RuntimeError::Storage(format!("{error:#}"))
 }

@@ -12,6 +12,9 @@ mod settings;
 pub mod sqlite;
 mod state_codecs;
 pub mod transaction;
+mod transactional_message_delivery;
+mod transactional_operation_storage;
+mod transactional_point_lookup;
 
 pub use migrations::{Migration, MigrationRunner};
 pub use runtime_storage::SqliteRuntimeStorage;
