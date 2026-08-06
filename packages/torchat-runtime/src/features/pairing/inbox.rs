@@ -1,6 +1,6 @@
 use crate::{
     ChangeSet, ContactStorage, FeatureResult, PairingItem, PairingStorage, PointLookupStorage,
-    ProfileStorage, RuntimeResult,
+    ProfileStorage, RuntimeError, RuntimeResult,
 };
 
 use super::process;
@@ -29,7 +29,7 @@ where
     let merge = process::merge_remote_items(&mut local, vec![remote])
         .into_iter()
         .next()
-        .expect("single pairing offer must produce one merge result");
+        .ok_or_else(|| RuntimeError::Storage("pairing offer merge produced no result".to_owned()))?;
     if merge.inserted || merge.changed {
         changes = changes.with_pairing(merge.item.pairing_id.clone());
         storage.put_pairing_inbox(merge.item.clone())?;
