@@ -25,8 +25,14 @@ where
         &mut self,
         operation_id: &str,
         pairing_id: &str,
+        command_descriptor: &str,
         now_ms: i64,
     ) -> RuntimeResult<FeatureResult<DurableOperation>> {
+        if command_descriptor.trim().is_empty() {
+            return Err(RuntimeError::InvalidParams(
+                "durable pairing command descriptor must not be empty".to_owned(),
+            ));
+        }
         let operation_id = OperationId::parse(operation_id.to_owned())?;
         let mut operation = self
             .storage
@@ -34,18 +40,23 @@ where
             .unwrap_or_else(|| {
                 DurableOperation::pending(
                     operation_id.clone(),
-                    OperationType::Pairing,
+                    OperationType::PairingCancellation,
                     pairing_id,
                     now_ms,
                 )
+                .with_command_descriptor(command_descriptor)
             });
-        if operation.operation_type != OperationType::Pairing
-            || operation.entity_id != pairing_id
-        {
-            return Err(RuntimeError::Conflict(
-                "operation id is already bound to a different workflow".to_owned(),
-            ));
+        ensure_pairing_entity(&operation, pairing_id)?;
+        if let Some(existing_descriptor) = operation.command_descriptor.as_deref() {
+            if existing_descriptor != command_descriptor {
+                return Err(RuntimeError::Conflict(
+                    "operation id is already bound to a different command payload".to_owned(),
+                ));
+            }
+        } else {
+            operation.command_descriptor = Some(command_descriptor.to_owned());
         }
+        operation.operation_type = OperationType::PairingCancellation;
         if operation.state == OperationState::Completed {
             return Ok(FeatureResult::unchanged(operation));
         }
@@ -125,6 +136,30 @@ where
             operation_changes(operation.operation_id.as_str()),
         ))
     }
+
+    pub fn fail_pairing(
+        &mut self,
+        operation_id: &str,
+        pairing_id: &str,
+        error_code: RuntimeErrorCode,
+        now_ms: i64,
+    ) -> RuntimeResult<FeatureResult<DurableOperation>> {
+        let operation_id = OperationId::parse(operation_id.to_owned())?;
+        let mut operation = self
+            .storage
+            .operation_by_id(&operation_id)?
+            .ok_or_else(|| RuntimeError::NotFound("pairing operation does not exist".to_owned()))?;
+        ensure_pairing_entity(&operation, pairing_id)?;
+        if operation.state.is_terminal() {
+            return Ok(FeatureResult::unchanged(operation));
+        }
+        operation.fail_permanently(error_code, now_ms);
+        self.storage.put_operation(operation.clone())?;
+        Ok(FeatureResult::changed(
+            operation.clone(),
+            operation_changes(operation.operation_id.as_str()),
+        ))
+    }
 }
 
 /// Narrow lifecycle boundary for restartable workflows.
@@ -136,6 +171,7 @@ pub trait ClientRuntimeOperationsFacade {
         &mut self,
         operation_id: &str,
         pairing_id: &str,
+        command_descriptor: &str,
         now_ms: i64,
     ) -> RuntimeResult<FeatureResult<DurableOperation>>;
 
@@ -147,6 +183,14 @@ pub trait ClientRuntimeOperationsFacade {
     ) -> RuntimeResult<FeatureResult<DurableOperation>>;
 
     fn feature_retry_pairing_operation(
+        &mut self,
+        operation_id: &str,
+        pairing_id: &str,
+        error_code: RuntimeErrorCode,
+        now_ms: i64,
+    ) -> RuntimeResult<FeatureResult<DurableOperation>>;
+
+    fn feature_fail_pairing_operation(
         &mut self,
         operation_id: &str,
         pairing_id: &str,
@@ -165,11 +209,13 @@ where
         &mut self,
         operation_id: &str,
         pairing_id: &str,
+        command_descriptor: &str,
         now_ms: i64,
     ) -> RuntimeResult<FeatureResult<DurableOperation>> {
         OperationsFeature::new(self.storage_mut()).begin_pairing(
             operation_id,
             pairing_id,
+            command_descriptor,
             now_ms,
         )
     }
@@ -201,10 +247,29 @@ where
             now_ms,
         )
     }
+
+    fn feature_fail_pairing_operation(
+        &mut self,
+        operation_id: &str,
+        pairing_id: &str,
+        error_code: RuntimeErrorCode,
+        now_ms: i64,
+    ) -> RuntimeResult<FeatureResult<DurableOperation>> {
+        OperationsFeature::new(self.storage_mut()).fail_pairing(
+            operation_id,
+            pairing_id,
+            error_code,
+            now_ms,
+        )
+    }
 }
 
 fn ensure_pairing_entity(operation: &DurableOperation, pairing_id: &str) -> RuntimeResult<()> {
-    if operation.operation_type == OperationType::Pairing && operation.entity_id == pairing_id {
+    let is_pairing = matches!(
+        operation.operation_type,
+        OperationType::Pairing | OperationType::PairingCancellation
+    );
+    if is_pairing && operation.entity_id == pairing_id {
         return Ok(());
     }
     Err(RuntimeError::Conflict(

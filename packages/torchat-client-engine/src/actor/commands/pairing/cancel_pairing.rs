@@ -29,7 +29,12 @@ impl ClientEngineActor {
         };
         let now_ms = self.clock.now_ms();
         match self.with_runtime(|runtime| {
-            runtime.feature_begin_pairing_operation(&operation_id, &pairing_id, now_ms)?;
+            runtime.feature_begin_pairing_operation(
+                &operation_id,
+                &pairing_id,
+                &context.command_descriptor,
+                now_ms,
+            )?;
             runtime.feature_prepare_cancel_pairing(&pairing_id)
         }) {
             Ok((prepared, runtime_events)) => self.defer_relay_effect(

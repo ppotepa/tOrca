@@ -1,8 +1,6 @@
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::de::DeserializeOwned;
-use torchat_runtime::{
-    DurableOperation, OperationId, RuntimeError, RuntimeResult,
-};
+use torchat_runtime::{DurableOperation, OperationId, RuntimeError, RuntimeResult};
 
 const UPSERT_OPERATION: &str =
     include_str!("../../sql/commands/operations/upsert_operation.sql");
@@ -39,6 +37,7 @@ pub(super) fn put_operation(
                 i64::from(operation.attempt_count),
                 operation.retry_at,
                 operation.error_code.map(enum_wire).transpose()?,
+                operation.command_descriptor.as_deref(),
             ],
         )
         .map_err(storage_error)?;
@@ -78,6 +77,7 @@ fn decode_operation(row: &Row<'_>) -> rusqlite::Result<RuntimeResult<DurableOper
                 .map_err(|_| RuntimeError::Storage("negative operation attempt count".to_owned()))?,
             retry_at: row.get("retry_at").map_err(storage_error)?,
             error_code: error_code.as_deref().map(parse_enum).transpose()?,
+            command_descriptor: row.get("command_descriptor").map_err(storage_error)?,
         })
     })())
 }

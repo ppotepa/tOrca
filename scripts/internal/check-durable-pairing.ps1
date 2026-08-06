@@ -20,7 +20,9 @@ foreach ($required in @(
     'feature_begin_pairing_operation',
     'feature_complete_pairing_operation',
     'feature_retry_pairing_operation',
-    'OperationType::Pairing',
+    'feature_fail_pairing_operation',
+    'OperationType::PairingCancellation',
+    'command_descriptor',
     'OperationState::Completed',
     'schedule_retry',
     'RetryClass::NetworkBackoff'
@@ -39,6 +41,7 @@ $cancelCommand = Require-Text 'packages/torchat-client-engine/src/actor/commands
 foreach ($required in @(
     'ClientRuntimeOperationsFacade',
     'context.command_id.clone()',
+    '&context.command_descriptor',
     'feature_begin_pairing_operation',
     'feature_prepare_cancel_pairing'
 )) {
