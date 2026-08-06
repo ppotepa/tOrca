@@ -6,9 +6,17 @@ impl ClientEngineActor {
         idempotency: Option<&IdempotencyCommitContext>,
         contact_id: String,
     ) -> CommandHandlerResult {
+        let now_ms = self.clock.now_ms();
         let (created, runtime_events) = self.with_runtime_idempotent(
             idempotency,
-            |runtime| runtime.start_conversation(&contact_id),
+            |runtime| {
+                torchat_runtime::ClientRuntimeFeatureFacade::feature_start_conversation(
+                    runtime,
+                    &contact_id,
+                    now_ms,
+                )
+                .map(|_| true)
+            },
             |value| json_response(value),
         )?;
         let _ = self.queue_peer_probe(&contact_id);
