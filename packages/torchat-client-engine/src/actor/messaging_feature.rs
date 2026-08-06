@@ -40,7 +40,7 @@ impl ClientEngineActor {
                     now_ms,
                 )?;
                 let effect = feature.value;
-                torchat_runtime::ClientOperationFeatureFacade::feature_begin_operation(
+                torchat_runtime::ClientOperationFeatureFacade::feature_ensure_operation(
                     runtime,
                     &effect.message_id,
                     torchat_runtime::OperationType::MessageDelivery,
