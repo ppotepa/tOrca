@@ -81,6 +81,36 @@ where
         Ok(changed(&pairing_id, item))
     }
 
+    pub fn pending_send_effects(&self, now_secs: i64) -> RuntimeResult<Vec<RuntimeSendEffect>> {
+        process::pending_send_effects(self.storage.pairing_inbox()?, now_secs)
+    }
+
+    pub fn reconcile_outbox_contact(
+        &mut self,
+        installation_id: &str,
+    ) -> RuntimeResult<FeatureResult<Vec<String>>> {
+        let contact = self
+            .storage
+            .contact_by_installation_id(installation_id)?
+            .ok_or_else(|| RuntimeError::NotFound("contact does not exist".to_owned()))?;
+        let repaired = process::reconcile_outbox_items(
+            self.storage.pairing_outbox()?,
+            &contact,
+            installation_id,
+        );
+        if repaired.is_empty() {
+            return Ok(FeatureResult::unchanged(Vec::new()));
+        }
+        let mut changes = ChangeSet::none();
+        let mut pairing_ids = Vec::with_capacity(repaired.len());
+        for item in repaired {
+            pairing_ids.push(item.pairing_id.clone());
+            changes = changes.with_pairing(item.pairing_id.clone());
+            self.storage.put_pairing_outbox(item)?;
+        }
+        Ok(FeatureResult::changed(pairing_ids, changes))
+    }
+
     pub fn offer_payload(&self, pairing_id: &str) -> RuntimeResult<String> {
         self.require_inbox(pairing_id)?
             .offer_payload
