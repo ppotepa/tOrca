@@ -5,6 +5,13 @@ use crate::{
 };
 
 pub trait ClientOperationFeatureFacade {
+    fn feature_ensure_operation(
+        &mut self,
+        operation_id: &str,
+        operation_type: OperationType,
+        entity_id: &str,
+        now_ms: i64,
+    ) -> RuntimeResult<FeatureResult<DurableOperation>>;
     fn feature_begin_operation(
         &mut self,
         operation_id: &str,
@@ -39,6 +46,22 @@ where
     T: RuntimeTransport,
     C: RuntimeClock,
 {
+    fn feature_ensure_operation(
+        &mut self,
+        operation_id: &str,
+        operation_type: OperationType,
+        entity_id: &str,
+        now_ms: i64,
+    ) -> RuntimeResult<FeatureResult<DurableOperation>> {
+        let operation_id = OperationId::parse(operation_id.to_owned())?;
+        OperationsFeature::new(self.storage_mut()).ensure(
+            operation_id,
+            operation_type,
+            entity_id,
+            now_ms,
+        )
+    }
+
     fn feature_begin_operation(
         &mut self,
         operation_id: &str,
