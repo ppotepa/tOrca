@@ -81,6 +81,44 @@ impl ClientEngineActor {
         })?;
         Ok(runtime_events)
     }
+
+    pub(super) fn retry_pairing_operation(
+        &mut self,
+        pairing_id: &str,
+    ) -> EngineResult<Vec<torchat_runtime::RuntimeEvent>> {
+        let now_ms = self.clock.now_ms();
+        let (_, runtime_events) = self.with_runtime(|runtime| {
+            ensure_pairing_operation(runtime, pairing_id, now_ms)?;
+            torchat_runtime::ClientOperationFeatureFacade::feature_retry_operation(
+                runtime,
+                pairing_id,
+                torchat_runtime::RetryClass::NetworkBackoff,
+                torchat_runtime::RuntimeErrorCode::TransportUnavailable,
+                now_ms,
+            )?;
+            Ok(())
+        })?;
+        Ok(runtime_events)
+    }
+
+    pub(super) fn fail_pairing_operation(
+        &mut self,
+        pairing_id: &str,
+        error_code: torchat_runtime::RuntimeErrorCode,
+    ) -> EngineResult<Vec<torchat_runtime::RuntimeEvent>> {
+        let now_ms = self.clock.now_ms();
+        let (_, runtime_events) = self.with_runtime(|runtime| {
+            ensure_pairing_operation(runtime, pairing_id, now_ms)?;
+            torchat_runtime::ClientOperationFeatureFacade::feature_fail_operation(
+                runtime,
+                pairing_id,
+                error_code,
+                now_ms,
+            )?;
+            Ok(())
+        })?;
+        Ok(runtime_events)
+    }
 }
 
 fn ensure_pairing_operation<S, T, C>(
