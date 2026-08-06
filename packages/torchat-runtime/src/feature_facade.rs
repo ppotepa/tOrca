@@ -1,12 +1,13 @@
 use crate::{
     CapabilityStorage, ChatMessage, ClientRuntime, ContactRecord, ContactStorage,
-    ConversationStorage, ConversationSummary, FeatureResult, MessageStorage, PointLookupStorage,
+    ConversationStorage, ConversationSummary, FeatureResult, InviteState, MessageStorage,
+    PairingCancelEffect, PairingPeerOutcome, PairingPreparation, PairingStorage, PointLookupStorage,
     ReceiptSendEffect, ReceiptStorage, RelationshipStorage, RelationshipTransition, RuntimeClock,
-    RuntimeEvent, RuntimeResult, RuntimeTransport,
+    RuntimeEvent, RuntimeResult, RuntimeSendEffect, RuntimeStorage, RuntimeTransport,
     features::{
         contacts::ContactsFeature, conversations::ConversationsFeature, messaging::MessagingFeature,
-        peer::PeerFeature, presence::PresenceFeature, receipts::ReceiptsFeature,
-        relationships::RelationshipsFeature,
+        pairing::PairingFeature, peer::PeerFeature, presence::PresenceFeature,
+        receipts::ReceiptsFeature, relationships::RelationshipsFeature,
     },
 };
 
@@ -52,6 +53,38 @@ pub trait ClientRuntimeFeatureFacade {
         &mut self,
         message_id: &str,
     ) -> RuntimeResult<FeatureResult<()>>;
+    fn feature_prepare_accept_pairing(
+        &mut self,
+        pairing_id: &str,
+        now_secs: i64,
+    ) -> RuntimeResult<PairingPreparation>;
+    fn feature_pairing_offer_payload(&mut self, pairing_id: &str) -> RuntimeResult<String>;
+    fn feature_accept_pairing(
+        &mut self,
+        pairing_id: &str,
+    ) -> RuntimeResult<FeatureResult<InviteState>>;
+    fn feature_reject_pairing(
+        &mut self,
+        pairing_id: &str,
+        now_secs: i64,
+    ) -> RuntimeResult<FeatureResult<(RuntimeSendEffect, InviteState)>>;
+    fn feature_archive_pairing(
+        &mut self,
+        pairing_id: &str,
+    ) -> RuntimeResult<FeatureResult<InviteState>>;
+    fn feature_prepare_cancel_pairing(
+        &mut self,
+        pairing_id: &str,
+    ) -> RuntimeResult<PairingCancelEffect>;
+    fn feature_confirm_pairing_cancelled(
+        &mut self,
+        pairing_id: &str,
+    ) -> RuntimeResult<FeatureResult<InviteState>>;
+    fn feature_apply_pairing_peer_outcome(
+        &mut self,
+        pairing_id: &str,
+        outcome: PairingPeerOutcome,
+    ) -> RuntimeResult<FeatureResult<InviteState>>;
     fn feature_apply_relationship(
         &mut self,
         transition: RelationshipTransition,
@@ -75,9 +108,11 @@ pub trait ClientRuntimeFeatureFacade {
 
 impl<S, T, C> ClientRuntimeFeatureFacade for ClientRuntime<S, T, C>
 where
-    S: ContactStorage
+    S: RuntimeStorage
+        + ContactStorage
         + ConversationStorage
         + MessageStorage
+        + PairingStorage
         + PointLookupStorage
         + RelationshipStorage
         + ReceiptStorage
@@ -146,6 +181,95 @@ where
         message_id: &str,
     ) -> RuntimeResult<FeatureResult<()>> {
         MessagingFeature::new(self.storage_mut()).delete(message_id)
+    }
+
+    fn feature_prepare_accept_pairing(
+        &mut self,
+        pairing_id: &str,
+        now_secs: i64,
+    ) -> RuntimeResult<PairingPreparation> {
+        PairingFeature::new(self.storage_mut()).prepare_accept(pairing_id, now_secs)
+    }
+
+    fn feature_pairing_offer_payload(&mut self, pairing_id: &str) -> RuntimeResult<String> {
+        PairingFeature::new(self.storage_mut()).offer_payload(pairing_id)
+    }
+
+    fn feature_accept_pairing(
+        &mut self,
+        pairing_id: &str,
+    ) -> RuntimeResult<FeatureResult<InviteState>> {
+        let result = PairingFeature::new(self.storage_mut()).accept(pairing_id)?;
+        if !result.changes.sections.is_empty() {
+            self.session_mut().push_event(RuntimeEvent::InviteStateChanged {
+                pairing_id: Some(pairing_id.to_owned()),
+                state: Some(result.value),
+            });
+        }
+        Ok(result)
+    }
+
+    fn feature_reject_pairing(
+        &mut self,
+        pairing_id: &str,
+        now_secs: i64,
+    ) -> RuntimeResult<FeatureResult<(RuntimeSendEffect, InviteState)>> {
+        let result = PairingFeature::new(self.storage_mut()).reject(pairing_id, now_secs)?;
+        if !result.changes.sections.is_empty() {
+            self.session_mut().push_event(RuntimeEvent::InviteStateChanged {
+                pairing_id: Some(pairing_id.to_owned()),
+                state: Some(result.value.1),
+            });
+        }
+        Ok(result)
+    }
+
+    fn feature_archive_pairing(
+        &mut self,
+        pairing_id: &str,
+    ) -> RuntimeResult<FeatureResult<InviteState>> {
+        let result = PairingFeature::new(self.storage_mut()).archive(pairing_id)?;
+        self.session_mut().push_event(RuntimeEvent::InviteStateChanged {
+            pairing_id: Some(pairing_id.to_owned()),
+            state: Some(result.value),
+        });
+        Ok(result)
+    }
+
+    fn feature_prepare_cancel_pairing(
+        &mut self,
+        pairing_id: &str,
+    ) -> RuntimeResult<PairingCancelEffect> {
+        PairingFeature::new(self.storage_mut()).prepare_cancel(pairing_id)
+    }
+
+    fn feature_confirm_pairing_cancelled(
+        &mut self,
+        pairing_id: &str,
+    ) -> RuntimeResult<FeatureResult<InviteState>> {
+        let result = PairingFeature::new(self.storage_mut()).confirm_cancel(pairing_id)?;
+        if !result.changes.sections.is_empty() {
+            self.session_mut().push_event(RuntimeEvent::InviteStateChanged {
+                pairing_id: Some(pairing_id.to_owned()),
+                state: Some(result.value),
+            });
+        }
+        Ok(result)
+    }
+
+    fn feature_apply_pairing_peer_outcome(
+        &mut self,
+        pairing_id: &str,
+        outcome: PairingPeerOutcome,
+    ) -> RuntimeResult<FeatureResult<InviteState>> {
+        let result = PairingFeature::new(self.storage_mut()).apply_peer_outcome(pairing_id, outcome)?;
+        if !result.changes.sections.is_empty() {
+            self.session_mut().push_event(RuntimeEvent::InviteStateChanged {
+                pairing_id: Some(pairing_id.to_owned()),
+                state: Some(result.value),
+            });
+        }
+        Ok(result)
     }
 
     fn feature_apply_relationship(

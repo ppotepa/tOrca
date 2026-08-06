@@ -122,6 +122,52 @@ foreach ($required in @('impl OperationStorage for SqliteRuntimeStorage', 'opera
     }
 }
 
+$pairingFeature = Get-Content -Raw -LiteralPath (Require-File 'packages/torchat-runtime/src/features/pairing/mod.rs')
+foreach ($required in @(
+    'pub struct PairingFeature',
+    'pairing_inbox_by_id',
+    'pairing_outbox_by_id',
+    'contact_by_installation_id',
+    'FeatureResult<InviteState>'
+)) {
+    if (-not $pairingFeature.Contains($required)) {
+        throw "pairing feature is missing its capability-based command boundary: $required"
+    }
+}
+foreach ($forbidden in @('pairing_inbox()?.into_iter()', 'pairing_outbox()?.into_iter()', 'contacts()?.into_iter()')) {
+    if ($pairingFeature.Contains($forbidden)) {
+        throw "pairing feature performs a forbidden collection scan: $forbidden"
+    }
+}
+
+$featureFacade = Get-Content -Raw -LiteralPath (Require-File 'packages/torchat-runtime/src/feature_facade.rs')
+foreach ($required in @(
+    'feature_prepare_accept_pairing',
+    'feature_accept_pairing',
+    'feature_reject_pairing',
+    'feature_archive_pairing',
+    'feature_prepare_cancel_pairing',
+    'feature_confirm_pairing_cancelled'
+)) {
+    if (-not $featureFacade.Contains($required)) {
+        throw "feature facade does not expose the migrated pairing command: $required"
+    }
+}
+
+$pairingHandlerRequirements = @{
+    'packages/torchat-client-engine/src/actor/commands/pairing/accept_pairing.rs' = 'feature_accept_pairing'
+    'packages/torchat-client-engine/src/actor/commands/pairing/reject_pairing.rs' = 'feature_reject_pairing'
+    'packages/torchat-client-engine/src/actor/commands/pairing/archive_pairing.rs' = 'feature_archive_pairing'
+    'packages/torchat-client-engine/src/actor/commands/pairing/cancel_pairing.rs' = 'feature_prepare_cancel_pairing'
+    'packages/torchat-client-engine/src/actor/command_pipeline/effect_outcomes/pairing_cancelled.rs' = 'feature_confirm_pairing_cancelled'
+}
+foreach ($entry in $pairingHandlerRequirements.GetEnumerator()) {
+    $handler = Get-Content -Raw -LiteralPath (Require-File $entry.Key)
+    if (-not $handler.Contains('ClientRuntimeFeatureFacade') -or -not $handler.Contains($entry.Value)) {
+        throw "pairing handler '$($entry.Key)' bypasses the feature facade"
+    }
+}
+
 $commandProcessor = Get-Content -Raw -LiteralPath (Require-File 'packages/torchat-client-engine/src/actor/command_pipeline/processor.rs')
 foreach ($forbidden in @(
     'let _ = self.database.save_processed_command',
