@@ -1,8 +1,9 @@
 use crate::{
-    CapabilityStorage, ChatMessage, ClientRuntime, ContactRecord, ContactStorage,
-    ConversationStorage, ConversationSummary, FeatureResult, MessageStorage, PointLookupStorage,
-    ReceiptSendEffect, ReceiptStorage, RelationshipStorage, RelationshipTransition, RuntimeClock,
-    RuntimeEvent, RuntimeResult, RuntimeTransport,
+    CapabilityStorage, ChangeSections, ChangeSet, ChatMessage, ClientRuntime, ContactRecord,
+    ContactStorage, ContactTransportPolicy, ConversationState, ConversationStorage,
+    ConversationSummary, FeatureResult, MessageStorage, PointLookupStorage, ReceiptSendEffect,
+    ReceiptStorage, RelationshipStorage, RelationshipTransition, RuntimeClock, RuntimeEvent,
+    RuntimeResult, RuntimeSession, RuntimeTransport,
     features::{
         contacts::ContactsFeature, conversations::ConversationsFeature, messaging::MessagingFeature,
         peer::PeerFeature, presence::PresenceFeature, receipts::ReceiptsFeature,
@@ -10,11 +11,6 @@ use crate::{
     },
 };
 
-/// Narrow, capability-based entry point for domain features.
-///
-/// Existing `ClientRuntime` methods remain source-compatible during migration,
-/// but new engine code should use this facade so each operation only sees the
-/// storage capabilities it actually needs.
 pub trait ClientRuntimeFeatureFacade {
     fn feature_contact_by_id(
         &mut self,
@@ -24,6 +20,24 @@ pub trait ClientRuntimeFeatureFacade {
         &mut self,
         contact: ContactRecord,
     ) -> RuntimeResult<FeatureResult<ContactRecord>>;
+    fn feature_update_contact_settings(
+        &mut self,
+        installation_id: &str,
+        local_alias: Option<String>,
+        muted: bool,
+        blocked: bool,
+        transport_policy: Option<ContactTransportPolicy>,
+    ) -> RuntimeResult<FeatureResult<ContactRecord>>;
+    fn feature_verify_contact(
+        &mut self,
+        installation_id: &str,
+        now_ms: i64,
+    ) -> RuntimeResult<FeatureResult<ConversationSummary>>;
+    fn feature_contact_accepts_messages(&mut self, installation_id: &str) -> RuntimeResult<bool>;
+    fn feature_contact_allows_notifications(
+        &mut self,
+        installation_id: &str,
+    ) -> RuntimeResult<bool>;
     fn feature_conversation_by_id(
         &mut self,
         conversation_id: &str,
@@ -35,6 +49,11 @@ pub trait ClientRuntimeFeatureFacade {
     fn feature_save_conversation(
         &mut self,
         conversation: ConversationSummary,
+    ) -> RuntimeResult<FeatureResult<ConversationSummary>>;
+    fn feature_start_conversation(
+        &mut self,
+        installation_id: &str,
+        now_ms: i64,
     ) -> RuntimeResult<FeatureResult<ConversationSummary>>;
     fn feature_mark_conversation_read(
         &mut self,
@@ -96,7 +115,56 @@ where
         &mut self,
         contact: ContactRecord,
     ) -> RuntimeResult<FeatureResult<ContactRecord>> {
-        ContactsFeature::new(self.storage_mut()).save(contact)
+        let result = ContactsFeature::new(self.storage_mut()).save(contact)?;
+        publish_changes(self.session_mut(), &result.changes);
+        Ok(result)
+    }
+
+    fn feature_update_contact_settings(
+        &mut self,
+        installation_id: &str,
+        local_alias: Option<String>,
+        muted: bool,
+        blocked: bool,
+        transport_policy: Option<ContactTransportPolicy>,
+    ) -> RuntimeResult<FeatureResult<ContactRecord>> {
+        let result = ContactsFeature::new(self.storage_mut()).update_settings(
+            installation_id,
+            local_alias,
+            muted,
+            blocked,
+            transport_policy,
+        )?;
+        publish_changes(self.session_mut(), &result.changes);
+        Ok(result)
+    }
+
+    fn feature_verify_contact(
+        &mut self,
+        installation_id: &str,
+        now_ms: i64,
+    ) -> RuntimeResult<FeatureResult<ConversationSummary>> {
+        let contact_result = ContactsFeature::new(self.storage_mut()).verify(installation_id)?;
+        let conversation_result = ConversationsFeature::new(self.storage_mut()).ensure_for_contact(
+            &contact_result.value,
+            ConversationState::Active,
+            now_ms,
+        )?;
+        let mut changes = contact_result.changes;
+        changes.merge(conversation_result.changes);
+        publish_changes(self.session_mut(), &changes);
+        Ok(FeatureResult::changed(conversation_result.value, changes))
+    }
+
+    fn feature_contact_accepts_messages(&mut self, installation_id: &str) -> RuntimeResult<bool> {
+        ContactsFeature::new(self.storage_mut()).accepts_messages(installation_id)
+    }
+
+    fn feature_contact_allows_notifications(
+        &mut self,
+        installation_id: &str,
+    ) -> RuntimeResult<bool> {
+        ContactsFeature::new(self.storage_mut()).allows_notifications(installation_id)
     }
 
     fn feature_conversation_by_id(
@@ -117,14 +185,33 @@ where
         &mut self,
         conversation: ConversationSummary,
     ) -> RuntimeResult<FeatureResult<ConversationSummary>> {
-        ConversationsFeature::new(self.storage_mut()).save(conversation)
+        let result = ConversationsFeature::new(self.storage_mut()).save(conversation)?;
+        publish_changes(self.session_mut(), &result.changes);
+        Ok(result)
+    }
+
+    fn feature_start_conversation(
+        &mut self,
+        installation_id: &str,
+        now_ms: i64,
+    ) -> RuntimeResult<FeatureResult<ConversationSummary>> {
+        let contact = ContactsFeature::new(self.storage_mut()).require(installation_id)?;
+        let result = ConversationsFeature::new(self.storage_mut()).ensure_for_contact(
+            &contact,
+            ConversationState::Active,
+            now_ms,
+        )?;
+        publish_changes(self.session_mut(), &result.changes);
+        Ok(result)
     }
 
     fn feature_mark_conversation_read(
         &mut self,
         conversation_id: &str,
     ) -> RuntimeResult<FeatureResult<()>> {
-        ConversationsFeature::new(self.storage_mut()).mark_read(conversation_id)
+        let result = ConversationsFeature::new(self.storage_mut()).mark_read(conversation_id)?;
+        publish_changes(self.session_mut(), &result.changes);
+        Ok(result)
     }
 
     fn feature_message_by_id(
@@ -138,21 +225,27 @@ where
         &mut self,
         message: ChatMessage,
     ) -> RuntimeResult<FeatureResult<ChatMessage>> {
-        MessagingFeature::new(self.storage_mut()).save(message)
+        let result = MessagingFeature::new(self.storage_mut()).save(message)?;
+        publish_changes(self.session_mut(), &result.changes);
+        Ok(result)
     }
 
     fn feature_delete_message(
         &mut self,
         message_id: &str,
     ) -> RuntimeResult<FeatureResult<()>> {
-        MessagingFeature::new(self.storage_mut()).delete(message_id)
+        let result = MessagingFeature::new(self.storage_mut()).delete(message_id)?;
+        publish_changes(self.session_mut(), &result.changes);
+        Ok(result)
     }
 
     fn feature_apply_relationship(
         &mut self,
         transition: RelationshipTransition,
     ) -> RuntimeResult<FeatureResult<()>> {
-        RelationshipsFeature::new(self.storage_mut()).apply(transition)
+        let result = RelationshipsFeature::new(self.storage_mut()).apply(transition)?;
+        publish_changes(self.session_mut(), &result.changes);
+        Ok(result)
     }
 
     fn feature_pending_receipts(&self) -> RuntimeResult<Vec<ReceiptSendEffect>> {
@@ -172,20 +265,46 @@ where
         issued_at: i64,
         expires_at: Option<i64>,
     ) -> RuntimeResult<FeatureResult<()>> {
-        PeerFeature::new(self.storage_mut()).store_capability(
+        let result = PeerFeature::new(self.storage_mut()).store_capability(
             contact_installation_id,
             capability_id,
             secret,
             sequence,
             issued_at,
             expires_at,
-        )
+        )?;
+        publish_changes(self.session_mut(), &result.changes);
+        Ok(result)
     }
 
     fn feature_revoke_peer_capability(
         &mut self,
         contact_installation_id: &str,
     ) -> RuntimeResult<FeatureResult<()>> {
-        PeerFeature::new(self.storage_mut()).revoke_capability(contact_installation_id)
+        let result = PeerFeature::new(self.storage_mut()).revoke_capability(contact_installation_id)?;
+        publish_changes(self.session_mut(), &result.changes);
+        Ok(result)
+    }
+}
+
+fn publish_changes(session: &mut RuntimeSession, changes: &ChangeSet) {
+    for (section, kind) in [
+        (ChangeSections::PROFILE, "profile"),
+        (ChangeSections::PAIRINGS, "pairings"),
+        (ChangeSections::CONTACTS, "contacts"),
+        (ChangeSections::RELATIONSHIPS, "relationships"),
+        (ChangeSections::CONVERSATIONS, "conversations"),
+        (ChangeSections::MESSAGES, "messages"),
+        (ChangeSections::RECEIPTS, "receipts"),
+        (ChangeSections::PRESENCE, "presence"),
+        (ChangeSections::TRANSPORT, "transport"),
+        (ChangeSections::CAPABILITIES, "capabilities"),
+        (ChangeSections::OPERATIONS, "operations"),
+    ] {
+        if changes.sections.contains(section) {
+            session.push_event(RuntimeEvent::Changed {
+                kind: Some(kind.to_owned()),
+            });
+        }
     }
 }
