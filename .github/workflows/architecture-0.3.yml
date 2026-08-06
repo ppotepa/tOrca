@@ -33,6 +33,10 @@ jobs:
         shell: pwsh
         run: ./scripts/internal/check-0.3-architecture.ps1
 
+      - name: Validate runtime problem wire
+        shell: pwsh
+        run: ./scripts/internal/check-runtime-problem-wire.ps1
+
       - name: Validate SQL catalog generator
         run: python -m py_compile scripts/internal/generate_sql_catalog.py
 

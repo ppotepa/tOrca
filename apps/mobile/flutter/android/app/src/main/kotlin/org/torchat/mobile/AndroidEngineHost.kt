@@ -78,11 +78,18 @@ class AndroidEngineHost private constructor(
                     .put(EngineContract.COMMAND, command)
                     .toString(),
             )
-            val decoded = GeneratedEngineResponse.fromJson(
-                withTimeout(timeoutMs) { response.await() },
-            )
+            val rawResponse = withTimeout(timeoutMs) { response.await() }
+            val decoded = GeneratedEngineResponse.fromJson(rawResponse)
             if (!decoded.ok) {
-                error(decoded.errorMessage ?: decoded.errorCode ?: "Engine request failed")
+                val message = decoded.errorMessage ?: decoded.errorCode ?: "Engine request failed"
+                val problem = rawResponse
+                    .optJSONObject(EngineContract.RESULT)
+                    ?.optJSONObject("problem")
+                    ?.toEngineProblemMap()
+                if (problem != null) {
+                    throw EngineProblemException(problem, message)
+                }
+                error(message)
             }
             Log.d("TorChat-Engine", "Engine command completed type=$commandType requestId=$requestId")
             decoded.value

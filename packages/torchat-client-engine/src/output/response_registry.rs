@@ -34,10 +34,7 @@ impl PendingResponseRegistry {
             std::mem::take(&mut *guard)
         };
         for (_, sender) in pending {
-            let _ = sender.send(ResponseResult::Error {
-                code: code.to_owned(),
-                message: message.to_owned(),
-            });
+            let _ = sender.send(ResponseResult::error(code, message));
         }
     }
 

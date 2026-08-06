@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tokio::time::Duration;
+use torchat_runtime::{RuntimeErrorCategory, RuntimeErrorCode, RuntimeProblem};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -95,7 +96,69 @@ pub enum ResponseResult {
     Error {
         code: String,
         message: String,
+        problem: RuntimeProblem,
     },
+}
+
+impl ResponseResult {
+    pub fn error(code: impl Into<String>, message: impl Into<String>) -> Self {
+        let code = code.into();
+        let message = message.into();
+        let (stable_code, category, retryable) = match code.as_str() {
+            "invalid_command" | "invalid_config" => (
+                RuntimeErrorCode::InvalidInput,
+                RuntimeErrorCategory::Validation,
+                false,
+            ),
+            "idempotency_conflict" => (
+                RuntimeErrorCode::Conflict,
+                RuntimeErrorCategory::Domain,
+                false,
+            ),
+            "closed" | "engine_closed" => (
+                RuntimeErrorCode::TemporarilyUnavailable,
+                RuntimeErrorCategory::Availability,
+                true,
+            ),
+            "transport" => (
+                RuntimeErrorCode::TransportUnavailable,
+                RuntimeErrorCategory::Transport,
+                true,
+            ),
+            "storage" => (
+                RuntimeErrorCode::StorageFailed,
+                RuntimeErrorCategory::Persistence,
+                false,
+            ),
+            "unsupported" => (
+                RuntimeErrorCode::Unsupported,
+                RuntimeErrorCategory::Availability,
+                false,
+            ),
+            "idempotency_corrupt" | "serialization" => (
+                RuntimeErrorCode::Internal,
+                RuntimeErrorCategory::Internal,
+                false,
+            ),
+            _ => (
+                RuntimeErrorCode::Internal,
+                RuntimeErrorCategory::Internal,
+                false,
+            ),
+        };
+        Self::Error {
+            code,
+            message: message.clone(),
+            problem: RuntimeProblem {
+                code: stable_code,
+                category,
+                retryable,
+                operation_id: None,
+                entity_id: None,
+                diagnostic_context: Some(message),
+            },
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
