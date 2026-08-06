@@ -8,7 +8,13 @@ impl ClientEngineActor {
     ) -> RelayCommitResult {
         self.with_runtime_idempotent(
             idempotency,
-            |runtime| runtime.commit_submitted_pairing(item.clone()),
+            |runtime| {
+                torchat_runtime::ClientPairingFeatureFacade::feature_commit_submitted_pairing(
+                    runtime,
+                    item.clone(),
+                )
+                .map(|result| result.value)
+            },
             |value| json_response(value),
         )
         .and_then(|(value, events)| Ok((json_response(value)?, events)))
