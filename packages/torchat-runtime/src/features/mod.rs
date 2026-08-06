@@ -1,6 +1,7 @@
 pub mod contacts;
 pub mod conversations;
 pub mod messaging;
+pub mod operations;
 pub mod pairing;
 pub mod peer;
 pub mod presence;
