@@ -76,8 +76,9 @@ where
         item: PairingItem,
     ) -> RuntimeResult<FeatureResult<PairingItem>> {
         let item = normalize_pairing_item(item);
+        let pairing_id = item.pairing_id.clone();
         self.storage.put_pairing_outbox(item.clone())?;
-        Ok(changed(&item.pairing_id.clone(), item))
+        Ok(changed(&pairing_id, item))
     }
 
     pub fn offer_payload(&self, pairing_id: &str) -> RuntimeResult<String> {
