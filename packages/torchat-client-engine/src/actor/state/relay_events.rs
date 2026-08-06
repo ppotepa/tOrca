@@ -1,7 +1,7 @@
 use super::*;
 
 impl ClientEngineActor {
-    pub(super) fn handle_relay_event(
+    pub(crate) fn handle_relay_event(
         &mut self,
         event: RelayEvent,
     ) -> EngineResult<(
@@ -18,9 +18,8 @@ impl ClientEngineActor {
                 Ok((events, None, None))
             }
             RelayEvent::PairingFinalized { pairing_id } => {
-                let (_, events) = self.with_runtime(|runtime| {
-                    runtime.finalize_pairing(&pairing_id.to_string())
-                })?;
+                let (_, events) =
+                    self.with_runtime(|runtime| runtime.finalize_pairing(&pairing_id.to_string()))?;
                 Ok((events, None, None))
             }
             RelayEvent::Envelope(envelope) => self

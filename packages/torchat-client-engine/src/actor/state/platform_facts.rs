@@ -1,7 +1,7 @@
 use super::*;
 
 impl ClientEngineActor {
-    pub(super) fn apply_platform_fact(
+    pub(crate) fn apply_platform_fact(
         &mut self,
         fact: PlatformFact,
     ) -> EngineResult<Vec<torchat_runtime::RuntimeEvent>> {
@@ -260,7 +260,7 @@ impl ClientEngineActor {
                     self.requeue_after_disconnect()?;
                     self.relay.set_socks5_url(self.socks5_url.clone());
                     self.connection_state = ConnectionState::Connecting;
-                    
+
                     let _ = self.queue_endpoint_update_probes();
                 }
                 Ok(Vec::new())
@@ -281,6 +281,6 @@ impl ClientEngineActor {
     }
 }
 
-pub(super) fn runtime_phase_for_tor_ready(_state: &ConnectionState) -> RuntimeStatusPhase {
+pub(crate) fn runtime_phase_for_tor_ready(_state: &ConnectionState) -> RuntimeStatusPhase {
     RuntimeStatusPhase::Connected
 }

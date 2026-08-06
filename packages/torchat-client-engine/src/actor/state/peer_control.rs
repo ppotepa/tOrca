@@ -1,7 +1,7 @@
 use super::*;
 
 impl ClientEngineActor {
-    pub(super) fn queue_peer_payload(
+    pub(crate) fn queue_peer_payload(
         &mut self,
         message_id: uuid::Uuid,
         recipient: &str,
@@ -105,7 +105,7 @@ impl ClientEngineActor {
             .map_err(|error| EngineError::Transport(error.to_string()))
     }
 
-    pub(super) fn queue_endpoint_update_probes(&mut self) -> EngineResult<()> {
+    pub(crate) fn queue_endpoint_update_probes(&mut self) -> EngineResult<()> {
         if !self.network_online {
             return Ok(());
         }
@@ -161,31 +161,32 @@ impl ClientEngineActor {
             let probe_id = uuid::Uuid::new_v4();
             let local_endpoint_for_contact =
                 self.local_endpoint_for_contact(&contact.installation_id, &local_endpoint)?;
-            transport.try_send(PeerOutboundCommand {
-                peer_public_key: endpoint.identity_public_key.clone(),
-                capability_id: endpoint_capability_id(&endpoint),
-                capability_secret: self
-                    .peer_capability_secret(&contact.installation_id, &endpoint)?,
-                endpoint,
-                local_endpoint: local_endpoint_for_contact,
-                endpoint_updates: updates,
-                message_id: probe_id,
-                conversation_id: contact.installation_id,
-                sequence: stable_message_sequence(probe_id),
-                created_at: self.clock.now_ms() / 1_000,
-                ciphertext: Vec::new(),
-                // Endpoint updates are sent by the same command, but the
-                // delivery itself must remain a probe so a successful Ping
-                // reports peer reachability instead of an endpoint-only ACK.
-                delivery: PeerDeliveryTag::Probe,
-                socks5_url: socks5_url.clone(),
-            })
-            .map_err(|error| EngineError::Transport(error.to_string()))?;
+            transport
+                .try_send(PeerOutboundCommand {
+                    peer_public_key: endpoint.identity_public_key.clone(),
+                    capability_id: endpoint_capability_id(&endpoint),
+                    capability_secret: self
+                        .peer_capability_secret(&contact.installation_id, &endpoint)?,
+                    endpoint,
+                    local_endpoint: local_endpoint_for_contact,
+                    endpoint_updates: updates,
+                    message_id: probe_id,
+                    conversation_id: contact.installation_id,
+                    sequence: stable_message_sequence(probe_id),
+                    created_at: self.clock.now_ms() / 1_000,
+                    ciphertext: Vec::new(),
+                    // Endpoint updates are sent by the same command, but the
+                    // delivery itself must remain a probe so a successful Ping
+                    // reports peer reachability instead of an endpoint-only ACK.
+                    delivery: PeerDeliveryTag::Probe,
+                    socks5_url: socks5_url.clone(),
+                })
+                .map_err(|error| EngineError::Transport(error.to_string()))?;
         }
         Ok(())
     }
 
-    pub(super) fn queue_presence_heartbeats(&mut self) -> EngineResult<()> {
+    pub(crate) fn queue_presence_heartbeats(&mut self) -> EngineResult<()> {
         if !self.network_online || self.socks5_url.is_none() || self.local_peer_endpoint.is_none() {
             return Ok(());
         }
@@ -215,7 +216,7 @@ impl ClientEngineActor {
         Ok(())
     }
 
-    pub(super) fn queue_peer_probe(&mut self, recipient: &str) -> EngineResult<()> {
+    pub(crate) fn queue_peer_probe(&mut self, recipient: &str) -> EngineResult<()> {
         if !self.network_online {
             return Ok(());
         }
@@ -252,7 +253,7 @@ impl ClientEngineActor {
             .map_err(|error| EngineError::Transport(error.to_string()))
     }
 
-    pub(super) fn queue_peer_presence(
+    pub(crate) fn queue_peer_presence(
         &mut self,
         recipient: &str,
         online: bool,
@@ -260,11 +261,11 @@ impl ClientEngineActor {
         self.queue_peer_control(recipient, PeerDeliveryTag::Presence { online })
     }
 
-    pub(super) fn queue_peer_typing(&mut self, recipient: &str, typing: bool) -> EngineResult<()> {
+    pub(crate) fn queue_peer_typing(&mut self, recipient: &str, typing: bool) -> EngineResult<()> {
         self.queue_peer_control(recipient, PeerDeliveryTag::Typing { typing })
     }
 
-    pub(super) fn queue_peer_conversation_focus(
+    pub(crate) fn queue_peer_conversation_focus(
         &mut self,
         recipient: &str,
         focused: bool,

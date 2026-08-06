@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn is_cryptographic_inbound_error(error: &EngineError) -> bool {
+pub(crate) fn is_cryptographic_inbound_error(error: &EngineError) -> bool {
     matches!(
         error,
         EngineError::InvalidCommand(message)

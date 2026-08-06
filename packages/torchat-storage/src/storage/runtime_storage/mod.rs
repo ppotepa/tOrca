@@ -209,7 +209,7 @@ impl<'db> SqliteRuntimeStorage<'db> {
         Ok(())
     }
 
-    fn tx(&self) -> &Transaction<'db> {
+    pub(crate) fn tx(&self) -> &Transaction<'db> {
         self.transaction
             .as_ref()
             .expect("sqlite runtime storage transaction must exist while active")
@@ -798,7 +798,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
             let superseded = self
                 .tx()
                 .query_row(
-                    include_str!("../../sql/queries/pairing/has_superseded_pairing_outbox.sql"),
+                    include_str!("../../../sql/queries/pairing/has_superseded_pairing_outbox.sql"),
                     params![pair_key, item.pairing_id],
                     |_| Ok(()),
                 )
@@ -909,7 +909,7 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
             let superseded = self
                 .tx()
                 .query_row(
-                    include_str!("../../sql/queries/pairing/has_superseded_pairing_inbox.sql"),
+                    include_str!("../../../sql/queries/pairing/has_superseded_pairing_inbox.sql"),
                     params![pair_key, item.pairing_id],
                     |_| Ok(()),
                 )
@@ -1379,6 +1379,10 @@ impl RuntimeStorage for SqliteRuntimeStorage<'_> {
         }))
     }
 }
+
+mod transactional_message_delivery;
+mod transactional_operation_storage;
+mod transactional_point_lookup;
 
 fn engine_storage_error(error: rusqlite::Error) -> crate::EngineError {
     crate::EngineError::Storage(format!("{error:#}"))

@@ -7,7 +7,7 @@ use crate::{
 };
 
 impl ClientEngineActor {
-    pub(super) fn process_peer_input(
+    pub(crate) fn process_peer_input(
         &mut self,
         event: PeerTransportEvent,
     ) -> EngineProcessingResult {
@@ -35,7 +35,7 @@ impl ClientEngineActor {
         result
     }
 
-    pub(super) fn process_relay_input(&mut self, event: RelayEvent) -> EngineProcessingResult {
+    pub(crate) fn process_relay_input(&mut self, event: RelayEvent) -> EngineProcessingResult {
         let mut result = EngineProcessingResult::empty();
         result.scheduler_plan_changed = true;
         match self.handle_relay_event(event) {
@@ -66,7 +66,7 @@ impl ClientEngineActor {
         result
     }
 
-    pub(super) fn process_platform_input(
+    pub(crate) fn process_platform_input(
         &mut self,
         request: Option<CommandRequestContext>,
         fact: PlatformFact,
@@ -113,7 +113,7 @@ impl ClientEngineActor {
         result
     }
 
-    pub(super) fn process_timer_input(
+    pub(crate) fn process_timer_input(
         &mut self,
         causation_id: uuid::Uuid,
         kind: EngineTimerKind,
@@ -169,7 +169,7 @@ impl ClientEngineActor {
         Ok(result)
     }
 
-    pub(super) fn process_shutdown_input(&mut self) -> EngineProcessingResult {
+    pub(crate) fn process_shutdown_input(&mut self) -> EngineProcessingResult {
         self.advance_connection_generation();
         self.relay.shutdown();
         self.connection_state = ConnectionState::Stopped;
@@ -178,7 +178,7 @@ impl ClientEngineActor {
         }])
     }
 
-    pub(super) fn scheduler_plan(&self, generation: u64) -> EngineResult<EngineSchedulerPlan> {
+    pub(crate) fn scheduler_plan(&self, generation: u64) -> EngineResult<EngineSchedulerPlan> {
         let retry_deadline = self.next_retry_deadline()?;
         let ordinary_retry_at = self.next_retry_wakeup_at(retry_deadline)?;
         let durable_retry_at = self.next_durable_operation_wakeup_at()?;

@@ -5,7 +5,7 @@ use torchat_runtime::{
 };
 
 impl ClientEngineActor {
-    pub(super) fn apply_message_delivery_outcome_with_error(
+    pub(crate) fn apply_message_delivery_outcome_with_error(
         &mut self,
         message_id: &str,
         outcome: MessageTransportOutcome,
@@ -26,7 +26,7 @@ impl ClientEngineActor {
         Ok(runtime_events)
     }
 
-    pub(super) fn apply_message_delivery_outcome(
+    pub(crate) fn apply_message_delivery_outcome(
         &mut self,
         message_id: &str,
         outcome: MessageTransportOutcome,
@@ -47,7 +47,7 @@ impl ClientEngineActor {
         self.apply_message_delivery_outcome_with_error(message_id, outcome, None, retry_at)
     }
 
-    pub(super) fn flush_pending_message_deliveries(&mut self) -> EngineResult<()> {
+    pub(crate) fn flush_pending_message_deliveries(&mut self) -> EngineResult<()> {
         let now_ms = self.clock.now_ms();
         let (effects, runtime_events) = self
             .with_runtime(|runtime| runtime.feature_prepare_pending_message_deliveries(now_ms))?;
@@ -90,7 +90,7 @@ impl ClientEngineActor {
         Ok(())
     }
 
-    pub(super) fn flush_pending_pairing_deliveries(&mut self) -> EngineResult<()> {
+    pub(crate) fn flush_pending_pairing_deliveries(&mut self) -> EngineResult<()> {
         let now_secs = self.clock.now_secs();
         let (effects, _) = self.with_runtime(|runtime| {
             PairingFeature::new(runtime.storage_mut()).pending_send_effects(now_secs)

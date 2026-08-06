@@ -7,7 +7,7 @@ use super::{ClientEngineActor, runtime_error};
 use crate::{EngineError, EngineResult, storage::SqliteRuntimeStorage};
 
 impl ClientEngineActor {
-    pub(super) fn runtime_profile(&mut self) -> EngineResult<RuntimeProfile> {
+    pub(crate) fn runtime_profile(&mut self) -> EngineResult<RuntimeProfile> {
         let mut storage = SqliteRuntimeStorage::new(self.database.transaction()?);
         let profile = storage
             .profile()
@@ -17,7 +17,7 @@ impl ClientEngineActor {
         Ok(profile)
     }
 
-    pub(super) fn runtime_identity(&mut self) -> EngineResult<RuntimeIdentity> {
+    pub(crate) fn runtime_identity(&mut self) -> EngineResult<RuntimeIdentity> {
         let mut storage = SqliteRuntimeStorage::new(self.database.transaction()?);
         let identity = storage
             .identity()
@@ -31,7 +31,7 @@ impl ClientEngineActor {
     /// Pairing collections and their summary share the same projection stamp as
     /// contacts and conversations, so Flutter never assembles mixed revisions
     /// from independent requests.
-    pub(super) fn application_snapshot(&mut self) -> EngineResult<ApplicationSnapshot> {
+    pub(crate) fn application_snapshot(&mut self) -> EngineResult<ApplicationSnapshot> {
         let mut storage = SqliteRuntimeStorage::new(self.database.transaction()?);
         let identity = storage
             .identity()
@@ -75,20 +75,18 @@ impl ClientEngineActor {
         .map(|snapshot| snapshot.normalize())
     }
 
-    pub(super) fn projection_head(&self) -> EngineResult<(String, u64)> {
+    pub(crate) fn projection_head(&self) -> EngineResult<(String, u64)> {
         self.database.projection_head()
     }
 
-    pub(super) fn list_contacts(
-        &mut self,
-    ) -> EngineResult<Vec<torchat_runtime::ContactRecord>> {
+    pub(crate) fn list_contacts(&mut self) -> EngineResult<Vec<torchat_runtime::ContactRecord>> {
         let mut storage = SqliteRuntimeStorage::new(self.database.transaction()?);
         let contacts = storage.contacts().map_err(runtime_error)?;
         storage.rollback().map_err(runtime_error)?;
         Ok(contacts)
     }
 
-    pub(super) fn list_conversations(
+    pub(crate) fn list_conversations(
         &mut self,
     ) -> EngineResult<Vec<torchat_runtime::ConversationSummary>> {
         let mut storage = SqliteRuntimeStorage::new(self.database.transaction()?);
@@ -97,7 +95,7 @@ impl ClientEngineActor {
         Ok(conversations)
     }
 
-    pub(super) fn list_messages(
+    pub(crate) fn list_messages(
         &mut self,
         conversation_id: &str,
     ) -> EngineResult<Vec<torchat_runtime::ChatMessage>> {

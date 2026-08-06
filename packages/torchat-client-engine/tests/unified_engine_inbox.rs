@@ -138,7 +138,7 @@ fn actor_has_one_canonical_loop_and_no_transitional_source_files() {
 
 #[test]
 fn command_router_only_delegates() {
-    let router = read(crate_root().join("src/actor/command_dispatch.rs"));
+    let router = read(crate_root().join("src/actor/state/command_dispatch.rs"));
     assert!(router.contains("match command"));
     assert!(router.contains("self.command_send_message"));
     for forbidden in [

@@ -7,12 +7,7 @@ mod operation_repository;
 mod pairing_records;
 mod point_lookup_queries;
 mod point_lookup_repository;
-pub mod runtime_storage {
-    include!("runtime_storage.rs");
-    include!("transactional_point_lookup.rs");
-    include!("transactional_operation_storage.rs");
-    include!("transactional_message_delivery.rs");
-}
+pub mod runtime_storage;
 mod settings;
 pub mod sqlite;
 mod state_codecs;

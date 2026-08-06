@@ -11,7 +11,7 @@ fn read(root: &Path, relative: &str) -> String {
 #[test]
 fn pairing_recovery_is_owned_by_engine_and_runtime() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let pairing = read(&root, "src/actor/pairing.rs");
+    let pairing = read(&root, "src/actor/state/pairing.rs");
     let accept = read(&root, "src/actor/commands/pairing/accept_pairing.rs");
 
     assert!(
@@ -54,7 +54,7 @@ fn pairing_recovery_is_owned_by_engine_and_runtime() {
 #[test]
 fn duplicate_invite_reuses_persisted_welcome_instead_of_recreating_domain_state() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let pairing = read(&root, "src/actor/pairing.rs");
+    let pairing = read(&root, "src/actor/state/pairing.rs");
 
     assert!(pairing.contains("invite_used"));
     assert!(pairing.contains("pending_welcome"));

@@ -1,7 +1,7 @@
 use super::*;
 
 impl ClientEngineActor {
-    pub(super) fn endpoint_with_capability(
+    pub(crate) fn endpoint_with_capability(
         &self,
         endpoint: &PeerEndpointBundle,
         capability_id: &str,
@@ -16,7 +16,7 @@ impl ClientEngineActor {
         endpoint
     }
 
-    pub(super) fn local_endpoint_for_contact(
+    pub(crate) fn local_endpoint_for_contact(
         &mut self,
         contact_installation_id: &str,
         endpoint: &PeerEndpointBundle,
@@ -36,7 +36,7 @@ impl ClientEngineActor {
 }
 
 impl ClientEngineActor {
-    pub(super) fn apply_peer_endpoint(
+    pub(crate) fn apply_peer_endpoint(
         &mut self,
         endpoint: PeerEndpointBundle,
     ) -> EngineResult<Vec<torchat_runtime::RuntimeEvent>> {
@@ -66,15 +66,13 @@ impl ClientEngineActor {
         }
         let contact_id = endpoint.installation_id.clone();
         let _ = self.queue_peer_probe(&contact_id);
-        Ok(vec![
-            torchat_runtime::RuntimeEvent::PeerEndpointChanged {
-                contact_id,
-                status: PeerEndpointStatus::Verified,
-            },
-        ])
+        Ok(vec![torchat_runtime::RuntimeEvent::PeerEndpointChanged {
+            contact_id,
+            status: PeerEndpointStatus::Verified,
+        }])
     }
 
-    pub(super) fn apply_pending_peer_endpoint(
+    pub(crate) fn apply_pending_peer_endpoint(
         &mut self,
         contact_installation_id: &str,
     ) -> EngineResult<Vec<torchat_runtime::RuntimeEvent>> {
@@ -104,7 +102,7 @@ impl ClientEngineActor {
 }
 
 impl ClientEngineActor {
-    pub(super) fn send_capability_offer(
+    pub(crate) fn send_capability_offer(
         &mut self,
         contact_installation_id: &str,
     ) -> EngineResult<()> {
@@ -142,7 +140,7 @@ impl ClientEngineActor {
         )
     }
 
-    pub(super) fn send_capability_offers_for_contacts(&mut self) -> EngineResult<()> {
+    pub(crate) fn send_capability_offers_for_contacts(&mut self) -> EngineResult<()> {
         if !self.network_online || self.socks5_url.is_none() {
             return Ok(());
         }
@@ -180,7 +178,7 @@ impl ClientEngineActor {
         Ok(())
     }
 
-    pub(super) fn retry_capability_deliveries(&mut self) -> EngineResult<()> {
+    pub(crate) fn retry_capability_deliveries(&mut self) -> EngineResult<()> {
         if !self.network_online || self.socks5_url.is_none() {
             return Ok(());
         }
@@ -216,7 +214,7 @@ impl ClientEngineActor {
 }
 
 impl ClientEngineActor {
-    pub(super) fn refresh_peer_authorizations(&mut self) -> EngineResult<()> {
+    pub(crate) fn refresh_peer_authorizations(&mut self) -> EngineResult<()> {
         let Some(transport) = self.peer_transport.clone() else {
             return Ok(());
         };
@@ -241,7 +239,7 @@ impl ClientEngineActor {
         Ok(())
     }
 
-    pub(super) fn local_capability_credentials(
+    pub(crate) fn local_capability_credentials(
         &self,
         contact_installation_id: &str,
     ) -> EngineResult<(String, Vec<u8>)> {
@@ -255,7 +253,7 @@ impl ClientEngineActor {
             })
     }
 
-    pub(super) fn peer_capability_secret(
+    pub(crate) fn peer_capability_secret(
         &self,
         contact_installation_id: &str,
         endpoint: &PeerEndpointBundle,

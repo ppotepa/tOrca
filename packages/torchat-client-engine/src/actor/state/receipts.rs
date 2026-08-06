@@ -1,7 +1,7 @@
 use super::*;
 
 impl ClientEngineActor {
-    pub(super) fn queue_read_receipts(
+    pub(crate) fn queue_read_receipts(
         &mut self,
         conversation_id: &str,
         mut message_ids: Vec<uuid::Uuid>,
@@ -23,7 +23,7 @@ impl ClientEngineActor {
         self.flush_pending_read_receipts()
     }
 
-    pub(super) fn flush_pending_read_receipts(&mut self) -> EngineResult<()> {
+    pub(crate) fn flush_pending_read_receipts(&mut self) -> EngineResult<()> {
         for record in self.database.due_read_receipts(self.clock.now_ms())? {
             let payload = if let Some(payload) = record.wire_ciphertext.clone() {
                 payload
@@ -111,7 +111,7 @@ impl ClientEngineActor {
 }
 
 impl ClientEngineActor {
-    pub(super) fn dispatch_outbound_receipt(
+    pub(crate) fn dispatch_outbound_receipt(
         &mut self,
         receipt: &torchat_runtime::ReceiptSendEffect,
         envelope_id: uuid::Uuid,
@@ -138,7 +138,7 @@ impl ClientEngineActor {
         Ok(())
     }
 
-    pub(super) fn handle_failed_peer_receipt_delivery(
+    pub(crate) fn handle_failed_peer_receipt_delivery(
         &mut self,
         installation_id: &str,
         message_id: &str,
@@ -177,7 +177,7 @@ impl ClientEngineActor {
         Ok(())
     }
 
-    pub(super) fn flush_pending_receipt_effects(&mut self) -> EngineResult<()> {
+    pub(crate) fn flush_pending_receipt_effects(&mut self) -> EngineResult<()> {
         let (effects, _) =
             self.with_runtime(|runtime| runtime.prepare_pending_receipt_effects())?;
         for effect in effects {
@@ -186,7 +186,7 @@ impl ClientEngineActor {
         Ok(())
     }
 
-    pub(super) fn encrypt_receipt(
+    pub(crate) fn encrypt_receipt(
         &mut self,
         effect: &torchat_runtime::ReceiptSendEffect,
     ) -> EngineResult<String> {

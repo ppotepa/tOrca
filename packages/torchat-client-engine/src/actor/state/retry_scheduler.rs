@@ -10,7 +10,7 @@ use torchat_runtime::{
 };
 
 impl ClientEngineActor {
-    pub(super) fn run_retry_scheduler_collect(
+    pub(crate) fn run_retry_scheduler_collect(
         &mut self,
         deadline: RetryDeadline,
     ) -> Vec<EngineEvent> {
@@ -55,12 +55,12 @@ impl ClientEngineActor {
         }
     }
 
-    pub(super) fn next_retry_deadline(&self) -> EngineResult<Option<RetryDeadline>> {
+    pub(crate) fn next_retry_deadline(&self) -> EngineResult<Option<RetryDeadline>> {
         self.database
             .next_retry_deadline(self.clock.now_ms(), self.clock.now_secs())
     }
 
-    pub(super) fn next_retry_wakeup_at(
+    pub(crate) fn next_retry_wakeup_at(
         &self,
         retry_deadline: Option<RetryDeadline>,
     ) -> EngineResult<Option<Instant>> {
@@ -82,13 +82,11 @@ impl ClientEngineActor {
         )))
     }
 
-    pub(super) fn next_durable_operation_wakeup_at(&self) -> EngineResult<Option<Instant>> {
+    pub(crate) fn next_durable_operation_wakeup_at(&self) -> EngineResult<Option<Instant>> {
         let deadline_at_ms = self
             .pending_durable_operations()?
             .iter()
-            .filter(|operation| {
-                operation.operation_type == OperationType::PairingCancellation
-            })
+            .filter(|operation| operation.operation_type == OperationType::PairingCancellation)
             .filter_map(durable_operation_deadline)
             .min();
         let Some(deadline_at_ms) = deadline_at_ms else {
@@ -109,7 +107,7 @@ impl ClientEngineActor {
         )))
     }
 
-    pub(super) fn resume_due_durable_operation(
+    pub(crate) fn resume_due_durable_operation(
         &mut self,
         causation_id: uuid::Uuid,
     ) -> EngineResult<EngineProcessingResult> {
@@ -123,9 +121,7 @@ impl ClientEngineActor {
         let operation = self
             .pending_durable_operations()?
             .into_iter()
-            .filter(|operation| {
-                operation.operation_type == OperationType::PairingCancellation
-            })
+            .filter(|operation| operation.operation_type == OperationType::PairingCancellation)
             .find(|operation| {
                 durable_operation_deadline(operation).is_some_and(|deadline| deadline <= now_ms)
             });
@@ -230,9 +226,9 @@ fn durable_operation_deadline(operation: &DurableOperation) -> Option<i64> {
     match operation.state {
         OperationState::Pending | OperationState::Running => Some(operation.updated_at),
         OperationState::WaitingForRetry => Some(operation.retry_at.unwrap_or(operation.updated_at)),
-        OperationState::Completed
-        | OperationState::Cancelled
-        | OperationState::FailedPermanent => None,
+        OperationState::Completed | OperationState::Cancelled | OperationState::FailedPermanent => {
+            None
+        }
     }
 }
 

@@ -1,11 +1,11 @@
-use std::{
+pub(crate) use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
 };
 
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use serde::Serialize;
-use sha2::{Digest, Sha256};
+pub(crate) use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+pub(crate) use serde::Serialize;
+pub(crate) use sha2::{Digest, Sha256};
 
 pub(crate) fn pairing_pair_key(left: &str, right: &str) -> String {
     let (first, second) = if left <= right {
@@ -19,18 +19,10 @@ pub(crate) fn pairing_pair_key(left: &str, right: &str) -> String {
     input.extend_from_slice(second.as_bytes());
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(Sha256::digest(input))
 }
-use tokio::sync::mpsc;
-use tokio::time::{Duration, Instant};
-use tokio_util::sync::CancellationToken;
-use torchat_runtime::{
-    InviteState, MessageSendEffect, MessageTransportOutcome, PairingItem, PairingPeerOutcome,
-    PairingPreparation, PairingSendKind, PeerConnectionStatus, PeerEndpointStatus, RuntimeClock,
-    RuntimeError, RuntimeIdentity, RuntimeProfile, RuntimeSendEffect, RuntimeSession,
-    RuntimeStatusPhase, RuntimeStorage, RuntimeTorStatus, RuntimeTransport,
-    StartupReadinessSnapshot, SystemRuntimeClock, WelcomeAcceptedResult,
-    contact_card_from_invite, contact_record_from_card,
-};
-use torchat_core::{
+pub(crate) use tokio::sync::mpsc;
+pub(crate) use tokio::time::{Duration, Instant};
+pub(crate) use tokio_util::sync::CancellationToken;
+pub(crate) use torchat_core::{
     ContactInvite, Identity,
     peer_protocol::{
         MAX_TRANSPORT_CIPHERTEXT_BYTES, PEER_VIRTUAL_PORT, PeerAck, PeerAckKind,
@@ -38,14 +30,18 @@ use torchat_core::{
     },
     relay::{RelayEnvelope, RelayPayloadV1},
 };
-use torchat_protocol::application::{ApplicationPayloadV1, ApplicationReply};
-
-use torchat_crypto::anti_rollback::{
-    AnchoredMlsCheckpoint, MlsEpochAnchor, MlsRecoveryState, validate_snapshot_checkpoint,
+pub(crate) use torchat_protocol::application::{ApplicationPayloadV1, ApplicationReply};
+pub(crate) use torchat_runtime::{
+    InviteState, MessageSendEffect, MessageTransportOutcome, PairingItem, PairingPeerOutcome,
+    PairingPreparation, PairingSendKind, PeerConnectionStatus, PeerEndpointStatus, RuntimeClock,
+    RuntimeError, RuntimeIdentity, RuntimeProfile, RuntimeSendEffect, RuntimeSession,
+    RuntimeStatusPhase, RuntimeStorage, RuntimeTorStatus, RuntimeTransport,
+    StartupReadinessSnapshot, SystemRuntimeClock, WelcomeAcceptedResult, contact_card_from_invite,
+    contact_record_from_card,
 };
-use torchat_crypto::mls::{DirectConversation, MlsMember};
-use crate::fault_injection::{FaultInjector, NoopFaultInjector};
-use crate::{
+
+pub(crate) use crate::fault_injection::{FaultInjector, NoopFaultInjector};
+pub(crate) use crate::{
     ClientDatabase, EngineCommand, EngineCommandEnvelope, EngineConfig, EngineError, EngineEvent,
     EngineLogEvent, EngineResult, PlatformAction, PlatformFact, PlatformKind,
     event::{
@@ -61,6 +57,10 @@ use crate::{
         RetryDeadline, RetryKind, SqliteRuntimeStorage,
     },
 };
+pub(crate) use torchat_crypto::anti_rollback::{
+    AnchoredMlsCheckpoint, MlsEpochAnchor, MlsRecoveryState, validate_snapshot_checkpoint,
+};
+pub(crate) use torchat_crypto::mls::{DirectConversation, MlsMember};
 
 mod application_envelope;
 mod capabilities;
@@ -79,7 +79,7 @@ mod relay_events;
 mod retry_scheduler;
 mod runtime_transaction;
 
-fn error_kind(error: &EngineError) -> &'static str {
+pub(crate) fn error_kind(error: &EngineError) -> &'static str {
     match error {
         EngineError::Closed(_) => "closed",
         EngineError::InvalidConfig(_) => "invalid_config",
@@ -96,22 +96,22 @@ use platform_facts::runtime_phase_for_tor_ready;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ContactCapabilityStatusResponse {
-    contact_id: String,
-    capability_id: String,
-    sequence: u64,
-    status: torchat_runtime::CapabilityStatus,
+pub(crate) struct ContactCapabilityStatusResponse {
+    pub(crate) contact_id: String,
+    pub(crate) capability_id: String,
+    pub(crate) sequence: u64,
+    pub(crate) status: torchat_runtime::CapabilityStatus,
 }
 
 #[derive(Clone, Debug)]
-struct IdempotencyCommitContext {
-    command_id: String,
-    command_descriptor: String,
+pub(crate) struct IdempotencyCommitContext {
+    pub(crate) command_id: String,
+    pub(crate) command_descriptor: String,
 }
 
 pub struct ClientEngineActor {
-    pub(super) fault_injector: Arc<dyn FaultInjector>,
-    pub(super) mls_anchor: Option<Box<dyn MlsEpochAnchor<Error = EngineError> + Send>>,
+    pub(crate) fault_injector: Arc<dyn FaultInjector>,
+    pub(crate) mls_anchor: Option<Box<dyn MlsEpochAnchor<Error = EngineError> + Send>>,
     /// Retain only platform metadata after construction. Database and identity
     /// secrets are consumed while opening the actor and must not have a second
     /// long-lived copy in actor memory.
@@ -120,32 +120,32 @@ pub struct ClientEngineActor {
     pub identity: Identity,
     pub conversations: HashMap<String, DirectConversation>,
     pub pending_welcomes: HashMap<String, PendingWelcomeRecord>,
-    pending_engine_events: Vec<EngineEvent>,
+    pub(crate) pending_engine_events: Vec<EngineEvent>,
     /// Process-local diagnostic count; durable receipt state remains in SQLite.
     receipt_queue_failed_after_commit: u64,
-    active_peer_sessions: HashMap<String, HashSet<uuid::Uuid>>,
-    crypto_blocked_peers: HashSet<String>,
-    connection_generation: u64,
-    app_foreground: bool,
+    pub(crate) active_peer_sessions: HashMap<String, HashSet<uuid::Uuid>>,
+    pub(crate) crypto_blocked_peers: HashSet<String>,
+    pub(crate) connection_generation: u64,
+    pub(crate) app_foreground: bool,
     pub session: RuntimeSession,
     pub clock: SharedRuntimeClock,
     pub connection_state: ConnectionState,
     pub tor_status: RuntimeTorStatus,
     pub socks5_url: Option<String>,
     pub relay: Box<dyn EngineRelay>,
-    peer_transport: Option<PeerTransportHandle>,
-    local_peer_endpoint: Option<PeerEndpointBundle>,
-    expected_onion_generation: u64,
-    network_online: bool,
-    battery_saver: bool,
-    device_idle: bool,
-    background_restricted: bool,
+    pub(crate) peer_transport: Option<PeerTransportHandle>,
+    pub(crate) local_peer_endpoint: Option<PeerEndpointBundle>,
+    pub(crate) expected_onion_generation: u64,
+    pub(crate) network_online: bool,
+    pub(crate) battery_saver: bool,
+    pub(crate) device_idle: bool,
+    pub(crate) background_restricted: bool,
     /// The next relay poll is actor state, not a per-loop local deadline.
     /// Recreating it after every command/event starves relay polling whenever
     /// the actor is busy with peer traffic or UI requests.
-    relay_poll_at: Instant,
-    probe_coordinator: ProbeCoordinator,
-    connect_requested: bool,
+    pub(crate) relay_poll_at: Instant,
+    pub(crate) probe_coordinator: ProbeCoordinator,
+    pub(crate) connect_requested: bool,
     engine_session_id: String,
 }
 
@@ -173,7 +173,7 @@ impl RuntimeClock for SharedRuntimeClock {
     }
 }
 
-const RELAY_POLL_INTERVAL: Duration = Duration::from_millis(100);
+pub(crate) const RELAY_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const RETRY_BLOCKED_RECHECK: Duration = Duration::from_secs(5);
 const RETRY_OFFLINE_RECHECK: Duration = Duration::from_secs(30);
 
@@ -280,7 +280,7 @@ impl ClientEngineActor {
         })
     }
 
-    fn recover_pending_inbound_peer_envelopes(
+    pub(crate) fn recover_pending_inbound_peer_envelopes(
         &mut self,
     ) -> EngineResult<Vec<torchat_runtime::RuntimeEvent>> {
         let mut runtime_events = Vec::new();
@@ -326,13 +326,11 @@ impl ClientEngineActor {
                             ),
                         },
                     });
-                    runtime_events.push(
-                        torchat_runtime::RuntimeEvent::PeerConnectionChanged {
-                            contact_id: record.sender_installation_id,
-                            status: PeerConnectionStatus::Backoff,
-                            retry_in_ms: None,
-                        },
-                    );
+                    runtime_events.push(torchat_runtime::RuntimeEvent::PeerConnectionChanged {
+                        contact_id: record.sender_installation_id,
+                        status: PeerConnectionStatus::Backoff,
+                        retry_in_ms: None,
+                    });
                 }
             }
         }
@@ -365,7 +363,7 @@ impl ClientEngineActor {
         Ok(())
     }
 
-    fn send_ephemeral_payload(
+    pub(crate) fn send_ephemeral_payload(
         &mut self,
         conversation_id: &str,
         application: ApplicationPayloadV1,
@@ -479,7 +477,7 @@ impl ClientEngineActor {
         )
     }
 
-    fn deliver_send_effect(&mut self, effect: RuntimeSendEffect) -> EngineResult<()> {
+    pub(crate) fn deliver_send_effect(&mut self, effect: RuntimeSendEffect) -> EngineResult<()> {
         if let Some(message) = effect.message().cloned() {
             let payload = self.prepare_outbound_message_payload(&message)?;
             let message_id = uuid::Uuid::parse_str(&message.message_id)
@@ -499,11 +497,9 @@ impl ClientEngineActor {
             };
             let envelope_id = uuid::Uuid::parse_str(&pairing.pairing_id)
                 .map_err(|error| EngineError::InvalidCommand(error.to_string()))?;
-            if let Err(error) = self.queue_relay_envelope(
-                envelope_id,
-                &recipient_installation_id,
-                &ciphertext,
-            ) {
+            if let Err(error) =
+                self.queue_relay_envelope(envelope_id, &recipient_installation_id, &ciphertext)
+            {
                 self.database
                     .record_pairing_response_error(&pairing.pairing_id, &error.to_string())?;
                 self.pending_engine_events.push(EngineEvent::Log {
@@ -536,7 +532,7 @@ impl ClientEngineActor {
         ))
     }
 
-    fn flush_pending_send_effects(&mut self) -> EngineResult<()> {
+    pub(crate) fn flush_pending_send_effects(&mut self) -> EngineResult<()> {
         let (effects, _) = self.with_runtime(|runtime| runtime.prepare_pending_send_effects())?;
         for effect in effects {
             self.deliver_send_effect(effect)?;
@@ -644,7 +640,7 @@ impl ClientEngineActor {
     }
 }
 
-struct EngineRuntimeTransport<'a> {
+pub(crate) struct EngineRuntimeTransport<'a> {
     status: RuntimeTorStatus,
     _actor: std::marker::PhantomData<&'a mut dyn EngineRelay>,
 }
@@ -659,7 +655,7 @@ impl RuntimeTransport for EngineRuntimeTransport<'_> {
     }
 }
 
-fn idempotency_descriptor(command: &EngineCommand, command_type: &str) -> String {
+pub(crate) fn idempotency_descriptor(command: &EngineCommand, command_type: &str) -> String {
     let encoded = serde_json::to_vec(command).unwrap_or_default();
     let digest = URL_SAFE_NO_PAD.encode(Sha256::digest(encoded));
     format!("{command_type}:{digest}")
@@ -773,7 +769,7 @@ fn unix_secs() -> i64 {
         .as_secs() as i64
 }
 
-fn unix_ms() -> i64 {
+pub(crate) fn unix_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .expect("system clock must be after unix epoch")
@@ -781,7 +777,7 @@ fn unix_ms() -> i64 {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) struct RetryPolicy {
+pub(crate) struct RetryPolicy {
     pub max_attempts: u32,
     pub base_delay_ms: i64,
     pub max_delay_ms: i64,
@@ -846,23 +842,23 @@ impl RetryPolicy {
     }
 }
 
-pub(super) trait RetryJitter {
+pub(crate) trait RetryJitter {
     fn sample(&mut self, upper_inclusive_ms: i64) -> i64;
 }
 
-pub(super) trait RetryRandom: RetryJitter {}
+pub(crate) trait RetryRandom: RetryJitter {}
 
 impl<T: RetryJitter> RetryRandom for T {}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum RetryDisposition {
+pub(crate) enum RetryDisposition {
     Transient,
     Permanent,
     Authentication,
     Protocol,
 }
 
-pub(super) fn classify_retry_error(error: &str) -> RetryDisposition {
+pub(crate) fn classify_retry_error(error: &str) -> RetryDisposition {
     let normalized = error.to_ascii_lowercase();
     if normalized.contains("authentication")
         || normalized.contains("invalid capability")
@@ -886,7 +882,7 @@ pub(super) fn classify_retry_error(error: &str) -> RetryDisposition {
     }
 }
 
-pub(super) fn retry_error_code(error: &str) -> &'static str {
+pub(crate) fn retry_error_code(error: &str) -> &'static str {
     match classify_retry_error(error) {
         RetryDisposition::Transient => "transient",
         RetryDisposition::Permanent => "permanent",
@@ -910,7 +906,7 @@ impl RetryJitter for SystemRetryJitter {
     }
 }
 
-fn retry_backoff_ms(attempt_count: u32) -> i64 {
+pub(crate) fn retry_backoff_ms(attempt_count: u32) -> i64 {
     retry_backoff_with(attempt_count, &mut SystemRetryJitter)
 }
 
@@ -1035,7 +1031,7 @@ fn peer_endpoint_requires_update(
     }
 }
 
-fn stable_message_sequence(message_id: uuid::Uuid) -> u64 {
+pub(crate) fn stable_message_sequence(message_id: uuid::Uuid) -> u64 {
     let bytes = message_id.as_bytes();
     let mut sequence = [0_u8; 8];
     sequence.copy_from_slice(&bytes[..8]);
@@ -1086,13 +1082,13 @@ fn runtime_error(error: torchat_runtime::RuntimeError) -> EngineError {
     }
 }
 
-fn json_response(value: impl serde::Serialize) -> EngineResult<ResponsePayload> {
+pub(crate) fn json_response(value: impl serde::Serialize) -> EngineResult<ResponsePayload> {
     Ok(ResponsePayload::Json {
         value: serde_json::to_value(value).map_err(EngineError::from)?,
     })
 }
 
-fn error_code(error: &EngineError) -> &'static str {
+pub(crate) fn error_code(error: &EngineError) -> &'static str {
     match error {
         EngineError::Closed(_) => "closed",
         EngineError::InvalidConfig(_) => "invalid_config",
@@ -1121,14 +1117,12 @@ fn relay_probe_state(
             torchat_runtime::TransportProbeState::Degraded
         }
         torchat_runtime::RuntimeStatusPhase::Offline
-        | torchat_runtime::RuntimeStatusPhase::Error => {
-            torchat_runtime::TransportProbeState::Error
-        }
+        | torchat_runtime::RuntimeStatusPhase::Error => torchat_runtime::TransportProbeState::Error,
     }
 }
 
 #[allow(clippy::too_many_arguments)]
-fn transport_status_event(
+pub(crate) fn transport_status_event(
     component: torchat_runtime::TransportComponent,
     state: torchat_runtime::TransportProbeState,
     detail: impl Into<String>,
@@ -1157,8 +1151,8 @@ fn transport_status_event(
 #[cfg(test)]
 mod tests {
     use super::{
-        idempotency_descriptor, is_expected_peer_shutdown, peer_endpoint_requires_update,
-        pairing_pair_key, protocol_nickname, runtime_phase_for_tor_ready,
+        idempotency_descriptor, is_expected_peer_shutdown, pairing_pair_key,
+        peer_endpoint_requires_update, protocol_nickname, runtime_phase_for_tor_ready,
     };
     use crate::EngineCommand;
     use crate::event::ConnectionState;

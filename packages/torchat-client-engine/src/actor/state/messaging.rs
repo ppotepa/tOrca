@@ -1,10 +1,8 @@
 use super::*;
-use torchat_runtime::{
-    PointLookupStorage, features::messaging::ClientRuntimeMessagingFacade,
-};
+use torchat_runtime::{PointLookupStorage, features::messaging::ClientRuntimeMessagingFacade};
 
 impl ClientEngineActor {
-    pub(super) fn send_message_command(
+    pub(crate) fn send_message_command(
         &mut self,
         idempotency: Option<&IdempotencyCommitContext>,
         conversation_id: &str,
@@ -12,18 +10,16 @@ impl ClientEngineActor {
         reply_to_message_id: Option<&str>,
     ) -> EngineResult<(MessageSendEffect, Vec<torchat_runtime::RuntimeEvent>)> {
         let idempotency = idempotency.ok_or_else(|| {
-            EngineError::InvalidCommand(
-                "send message requires a durable operation id".to_owned(),
-            )
+            EngineError::InvalidCommand("send message requires a durable operation id".to_owned())
         })?;
         let operation_id = idempotency.command_id.clone();
         let command_descriptor = idempotency.command_descriptor.clone();
-        let conversation_summary = PointLookupStorage::conversation_by_id(
-            &self.database,
-            conversation_id,
-        )
-        .map_err(runtime_error)?
-        .ok_or_else(|| EngineError::InvalidCommand("conversation does not exist".to_owned()))?;
+        let conversation_summary =
+            PointLookupStorage::conversation_by_id(&self.database, conversation_id)
+                .map_err(runtime_error)?
+                .ok_or_else(|| {
+                    EngineError::InvalidCommand("conversation does not exist".to_owned())
+                })?;
         let peer_installation_id = conversation_summary.contact_installation_id;
         let mut conversation = self
             .conversations
@@ -53,15 +49,14 @@ impl ClientEngineActor {
                         now_ms,
                     )?
                     .value;
-                let stored = PointLookupStorage::message_by_id(
-                    runtime.storage(),
-                    &effect.message_id,
-                )?
-                .ok_or_else(|| {
-                    RuntimeError::Storage(
-                        "new outgoing message is missing from the active transaction".to_owned(),
-                    )
-                })?;
+                let stored =
+                    PointLookupStorage::message_by_id(runtime.storage(), &effect.message_id)?
+                        .ok_or_else(|| {
+                            RuntimeError::Storage(
+                                "new outgoing message is missing from the active transaction"
+                                    .to_owned(),
+                            )
+                        })?;
                 let message_id = uuid::Uuid::parse_str(&effect.message_id)
                     .map_err(|error| RuntimeError::Storage(error.to_string()))?;
                 let plaintext = ApplicationPayloadV1::Message {
@@ -141,7 +136,7 @@ impl ClientEngineActor {
         Ok((effect, runtime_events))
     }
 
-    pub(super) fn dispatch_outbound_message(
+    pub(crate) fn dispatch_outbound_message(
         &mut self,
         message: &torchat_runtime::MessageSendEffect,
         envelope_id: uuid::Uuid,
@@ -177,7 +172,7 @@ impl ClientEngineActor {
         Ok(Vec::new())
     }
 
-    pub(super) fn handle_failed_peer_message_delivery(
+    pub(crate) fn handle_failed_peer_message_delivery(
         &mut self,
         installation_id: &str,
         message_id: &str,
@@ -225,7 +220,7 @@ impl ClientEngineActor {
         }
     }
 
-    pub(super) fn prepare_outbound_message_payload(
+    pub(crate) fn prepare_outbound_message_payload(
         &mut self,
         effect: &torchat_runtime::MessageSendEffect,
     ) -> EngineResult<String> {
@@ -328,7 +323,7 @@ impl ClientEngineActor {
         }
     }
 
-    pub(super) fn drain_pending_pre_welcome(
+    pub(crate) fn drain_pending_pre_welcome(
         &mut self,
         contact_installation_id: &str,
     ) -> EngineResult<Vec<torchat_runtime::RuntimeEvent>> {

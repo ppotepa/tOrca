@@ -1,7 +1,7 @@
 use super::*;
 
 impl ClientEngineActor {
-    pub(super) fn prepare_pairing_response_payload(
+    pub(crate) fn prepare_pairing_response_payload(
         &mut self,
         effect: &torchat_runtime::PairingSendEffect,
     ) -> EngineResult<Option<(String, String)>> {
@@ -23,7 +23,7 @@ impl ClientEngineActor {
         Ok(Some((stored.recipient_installation_id, ciphertext)))
     }
 
-    pub(super) fn queue_welcome_applied(
+    pub(crate) fn queue_welcome_applied(
         &mut self,
         recipient_installation_id: &str,
         invite_id: &str,
@@ -38,14 +38,10 @@ impl ClientEngineActor {
         )
         .encode()
         .map_err(EngineError::InvalidCommand)?;
-        self.queue_relay_envelope(
-            uuid::Uuid::new_v4(),
-            recipient_installation_id,
-            &payload,
-        )
+        self.queue_relay_envelope(uuid::Uuid::new_v4(), recipient_installation_id, &payload)
     }
 
-    pub(super) fn build_contact_invite(
+    pub(crate) fn build_contact_invite(
         &mut self,
         recipient_installation_id: Option<String>,
     ) -> EngineResult<String> {
@@ -79,10 +75,8 @@ impl ClientEngineActor {
         })?;
         let local_capability_id = uuid::Uuid::new_v4().simple().to_string()[..16].to_owned();
         let local_capability_secret = uuid::Uuid::new_v4().as_bytes().to_vec();
-        invite.peer_endpoint = Some(self.endpoint_with_capability(
-            &local_peer_endpoint,
-            &local_capability_id,
-        ));
+        invite.peer_endpoint =
+            Some(self.endpoint_with_capability(&local_peer_endpoint, &local_capability_id));
         invite.peer_capability_id = Some(local_capability_id.clone());
         invite.peer_capability_secret = Some(URL_SAFE_NO_PAD.encode(&local_capability_secret));
         invite
@@ -103,7 +97,7 @@ impl ClientEngineActor {
         Ok(encoded)
     }
 
-    pub(super) fn retry_pending_welcomes(&mut self) -> EngineResult<()> {
+    pub(crate) fn retry_pending_welcomes(&mut self) -> EngineResult<()> {
         let now_ms = self.clock.now_ms();
         let now_secs = now_ms / 1_000;
         self.database.delete_expired_pending_welcomes(now_secs)?;
@@ -147,7 +141,7 @@ impl ClientEngineActor {
         Ok(())
     }
 
-    pub(super) fn accept_invite(
+    pub(crate) fn accept_invite(
         &mut self,
         invite_payload: &str,
     ) -> EngineResult<Vec<torchat_runtime::RuntimeEvent>> {
@@ -296,18 +290,16 @@ impl ClientEngineActor {
         self.pending_welcomes
             .insert(invite.invite_id.clone(), pending.clone());
 
-        if let Err(error) = self.queue_relay_envelope(
-            envelope_id,
-            &card.installation_id,
-            &ciphertext,
-        ) {
+        if let Err(error) =
+            self.queue_relay_envelope(envelope_id, &card.installation_id, &ciphertext)
+        {
             self.database
                 .record_pending_welcome_error(&invite.invite_id, &error.to_string())?;
         }
         Ok(runtime_events)
     }
 
-    pub(super) fn apply_pairing_peer_outcome(
+    pub(crate) fn apply_pairing_peer_outcome(
         &mut self,
         pairing_id: &str,
         outcome: PairingPeerOutcome,
@@ -318,7 +310,7 @@ impl ClientEngineActor {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn commit_contact_with_conversation(
+    pub(crate) fn commit_contact_with_conversation(
         &mut self,
         card: torchat_core::relay::ContactCard,
         conversation: DirectConversation,

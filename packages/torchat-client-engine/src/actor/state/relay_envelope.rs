@@ -2,7 +2,7 @@ use super::*;
 use crate::event::NotificationKind;
 
 impl ClientEngineActor {
-    pub(super) fn handle_relay_envelope(
+    pub(crate) fn handle_relay_envelope(
         &mut self,
         envelope: RelayEnvelope,
     ) -> EngineResult<Vec<torchat_runtime::RuntimeEvent>> {
@@ -72,9 +72,9 @@ impl ClientEngineActor {
                     .verify_welcome(&envelope.sender, &self.identity.installation_id())
                     .map_err(EngineError::InvalidCommand)?;
                 let peer_endpoint = payload.welcome_peer_endpoint().cloned();
-                let peer_capability = payload.welcome_peer_capability().map(|(id, secret)| {
-                    (id.to_owned(), secret.to_owned())
-                });
+                let peer_capability = payload
+                    .welcome_peer_capability()
+                    .map(|(id, secret)| (id.to_owned(), secret.to_owned()));
                 if let Some(endpoint) = &peer_endpoint {
                     endpoint
                         .validate(self.clock.now_ms() / 1_000)

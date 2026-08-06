@@ -1,11 +1,11 @@
 use super::*;
 
 impl ClientEngineActor {
-    pub(super) fn handle_command(
+    pub(crate) fn handle_command(
         &mut self,
         command: EngineCommand,
         idempotency: Option<&IdempotencyCommitContext>,
-    ) -> commands::CommandHandlerResult {
+    ) -> crate::actor::commands::CommandHandlerResult {
         match command {
             EngineCommand::Bootstrap => self.command_bootstrap(idempotency),
             EngineCommand::Connect => self.command_connect(),
@@ -83,18 +83,11 @@ impl ClientEngineActor {
                 conversation_id,
                 body,
                 reply_to_message_id,
-            } => self.command_send_message(
-                idempotency,
-                conversation_id,
-                body,
-                reply_to_message_id,
-            ),
+            } => self.command_send_message(idempotency, conversation_id, body, reply_to_message_id),
             EngineCommand::RetryMessage { message_id } => {
                 self.command_retry_message(idempotency, message_id)
             }
-            EngineCommand::RetryDeadLetter { kind, id } => {
-                self.command_retry_dead_letter(kind, id)
-            }
+            EngineCommand::RetryDeadLetter { kind, id } => self.command_retry_dead_letter(kind, id),
             EngineCommand::ListDeadLetters => self.command_list_dead_letters(),
             EngineCommand::DeleteMessageLocal { message_id } => {
                 self.command_delete_message_local(idempotency, message_id)

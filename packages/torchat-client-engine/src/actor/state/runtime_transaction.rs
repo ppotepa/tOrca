@@ -1,7 +1,7 @@
 use std::mem;
 
-use torchat_runtime::ClientRuntime;
 use torchat_crypto::mls::DirectConversation;
+use torchat_runtime::ClientRuntime;
 
 use super::{
     ClientEngineActor, EngineRuntimeTransport, IdempotencyCommitContext, SharedRuntimeClock,
@@ -11,7 +11,7 @@ use crate::fault_injection::FaultPoint;
 use crate::{EngineError, EngineResult, event::ResponsePayload, storage::SqliteRuntimeStorage};
 
 impl ClientEngineActor {
-    pub(super) fn with_runtime<R>(
+    pub(crate) fn with_runtime<R>(
         &mut self,
         op: impl FnOnce(
             &mut ClientRuntime<
@@ -24,7 +24,7 @@ impl ClientEngineActor {
         self.with_runtime_internal(op, None, |_| Ok(None))
     }
 
-    pub(super) fn with_runtime_idempotent<R>(
+    pub(crate) fn with_runtime_idempotent<R>(
         &mut self,
         idempotency: Option<&IdempotencyCommitContext>,
         op: impl FnOnce(

@@ -1,14 +1,14 @@
 use super::*;
 use crate::event::NotificationKind;
 
-pub(super) struct InboundApplyResult {
-    pub(super) committed: bool,
-    pub(super) receipt_due: bool,
-    pub(super) runtime_events: Vec<torchat_runtime::RuntimeEvent>,
+pub(crate) struct InboundApplyResult {
+    pub(crate) committed: bool,
+    pub(crate) receipt_due: bool,
+    pub(crate) runtime_events: Vec<torchat_runtime::RuntimeEvent>,
 }
 
 impl ClientEngineActor {
-    pub(super) fn handle_application_envelope_result(
+    pub(crate) fn handle_application_envelope_result(
         &mut self,
         envelope: RelayEnvelope,
         ciphertext: Vec<u8>,
@@ -23,7 +23,7 @@ impl ClientEngineActor {
         })
     }
 
-    pub(super) fn handle_application_envelope(
+    pub(crate) fn handle_application_envelope(
         &mut self,
         envelope: RelayEnvelope,
         ciphertext: Vec<u8>,
@@ -134,12 +134,10 @@ impl ClientEngineActor {
                                 &peer,
                                 body.clone(),
                                 Some(message_id),
-                                reply_to.clone().map(|reply| {
-                                    torchat_runtime::MessageReply {
-                                        message_id: reply.message_id.to_string(),
-                                        body: reply.body,
-                                        outgoing: !reply.outgoing,
-                                    }
+                                reply_to.clone().map(|reply| torchat_runtime::MessageReply {
+                                    message_id: reply.message_id.to_string(),
+                                    body: reply.body,
+                                    outgoing: !reply.outgoing,
                                 }),
                             )?;
                             runtime.storage_mut().put_delivery_receipt(&receipt)?;
@@ -306,14 +304,12 @@ impl ClientEngineActor {
                             .put_received_envelope(&envelope_record)?;
                         Ok(())
                     })?;
-                    events.push(
-                        torchat_runtime::RuntimeEvent::ContactCapabilityChanged {
-                            contact_id: peer.clone(),
-                            capability_id: capability_id.clone(),
-                            sequence,
-                            status: torchat_runtime::CapabilityStatus::Active,
-                        },
-                    );
+                    events.push(torchat_runtime::RuntimeEvent::ContactCapabilityChanged {
+                        contact_id: peer.clone(),
+                        capability_id: capability_id.clone(),
+                        sequence,
+                        status: torchat_runtime::CapabilityStatus::Active,
+                    });
                     // If this is the first grant received from the peer, make
                     // the exchange symmetric. Duplicate offers do not trigger
                     // another offer, preventing an acknowledgement loop.
@@ -372,14 +368,12 @@ impl ClientEngineActor {
                             .put_received_envelope(&envelope_record)?;
                         Ok(())
                     })?;
-                    events.push(
-                        torchat_runtime::RuntimeEvent::ContactCapabilityChanged {
-                            contact_id: peer.clone(),
-                            capability_id,
-                            sequence,
-                            status: torchat_runtime::CapabilityStatus::Active,
-                        },
-                    );
+                    events.push(torchat_runtime::RuntimeEvent::ContactCapabilityChanged {
+                        contact_id: peer.clone(),
+                        capability_id,
+                        sequence,
+                        status: torchat_runtime::CapabilityStatus::Active,
+                    });
                     self.database.expedite_peer_deliveries(&peer)?;
                     let _ = self.queue_peer_probe(&peer);
                     Ok((events, None))
@@ -401,14 +395,12 @@ impl ClientEngineActor {
                             .put_received_envelope(&envelope_record)?;
                         Ok(())
                     })?;
-                    events.push(
-                        torchat_runtime::RuntimeEvent::ContactCapabilityChanged {
-                            contact_id: peer.clone(),
-                            capability_id,
-                            sequence,
-                            status: torchat_runtime::CapabilityStatus::Revoked,
-                        },
-                    );
+                    events.push(torchat_runtime::RuntimeEvent::ContactCapabilityChanged {
+                        contact_id: peer.clone(),
+                        capability_id,
+                        sequence,
+                        status: torchat_runtime::CapabilityStatus::Revoked,
+                    });
                     Ok((events, None))
                 }
             }

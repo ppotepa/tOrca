@@ -1,7 +1,7 @@
 use super::*;
 
 impl ClientEngineActor {
-    pub(super) fn handle_peer_event(
+    pub(crate) fn handle_peer_event(
         &mut self,
         event: PeerTransportEvent,
     ) -> EngineResult<Vec<torchat_runtime::RuntimeEvent>> {
@@ -120,13 +120,11 @@ impl ClientEngineActor {
                                 ),
                             },
                         });
-                        Ok(vec![
-                            torchat_runtime::RuntimeEvent::PeerConnectionChanged {
-                                contact_id: envelope.sender_installation_id,
-                                status: PeerConnectionStatus::Backoff,
-                                retry_in_ms: None,
-                            },
-                        ])
+                        Ok(vec![torchat_runtime::RuntimeEvent::PeerConnectionChanged {
+                            contact_id: envelope.sender_installation_id,
+                            status: PeerConnectionStatus::Backoff,
+                            retry_in_ms: None,
+                        }])
                     }
                 }
             }
@@ -235,9 +233,7 @@ impl ClientEngineActor {
                     PeerDeliveryTag::RelationshipRemovalAck { removal_id } => {
                         if matches!(
                             kind,
-                            PeerAckKind::Persisted
-                                | PeerAckKind::Delivered
-                                | PeerAckKind::Rejected
+                            PeerAckKind::Persisted | PeerAckKind::Delivered | PeerAckKind::Rejected
                         ) {
                             self.database.mark_relationship_removal_ack_dispatched(
                                 &removal_id,
@@ -291,12 +287,10 @@ impl ClientEngineActor {
                 }
                 let contact_id = endpoint.installation_id.clone();
                 let _ = self.queue_peer_probe(&contact_id);
-                Ok(vec![
-                    torchat_runtime::RuntimeEvent::PeerEndpointChanged {
-                        contact_id,
-                        status: PeerEndpointStatus::Verified,
-                    },
-                ])
+                Ok(vec![torchat_runtime::RuntimeEvent::PeerEndpointChanged {
+                    contact_id,
+                    status: PeerEndpointStatus::Verified,
+                }])
             }
             PeerTransportEvent::PresenceChanged {
                 installation_id,
@@ -323,15 +317,13 @@ impl ClientEngineActor {
                     None,
                     Duration::from_secs(30),
                 );
-                Ok(vec![
-                    torchat_runtime::RuntimeEvent::PresenceChanged {
-                        contact_id: installation_id,
-                        online,
-                        idle,
-                        observed_at,
-                        expires_at,
-                    },
-                ])
+                Ok(vec![torchat_runtime::RuntimeEvent::PresenceChanged {
+                    contact_id: installation_id,
+                    online,
+                    idle,
+                    observed_at,
+                    expires_at,
+                }])
             }
             PeerTransportEvent::TypingChanged {
                 installation_id,
@@ -494,13 +486,11 @@ impl ClientEngineActor {
                     }
                     _ => None,
                 };
-                runtime_events.push(
-                    torchat_runtime::RuntimeEvent::PeerConnectionChanged {
-                        contact_id: installation_id,
-                        status,
-                        retry_in_ms,
-                    },
-                );
+                runtime_events.push(torchat_runtime::RuntimeEvent::PeerConnectionChanged {
+                    contact_id: installation_id,
+                    status,
+                    retry_in_ms,
+                });
                 Ok(runtime_events)
             }
         }
