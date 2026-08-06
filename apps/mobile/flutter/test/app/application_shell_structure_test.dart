@@ -11,7 +11,10 @@ void main() {
       'lib/app/application_dialogs.dart',
     ).readAsStringSync();
 
-    expect(mainSource, contains('runApp(const TorcaApp())'));
+    expect(
+      mainSource,
+      contains('runApp(TorcaApp(platformServices: services))'),
+    );
     expect(mainSource.contains('class ControllerHomePage'), isFalse);
     expect(mainSource.contains('MaterialApp('), isFalse);
     expect(appSource, contains('class TorcaApp'));

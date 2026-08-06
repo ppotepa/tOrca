@@ -5,16 +5,6 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   String source(String path) => File(path).readAsStringSync();
 
-  test('pairing establishes trust and opens a conversation automatically', () {
-    final controller = source('lib/app/pairing_recovery_app_controller.dart');
-    expect(controller, contains('_promoteTrustedPairingContacts'));
-    expect(controller, contains('await super.verifyContact(contact.id)'));
-    expect(
-      controller,
-      contains('await super.openOrStartConversation(contact)'),
-    );
-  });
-
   test('active chat has user-friendly scroll behavior', () {
     final chat = source('lib/features/chats/release_chat_view.dart');
     expect(chat, contains('_nearBottomThreshold'));
@@ -27,7 +17,13 @@ void main() {
     final codec = source('lib/core/attachments/image_message_codec.dart');
     final picker = source('lib/core/attachments/image_attachment_picker.dart');
     final bubble = source('lib/features/chats/release_message_bubble.dart');
-    expect(codec, contains('maximumImageAttachmentBytes = 50 * 1024'));
+    expect(
+      codec,
+      contains(
+        'maximumImageAttachmentBytes = ImageAttachmentPolicy.maximumEncodedBytes',
+      ),
+    );
+    expect(codec, contains('ImageAttachmentPolicy.maximumEncodedBytes'));
     expect(codec, contains('encodeJpg'));
     expect(
       picker,
@@ -68,7 +64,7 @@ void main() {
   test('README documents the current release scope', () {
     final release = File('../../../README.md').readAsStringSync();
     expect(release, contains('Calls, groups, multi-device synchronization'));
-    expect(release, contains('not part of the current scope'));
+    expect(release, contains('outside the 0.2 scope'));
     expect(release, contains('Windows and Android'));
   });
 }

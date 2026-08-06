@@ -27,7 +27,19 @@ abstract class ClientRuntime
         RuntimeContactCapability,
         RuntimeConversationCapability,
         RuntimeMessagingCapability,
-        RuntimePeerCapability {
+        RuntimePeerCapability,
+        RuntimeAttachmentProvider,
+        RuntimeProjectionProvider,
+        RuntimeDisposable {
+  @override
+  Future<Map<String, dynamic>?> runtimeSnapshot() =>
+      throw UnsupportedError('runtime snapshot unavailable');
+  @override
+  Future<ApplicationSnapshot?> applicationSnapshot() =>
+      throw UnsupportedError('application snapshot unavailable');
+  @override
+  Future<void> disposeRuntime() =>
+      throw UnsupportedError('runtime disposal unavailable');
   @override
   Future<ContactEndpointCapabilityStatus> contactEndpointCapability(
     String installationId,
@@ -92,13 +104,7 @@ final class _SessionAwareClientRuntime
     return delegate.applicationSnapshot();
   }
 
-  RuntimePairingQueryCapability get _pairingQueries {
-    final delegate = _delegate;
-    if (delegate is! RuntimePairingQueryCapability) {
-      throw UnsupportedError('direct pairing queries unavailable');
-    }
-    return delegate;
-  }
+  RuntimePairingQueryCapability get _pairingQueries => _delegate;
 
   @override
   Future<List<PairingItem>> pairingInbox() => _pairingQueries.pairingInbox();

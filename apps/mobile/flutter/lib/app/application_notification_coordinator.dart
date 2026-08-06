@@ -3,8 +3,8 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:torchat_flutter_ui/core/models/domain.dart';
-import 'package:torchat_flutter_ui/core/runtime/message_paging.dart';
-import 'package:torchat_flutter_ui/core/runtime/runtime_repository_models.dart';
+import '../core/runtime/message_paging.dart';
+import '../core/runtime/runtime_repository_models.dart';
 
 import '../client_runtime.dart';
 import '../core/runtime/runtime_repository.dart';
@@ -110,7 +110,10 @@ class ApplicationNotificationCoordinator {
     if (page.messages.isEmpty) {
       return OlderMessagesResult(loadedCount: 0, hasMore: page.hasMore);
     }
-    final loaded = await _repository.mergeOlderMessagePage(conversationId, page);
+    final loaded = await _repository.mergeOlderMessagePage(
+      conversationId,
+      page,
+    );
     return OlderMessagesResult(loadedCount: loaded, hasMore: page.hasMore);
   }
 

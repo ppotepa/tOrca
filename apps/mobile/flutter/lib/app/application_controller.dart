@@ -5,8 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:torchat_flutter_ui/async/async_operation_state.dart';
 import 'package:torchat_flutter_ui/core/models/domain.dart';
-import 'package:torchat_flutter_ui/core/runtime/message_paging.dart';
-import 'package:torchat_flutter_ui/core/runtime/runtime_repository_models.dart';
+import '../core/runtime/message_paging.dart';
+import '../core/runtime/runtime_repository_models.dart';
 
 import '../client_runtime.dart';
 import '../core/connection/app_state_connection.dart';
@@ -39,8 +39,7 @@ final runtimeRepositoryProvider = Provider<RuntimeRepository>(
   (ref) => RuntimeRepository(ref.watch(clientRuntimeProvider)),
 );
 
-class ApplicationController extends Notifier<AppState>
-    with UiOperationRunner {
+class ApplicationController extends Notifier<AppState> with UiOperationRunner {
   late final ClientRuntime _runtime;
   late final RuntimeRepository _repository;
   late final ApplicationRuntimeCoordinator _runtimeCoordinator;
@@ -72,9 +71,9 @@ class ApplicationController extends Notifier<AppState>
     );
     listenSelf((previous, next) {
       if (previous?.selectedConversationId != next.selectedConversationId) {
-        unawaited(_notifications.persistActiveConversation(
-          next.selectedConversationId,
-        ));
+        unawaited(
+          _notifications.persistActiveConversation(next.selectedConversationId),
+        );
       }
     });
     ref.onDispose(() {
@@ -87,7 +86,9 @@ class ApplicationController extends Notifier<AppState>
   Future<void> initialize() async {
     await _notifications.prepare();
     await _runtimeCoordinator.initialize();
-    await _notifications.persistActiveConversation(state.selectedConversationId);
+    await _notifications.persistActiveConversation(
+      state.selectedConversationId,
+    );
     _notifications.hideRemovedRelationships();
   }
 
@@ -197,8 +198,8 @@ class ApplicationController extends Notifier<AppState>
       RuntimeErrorCode.transportUnavailable ||
       RuntimeErrorCode.temporarilyUnavailable =>
         UserProblemCode.connectionUnavailable,
-      RuntimeErrorCode.notFound || RuntimeErrorCode.conflict =>
-        UserProblemCode.operationFailed,
+      RuntimeErrorCode.notFound ||
+      RuntimeErrorCode.conflict => UserProblemCode.operationFailed,
       RuntimeErrorCode.storageFailed ||
       RuntimeErrorCode.cryptoFailed ||
       RuntimeErrorCode.unsupported ||
@@ -214,7 +215,8 @@ class ApplicationController extends Notifier<AppState>
         'runtimeCategory': runtimeProblem.category.wireValue,
         if (runtimeProblem.operationId != null)
           'operationId': runtimeProblem.operationId!,
-        if (runtimeProblem.entityId != null) 'entityId': runtimeProblem.entityId!,
+        if (runtimeProblem.entityId != null)
+          'entityId': runtimeProblem.entityId!,
       },
     );
   }

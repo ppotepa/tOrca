@@ -3,30 +3,14 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('active provider layers pairing recovery over sequential warmup', () {
-    final wrapper = File('lib/app/app_controller.dart').readAsStringSync();
-    final recovery = File(
-      'lib/app/pairing_recovery_app_controller.dart',
+  test('warmup opens on local data before the P2P endpoint is ready', () {
+    final coordinator = File(
+      'lib/app/application_runtime_coordinator.dart',
     ).readAsStringSync();
-    final notifications = File(
-      'lib/app/notification_safe_app_controller.dart',
+    final orchestrator = File(
+      'lib/core/startup/sequential_startup_orchestrator.dart',
     ).readAsStringSync();
 
-    expect(
-      wrapper,
-      contains("import 'notification_safe_app_controller.dart';"),
-    );
-    expect(wrapper, contains('() {'));
-    expect(wrapper, contains('return NotificationSafeAppController();'));
-    expect(notifications, contains('extends PairingRecoveryAppController'));
-    expect(recovery, contains('extends SequentialAppController'));
-    expect(wrapper, contains("export 'app_controller_base.dart';"));
-  });
-
-  test('warmup opens on local data without a global relay gate', () {
-    final source = File(
-      'lib/app/sequential_app_controller.dart',
-    ).readAsStringSync();
     const phases = [
       'SequentialStartupPhase.engine',
       'SequentialStartupPhase.localData',
@@ -34,67 +18,69 @@ void main() {
 
     var previous = -1;
     for (final phase in phases) {
-      final current = source.indexOf(phase, previous + 1);
+      final current = coordinator.indexOf(phase, previous + 1);
       expect(current, greaterThan(previous), reason: '$phase must be ordered');
       previous = current;
     }
 
-    expect(source, isNot(contains('waitForRelay')));
-    expect(source, isNot(contains('observeRelayReady')));
-    expect(source, contains('Local data is the shell gate'));
+    expect(orchestrator, contains('localData,'));
+    expect(coordinator, isNot(contains('waitForRelay')));
+    expect(coordinator, isNot(contains('observeRelayReady')));
   });
 
   test(
     'startup consumes canonical repository events with cache side effects',
     () {
-      final source = File(
-        'lib/app/sequential_app_controller.dart',
+      final coordinator = File(
+        'lib/app/application_runtime_coordinator.dart',
       ).readAsStringSync();
 
-      expect(source, contains('_events ??= _repository.events.listen('));
-      expect(source, isNot(contains('_events ??= _runtime.events.listen(')));
+      expect(coordinator, contains('_events ??= _repository.events.listen('));
       expect(
-        source,
+        coordinator,
+        isNot(contains('_events ??= _runtime.events.listen(')),
+      );
+      expect(
+        coordinator,
         contains('onError: (Object error, StackTrace stackTrace)'),
       );
       expect(
-        source,
+        coordinator,
         contains('Desktop runtime event stream closed during warmup'),
       );
-      expect(source, contains('await _runtime.connect().timeout'));
+      expect(coordinator, contains('await _runtime.connect().timeout'));
     },
   );
 
   test(
     'startup refreshes are serialized and event refreshes are conflated',
     () {
-      final source = File(
-        'lib/app/sequential_app_controller.dart',
+      final coordinator = File(
+        'lib/app/application_runtime_coordinator.dart',
       ).readAsStringSync();
 
-      expect(source, contains('Future<void> _refreshTail'));
-      expect(source, contains('_refreshTail = _refreshTail.catchError'));
-      expect(source, contains('bool _eventRefreshQueued'));
-      expect(source, contains('while (_eventRefreshQueued && !_warming)'));
-      expect(source, contains('if (_warming)'));
-      expect(source, contains('_refreshAfterWarmup = true'));
-      expect(source, contains('await super.refreshData('));
-      expect(source, contains('final messageRefreshes = Set<String>.of('));
-      expect(source, contains('await _repository.messages('));
+      expect(coordinator, contains('Future<void> _refreshTail'));
+      expect(coordinator, contains('_refreshTail = _refreshTail.catchError'));
+      expect(coordinator, contains('bool _eventRefreshQueued'));
+      expect(coordinator, contains('while (_eventRefreshQueued && !_warming)'));
+      expect(coordinator, contains('if (_warming)'));
+      expect(coordinator, contains('_refreshAfterWarmup = true'));
+      expect(coordinator, contains('final messageRefreshes = Set<String>.of('));
+      expect(coordinator, contains('await _repository.messages('));
     },
   );
 
   test('contact endpoint cannot be mistaken for the local onion endpoint', () {
-    final source = File(
-      'lib/app/sequential_app_controller.dart',
+    final coordinator = File(
+      'lib/app/application_runtime_coordinator.dart',
     ).readAsStringSync();
 
     expect(
-      source,
+      coordinator,
       contains('final local = identity.isNotEmpty && contactId == identity;'),
     );
     expect(
-      source,
+      coordinator,
       isNot(contains('(identity.isEmpty || contactId == identity)')),
     );
   });

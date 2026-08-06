@@ -18,6 +18,15 @@ mixin RuntimeBridgeMethods implements ClientRuntime, RuntimeProjectionProvider {
   ]);
 
   @override
+  Future<void> disposeRuntime() async {
+    // The host owns the engine process and its teardown lifecycle; bridge
+    // disposal is a no-op unless a concrete adapter supplies its own policy.
+  }
+
+  @override
+  Future<Map<String, dynamic>?> runtimeSnapshot() async => null;
+
+  @override
   Future<bool> connect() async =>
       await callRuntime(EngineContract.connect) as bool;
 
@@ -167,20 +176,14 @@ mixin RuntimeBridgeMethods implements ClientRuntime, RuntimeProjectionProvider {
     final raw = await callRuntime(EngineContract.listPairings);
     if (raw is! Map) return const <PairingItem>[];
     final map = Map<String, dynamic>.from(raw);
-    final inbox = RuntimePayload.itemsFromDynamicOrNull(map['inbox'])
-        .map(
-          (payload) => PairingItem.fromMap(
-            payload.toMap(),
-            origin: PairingOrigin.inbox,
-          ),
-        );
-    final outbox = RuntimePayload.itemsFromDynamicOrNull(map['outbox'])
-        .map(
-          (payload) => PairingItem.fromMap(
-            payload.toMap(),
-            origin: PairingOrigin.outbox,
-          ),
-        );
+    final inbox = RuntimePayload.itemsFromDynamicOrNull(map['inbox']).map(
+      (payload) =>
+          PairingItem.fromMap(payload.toMap(), origin: PairingOrigin.inbox),
+    );
+    final outbox = RuntimePayload.itemsFromDynamicOrNull(map['outbox']).map(
+      (payload) =>
+          PairingItem.fromMap(payload.toMap(), origin: PairingOrigin.outbox),
+    );
     return <PairingItem>[...inbox, ...outbox];
   }
 

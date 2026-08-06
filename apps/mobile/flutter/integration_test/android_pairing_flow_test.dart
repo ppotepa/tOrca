@@ -13,7 +13,7 @@ void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   testWidgets('Android onboarding reaches pairing code dialog', (tester) async {
-    await tester.pumpWidget(const TorChatMobileApp());
+    await tester.pumpWidget(TorChatMobileApp());
     await tester.pump(const Duration(seconds: 2));
 
     final nickField = find.byType(TextField).first;

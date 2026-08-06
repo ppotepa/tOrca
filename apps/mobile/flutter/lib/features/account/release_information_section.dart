@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/notifications/ui_notification_center.dart';
 import '../../core/release/release_info.dart';
 import '../../platform/platform_services.dart';
 import '../../shared/widgets/action_section.dart';
 import '../../shared/widgets/action_tile.dart';
 
-class ReleaseInformationSection extends StatefulWidget {
+class ReleaseInformationSection extends ConsumerStatefulWidget {
   const ReleaseInformationSection({
     super.key,
     required this.onResetUnavailable,
@@ -15,12 +17,12 @@ class ReleaseInformationSection extends StatefulWidget {
   final VoidCallback onResetUnavailable;
 
   @override
-  State<ReleaseInformationSection> createState() =>
+  ConsumerState<ReleaseInformationSection> createState() =>
       _ReleaseInformationSectionState();
 }
 
 class _ReleaseInformationSectionState
-    extends State<ReleaseInformationSection> {
+    extends ConsumerState<ReleaseInformationSection> {
   bool _checkingUpdate = false;
   bool _exportingDiagnostics = false;
   bool _resettingProfile = false;
@@ -193,9 +195,9 @@ class _ReleaseInformationSectionState
   }
 
   void _showMessage(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ref
+        .read(uiNotificationCenterProvider.notifier)
+        .showInfo(message, deduplicationKey: 'release-info:$message');
   }
 
   @override

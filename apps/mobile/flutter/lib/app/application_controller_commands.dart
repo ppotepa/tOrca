@@ -49,7 +49,6 @@ extension ApplicationControllerCommands on ApplicationController {
     UiOperationKey.pairingSubmit,
     'Submitting pairing code',
     () => _submitPairingCodeCore(code),
-    throwOnFailure: true,
   );
 
   Future<InviteCode?> refreshInviteCode({bool quietWhenPending = false}) =>
@@ -341,7 +340,9 @@ extension ApplicationControllerCommands on ApplicationController {
     }
   }
 
-  Future<InviteCode?> _refreshInviteCodeCore({bool quietWhenPending = false}) async {
+  Future<InviteCode?> _refreshInviteCodeCore({
+    bool quietWhenPending = false,
+  }) async {
     if (!state.connectionReadiness.canPerform(ConnectionOperation.pair)) {
       if (!quietWhenPending) {
         state = state.copyWith(

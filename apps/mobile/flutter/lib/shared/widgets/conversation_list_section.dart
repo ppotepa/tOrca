@@ -276,9 +276,7 @@ class ConversationListSection extends ConsumerWidget {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: Text(context.l10n.conversationClearHistoryTitle),
-        content: Text(
-          context.l10n.conversationClearHistoryDescription,
-        ),
+        content: Text(context.l10n.conversationClearHistoryDescription),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
@@ -299,7 +297,7 @@ class ConversationListSection extends ConsumerWidget {
       await runtime.deleteMessageLocal(message.id);
     }
     final appController = ref.read(appControllerProvider.notifier);
-    await appController.refreshData(forcePairing: false, allowAutoTorka: false);
+    await appController.refreshData();
     if (selectedConversation == conversation.id) {
       await appController.openConversation(conversation.id);
     }

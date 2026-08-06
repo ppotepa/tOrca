@@ -26,10 +26,7 @@ void main() {
     expect(enginePairing, contains('BeginVerified'));
     expect(enginePairing, contains('put_conversation_mls_snapshot'));
     expect(enginePairing, contains('put_pending_welcome'));
-    expect(
-      release,
-      contains('No additional `Verify contact` action is required'),
-    );
+    expect(release, contains('No additional verification action is required'));
     expect(release, contains('verified contact and an active'));
   });
 }

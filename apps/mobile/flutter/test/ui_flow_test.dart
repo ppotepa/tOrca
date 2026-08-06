@@ -20,6 +20,7 @@ import 'package:torchat_mobile/core/runtime/runtime_payload.dart';
 import 'package:torchat_mobile/shared/widgets/action_tile.dart';
 import 'package:torchat_mobile/platform/desktop/desktop_workspace.dart';
 import 'package:torchat_mobile/locales/generated/app_localizations.dart';
+import 'package:torchat_mobile/core/application_state/application_snapshot.dart';
 
 final _statefulRuntimes = <_StatefulRuntime>[];
 
@@ -43,7 +44,9 @@ void main() {
   RuntimeFixture fixture() => RuntimeFixture.fromMap(
     Map<String, dynamic>.from(
       jsonDecode(
-            File('../../../common/internal-runtime-fixtures.json').readAsStringSync(),
+            File(
+              '../../../common/internal-runtime-fixtures.json',
+            ).readAsStringSync(),
           )
           as Map,
     ),
@@ -252,79 +255,6 @@ void main() {
   });
 
   test(
-    'auto-paired Torka starts a conversation even when the contact still has a fallback nickname',
-    () async {
-      debugTorkaPairingCodeOverride = '1234 5678';
-      addTearDown(() {
-        debugTorkaPairingCodeOverride = null;
-      });
-
-      final runtime = _StatefulRuntime();
-      final container = ProviderContainer(
-        overrides: [clientRuntimeProvider.overrideWithValue(runtime)],
-      );
-      addTearDown(container.dispose);
-
-      final controller = container.read(appControllerProvider.notifier);
-      unawaited(controller.initialize());
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-      expect(runtime.submitPairingCalls, 1);
-      expect(container.read(appControllerProvider).conversations, isEmpty);
-
-      runtime.publishTorkaContactWithoutConversation();
-      await Future<void>.delayed(Duration.zero);
-      await controller.refreshData();
-      for (var attempt = 0; attempt < 20; attempt += 1) {
-        if (container
-            .read(appControllerProvider)
-            .conversations
-            .any(
-              (conversation) => conversation.contactId == 'installation-torka',
-            )) {
-          break;
-        }
-        await Future<void>.delayed(const Duration(milliseconds: 10));
-      }
-
-      final state = container.read(appControllerProvider);
-      expect(state.contacts.single.id, 'installation-torka');
-      expect(
-        state.conversations.map((item) => item.contactId),
-        contains('installation-torka'),
-      );
-    },
-  );
-
-  test(
-    'existing fallback-named Torka contact is still recognized after controller restart',
-    () async {
-      debugTorkaPairingCodeOverride = '1234 5678';
-      addTearDown(() {
-        debugTorkaPairingCodeOverride = null;
-      });
-
-      final runtime = _StatefulRuntime();
-      runtime.publishTorkaContactWithoutConversation();
-      final container = ProviderContainer(
-        overrides: [clientRuntimeProvider.overrideWithValue(runtime)],
-      );
-      addTearDown(container.dispose);
-
-      final controller = container.read(appControllerProvider.notifier);
-      await controller.initialize();
-      await controller.refreshData();
-
-      final state = container.read(appControllerProvider);
-      expect(runtime.submitPairingCalls, 0);
-      expect(state.contacts.single.id, 'installation-torka');
-      expect(
-        state.conversations.map((item) => item.contactId),
-        contains('installation-torka'),
-      );
-    },
-  );
-
-  test(
     'startup opens the local shell before the local P2P endpoint is ready',
     () async {
       final runtime = _StatefulRuntime(emitPeerReady: false);
@@ -346,74 +276,6 @@ void main() {
             .firstWhere((step) => step.kind == StartupStepKind.communication)
             .state,
         StartupStepState.ready,
-      );
-    },
-  );
-
-  test(
-    'manual pairing cancels the blocking Torka request before retrying',
-    () async {
-      debugTorkaPairingCodeOverride = '1234 5678';
-      addTearDown(() {
-        debugTorkaPairingCodeOverride = null;
-      });
-
-      final runtime = _StatefulRuntime();
-      runtime.seedOutgoingTorkaRequest();
-      final container = ProviderContainer(
-        overrides: [clientRuntimeProvider.overrideWithValue(runtime)],
-      );
-      addTearDown(container.dispose);
-
-      final controller = container.read(appControllerProvider.notifier);
-      await controller.initialize();
-      runtime.resetSubmitPairingMetrics();
-
-      await controller.submitPairingCode('1234 5678');
-
-      final state = container.read(appControllerProvider);
-      expect(runtime.cancelPairingCalls, ['pairing-out']);
-      expect(runtime.lastSubmittedPairingCode, '12345678');
-      expect(runtime.submitPairingCalls, 1);
-      expect(state.outbox, isNotEmpty);
-      expect(state.outbox.last.status, InviteState.pending);
-    },
-  );
-
-  test(
-    'Torka watchdog materializes the contact even when no runtime event arrives',
-    () async {
-      debugTorkaPairingCodeOverride = '1234 5678';
-      debugTorkaWatchdogIntervalOverride = const Duration(milliseconds: 5);
-      debugTorkaWatchdogMaxAttemptsOverride = 20;
-      addTearDown(() {
-        debugTorkaPairingCodeOverride = null;
-        debugTorkaWatchdogIntervalOverride = null;
-        debugTorkaWatchdogMaxAttemptsOverride = null;
-      });
-
-      final runtime = _StatefulRuntime()
-        ..publishSilentTorkaContactWithoutConversationAfter(
-          const Duration(milliseconds: 15),
-        );
-      final container = ProviderContainer(
-        overrides: [clientRuntimeProvider.overrideWithValue(runtime)],
-      );
-      addTearDown(container.dispose);
-
-      final controller = container.read(appControllerProvider.notifier);
-      await controller.initialize();
-
-      await Future<void>.delayed(const Duration(milliseconds: 60));
-
-      final state = container.read(appControllerProvider);
-      expect(
-        state.contacts.map((contact) => contact.id),
-        contains('installation-torka'),
-      );
-      expect(
-        state.conversations.map((conversation) => conversation.contactId),
-        contains('installation-torka'),
       );
     },
   );
@@ -632,9 +494,12 @@ void main() {
         'sender': {'nickname': 'Bob'},
       }),
     ];
-    // Pairing is now owned by AppState's projection slice; the process-wide
-    // store is no longer a hidden fallback source of truth.
-    final state = AppState(pairingInboxItems: inbox);
+    // Pairing is now owned by the revisioned application projection; the
+    // process-wide pairing store is no longer a hidden fallback source of
+    // truth.
+    final state = AppState(
+      applicationSnapshot: ApplicationSnapshot(pairingInbox: inbox),
+    );
 
     expect(state.activeInviteCount, 1);
   });
@@ -1267,6 +1132,19 @@ class _EventRuntime implements ClientRuntime {
 
   @override
   Future<void> updateAppVisibility(bool foreground) async {}
+  @override
+  Future<void> setConversationFocus(
+    String conversationId,
+    bool focused,
+  ) async {}
+  @override
+  Future<List<Map<String, dynamic>>> listDeadLetters() async => const [];
+  @override
+  Future<void> disposeRuntime() async {}
+  @override
+  Future<Map<String, dynamic>?> runtimeSnapshot() async => null;
+  @override
+  Future<ApplicationSnapshot?> applicationSnapshot() async => null;
 }
 
 class _StreamRuntime extends _EventRuntime {
@@ -1346,40 +1224,8 @@ class _StatefulRuntime implements ClientRuntime {
     ];
   }
 
-  void publishTorkaContactWithoutConversation() {
-    _contacts = [_torka];
-    _conversations = [];
-    _events.add(DataChangedEvent(EngineContract.changed));
-  }
-
   void clearConversations() {
     _conversations = [];
-  }
-
-  void publishSilentTorkaContactWithoutConversationAfter(Duration delay) {
-    Future<void>.delayed(delay, () {
-      _contacts = [_torka];
-      _conversations = [];
-    });
-  }
-
-  void seedOutgoingTorkaRequest() {
-    _outbox = [
-      PairingItem(
-        id: 'pairing-out',
-        peer: _torka,
-        status: InviteState.pending,
-        availableActions: const [PairingAvailableAction.cancel],
-        expiresAt: 1760000060,
-        received: false,
-      ),
-    ];
-  }
-
-  void resetSubmitPairingMetrics() {
-    submitPairingCalls = 0;
-    lastSubmittedPairingCode = null;
-    cancelPairingCalls.clear();
   }
 
   @override
@@ -1721,4 +1567,36 @@ class _StatefulRuntime implements ClientRuntime {
 
   @override
   Future<void> updateAppVisibility(bool foreground) async {}
+  @override
+  Future<void> setConversationFocus(
+    String conversationId,
+    bool focused,
+  ) async {}
+  @override
+  Future<List<Map<String, dynamic>>> listDeadLetters() async => const [];
+  @override
+  Future<void> disposeRuntime() async {}
+  @override
+  Future<Map<String, dynamic>?> runtimeSnapshot() async => null;
+
+  @override
+  Future<ApplicationSnapshot?> applicationSnapshot() async =>
+      ApplicationSnapshot(
+        schemaVersion: 2,
+        generation: 1,
+        createdAtMs: 1,
+        identity: RuntimeIdentity(
+          installationId: _profile.installationId,
+          fingerprint: _profile.fingerprint,
+          publicKey: _profile.publicKey,
+        ),
+        profile: _profile,
+        contacts: List<ContactRecord>.from(_contacts),
+        conversations: List<ConversationSummary>.from(_conversations),
+        pairingInbox: List<PairingItem>.from(_inbox),
+        pairingOutbox: List<PairingItem>.from(_outbox),
+        pendingInbox: _inbox.length,
+        pendingOutbox: _outbox.length,
+        peerEndpointAvailable: emitPeerReady,
+      );
 }

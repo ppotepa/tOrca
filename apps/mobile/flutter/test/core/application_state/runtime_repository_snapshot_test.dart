@@ -9,22 +9,25 @@ import 'package:torchat_mobile/core/runtime/runtime_repository.dart';
 void main() {
   setUp(ApplicationStateStore.shared.clear);
 
-  test('shell and pairing are loaded from one application projection', () async {
-    final runtime = _SnapshotRuntime();
-    final repository = RuntimeRepository(runtime);
+  test(
+    'shell and pairing are loaded from one application projection',
+    () async {
+      final runtime = _SnapshotRuntime();
+      final repository = RuntimeRepository(runtime);
 
-    final snapshot = await repository.applicationSnapshot();
+      final snapshot = await repository.applicationSnapshot();
 
-    expect(snapshot.profile.nickname, 'Alice');
-    expect(snapshot.contacts.single.nickname, 'Bob');
-    expect(snapshot.conversations.single.preview, 'hello');
-    expect(snapshot.pairingInbox.single.id, 'inbox');
-    expect(snapshot.pairingOutbox.single.id, 'outbox');
-    expect(snapshot.pendingInbox, 1);
-    expect(snapshot.pendingOutbox, 1);
-    expect(runtime.applicationSnapshotCalls, 1);
-    expect(runtime.listPairingsCalls, 0);
-  });
+      expect(snapshot.profile.nickname, 'Alice');
+      expect(snapshot.contacts.single.nickname, 'Bob');
+      expect(snapshot.conversations.single.preview, 'hello');
+      expect(snapshot.pairingInbox.single.id, 'inbox');
+      expect(snapshot.pairingOutbox.single.id, 'outbox');
+      expect(snapshot.pendingInbox, 1);
+      expect(snapshot.pendingOutbox, 1);
+      expect(runtime.applicationSnapshotCalls, 1);
+      expect(runtime.listPairingsCalls, 0);
+    },
+  );
 
   test('forced application refresh performs one projection request', () async {
     final runtime = _SnapshotRuntime();
@@ -589,4 +592,19 @@ class _SnapshotRuntime implements ClientRuntime, RuntimeProjectionProvider {
 
   @override
   Future<void> updateAppVisibility(bool foreground) async {}
+
+  @override
+  Future<void> setConversationFocus(
+    String conversationId,
+    bool focused,
+  ) async {}
+
+  @override
+  Future<List<Map<String, dynamic>>> listDeadLetters() async => const [];
+
+  @override
+  Future<void> disposeRuntime() async {}
+
+  @override
+  Future<Map<String, dynamic>?> runtimeSnapshot() async => null;
 }

@@ -56,6 +56,9 @@ void main() {
     expect(bridge, contains("snapshot['serviceAlive']"));
     expect(bridge, isNot(contains('EngineContract.listMessages')));
     expect(runtime, isNot(contains('ApplicationStateStore.shared.hydrate')));
-    expect(runtime, contains('RuntimeRepository owns the'));
+    expect(
+      runtime,
+      contains('belong to the revisioned application projection'),
+    );
   });
 }

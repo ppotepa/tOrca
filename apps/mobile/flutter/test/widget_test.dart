@@ -124,6 +124,19 @@ class _SplashRuntime implements ClientRuntime {
   Future<void> sendReadReceipts(String conversationId) async {}
   @override
   Future<void> updateAppVisibility(bool foreground) async {}
+  @override
+  Future<void> setConversationFocus(
+    String conversationId,
+    bool focused,
+  ) async {}
+  @override
+  Future<List<Map<String, dynamic>>> listDeadLetters() async => const [];
+  @override
+  Future<void> disposeRuntime() async {}
+  @override
+  Future<Map<String, dynamic>?> runtimeSnapshot() async => null;
+  @override
+  Future<ApplicationSnapshot?> applicationSnapshot() async => null;
 }
 
 class _AttachedRuntime extends _SplashRuntime
@@ -225,14 +238,12 @@ class _AttachedRuntime extends _SplashRuntime
 
 void main() {
   setUp(() {
-    SharedPreferences.setMockInitialValues({
-      'torchat.locale.preference': 'pl',
-    });
+    SharedPreferences.setMockInitialValues({'torchat.locale.preference': 'pl'});
     ApplicationStateStore.shared.clear();
   });
 
   testWidgets('shows TorChat splash before runtime bootstrap', (tester) async {
-    await tester.pumpWidget(const TorChatMobileApp(runtime: _SplashRuntime()));
+    await tester.pumpWidget(TorChatMobileApp(runtime: _SplashRuntime()));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
     expect(find.text('Prywatne wiadomości przez Tor'), findsOneWidget);
@@ -245,9 +256,7 @@ void main() {
       await tester.binding.setSurfaceSize(const Size(1200, 800));
       addTearDown(() => tester.binding.setSurfaceSize(null));
 
-      await tester.pumpWidget(
-        const TorChatMobileApp(runtime: _AttachedRuntime()),
-      );
+      await tester.pumpWidget(TorChatMobileApp(runtime: _AttachedRuntime()));
       await tester.pump(const Duration(seconds: 2));
 
       expect(find.text('Bob'), findsNothing);

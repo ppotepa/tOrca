@@ -110,7 +110,6 @@ void main() {
           theme: buildRetroDarkTheme(),
           home: SettingsView(
             nickname: 'torca',
-            torStatus: 'online',
             themePreferences: const TorChatThemePreferences(),
             onThemeFamilyChanged: (family) => selectedFamily = family,
             onBrightnessChanged: (_) {},

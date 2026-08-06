@@ -1,52 +1,61 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:torchat_mobile/core/problems/runtime_problem.dart';
 import 'package:torchat_mobile/core/problems/runtime_problem_classifier.dart';
 
+RuntimeProblem _problem(
+  RuntimeErrorCategory category, {
+  RuntimeErrorCode code = RuntimeErrorCode.internal,
+}) => RuntimeProblem(code: code, category: category, retryable: false);
+
 void main() {
-  test('stale Welcome is diagnostic only', () {
-    final result = classifyRuntimeProblem(
-      'Nie można dokończyć starego zaproszenia. Poproś kontakt o nowy kod.',
-    );
-    expect(result.code, 'pairing_stale_welcome');
-    expect(result.userVisible, isFalse);
-  });
-
-  test('relay recovery is represented by connection status', () {
-    final result = classifyRuntimeProblem(
-      'relay bootstrap retry 3 failed: relay transport error',
-    );
-    expect(result.code, 'connection_recovering');
-    expect(result.userVisible, isFalse);
-  });
-
-  test('relay gateway responses are recoverable connection status', () {
-    for (final message in [
-      'relay HTTP 502: Bad Gateway',
-      'relay HTTP 503: Service Unavailable',
-      'relay HTTP 504: Gateway Timeout',
+  test('transport and availability problems map to connection status', () {
+    for (final category in [
+      RuntimeErrorCategory.transport,
+      RuntimeErrorCategory.availability,
     ]) {
-      final result = classifyRuntimeProblem(message);
-      expect(result.code, 'connection_recovering');
+      final result = classifyRuntimeProblem(_problem(category));
+      expect(result.disposition, RuntimeProblemDisposition.connectionStatus);
       expect(result.userVisible, isFalse);
     }
   });
 
-  test('automation deferrals never reach the user', () {
+  test('persistence and security problems remain fatal', () {
+    for (final category in [
+      RuntimeErrorCategory.persistence,
+      RuntimeErrorCategory.security,
+    ]) {
+      final result = classifyRuntimeProblem(_problem(category));
+      expect(result.disposition, RuntimeProblemDisposition.fatal);
+      expect(result.userVisible, isTrue);
+    }
+  });
+
+  test('validation and domain problems are local and visible', () {
+    for (final category in [
+      RuntimeErrorCategory.validation,
+      RuntimeErrorCategory.domain,
+    ]) {
+      final result = classifyRuntimeProblem(_problem(category));
+      expect(result.disposition, RuntimeProblemDisposition.localOperation);
+      expect(result.userVisible, isTrue);
+    }
+  });
+
+  test('internal problems remain fatal', () {
     final result = classifyRuntimeProblem(
-      'message poll deferred: contact must be verified before sending',
+      _problem(RuntimeErrorCategory.internal),
     );
-    expect(result.code, 'automation_deferred');
-    expect(result.userVisible, isFalse);
-  });
-
-  test('storage failures remain visible and fatal', () {
-    final result = classifyRuntimeProblem('SQLite integrity_check failed');
-    expect(result.code, 'runtime_fatal');
+    expect(result.disposition, RuntimeProblemDisposition.fatal);
     expect(result.userVisible, isTrue);
   });
 
-  test('ordinary operation errors remain local and visible', () {
-    final result = classifyRuntimeProblem('Nieprawidłowy kod parowania');
-    expect(result.code, 'operation_failed');
-    expect(result.userVisible, isTrue);
+  test('classification exposes the structured code wire value', () {
+    final result = classifyRuntimeProblem(
+      _problem(
+        RuntimeErrorCategory.persistence,
+        code: RuntimeErrorCode.storageFailed,
+      ),
+    );
+    expect(result.code, 'storage_failed');
   });
 }

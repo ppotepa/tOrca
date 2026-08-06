@@ -27,32 +27,26 @@ void main() {
     expect(shell, isNot(contains('ActionStatusStrip')));
   });
 
-  test(
-    'desktop workspace is compact and resizable without placeholder tabs',
-    () {
-      final workspace = File(
-        'lib/platform/desktop/desktop_workspace.dart',
-      ).readAsStringSync();
-      final sharedShell = File(
-        '../../../packages/torchat-flutter-ui/lib/core/presentation/desktop_workspace_shell.dart',
-      ).readAsStringSync();
-      final splitter = File(
-        '../../../packages/torchat-flutter-ui/lib/core/presentation/resizable_split_pane.dart',
-      ).readAsStringSync();
+  test('desktop workspace is compact and resizable without placeholder tabs', () {
+    final workspace = File(
+      'lib/platform/desktop/desktop_workspace.dart',
+    ).readAsStringSync();
+    final sharedShell = File(
+      '../../../packages/torchat-flutter-ui/lib/core/presentation/desktop_workspace_shell.dart',
+    ).readAsStringSync();
+    final splitter = File(
+      '../../../packages/torchat-flutter-ui/lib/core/presentation/resizable_split_pane.dart',
+    ).readAsStringSync();
 
-      expect(workspace, contains('DesktopWorkspaceShell('));
-      expect(sharedShell, contains('ResizableSplitPane('));
-      expect(workspace, isNot(contains("'Grupy'")));
-      expect(
-        workspace,
-        isNot(contains('Nie mieszamy ich ze zwykłymi czatami')),
-      );
-      expect(workspace, contains('context.l10n.appTitle'));
-      expect(workspace, isNot(contains('PeerServerIndicator')));
-      expect(splitter, contains('SystemMouseCursors.resizeColumn'));
-      expect(splitter, contains('torchat.desktop.sidebar.width'));
-    },
-  );
+    expect(workspace, contains('DesktopWorkspaceShell('));
+    expect(sharedShell, contains('ResizableSplitPane('));
+    expect(workspace, isNot(contains("'Grupy'")));
+    expect(workspace, isNot(contains('Nie mieszamy ich ze zwykłymi czatami')));
+    expect(workspace, contains('context.l10n.appTitle'));
+    expect(workspace, isNot(contains('PeerServerIndicator')));
+    expect(splitter, contains('SystemMouseCursors.resizeColumn'));
+    expect(splitter, contains('torchat.desktop.sidebar.width'));
+  });
 
   test('active chat UI has no voice or video controls', () {
     final chat = File(
@@ -73,30 +67,23 @@ void main() {
   });
 
   test('new conversations use the canonical runtime projection', () {
-    final notificationController = File(
-      'lib/app/notification_safe_app_controller.dart',
-    ).readAsStringSync();
-    final baseController = File(
-      'lib/app/app_controller_base.dart',
+    final commands = File(
+      'lib/app/application_controller_commands.dart',
     ).readAsStringSync();
 
-    expect(notificationController, isNot(contains('ConversationSummary(')));
+    expect(commands, isNot(contains('ConversationSummary(')));
+    expect(commands, isNot(contains('ConversationState.pending')));
     expect(
-      notificationController,
-      isNot(contains('ConversationState.pending')),
+      commands,
+      contains('Future<void> openOrStartConversation(ContactRecord contact)'),
     );
-    expect(
-      notificationController,
-      isNot(contains('Future<void> openOrStartConversation')),
-    );
-    expect(
-      baseController,
-      contains('_repository.activateConversation(contact.id)'),
-    );
+    expect(commands, contains('_repository.activateConversation(contact.id)'));
   });
 
   test('busy surfaces avoid flicker and block their own component', () {
-    final busy = File('../../../packages/torchat-flutter-ui/lib/async/busy_surface.dart').readAsStringSync();
+    final busy = File(
+      '../../../packages/torchat-flutter-ui/lib/async/busy_surface.dart',
+    ).readAsStringSync();
 
     expect(busy, contains('Duration(milliseconds: 150)'));
     expect(busy, contains('Duration(milliseconds: 300)'));
