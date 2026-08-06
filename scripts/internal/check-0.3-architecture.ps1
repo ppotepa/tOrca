@@ -39,6 +39,11 @@ foreach ($forbidden in @('RuntimeStorage', 'impl<T:', '.into_iter().find(')) {
     }
 }
 
+$storageCapabilities = Get-Content -Raw -LiteralPath (Require-File 'packages/torchat-runtime/src/storage_capabilities.rs')
+if ($storageCapabilities.Contains('impl<T: RuntimeStorage + ?Sized> OperationStorage')) {
+    throw 'OperationStorage must be implemented by active adapters, not the RuntimeStorage compatibility aggregate'
+}
+
 $problemClassifier = Get-Content -Raw -LiteralPath (Require-File 'apps/mobile/flutter/lib/core/problems/runtime_problem_classifier.dart')
 foreach ($forbidden in @('.toLowerCase()', '.contains(', 'String message')) {
     if ($problemClassifier.Contains($forbidden)) {
@@ -69,7 +74,9 @@ foreach ($required in @(
     'packages/torchat-storage/src/storage/point_lookup_queries.rs',
     'packages/torchat-storage/src/storage/point_lookup_repository.rs',
     'packages/torchat-storage/src/storage/transactional_point_lookup.rs',
+    'packages/torchat-storage/src/storage/operation_queries.rs',
     'packages/torchat-storage/src/storage/operation_repository.rs',
+    'packages/torchat-storage/src/storage/transactional_operation_storage.rs',
     'packages/torchat-storage/sql/migrations/004_durable_operations.sql',
     'packages/torchat-client-engine/src/actor/command_pipeline/stages.rs',
     'packages/torchat-client-engine/src/generated/command_contract.rs',
@@ -99,11 +106,20 @@ foreach ($required in @('impl PointLookupStorage for SqliteRuntimeStorage', 'poi
 }
 
 $operationRepository = Get-Content -Raw -LiteralPath (Require-File 'packages/torchat-storage/src/storage/operation_repository.rs')
-if (-not $operationRepository.Contains('impl OperationStorage for ClientDatabase')) {
-    throw 'SQLite durable operation repository is not integrated'
+foreach ($required in @('impl OperationStorage for ClientDatabase', 'operation_queries::operation_by_id', 'operation_queries::put_operation')) {
+    if (-not $operationRepository.Contains($required)) {
+        throw "SQLite durable operation repository is not integrated: $required"
+    }
 }
 if ($operationRepository.Contains('allow(dead_code)')) {
     throw 'durable operation repository contains dead-code suppression'
+}
+
+$transactionalOperations = Get-Content -Raw -LiteralPath (Require-File 'packages/torchat-storage/src/storage/transactional_operation_storage.rs')
+foreach ($required in @('impl OperationStorage for SqliteRuntimeStorage', 'operation_queries::operation_by_id', 'operation_queries::put_operation', 'operation_queries::pending_operations')) {
+    if (-not $transactionalOperations.Contains($required)) {
+        throw "transactional durable operation storage is not integrated: $required"
+    }
 }
 
 Write-Host '[torca] 0.3 architecture ownership check passed'
