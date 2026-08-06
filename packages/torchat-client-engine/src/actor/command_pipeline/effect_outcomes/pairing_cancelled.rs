@@ -8,7 +8,13 @@ impl ClientEngineActor {
     ) -> RelayCommitResult {
         self.with_runtime_idempotent(
             idempotency,
-            |runtime| runtime.confirm_pairing_cancelled(&pairing_id),
+            |runtime| {
+                torchat_runtime::ClientPairingFeatureFacade::feature_confirm_pairing_cancelled(
+                    runtime,
+                    &pairing_id,
+                )
+                .map(|_| ())
+            },
             |_| Ok(ResponsePayload::Empty),
         )
         .map(|(_, events)| (ResponsePayload::Empty, events))
