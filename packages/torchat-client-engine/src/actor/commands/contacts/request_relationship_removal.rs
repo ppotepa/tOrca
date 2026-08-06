@@ -35,7 +35,7 @@ impl ClientEngineActor {
                     &removal_id,
                     removed_at,
                 )?;
-                if !result.changes.is_empty() {
+                if !result.changes.sections.is_empty() {
                     for kind in [
                         "operations",
                         "relationships",
