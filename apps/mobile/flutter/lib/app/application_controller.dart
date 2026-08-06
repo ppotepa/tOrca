@@ -18,7 +18,7 @@ import '../core/problems/runtime_problem_from_error.dart';
 import '../core/runtime/runtime_repository.dart';
 import '../locales/domain/user_problem.dart';
 import '../locales/domain/user_problem_code.dart';
-import '../platform/platform_services.dart';
+import '../platform/providers/platform_port_providers.dart';
 import '../shared/formatters/invite_code.dart';
 import '../shared/formatters/operation_status.dart';
 import 'application_notification_coordinator.dart';
@@ -32,7 +32,7 @@ export 'application_state.dart';
 part 'application_controller_commands.dart';
 
 final clientRuntimeProvider = Provider<ClientRuntime>(
-  (ref) => createClientRuntime(),
+  (ref) => ref.watch(runtimeHostProvider),
 );
 
 final runtimeRepositoryProvider = Provider<RuntimeRepository>(
@@ -56,6 +56,7 @@ class ApplicationController extends Notifier<AppState>
     final presence = ref.read(contactPresenceStoreProvider);
     _notifications = ApplicationNotificationCoordinator(
       repository: _repository,
+      notificationService: ref.watch(notificationServiceProvider),
       readState: () => state,
       writeState: (next) => state = next,
     );
