@@ -1,6 +1,6 @@
 use crate::{
     ClientRuntime, FeatureResult, PointLookupStorage, RelationshipStorage, RuntimeClock,
-    RuntimeEvent, RuntimeResult, RuntimeTransport,
+    RuntimeEvent, RuntimeResult, RuntimeStorage, RuntimeTransport,
     features::relationships::{RelationshipRemoval, RelationshipsFeature},
 };
 
@@ -27,7 +27,7 @@ pub trait ClientRelationshipFeatureFacade {
 
 impl<S, T, C> ClientRelationshipFeatureFacade for ClientRuntime<S, T, C>
 where
-    S: RelationshipStorage + PointLookupStorage,
+    S: RuntimeStorage + RelationshipStorage + PointLookupStorage,
     T: RuntimeTransport,
     C: RuntimeClock,
 {
@@ -77,7 +77,7 @@ where
 
 fn publish<S, T, C>(runtime: &mut ClientRuntime<S, T, C>, installation_id: &str)
 where
-    S: RelationshipStorage + PointLookupStorage,
+    S: RuntimeStorage + RelationshipStorage + PointLookupStorage,
     T: RuntimeTransport,
     C: RuntimeClock,
 {
@@ -87,7 +87,7 @@ where
         });
     }
     runtime.session_mut().push_event(RuntimeEvent::PeerConnectionChanged {
-        installation_id: installation_id.to_owned(),
+        contact_id: installation_id.to_owned(),
         status: crate::PeerConnectionStatus::Offline,
     });
 }
