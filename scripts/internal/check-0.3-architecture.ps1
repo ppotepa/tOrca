@@ -122,4 +122,23 @@ foreach ($required in @('impl OperationStorage for SqliteRuntimeStorage', 'opera
     }
 }
 
+$commandProcessor = Get-Content -Raw -LiteralPath (Require-File 'packages/torchat-client-engine/src/actor/command_pipeline/processor.rs')
+foreach ($forbidden in @(
+    'let _ = self.database.save_processed_command',
+    'let Ok(Some((stored_type, result_json, _revision))) ='
+)) {
+    if ($commandProcessor.Contains($forbidden)) {
+        throw "command pipeline silently ignores idempotency persistence: $forbidden"
+    }
+}
+foreach ($required in @(
+    'match self.database.load_processed_command(command_id)',
+    'let idempotency_result = (|| -> EngineResult<()>',
+    'return self.command_error_result(envelope.request_id, error)'
+)) {
+    if (-not $commandProcessor.Contains($required)) {
+        throw "command pipeline is missing explicit idempotency error handling: $required"
+    }
+}
+
 Write-Host '[torca] 0.3 architecture ownership check passed'
