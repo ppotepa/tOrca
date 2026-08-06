@@ -140,6 +140,26 @@ foreach ($forbidden in @('pairing_inbox()?.into_iter()', 'pairing_outbox()?.into
     }
 }
 
+$contactsFeature = Get-Content -Raw -LiteralPath (Require-File 'packages/torchat-runtime/src/features/contacts/mod.rs')
+foreach ($required in @('contact_by_installation_id', 'update_settings', 'pub fn verify')) {
+    if (-not $contactsFeature.Contains($required)) {
+        throw "contacts feature is missing migrated command behavior: $required"
+    }
+}
+if ($contactsFeature.Contains('contacts()?.into_iter()')) {
+    throw 'contacts feature performs a forbidden collection scan'
+}
+
+$conversationsFeature = Get-Content -Raw -LiteralPath (Require-File 'packages/torchat-runtime/src/features/conversations/mod.rs')
+foreach ($required in @('conversation_for_contact', 'activate_for_contact')) {
+    if (-not $conversationsFeature.Contains($required)) {
+        throw "conversations feature is missing migrated command behavior: $required"
+    }
+}
+if ($conversationsFeature.Contains('conversations()?.into_iter()')) {
+    throw 'conversations feature performs a forbidden collection scan'
+}
+
 $featureFacade = Get-Content -Raw -LiteralPath (Require-File 'packages/torchat-runtime/src/feature_facade.rs')
 foreach ($required in @(
     'feature_prepare_accept_pairing',
@@ -147,10 +167,13 @@ foreach ($required in @(
     'feature_reject_pairing',
     'feature_archive_pairing',
     'feature_prepare_cancel_pairing',
-    'feature_confirm_pairing_cancelled'
+    'feature_confirm_pairing_cancelled',
+    'feature_update_contact_settings',
+    'feature_verify_contact',
+    'feature_start_conversation'
 )) {
     if (-not $featureFacade.Contains($required)) {
-        throw "feature facade does not expose the migrated pairing command: $required"
+        throw "feature facade does not expose the migrated command: $required"
     }
 }
 
@@ -165,6 +188,23 @@ foreach ($entry in $pairingHandlerRequirements.GetEnumerator()) {
     $handler = Get-Content -Raw -LiteralPath (Require-File $entry.Key)
     if (-not $handler.Contains('ClientRuntimeFeatureFacade') -or -not $handler.Contains($entry.Value)) {
         throw "pairing handler '$($entry.Key)' bypasses the feature facade"
+    }
+}
+
+$featureCommandRequirements = @{
+    'packages/torchat-client-engine/src/actor/commands/contacts/update_contact_settings.rs' = 'feature_update_contact_settings'
+    'packages/torchat-client-engine/src/actor/commands/contacts/verify_contact.rs' = 'feature_verify_contact'
+    'packages/torchat-client-engine/src/actor/commands/conversations/start_conversation.rs' = 'feature_start_conversation'
+}
+foreach ($entry in $featureCommandRequirements.GetEnumerator()) {
+    $handler = Get-Content -Raw -LiteralPath (Require-File $entry.Key)
+    if (-not $handler.Contains('ClientRuntimeFeatureFacade') -or -not $handler.Contains($entry.Value)) {
+        throw "command handler '$($entry.Key)' bypasses the feature facade"
+    }
+    foreach ($forbidden in @('runtime.update_contact_settings', 'runtime.verify_contact', 'runtime.start_conversation')) {
+        if ($handler.Contains($forbidden)) {
+            throw "command handler '$($entry.Key)' still calls monolithic runtime behavior: $forbidden"
+        }
     }
 }
 

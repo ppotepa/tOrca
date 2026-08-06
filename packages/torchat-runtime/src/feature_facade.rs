@@ -1,9 +1,10 @@
 use crate::{
     CapabilityStorage, ChatMessage, ClientRuntime, ContactRecord, ContactStorage,
-    ConversationStorage, ConversationSummary, FeatureResult, InviteState, MessageStorage,
-    PairingCancelEffect, PairingPeerOutcome, PairingPreparation, PairingStorage, PointLookupStorage,
-    ReceiptSendEffect, ReceiptStorage, RelationshipStorage, RelationshipTransition, RuntimeClock,
-    RuntimeEvent, RuntimeResult, RuntimeSendEffect, RuntimeStorage, RuntimeTransport,
+    ContactTransportPolicy, ConversationStorage, ConversationSummary, FeatureResult, InviteState,
+    MessageStorage, PairingCancelEffect, PairingPeerOutcome, PairingPreparation, PairingStorage,
+    PointLookupStorage, ReceiptSendEffect, ReceiptStorage, RelationshipStorage,
+    RelationshipTransition, RuntimeClock, RuntimeError, RuntimeEvent, RuntimeResult,
+    RuntimeSendEffect, RuntimeStorage, RuntimeTransport,
     features::{
         contacts::ContactsFeature, conversations::ConversationsFeature, messaging::MessagingFeature,
         pairing::PairingFeature, peer::PeerFeature, presence::PresenceFeature,
@@ -25,6 +26,19 @@ pub trait ClientRuntimeFeatureFacade {
         &mut self,
         contact: ContactRecord,
     ) -> RuntimeResult<FeatureResult<ContactRecord>>;
+    fn feature_update_contact_settings(
+        &mut self,
+        installation_id: &str,
+        local_alias: Option<String>,
+        muted: bool,
+        blocked: bool,
+        transport_policy: Option<ContactTransportPolicy>,
+    ) -> RuntimeResult<FeatureResult<ContactRecord>>;
+    fn feature_verify_contact(
+        &mut self,
+        installation_id: &str,
+        now_ms: i64,
+    ) -> RuntimeResult<FeatureResult<()>>;
     fn feature_conversation_by_id(
         &mut self,
         conversation_id: &str,
@@ -37,6 +51,11 @@ pub trait ClientRuntimeFeatureFacade {
         &mut self,
         conversation: ConversationSummary,
     ) -> RuntimeResult<FeatureResult<ConversationSummary>>;
+    fn feature_start_conversation(
+        &mut self,
+        contact_id: &str,
+        now_ms: i64,
+    ) -> RuntimeResult<FeatureResult<bool>>;
     fn feature_mark_conversation_read(
         &mut self,
         conversation_id: &str,
@@ -134,6 +153,51 @@ where
         ContactsFeature::new(self.storage_mut()).save(contact)
     }
 
+    fn feature_update_contact_settings(
+        &mut self,
+        installation_id: &str,
+        local_alias: Option<String>,
+        muted: bool,
+        blocked: bool,
+        transport_policy: Option<ContactTransportPolicy>,
+    ) -> RuntimeResult<FeatureResult<ContactRecord>> {
+        let result = ContactsFeature::new(self.storage_mut()).update_settings(
+            installation_id,
+            local_alias,
+            muted,
+            blocked,
+            transport_policy,
+        )?;
+        if !result.changes.sections.is_empty() {
+            self.session_mut().push_event(RuntimeEvent::Changed {
+                kind: Some("contacts".to_owned()),
+            });
+        }
+        Ok(result)
+    }
+
+    fn feature_verify_contact(
+        &mut self,
+        installation_id: &str,
+        now_ms: i64,
+    ) -> RuntimeResult<FeatureResult<()>> {
+        let contact_result = ContactsFeature::new(self.storage_mut()).verify(installation_id)?;
+        let conversation_result =
+            ConversationsFeature::new(self.storage_mut()).activate_for_contact(installation_id, now_ms)?;
+        let mut changes = contact_result.changes;
+        changes.merge(conversation_result.changes);
+        if changes.sections.is_empty() {
+            return Ok(FeatureResult::unchanged(()));
+        }
+        self.session_mut().push_event(RuntimeEvent::Changed {
+            kind: Some("contacts".to_owned()),
+        });
+        self.session_mut().push_event(RuntimeEvent::Changed {
+            kind: Some("conversations".to_owned()),
+        });
+        Ok(FeatureResult::changed((), changes))
+    }
+
     fn feature_conversation_by_id(
         &mut self,
         conversation_id: &str,
@@ -153,6 +217,25 @@ where
         conversation: ConversationSummary,
     ) -> RuntimeResult<FeatureResult<ConversationSummary>> {
         ConversationsFeature::new(self.storage_mut()).save(conversation)
+    }
+
+    fn feature_start_conversation(
+        &mut self,
+        contact_id: &str,
+        now_ms: i64,
+    ) -> RuntimeResult<FeatureResult<bool>> {
+        ContactsFeature::new(self.storage_mut())
+            .by_installation_id(contact_id)?
+            .ok_or_else(|| RuntimeError::NotFound("contact does not exist".to_owned()))?;
+        let conversation =
+            ConversationsFeature::new(self.storage_mut()).activate_for_contact(contact_id, now_ms)?;
+        if conversation.changes.sections.is_empty() {
+            return Ok(FeatureResult::unchanged(true));
+        }
+        self.session_mut().push_event(RuntimeEvent::Changed {
+            kind: Some("conversations".to_owned()),
+        });
+        Ok(FeatureResult::changed(true, conversation.changes))
     }
 
     fn feature_mark_conversation_read(

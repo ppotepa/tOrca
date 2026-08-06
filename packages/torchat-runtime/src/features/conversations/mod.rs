@@ -1,6 +1,6 @@
 use crate::{
-    ChangeSet, ConversationStorage, ConversationSummary, FeatureResult, PointLookupStorage,
-    RuntimeResult,
+    ChangeSet, ConversationState, ConversationStorage, ConversationSummary, FeatureResult,
+    PointLookupStorage, RuntimeResult,
 };
 
 pub struct ConversationsFeature<'a, S> {
@@ -33,6 +33,27 @@ where
         self.storage.put_conversation(conversation.clone())?;
         let changes = ChangeSet::default().with_conversation(conversation.id.clone());
         Ok(FeatureResult::changed(conversation, changes))
+    }
+
+    pub fn activate_for_contact(
+        &mut self,
+        installation_id: &str,
+        now_ms: i64,
+    ) -> RuntimeResult<FeatureResult<ConversationSummary>> {
+        let existing = self.storage.conversation_for_contact(installation_id)?;
+        let mut conversation = existing.unwrap_or_else(|| ConversationSummary {
+            id: installation_id.to_owned(),
+            contact_installation_id: installation_id.to_owned(),
+            status: ConversationState::Active,
+            last_message_preview: "Nowa rozmowa".to_owned(),
+            last_message_at: now_ms,
+            unread_count: 0,
+        });
+        if conversation.status == ConversationState::Active {
+            return Ok(FeatureResult::unchanged(conversation));
+        }
+        conversation.status = ConversationState::Active;
+        self.save(conversation)
     }
 
     pub fn mark_read(&mut self, conversation_id: &str) -> RuntimeResult<FeatureResult<()>> {
