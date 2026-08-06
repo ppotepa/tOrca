@@ -107,6 +107,12 @@ impl ChangeSet {
         self
     }
 
+    pub fn with_operation(mut self, id: impl Into<String>) -> Self {
+        self.sections.insert(ChangeSections::OPERATIONS);
+        self.entities.operation_ids.insert(id.into());
+        self
+    }
+
     pub fn from_runtime_event(event: &RuntimeEvent) -> Self {
         match event {
             RuntimeEvent::RuntimeReady { .. }
@@ -275,8 +281,6 @@ impl ChangePublisher {
         self.revision
     }
 
-    /// Commits persistence first, then advances exactly one projection revision.
-    /// Effects are returned to the caller and must be scheduled afterwards.
     pub fn commit<T, E>(
         &mut self,
         result: FeatureResult<T>,
