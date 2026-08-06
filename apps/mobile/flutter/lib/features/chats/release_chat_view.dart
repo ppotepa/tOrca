@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/rendering.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -830,7 +831,7 @@ class _MessageTimeline extends StatelessWidget {
         constraints: const BoxConstraints(maxWidth: 1080),
         child: ListView.builder(
           controller: controller,
-          cacheExtent: 320,
+          scrollCacheExtent: const ScrollCacheExtent.pixels(320),
           padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
           itemCount: messages.length,
           itemBuilder: (context, index) {
