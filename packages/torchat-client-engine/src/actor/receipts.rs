@@ -155,8 +155,6 @@ impl ClientEngineActor {
         });
         let exhausted = super::RetryPolicy::DELIVERY.exhausted(attempt) || age_exhausted;
         let retry_at = if exhausted {
-            // Keep the durable receipt record for diagnostics/reconciliation,
-            // but stop scheduling an unbounded retry loop.
             i64::MAX
         } else {
             self.clock.now_ms() + retry_backoff_ms(attempt)
@@ -182,10 +180,67 @@ impl ClientEngineActor {
         message_id: &str,
         outcome: MessageTransportOutcome,
     ) -> EngineResult<Vec<torchat_runtime::RuntimeEvent>> {
-        let parsed = uuid::Uuid::parse_str(message_id)
-            .map_err(|error| EngineError::InvalidCommand(error.to_string()))?;
-        let (_, runtime_events) =
-            self.with_runtime(|runtime| runtime.apply_message_transport_outcome(parsed, outcome))?;
+        let now_ms = self.clock.now_ms();
+        let (_, runtime_events) = self.with_runtime(|runtime| {
+            torchat_runtime::ClientRuntimeFeatureFacade::feature_apply_message_transport_outcome(
+                runtime,
+                message_id,
+                outcome,
+            )?;
+            torchat_runtime::ClientOperationFeatureFacade::feature_ensure_operation(
+                runtime,
+                message_id,
+                torchat_runtime::OperationType::MessageDelivery,
+                message_id,
+                now_ms,
+            )?;
+            match outcome {
+                MessageTransportOutcome::Delivered
+                | MessageTransportOutcome::PeerPersisted
+                | MessageTransportOutcome::PeerDelivered => {
+                    torchat_runtime::ClientOperationFeatureFacade::feature_complete_operation(
+                        runtime,
+                        message_id,
+                        now_ms,
+                    )?;
+                }
+                MessageTransportOutcome::PeerUnavailable
+                | MessageTransportOutcome::RetryableFailure => {
+                    torchat_runtime::ClientOperationFeatureFacade::feature_retry_operation(
+                        runtime,
+                        message_id,
+                        torchat_runtime::RetryClass::NetworkBackoff,
+                        torchat_runtime::RuntimeErrorCode::TransportUnavailable,
+                        now_ms,
+                    )?;
+                }
+                MessageTransportOutcome::PeerAuthenticationFailed => {
+                    torchat_runtime::ClientOperationFeatureFacade::feature_fail_operation(
+                        runtime,
+                        message_id,
+                        torchat_runtime::RuntimeErrorCode::CryptoFailed,
+                        now_ms,
+                    )?;
+                }
+                MessageTransportOutcome::PeerRejected => {
+                    torchat_runtime::ClientOperationFeatureFacade::feature_fail_operation(
+                        runtime,
+                        message_id,
+                        torchat_runtime::RuntimeErrorCode::Conflict,
+                        now_ms,
+                    )?;
+                }
+                MessageTransportOutcome::PermanentFailure => {
+                    torchat_runtime::ClientOperationFeatureFacade::feature_fail_operation(
+                        runtime,
+                        message_id,
+                        torchat_runtime::RuntimeErrorCode::TransportUnavailable,
+                        now_ms,
+                    )?;
+                }
+            }
+            Ok(())
+        })?;
         Ok(runtime_events)
     }
 
