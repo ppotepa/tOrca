@@ -8,21 +8,18 @@ impl ClientEngineActor {
     ) -> CommandHandlerResult {
         let now_ms = self.clock.now_ms();
         let now_secs = now_ms / 1_000;
-        let operation_id = idempotency.map(|context| context.command_id.clone());
         let mut runtime_events = Vec::new();
-        if let Some(operation_id) = operation_id.as_deref() {
-            let (_, mut events) = self.with_runtime(|runtime| {
-                torchat_runtime::ClientOperationFeatureFacade::feature_begin_operation(
-                    runtime,
-                    operation_id,
-                    torchat_runtime::OperationType::Pairing,
-                    &pairing_id,
-                    now_ms,
-                )
-                .map(|_| ())
-            })?;
-            runtime_events.append(&mut events);
-        }
+        let (_, mut operation_events) = self.with_runtime(|runtime| {
+            torchat_runtime::ClientOperationFeatureFacade::feature_begin_operation(
+                runtime,
+                &pairing_id,
+                torchat_runtime::OperationType::Pairing,
+                &pairing_id,
+                now_ms,
+            )
+            .map(|_| ())
+        })?;
+        runtime_events.append(&mut operation_events);
         let (_preparation, mut prepare_events): (PairingPreparation, _) =
             self.with_runtime(|runtime| {
                 torchat_runtime::ClientPairingFeatureFacade::feature_prepare_accept_pairing(
@@ -42,38 +39,28 @@ impl ClientEngineActor {
         match self.accept_invite(&offer) {
             Ok(mut accept_events) => runtime_events.append(&mut accept_events),
             Err(error) => {
-                if let Some(operation_id) = operation_id.as_deref() {
-                    let failed_at = self.clock.now_ms();
-                    let _ = self.with_runtime(|runtime| {
-                        torchat_runtime::ClientOperationFeatureFacade::feature_retry_operation(
-                            runtime,
-                            operation_id,
-                            torchat_runtime::RetryClass::NetworkBackoff,
-                            torchat_runtime::RuntimeErrorCode::TransportUnavailable,
-                            failed_at,
-                        )
-                        .map(|_| ())
-                    });
-                }
+                let failed_at = self.clock.now_ms();
+                let _ = self.with_runtime(|runtime| {
+                    torchat_runtime::ClientOperationFeatureFacade::feature_retry_operation(
+                        runtime,
+                        &pairing_id,
+                        torchat_runtime::RetryClass::NetworkBackoff,
+                        torchat_runtime::RuntimeErrorCode::TransportUnavailable,
+                        failed_at,
+                    )
+                    .map(|_| ())
+                });
                 return Err(error);
             }
         }
-        let completed_at = self.clock.now_ms();
         let (_, mut commit_events) = self.with_runtime_idempotent(
             idempotency,
             |runtime| {
                 torchat_runtime::ClientPairingFeatureFacade::feature_accept_received_pairing(
                     runtime,
                     &pairing_id,
-                )?;
-                if let Some(operation_id) = operation_id.as_deref() {
-                    torchat_runtime::ClientOperationFeatureFacade::feature_complete_operation(
-                        runtime,
-                        operation_id,
-                        completed_at,
-                    )?;
-                }
-                Ok(())
+                )
+                .map(|_| ())
             },
             |_| Ok(ResponsePayload::Empty),
         )?;
