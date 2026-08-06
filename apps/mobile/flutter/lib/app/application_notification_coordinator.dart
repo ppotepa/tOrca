@@ -7,19 +7,21 @@ import 'package:torchat_flutter_ui/core/runtime/message_paging.dart';
 import 'package:torchat_flutter_ui/core/runtime/runtime_repository_models.dart';
 
 import '../client_runtime.dart';
+import '../core/platform/platform_ports.dart';
 import '../core/runtime/runtime_repository.dart';
 import '../locales/domain/user_problem.dart';
 import '../locales/domain/user_problem_code.dart';
-import '../platform/platform_services.dart';
 import 'application_state.dart';
 import 'conversation_navigation_intent.dart';
 
 class ApplicationNotificationCoordinator {
   ApplicationNotificationCoordinator({
     required RuntimeRepository repository,
+    required NotificationService notificationService,
     required AppState Function() readState,
     required void Function(AppState) writeState,
   }) : _repository = repository,
+       _notificationService = notificationService,
        _readState = readState,
        _writeState = writeState;
 
@@ -27,6 +29,7 @@ class ApplicationNotificationCoordinator {
       'torchat.notifications.activeConversationId';
 
   final RuntimeRepository _repository;
+  final NotificationService _notificationService;
   final AppState Function() _readState;
   final void Function(AppState) _writeState;
 
@@ -58,7 +61,7 @@ class ApplicationNotificationCoordinator {
     }
     if (event is! NotificationRequestedEvent) return;
     unawaited(
-      PlatformServices.current.notifications.show(
+      _notificationService.show(
         event,
         selectedConversationId: state.selectedConversationId,
       ),
