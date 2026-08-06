@@ -21,6 +21,14 @@ private interface ClientEngineLibrary : Library {
         outHandle: PointerByReference,
     ): Int
 
+    fun torca_engine_new_with_mls_epoch_anchor_v1(
+        configJson: ByteArray,
+        configLen: Long,
+        getEpoch: MlsEpochGetCallback?,
+        setEpoch: MlsEpochSetCallback?,
+        outHandle: PointerByReference,
+    ): Int
+
     fun torca_engine_start_v1(value: Pointer?): Int
     fun torca_engine_submit_json_v1(
         value: Pointer?,
@@ -181,15 +189,21 @@ class NativeClientEngine private constructor(
             getEpoch: MlsEpochGetCallback,
             setEpoch: MlsEpochSetCallback,
         ): NativeClientEngine {
-            // ABI v1 intentionally exposes one creation path. MLS callbacks are
-            // retained by the Kotlin owner for compatibility while secure epoch
-            // persistence is provided through the engine configuration.
-            return create(configJson).also {
-                // Keep callbacks strongly reachable for callers migrating from
-                // the legacy constructor.
-                @Suppress("UNUSED_VARIABLE")
-                val callbacks = getEpoch to setEpoch
-            }
+            val config = configJson.toByteArray(Charsets.UTF_8)
+            val outHandle = PointerByReference()
+            val status = ClientEngineNative.api.torca_engine_new_with_mls_epoch_anchor_v1(
+                config,
+                config.size.toLong(),
+                getEpoch,
+                setEpoch,
+                outHandle,
+            )
+            check(status == FFI_OK) { ClientEngineNative.problem() }
+            return NativeClientEngine(
+                outHandle.value ?: error("Engine ABI returned a null handle"),
+                getEpoch,
+                setEpoch,
+            )
         }
     }
 }
