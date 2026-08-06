@@ -1,7 +1,7 @@
 use crate::{
     ClientRuntime, DurableOperation, FeatureResult, OperationId, OperationStorage, OperationType,
-    PointLookupStorage, RetryClass, RuntimeClock, RuntimeErrorCode, RuntimeResult, RuntimeTransport,
-    features::operations::OperationsFeature,
+    PointLookupStorage, RetryClass, RuntimeClock, RuntimeErrorCode, RuntimeEvent, RuntimeResult,
+    RuntimeStorage, RuntimeTransport, features::operations::OperationsFeature,
 };
 
 pub trait ClientOperationFeatureFacade {
@@ -42,7 +42,7 @@ pub trait ClientOperationFeatureFacade {
 
 impl<S, T, C> ClientOperationFeatureFacade for ClientRuntime<S, T, C>
 where
-    S: OperationStorage + PointLookupStorage,
+    S: RuntimeStorage + OperationStorage + PointLookupStorage,
     T: RuntimeTransport,
     C: RuntimeClock,
 {
@@ -54,12 +54,14 @@ where
         now_ms: i64,
     ) -> RuntimeResult<FeatureResult<DurableOperation>> {
         let operation_id = OperationId::parse(operation_id.to_owned())?;
-        OperationsFeature::new(self.storage_mut()).ensure(
+        let result = OperationsFeature::new(self.storage_mut()).ensure(
             operation_id,
             operation_type,
             entity_id,
             now_ms,
-        )
+        )?;
+        publish_operation_change(self, &result);
+        Ok(result)
     }
 
     fn feature_begin_operation(
@@ -70,12 +72,14 @@ where
         now_ms: i64,
     ) -> RuntimeResult<FeatureResult<DurableOperation>> {
         let operation_id = OperationId::parse(operation_id.to_owned())?;
-        OperationsFeature::new(self.storage_mut()).begin(
+        let result = OperationsFeature::new(self.storage_mut()).begin(
             operation_id,
             operation_type,
             entity_id,
             now_ms,
-        )
+        )?;
+        publish_operation_change(self, &result);
+        Ok(result)
     }
 
     fn feature_complete_operation(
@@ -84,7 +88,9 @@ where
         now_ms: i64,
     ) -> RuntimeResult<FeatureResult<DurableOperation>> {
         let operation_id = OperationId::parse(operation_id.to_owned())?;
-        OperationsFeature::new(self.storage_mut()).complete(&operation_id, now_ms)
+        let result = OperationsFeature::new(self.storage_mut()).complete(&operation_id, now_ms)?;
+        publish_operation_change(self, &result);
+        Ok(result)
     }
 
     fn feature_retry_operation(
@@ -95,12 +101,14 @@ where
         now_ms: i64,
     ) -> RuntimeResult<FeatureResult<DurableOperation>> {
         let operation_id = OperationId::parse(operation_id.to_owned())?;
-        OperationsFeature::new(self.storage_mut()).schedule_retry(
+        let result = OperationsFeature::new(self.storage_mut()).schedule_retry(
             &operation_id,
             retry_class,
             error_code,
             now_ms,
-        )
+        )?;
+        publish_operation_change(self, &result);
+        Ok(result)
     }
 
     fn feature_fail_operation(
@@ -110,10 +118,28 @@ where
         now_ms: i64,
     ) -> RuntimeResult<FeatureResult<DurableOperation>> {
         let operation_id = OperationId::parse(operation_id.to_owned())?;
-        OperationsFeature::new(self.storage_mut()).fail(&operation_id, error_code, now_ms)
+        let result =
+            OperationsFeature::new(self.storage_mut()).fail(&operation_id, error_code, now_ms)?;
+        publish_operation_change(self, &result);
+        Ok(result)
     }
 
     fn feature_pending_operations(&mut self) -> RuntimeResult<Vec<DurableOperation>> {
         OperationsFeature::new(self.storage_mut()).pending()
+    }
+}
+
+fn publish_operation_change<S, T, C, V>(
+    runtime: &mut ClientRuntime<S, T, C>,
+    result: &FeatureResult<V>,
+) where
+    S: RuntimeStorage + OperationStorage + PointLookupStorage,
+    T: RuntimeTransport,
+    C: RuntimeClock,
+{
+    if !result.changes.sections.is_empty() {
+        runtime.session_mut().push_event(RuntimeEvent::Changed {
+            kind: Some("operations".to_owned()),
+        });
     }
 }
