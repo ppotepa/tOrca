@@ -18,6 +18,8 @@ const CONVERSATION_FOR_CONTACT: &str =
     include_str!("../../sql/queries/conversations/conversation_for_contact.sql");
 const PAIRING_INBOX_BY_ID: &str =
     include_str!("../../sql/queries/pairing/pairing_inbox_by_id.sql");
+const PAIRING_INBOX_BY_OFFER_INVITE_ID: &str =
+    include_str!("../../sql/queries/pairing/pairing_inbox_by_offer_invite_id.sql");
 const PAIRING_OUTBOX_BY_ID: &str =
     include_str!("../../sql/queries/pairing/pairing_outbox_by_id.sql");
 const MESSAGE_BY_ID: &str =
@@ -68,6 +70,21 @@ impl ClientDatabase {
             .transpose()
     }
 
+    pub fn pairing_inbox_by_offer_invite_id(
+        &self,
+        offer_invite_id: &str,
+    ) -> RuntimeResult<Option<PairingItem>> {
+        self.connection()
+            .query_row(
+                PAIRING_INBOX_BY_OFFER_INVITE_ID,
+                [offer_invite_id],
+                decode_pairing_inbox,
+            )
+            .optional()
+            .map_err(storage_error)?
+            .transpose()
+    }
+
     pub fn pairing_outbox_by_id(
         &self,
         pairing_id: &str,
@@ -109,6 +126,13 @@ impl PointLookupStorage for ClientDatabase {
 
     fn pairing_inbox_by_id(&self, pairing_id: &str) -> RuntimeResult<Option<PairingItem>> {
         ClientDatabase::pairing_inbox_by_id(self, pairing_id)
+    }
+
+    fn pairing_inbox_by_offer_invite_id(
+        &self,
+        offer_invite_id: &str,
+    ) -> RuntimeResult<Option<PairingItem>> {
+        ClientDatabase::pairing_inbox_by_offer_invite_id(self, offer_invite_id)
     }
 
     fn pairing_outbox_by_id(&self, pairing_id: &str) -> RuntimeResult<Option<PairingItem>> {
