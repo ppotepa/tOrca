@@ -89,5 +89,6 @@ where
     runtime.session_mut().push_event(RuntimeEvent::PeerConnectionChanged {
         contact_id: installation_id.to_owned(),
         status: crate::PeerConnectionStatus::Offline,
+        retry_in_ms: None,
     });
 }
