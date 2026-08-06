@@ -86,7 +86,8 @@ impl ClientEngineActor {
             let snapshot_after = conversation
                 .snapshot()
                 .map_err(|error| EngineError::Storage(error.to_string()))?;
-            let received_at = self.clock.now_ms() / 1_000;
+            let received_at_ms = self.clock.now_ms();
+            let received_at = received_at_ms / 1_000;
             let envelope_record = ReceivedEnvelopeRecord {
                 sender_installation_id: peer.clone(),
                 message_id: message_id.to_string(),
@@ -127,20 +128,29 @@ impl ClientEngineActor {
                         preview_text: Some(body.clone()),
                     };
                     let (notify, runtime_events) = self.with_runtime(|runtime| {
-                        let accepts = runtime.contact_accepts_messages(&peer)?;
+                        let accepts = torchat_runtime::ClientRuntimeFeatureFacade::feature_contact_accepts_messages(
+                            runtime,
+                            &peer,
+                        )?;
+                        let allows_notifications = torchat_runtime::ClientRuntimeFeatureFacade::feature_contact_allows_notifications(
+                            runtime,
+                            &peer,
+                        )?;
                         let mut envelope_record = envelope_record.clone();
                         if accepts {
-                            runtime.receive_message_reply(
+                            let attended = runtime.session().conversation_is_attended(&peer);
+                            torchat_runtime::ClientRuntimeFeatureFacade::feature_receive_message(
+                                runtime,
                                 &peer,
                                 body.clone(),
                                 Some(message_id),
-                                reply_to.clone().map(|reply| {
-                                    torchat_runtime::MessageReply {
-                                        message_id: reply.message_id.to_string(),
-                                        body: reply.body,
-                                        outgoing: !reply.outgoing,
-                                    }
+                                reply_to.clone().map(|reply| torchat_runtime::MessageReply {
+                                    message_id: reply.message_id.to_string(),
+                                    body: reply.body,
+                                    outgoing: !reply.outgoing,
                                 }),
+                                attended,
+                                received_at_ms,
                             )?;
                             runtime.storage_mut().put_delivery_receipt(&receipt)?;
                             envelope_record.receipt_state = "PENDING".to_owned();
@@ -151,7 +161,7 @@ impl ClientEngineActor {
                         runtime
                             .storage_mut()
                             .put_received_envelope(&envelope_record)?;
-                        Ok(accepts && runtime.contact_allows_notifications(&peer)?)
+                        Ok(accepts && allows_notifications)
                     })?;
                     Ok((runtime_events, notify.then_some(notification)))
                 }
@@ -159,10 +169,24 @@ impl ClientEngineActor {
                     message_id: delivered_message_id,
                     ..
                 } => {
+                    let delivered_message_id = delivered_message_id.to_string();
                     let (_, runtime_events) = self.with_runtime(|runtime| {
-                        runtime.apply_message_transport_outcome(
-                            delivered_message_id,
+                        torchat_runtime::ClientRuntimeFeatureFacade::feature_apply_message_transport_outcome(
+                            runtime,
+                            &delivered_message_id,
                             MessageTransportOutcome::Delivered,
+                        )?;
+                        torchat_runtime::ClientOperationFeatureFacade::feature_ensure_operation(
+                            runtime,
+                            &delivered_message_id,
+                            torchat_runtime::OperationType::MessageDelivery,
+                            &delivered_message_id,
+                            received_at_ms,
+                        )?;
+                        torchat_runtime::ClientOperationFeatureFacade::feature_complete_operation(
+                            runtime,
+                            &delivered_message_id,
+                            received_at_ms,
                         )?;
                         runtime
                             .storage_mut()
@@ -177,45 +201,63 @@ impl ClientEngineActor {
                 ApplicationPayloadV1::Typing {
                     sent_at, typing, ..
                 } => {
-                    let (_, mut runtime_events) = self.with_runtime(|runtime| {
+                    let (_, runtime_events) = self.with_runtime(|runtime| {
                         runtime
                             .storage_mut()
                             .put_conversation_mls_snapshot(&peer, &snapshot_after)?;
+                        runtime
+                            .storage_mut()
+                            .put_received_envelope(&envelope_record)?;
+                        torchat_runtime::ClientRuntimeFeatureFacade::feature_publish_presence(
+                            runtime,
+                            torchat_runtime::RuntimeEvent::TypingChanged {
+                                conversation_id: peer.clone(),
+                                typing,
+                                expires_at: sent_at + 5_000,
+                            },
+                        );
                         Ok(())
                     })?;
-                    runtime_events.push(torchat_runtime::RuntimeEvent::TypingChanged {
-                        conversation_id: peer.clone(),
-                        typing,
-                        expires_at: sent_at + 5_000,
-                    });
                     Ok((runtime_events, None))
                 }
                 ApplicationPayloadV1::Presence {
                     sent_at, online, ..
                 } => {
-                    let (_, mut runtime_events) = self.with_runtime(|runtime| {
+                    let (_, runtime_events) = self.with_runtime(|runtime| {
                         runtime
                             .storage_mut()
                             .put_conversation_mls_snapshot(&peer, &snapshot_after)?;
+                        runtime
+                            .storage_mut()
+                            .put_received_envelope(&envelope_record)?;
+                        torchat_runtime::ClientRuntimeFeatureFacade::feature_publish_presence(
+                            runtime,
+                            torchat_runtime::RuntimeEvent::PresenceChanged {
+                                contact_id: peer.clone(),
+                                online,
+                                idle: !online,
+                                observed_at: sent_at,
+                                expires_at: sent_at + 45_000,
+                            },
+                        );
                         Ok(())
                     })?;
-                    runtime_events.push(torchat_runtime::RuntimeEvent::PresenceChanged {
-                        contact_id: peer.clone(),
-                        online,
-                        idle: !online,
-                        observed_at: sent_at,
-                        expires_at: sent_at + 45_000,
-                    });
                     Ok((runtime_events, None))
                 }
                 ApplicationPayloadV1::ReadReceipt { message_ids, .. } => {
                     let (_, events) = self.with_runtime(|runtime| {
                         for message_id in message_ids {
-                            let _ = runtime.apply_message_read(message_id);
+                            let _ = torchat_runtime::ClientRuntimeFeatureFacade::feature_apply_message_read(
+                                runtime,
+                                &message_id.to_string(),
+                            );
                         }
                         runtime
                             .storage_mut()
                             .put_conversation_mls_snapshot(&peer, &snapshot_after)?;
+                        runtime
+                            .storage_mut()
+                            .put_received_envelope(&envelope_record)?;
                         Ok(())
                     })?;
                     Ok((events, None))
@@ -247,10 +289,8 @@ impl ClientEngineActor {
                     .encode()
                     .map_err(EngineError::InvalidCommand)?;
                     let (_, events) = self.with_runtime(|runtime| {
-                        // The shared runtime owns the relationship transition;
-                        // the transport only delivers the typed application
-                        // payload and persists the resulting MLS snapshot.
-                        runtime.apply_remote_relationship_removal(
+                        torchat_runtime::ClientRelationshipFeatureFacade::feature_apply_remote_relationship_removal(
+                            runtime,
                             &peer,
                             removed_at,
                             &removal_id,
@@ -290,7 +330,8 @@ impl ClientEngineActor {
                         .peer_endpoint_capability_secret(&peer, &capability_id)?
                         .is_some();
                     let (_, mut events) = self.with_runtime(|runtime| {
-                        runtime.storage_mut().put_peer_endpoint_capability(
+                        torchat_runtime::ClientRuntimeFeatureFacade::feature_store_peer_capability(
+                            runtime,
                             &peer,
                             &capability_id,
                             &secret,
@@ -314,9 +355,6 @@ impl ClientEngineActor {
                             status: torchat_runtime::CapabilityStatus::Active,
                         },
                     );
-                    // If this is the first grant received from the peer, make
-                    // the exchange symmetric. Duplicate offers do not trigger
-                    // another offer, preventing an acknowledgement loop.
                     if !had_peer_capability && let Err(error) = self.send_capability_offer(&peer) {
                         self.pending_engine_events.push(EngineEvent::Log {
                             log: EngineLogEvent {
@@ -346,9 +384,6 @@ impl ClientEngineActor {
                             },
                         });
                     }
-                    // New authentication material invalidates failures caused
-                    // by the previous credentials. Retry queued deliveries
-                    // immediately instead of preserving exponential backoff.
                     self.database.expedite_peer_deliveries(&peer)?;
                     let _ = self.queue_peer_probe(&peer);
                     Ok((events, None))
@@ -358,9 +393,6 @@ impl ClientEngineActor {
                     sequence,
                     ..
                 } => {
-                    // This is the application-level acknowledgement for the
-                    // durable offer. A peer persistence ACK only proves peer
-                    // acceptance, not that the peer installed the secret.
                     self.database
                         .complete_capability_deliveries_for_contact(&peer)?;
                     let (_, mut events) = self.with_runtime(|runtime| {
@@ -390,9 +422,10 @@ impl ClientEngineActor {
                     ..
                 } => {
                     let (_, mut events) = self.with_runtime(|runtime| {
-                        runtime
-                            .storage_mut()
-                            .revoke_peer_endpoint_capability(&peer)?;
+                        torchat_runtime::ClientRuntimeFeatureFacade::feature_revoke_peer_capability(
+                            runtime,
+                            &peer,
+                        )?;
                         runtime
                             .storage_mut()
                             .put_conversation_mls_snapshot(&peer, &snapshot_after)?;
@@ -417,10 +450,6 @@ impl ClientEngineActor {
         match result {
             Ok((runtime_events, notification)) => {
                 self.conversations.insert(peer, conversation);
-                // The inbound transaction is already committed at this point.
-                // Receipt transport is a separate durable effect and must not
-                // turn a successful inbound message into a rejected/crypto
-                // failure when its first send attempt fails.
                 if let Err(error) = self.flush_pending_receipt_effects() {
                     self.receipt_queue_failed_after_commit =
                         self.receipt_queue_failed_after_commit.saturating_add(1);
