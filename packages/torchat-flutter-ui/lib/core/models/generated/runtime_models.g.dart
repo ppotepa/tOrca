@@ -38,6 +38,8 @@ class GeneratedRuntimePayload {
 
   String? string(String key) => _value[key]?.toString();
 
+  bool? boolean(String key) => _value[key] as bool?;
+
   num? number(String key) => _value[key] as num?;
 
   int? intValue(String key) => number(key)?.toInt();
@@ -110,20 +112,61 @@ Map<String, dynamic> _requireGeneratedEventObject(
   return Map<String, dynamic>.from(value);
 }
 
+class GeneratedRuntimeProblem {
+  const GeneratedRuntimeProblem({
+    required this.code,
+    required this.category,
+    required this.retryable,
+    this.operationId,
+    this.entityId,
+    this.diagnosticContext,
+  });
+
+  final String code;
+  final String category;
+  final bool retryable;
+  final String? operationId;
+  final String? entityId;
+  final String? diagnosticContext;
+
+  factory GeneratedRuntimeProblem.fromPayload(GeneratedRuntimePayload payload) {
+    final code = payload.string(EngineContract.code);
+    final category = payload.string('category');
+    final retryable = payload.boolean('retryable');
+    if (code == null || code.isEmpty) {
+      throw FormatException('engine problem is missing code');
+    }
+    if (category == null || category.isEmpty) {
+      throw FormatException('engine problem is missing category');
+    }
+    if (retryable == null) {
+      throw FormatException('engine problem is missing retryable');
+    }
+    return GeneratedRuntimeProblem(
+      code: code,
+      category: category,
+      retryable: retryable,
+      operationId: payload.string('operationId'),
+      entityId: payload.string('entityId'),
+      diagnosticContext: payload.string('diagnosticContext'),
+    );
+  }
+}
+
 class GeneratedEngineResponse {
   const GeneratedEngineResponse({
     required this.requestId,
     required this.ok,
     required this.result,
-    this.errorCode,
-    this.errorMessage,
+    this.problem,
   });
 
   final String requestId;
   final bool ok;
   final Object? result;
-  final String? errorCode;
-  final String? errorMessage;
+  final GeneratedRuntimeProblem? problem;
+
+  String? get errorCode => problem?.code;
 
   factory GeneratedEngineResponse.fromDynamic(Object? value) {
     final envelope = GeneratedRuntimePayload.fromDynamic(value);
@@ -168,8 +211,7 @@ class GeneratedEngineResponse {
         requestId: requestId,
         ok: false,
         result: null,
-        errorCode: resultEnvelope.string(EngineContract.code),
-        errorMessage: resultEnvelope.string(EngineContract.message),
+        problem: GeneratedRuntimeProblem.fromPayload(resultEnvelope),
       );
     }
     throw FormatException('unknown engine response status: $status');
