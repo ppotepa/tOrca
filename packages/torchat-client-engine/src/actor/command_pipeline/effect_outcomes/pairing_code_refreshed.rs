@@ -9,8 +9,11 @@ impl ClientEngineActor {
         self.with_runtime_idempotent(
             idempotency,
             |runtime| {
-                runtime.commit_pairing_code(code.clone())?;
-                Ok(code.clone())
+                torchat_runtime::ClientPairingFeatureFacade::feature_commit_pairing_code(
+                    runtime,
+                    code.clone(),
+                )
+                .map(|result| result.value)
             },
             |value| json_response(value),
         )
