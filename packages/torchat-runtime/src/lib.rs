@@ -12,6 +12,7 @@ pub mod ids;
 pub mod logic;
 pub mod message_rules;
 pub mod models;
+pub mod operation_facade;
 pub mod operations;
 pub mod pairing_facade;
 pub mod point_lookup_storage;
@@ -70,6 +71,7 @@ pub use models::{
     RuntimeIdentity, RuntimeProfile, RuntimeSendEffect, RuntimeTorStatus, VerificationState,
     WelcomeAcceptedResult, pairing_available_actions,
 };
+pub use operation_facade::ClientOperationFeatureFacade;
 pub use operations::{DurableOperation, OperationState, OperationType};
 pub use pairing_facade::ClientPairingFeatureFacade;
 pub use pairing_rules::{
