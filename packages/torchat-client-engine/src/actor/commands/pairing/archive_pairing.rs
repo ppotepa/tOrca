@@ -8,7 +8,13 @@ impl ClientEngineActor {
     ) -> CommandHandlerResult {
         let (_, runtime_events) = self.with_runtime_idempotent(
             idempotency,
-            |runtime| runtime.archive_pairing(&pairing_id),
+            |runtime| {
+                torchat_runtime::ClientPairingFeatureFacade::feature_archive_pairing(
+                    runtime,
+                    &pairing_id,
+                )
+                .map(|_| ())
+            },
             |_| json_response(true),
         )?;
         Ok((json_response(true)?, runtime_events, None))
