@@ -211,9 +211,10 @@ impl ClientEngineActor {
             return Ok(Vec::new());
         }
         if self
-            .list_contacts()?
-            .iter()
-            .any(|contact| contact.installation_id == invite.installation_id && !contact.blocked)
+            .database
+            .contact_by_installation_id(&invite.installation_id)
+            .map_err(runtime_error)?
+            .is_some_and(|contact| !contact.blocked)
         {
             return Err(EngineError::InvalidCommand(
                 "contact already exists; remove it before pairing again".to_owned(),
@@ -312,8 +313,14 @@ impl ClientEngineActor {
         pairing_id: &str,
         outcome: PairingPeerOutcome,
     ) -> EngineResult<Vec<torchat_runtime::RuntimeEvent>> {
-        let (_, runtime_events) =
-            self.with_runtime(|runtime| runtime.apply_pairing_peer_outcome(pairing_id, outcome))?;
+        let (_, runtime_events) = self.with_runtime(|runtime| {
+            torchat_runtime::ClientPairingFeatureFacade::feature_apply_pairing_peer_outcome(
+                runtime,
+                pairing_id,
+                outcome,
+            )
+            .map(|_| ())
+        })?;
         Ok(runtime_events)
     }
 
@@ -331,52 +338,51 @@ impl ClientEngineActor {
             .snapshot()
             .map_err(|error| EngineError::Storage(error.to_string()))?;
         let boundary_at = self.clock.now_ms();
-        let (_result, mut runtime_events): (WelcomeAcceptedResult, _) =
-            self.with_runtime(|runtime| {
-                if let Some(invite_id) = consume_invite_id
-                    && !runtime.storage_mut().consume_invite(invite_id)?
-                {
-                    return Err(RuntimeError::Conflict(
-                        "contact invite was already consumed".to_owned(),
-                    ));
-                }
-                let result = runtime.welcome_accepted(
-                    contact_record_from_card(&card, true),
-                    true,
-                    pairing_invite_id.map(str::to_owned),
+        let (_conversation, mut runtime_events) = self.with_runtime(|runtime| {
+            if let Some(invite_id) = consume_invite_id
+                && !runtime.storage_mut().consume_invite(invite_id)?
+            {
+                return Err(RuntimeError::Conflict(
+                    "contact invite was already consumed".to_owned(),
+                ));
+            }
+            if let Some(invite_id) = pairing_invite_id {
+                torchat_runtime::ClientPairingFeatureFacade::feature_complete_pairing_welcome_for_offer_invite(
+                    runtime,
+                    invite_id,
+                    card.installation_id.clone(),
                 )?;
-                runtime.storage_mut().apply_relationship_transition(
-                    crate::storage::runtime_storage::RelationshipTransition::BeginVerified {
-                        installation_id: card.installation_id.clone(),
-                        boundary_at,
-                    },
-                )?;
-                runtime.storage_mut().put_conversation_mls_snapshot(
-                    &result.conversation.id,
-                    &conversation_snapshot,
-                )?;
-                if let Some(pending) = pending_welcome {
-                    runtime.storage_mut().put_pending_welcome(pending)?;
-                }
-                if let Some(invite_id) = remove_pending_local_invite_id {
-                    runtime
-                        .storage_mut()
-                        .remove_pending_local_invite_mls(invite_id)?;
-                }
-                Ok(result)
-            })?;
+            }
+            let conversation = torchat_runtime::ClientRuntimeFeatureFacade::feature_promote_verified_contact(
+                runtime,
+                contact_record_from_card(&card, true),
+                boundary_at,
+            )?
+            .value;
+            torchat_runtime::ClientRelationshipFeatureFacade::feature_begin_verified_relationship(
+                runtime,
+                &card.installation_id,
+                boundary_at,
+            )?;
+            runtime.storage_mut().put_conversation_mls_snapshot(
+                &conversation.id,
+                &conversation_snapshot,
+            )?;
+            if let Some(pending) = pending_welcome {
+                runtime.storage_mut().put_pending_welcome(pending)?;
+            }
+            if let Some(invite_id) = remove_pending_local_invite_id {
+                runtime
+                    .storage_mut()
+                    .remove_pending_local_invite_mls(invite_id)?;
+            }
+            Ok(conversation)
+        })?;
         self.conversations
             .insert(card.installation_id.clone(), conversation);
         self.crypto_blocked_peers.remove(&card.installation_id);
         runtime_events.extend(self.apply_pending_peer_endpoint(&card.installation_id)?);
-        // A capability or message frame may have arrived through the relay
-        // while Welcome was still being committed. Replay those frames now
-        // that the MLS conversation is available.
         runtime_events.extend(self.drain_pending_pre_welcome(&card.installation_id)?);
-        // Fresh pairings carry both endpoint capabilities in the signed
-        // invite/Welcome. Sending a first capability offer here would create
-        // a circular dependency: that offer itself requires the remote
-        // capability to open the first P2P connection.
         Ok(runtime_events)
     }
 }
