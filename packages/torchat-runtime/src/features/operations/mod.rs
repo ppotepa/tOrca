@@ -27,6 +27,29 @@ where
         }
     }
 
+    pub fn ensure(
+        &mut self,
+        operation_id: OperationId,
+        operation_type: OperationType,
+        entity_id: impl Into<String>,
+        now_ms: i64,
+    ) -> RuntimeResult<FeatureResult<DurableOperation>> {
+        let entity_id = entity_id.into();
+        if let Some(existing) = self.storage.operation_by_id(&operation_id)? {
+            validate_owner(&existing, operation_type, &entity_id)?;
+            return Ok(FeatureResult::unchanged(existing));
+        }
+
+        let operation = DurableOperation::pending(
+            operation_id,
+            operation_type,
+            entity_id,
+            now_ms,
+        );
+        self.storage.put_operation(operation.clone())?;
+        Ok(changed(operation))
+    }
+
     pub fn begin(
         &mut self,
         operation_id: OperationId,
@@ -35,25 +58,16 @@ where
         now_ms: i64,
     ) -> RuntimeResult<FeatureResult<DurableOperation>> {
         let entity_id = entity_id.into();
-        let mut operation = match self.storage.operation_by_id(&operation_id)? {
-            Some(existing) => {
-                if existing.operation_type != operation_type || existing.entity_id != entity_id {
-                    return Err(RuntimeError::Conflict(
-                        "operation id is already assigned to another workflow".to_owned(),
-                    ));
-                }
-                if existing.state.is_terminal() {
-                    return Ok(FeatureResult::unchanged(existing));
-                }
-                existing
-            }
-            None => DurableOperation::pending(
-                operation_id,
-                operation_type,
-                entity_id,
-                now_ms,
-            ),
-        };
+        let ensured = self.ensure(
+            operation_id,
+            operation_type,
+            entity_id,
+            now_ms,
+        )?;
+        let mut operation = ensured.value;
+        if operation.state.is_terminal() {
+            return Ok(FeatureResult::unchanged(operation));
+        }
         operation.begin_attempt(now_ms);
         self.storage.put_operation(operation.clone())?;
         Ok(changed(operation))
@@ -133,6 +147,19 @@ where
             .operation_by_id(operation_id)?
             .ok_or_else(|| RuntimeError::NotFound("operation does not exist".to_owned()))
     }
+}
+
+fn validate_owner(
+    operation: &DurableOperation,
+    operation_type: OperationType,
+    entity_id: &str,
+) -> RuntimeResult<()> {
+    if operation.operation_type != operation_type || operation.entity_id != entity_id {
+        return Err(RuntimeError::Conflict(
+            "operation id is already assigned to another workflow".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 fn changed(operation: DurableOperation) -> FeatureResult<DurableOperation> {
