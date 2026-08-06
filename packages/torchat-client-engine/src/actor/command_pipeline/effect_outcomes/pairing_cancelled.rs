@@ -7,7 +7,6 @@ impl ClientEngineActor {
         pairing_id: String,
     ) -> RelayCommitResult {
         let completed_at = self.clock.now_ms();
-        let operation_id = idempotency.map(|context| context.command_id.clone());
         self.with_runtime_idempotent(
             idempotency,
             |runtime| {
@@ -15,13 +14,11 @@ impl ClientEngineActor {
                     runtime,
                     &pairing_id,
                 )?;
-                if let Some(operation_id) = operation_id.as_deref() {
-                    torchat_runtime::ClientOperationFeatureFacade::feature_complete_operation(
-                        runtime,
-                        operation_id,
-                        completed_at,
-                    )?;
-                }
+                torchat_runtime::ClientOperationFeatureFacade::feature_complete_operation(
+                    runtime,
+                    &pairing_id,
+                    completed_at,
+                )?;
                 Ok(())
             },
             |_| Ok(ResponsePayload::Empty),
