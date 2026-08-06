@@ -4,7 +4,7 @@ use crate::{
     ConversationSummary, FeatureResult, MessageReply, MessageSendEffect, MessageStorage,
     MessageTransportOutcome, PointLookupStorage, ReceiptSendEffect, ReceiptStorage,
     RelationshipStorage, RelationshipTransition, RuntimeClock, RuntimeEvent, RuntimeResult,
-    RuntimeSession, RuntimeTransport,
+    RuntimeSession, RuntimeStorage, RuntimeTransport,
     features::{
         contacts::ContactsFeature, conversations::ConversationsFeature, messaging::MessagingFeature,
         peer::PeerFeature, presence::PresenceFeature, receipts::ReceiptsFeature,
@@ -126,7 +126,8 @@ pub trait ClientRuntimeFeatureFacade {
 
 impl<S, T, C> ClientRuntimeFeatureFacade for ClientRuntime<S, T, C>
 where
-    S: ContactStorage
+    S: RuntimeStorage
+        + ContactStorage
         + ConversationStorage
         + MessageStorage
         + PointLookupStorage
