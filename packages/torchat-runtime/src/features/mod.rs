@@ -4,6 +4,7 @@ pub mod message_deletion;
 pub mod messaging;
 pub mod operations;
 pub mod pairing;
+pub mod pairing_preparation;
 pub mod peer;
 pub mod presence;
 pub mod receipts;
