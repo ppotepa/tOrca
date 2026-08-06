@@ -124,14 +124,25 @@ fn render_rust(manifest: &Manifest) -> String {
          }\n\n\
          #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]\n\
          #[serde(rename_all = \"camelCase\")]\n\
+         pub struct GeneratedRuntimeProblem {\n\
+         \tpub code: String,\n\
+         \tpub category: String,\n\
+         \tpub retryable: bool,\n\
+         \t#[serde(skip_serializing_if = \"Option::is_none\")]\n\
+         \tpub operation_id: Option<String>,\n\
+         \t#[serde(skip_serializing_if = \"Option::is_none\")]\n\
+         \tpub entity_id: Option<String>,\n\
+         \t#[serde(skip_serializing_if = \"Option::is_none\")]\n\
+         \tpub diagnostic_context: Option<String>,\n\
+         }\n\n\
+         #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]\n\
+         #[serde(rename_all = \"camelCase\")]\n\
          pub struct GeneratedCommandResponse {\n\
          \tpub status: String,\n\
          \t#[serde(skip_serializing_if = \"Option::is_none\")]\n\
          \tpub payload: Option<serde_json::Value>,\n\
          \t#[serde(skip_serializing_if = \"Option::is_none\")]\n\
-         \tpub code: Option<String>,\n\
-         \t#[serde(skip_serializing_if = \"Option::is_none\")]\n\
-         \tpub retryable: Option<bool>,\n\
+         \tpub problem: Option<GeneratedRuntimeProblem>,\n\
          }\n\n\
          #[derive(Clone, Copy, Debug, Eq, PartialEq)]\n\
          pub struct CommandContract {\n\
@@ -213,13 +224,22 @@ fn render_dart_envelopes() -> String {
          \tfinal Map<String, Object?> payload;\n\
          \tMap<String, Object?> toJson() => <String, Object?>{{'type': type, if (commandId != null) 'commandId': commandId, 'payload': payload}};\n\
          }}\n\n\
+         final class GeneratedRuntimeProblem {{\n\
+         \tconst GeneratedRuntimeProblem({{required this.code, required this.category, required this.retryable, this.operationId, this.entityId, this.diagnosticContext}});\n\
+         \tfinal String code;\n\
+         \tfinal String category;\n\
+         \tfinal bool retryable;\n\
+         \tfinal String? operationId;\n\
+         \tfinal String? entityId;\n\
+         \tfinal String? diagnosticContext;\n\
+         \tfactory GeneratedRuntimeProblem.fromJson(Map<String, Object?> json) => GeneratedRuntimeProblem(code: json['code'] as String, category: json['category'] as String, retryable: json['retryable'] as bool, operationId: json['operationId'] as String?, entityId: json['entityId'] as String?, diagnosticContext: json['diagnosticContext'] as String?);\n\
+         }}\n\n\
          final class GeneratedCommandResponse {{\n\
-         \tconst GeneratedCommandResponse({{required this.status, this.payload, this.code, this.retryable}});\n\
+         \tconst GeneratedCommandResponse({{required this.status, this.payload, this.problem}});\n\
          \tfinal String status;\n\
          \tfinal Object? payload;\n\
-         \tfinal String? code;\n\
-         \tfinal bool? retryable;\n\
-         \tfactory GeneratedCommandResponse.fromJson(Map<String, Object?> json) => GeneratedCommandResponse(status: json['status'] as String, payload: json['payload'], code: json['code'] as String?, retryable: json['retryable'] as bool?);\n\
+         \tfinal GeneratedRuntimeProblem? problem;\n\
+         \tfactory GeneratedCommandResponse.fromJson(Map<String, Object?> json) => GeneratedCommandResponse(status: json['status'] as String, payload: json['payload'], problem: json['problem'] is Map<String, Object?> ? GeneratedRuntimeProblem.fromJson(json['problem'] as Map<String, Object?>) : null);\n\
          }}\n"
     )
 }
@@ -265,7 +285,15 @@ fn render_kotlin_envelopes() -> String {
         "{HEADER}package org.torchat.generated\n\n\
          import org.json.JSONObject\n\n\
          data class GeneratedCommandRequest(val type: String, val commandId: String? = null, val payload: JSONObject = JSONObject())\n\n\
-         data class GeneratedCommandResponse(val status: String, val payload: Any? = null, val code: String? = null, val retryable: Boolean? = null)\n"
+         data class GeneratedRuntimeProblem(\n\
+         \tval code: String,\n\
+         \tval category: String,\n\
+         \tval retryable: Boolean,\n\
+         \tval operationId: String? = null,\n\
+         \tval entityId: String? = null,\n\
+         \tval diagnosticContext: String? = null,\n\
+         )\n\n\
+         data class GeneratedCommandResponse(val status: String, val payload: Any? = null, val problem: GeneratedRuntimeProblem? = null)\n"
     )
 }
 
