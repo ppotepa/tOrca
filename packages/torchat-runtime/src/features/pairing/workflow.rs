@@ -1,7 +1,7 @@
 use crate::{
-    ChangeSet, ContactStorage, FeatureResult, InviteState, PairingCancelEffect, PairingPeerOutcome,
-    PairingPreparation, PairingSendKind, PairingStorage, PointLookupStorage, RuntimeError,
-    RuntimeResult, RuntimeSendEffect,
+    ChangeSet, ContactStorage, FeatureResult, InviteCode, InviteState, PairingCancelEffect,
+    PairingItem, PairingPeerOutcome, PairingPreparation, PairingSendKind, PairingStorage,
+    PointLookupStorage, ProfileStorage, RuntimeError, RuntimeResult, RuntimeSendEffect,
     pairing_rules::{PairingAction, normalize_pairing_item},
 };
 
@@ -13,10 +13,71 @@ pub struct PairingFeature<'a, S> {
 
 impl<'a, S> PairingFeature<'a, S>
 where
-    S: PairingStorage + ContactStorage + PointLookupStorage,
+    S: PairingStorage + ProfileStorage + ContactStorage + PointLookupStorage,
 {
     pub fn new(storage: &'a mut S) -> Self {
         Self { storage }
+    }
+
+    pub fn prepare_refresh_code(&self) -> RuntimeResult<()> {
+        process::require_profile_ready(self.storage.profile()?.as_ref())
+    }
+
+    pub fn commit_code(
+        &mut self,
+        code: InviteCode,
+    ) -> RuntimeResult<FeatureResult<InviteCode>> {
+        self.storage.put_pairing_code(code.clone())?;
+        Ok(FeatureResult::changed(
+            code,
+            ChangeSet::section(crate::ChangeSections::PAIRINGS),
+        ))
+    }
+
+    pub fn prepare_submit_code(
+        &mut self,
+        code: String,
+        now_secs: i64,
+    ) -> RuntimeResult<FeatureResult<String>> {
+        let normalized = process::normalize_pairing_code(&code)?;
+        let contact_ids = self
+            .storage
+            .contacts()?
+            .into_iter()
+            .map(|contact| contact.installation_id)
+            .collect::<std::collections::BTreeSet<_>>();
+        let mut changes = ChangeSet::none();
+        let mut items = self.storage.pairing_outbox()?;
+        for expired in process::expire_items(&mut items, now_secs) {
+            changes = changes.with_pairing(expired.pairing_id.clone());
+            self.storage.put_pairing_outbox(expired)?;
+        }
+        for item in self.storage.pairing_outbox()? {
+            let Some(completed) = process::complete_for_existing_contact(item, &contact_ids) else {
+                continue;
+            };
+            changes = changes.with_pairing(completed.pairing_id.clone());
+            self.storage.put_pairing_outbox(completed)?;
+        }
+        if process::has_outstanding_request(&self.storage.pairing_outbox()?) {
+            return Err(RuntimeError::Conflict(
+                "an active pairing request already exists".to_owned(),
+            ));
+        }
+        if changes.sections.is_empty() {
+            Ok(FeatureResult::unchanged(normalized))
+        } else {
+            Ok(FeatureResult::changed(normalized, changes))
+        }
+    }
+
+    pub fn commit_submitted(
+        &mut self,
+        item: PairingItem,
+    ) -> RuntimeResult<FeatureResult<PairingItem>> {
+        let item = normalize_pairing_item(item);
+        self.storage.put_pairing_outbox(item.clone())?;
+        Ok(changed(&item.pairing_id.clone(), item))
     }
 
     pub fn offer_payload(&self, pairing_id: &str) -> RuntimeResult<String> {
