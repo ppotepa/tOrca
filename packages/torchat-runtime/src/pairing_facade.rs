@@ -1,11 +1,25 @@
 use crate::{
-    ClientRuntime, ContactStorage, FeatureResult, PairingCancelEffect, PairingPeerOutcome,
-    PairingPreparation, PairingStorage, PointLookupStorage, RuntimeClock, RuntimeEvent,
-    RuntimeResult, RuntimeSendEffect, RuntimeStorage, RuntimeTransport,
+    ClientRuntime, ContactStorage, FeatureResult, InviteCode, PairingCancelEffect, PairingItem,
+    PairingPeerOutcome, PairingPreparation, PairingStorage, PointLookupStorage, ProfileStorage,
+    RuntimeClock, RuntimeEvent, RuntimeResult, RuntimeSendEffect, RuntimeStorage, RuntimeTransport,
     features::pairing::PairingFeature,
 };
 
 pub trait ClientPairingFeatureFacade {
+    fn feature_prepare_pairing_code_refresh(&mut self) -> RuntimeResult<()>;
+    fn feature_commit_pairing_code(
+        &mut self,
+        code: InviteCode,
+    ) -> RuntimeResult<FeatureResult<InviteCode>>;
+    fn feature_prepare_submit_pairing_code(
+        &mut self,
+        code: String,
+        now_secs: i64,
+    ) -> RuntimeResult<FeatureResult<String>>;
+    fn feature_commit_submitted_pairing(
+        &mut self,
+        item: PairingItem,
+    ) -> RuntimeResult<FeatureResult<PairingItem>>;
     fn feature_pairing_offer_payload(&mut self, pairing_id: &str) -> RuntimeResult<String>;
     fn feature_prepare_accept_pairing(
         &mut self,
@@ -68,10 +82,47 @@ pub trait ClientPairingFeatureFacade {
 
 impl<S, T, C> ClientPairingFeatureFacade for ClientRuntime<S, T, C>
 where
-    S: RuntimeStorage + PairingStorage + ContactStorage + PointLookupStorage,
+    S: RuntimeStorage
+        + PairingStorage
+        + ProfileStorage
+        + ContactStorage
+        + PointLookupStorage,
     T: RuntimeTransport,
     C: RuntimeClock,
 {
+    fn feature_prepare_pairing_code_refresh(&mut self) -> RuntimeResult<()> {
+        PairingFeature::new(self.storage_mut()).prepare_refresh_code()
+    }
+
+    fn feature_commit_pairing_code(
+        &mut self,
+        code: InviteCode,
+    ) -> RuntimeResult<FeatureResult<InviteCode>> {
+        let result = PairingFeature::new(self.storage_mut()).commit_code(code)?;
+        publish_pairing_change(self, None, &result);
+        Ok(result)
+    }
+
+    fn feature_prepare_submit_pairing_code(
+        &mut self,
+        code: String,
+        now_secs: i64,
+    ) -> RuntimeResult<FeatureResult<String>> {
+        let result = PairingFeature::new(self.storage_mut()).prepare_submit_code(code, now_secs)?;
+        publish_pairing_change(self, None, &result);
+        Ok(result)
+    }
+
+    fn feature_commit_submitted_pairing(
+        &mut self,
+        item: PairingItem,
+    ) -> RuntimeResult<FeatureResult<PairingItem>> {
+        let pairing_id = item.pairing_id.clone();
+        let result = PairingFeature::new(self.storage_mut()).commit_submitted(item)?;
+        publish_pairing_change(self, Some(&pairing_id), &result);
+        Ok(result)
+    }
+
     fn feature_pairing_offer_payload(&mut self, pairing_id: &str) -> RuntimeResult<String> {
         PairingFeature::new(self.storage_mut()).offer_payload(pairing_id)
     }
@@ -97,7 +148,7 @@ where
             offer_payload,
             now_secs,
         )?;
-        publish_pairing_change(self, pairing_id, &result);
+        publish_pairing_change(self, Some(pairing_id), &result);
         Ok(result)
     }
 
@@ -106,7 +157,7 @@ where
         pairing_id: &str,
     ) -> RuntimeResult<FeatureResult<()>> {
         let result = PairingFeature::new(self.storage_mut()).accept_received(pairing_id)?;
-        publish_pairing_change(self, pairing_id, &result);
+        publish_pairing_change(self, Some(pairing_id), &result);
         Ok(result)
     }
 
@@ -125,7 +176,7 @@ where
     ) -> RuntimeResult<FeatureResult<RuntimeSendEffect>> {
         let result =
             PairingFeature::new(self.storage_mut()).commit_reject(pairing_id, now_secs)?;
-        publish_pairing_change(self, pairing_id, &result);
+        publish_pairing_change(self, Some(pairing_id), &result);
         Ok(result)
     }
 
@@ -141,7 +192,7 @@ where
         pairing_id: &str,
     ) -> RuntimeResult<FeatureResult<()>> {
         let result = PairingFeature::new(self.storage_mut()).confirm_cancelled(pairing_id)?;
-        publish_pairing_change(self, pairing_id, &result);
+        publish_pairing_change(self, Some(pairing_id), &result);
         Ok(result)
     }
 
@@ -150,7 +201,7 @@ where
         pairing_id: &str,
     ) -> RuntimeResult<FeatureResult<()>> {
         let result = PairingFeature::new(self.storage_mut()).archive(pairing_id)?;
-        publish_pairing_change(self, pairing_id, &result);
+        publish_pairing_change(self, Some(pairing_id), &result);
         Ok(result)
     }
 
@@ -159,7 +210,7 @@ where
         pairing_id: &str,
     ) -> RuntimeResult<FeatureResult<()>> {
         let result = PairingFeature::new(self.storage_mut()).finalize(pairing_id)?;
-        publish_pairing_change(self, pairing_id, &result);
+        publish_pairing_change(self, Some(pairing_id), &result);
         Ok(result)
     }
 
@@ -169,7 +220,7 @@ where
         outcome: PairingPeerOutcome,
     ) -> RuntimeResult<FeatureResult<()>> {
         let result = PairingFeature::new(self.storage_mut()).apply_peer_outcome(pairing_id, outcome)?;
-        publish_pairing_change(self, pairing_id, &result);
+        publish_pairing_change(self, Some(pairing_id), &result);
         Ok(result)
     }
 
@@ -180,7 +231,7 @@ where
     ) -> RuntimeResult<FeatureResult<()>> {
         let result = PairingFeature::new(self.storage_mut())
             .complete_welcome(pairing_id, peer_installation_id)?;
-        publish_pairing_change(self, pairing_id, &result);
+        publish_pairing_change(self, Some(pairing_id), &result);
         Ok(result)
     }
 
@@ -192,23 +243,27 @@ where
         let result = PairingFeature::new(self.storage_mut())
             .complete_welcome_for_offer_invite(offer_invite_id, peer_installation_id)?;
         let pairing_id = result.value.clone();
-        publish_pairing_change(self, &pairing_id, &result);
+        publish_pairing_change(self, Some(&pairing_id), &result);
         Ok(result)
     }
 }
 
 fn publish_pairing_change<S, T, C, V>(
     runtime: &mut ClientRuntime<S, T, C>,
-    pairing_id: &str,
+    pairing_id: Option<&str>,
     result: &FeatureResult<V>,
 ) where
-    S: RuntimeStorage + PairingStorage + ContactStorage + PointLookupStorage,
+    S: RuntimeStorage
+        + PairingStorage
+        + ProfileStorage
+        + ContactStorage
+        + PointLookupStorage,
     T: RuntimeTransport,
     C: RuntimeClock,
 {
     if !result.changes.sections.is_empty() {
         runtime.session_mut().push_event(RuntimeEvent::InviteStateChanged {
-            pairing_id: Some(pairing_id.to_owned()),
+            pairing_id: pairing_id.map(str::to_owned),
             state: None,
         });
     }
