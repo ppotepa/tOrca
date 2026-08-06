@@ -14,7 +14,12 @@ impl ClientEngineActor {
         if let Err(result) = self.ensure_relay_effect_available(context.request_id.clone()) {
             return result;
         }
-        match self.with_runtime(|runtime| runtime.prepare_refresh_pairing_code()) {
+        match self.with_runtime(|runtime| {
+            torchat_runtime::features::pairing_preparation::PairingPreparationFeature::new(
+                runtime.storage(),
+            )
+            .prepare_refresh_code()
+        }) {
             Ok((_, runtime_events)) => self.defer_relay_effect(
                 input_id,
                 context,
