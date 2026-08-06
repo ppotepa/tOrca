@@ -13,6 +13,7 @@ pub mod logic;
 pub mod message_rules;
 pub mod models;
 pub mod operations;
+pub mod pairing_facade;
 pub mod point_lookup_storage;
 pub mod retry;
 pub mod runtime;
@@ -70,6 +71,7 @@ pub use models::{
     WelcomeAcceptedResult, pairing_available_actions,
 };
 pub use operations::{DurableOperation, OperationState, OperationType};
+pub use pairing_facade::ClientPairingFeatureFacade;
 pub use pairing_rules::{
     PairingAction, RuntimePairingExpiryLike, RuntimePairingIdLike, RuntimePairingStateLike,
     RuntimePairingTransitionError, RuntimePairingTransitionLike, RuntimePairingUuidLike,
