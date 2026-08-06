@@ -5,15 +5,20 @@ class EngineResponse {
     required this.requestId,
     required this.ok,
     required this.result,
-    this.errorCode,
-    this.errorMessage,
+    this.problem,
   });
 
   final String requestId;
   final bool ok;
   final Object? result;
-  final String? errorCode;
-  final String? errorMessage;
+  final GeneratedRuntimeProblem? problem;
+
+  String? get errorCode => problem?.code;
+  String? get errorCategory => problem?.category;
+  bool get retryable => problem?.retryable ?? false;
+  String? get operationId => problem?.operationId;
+  String? get entityId => problem?.entityId;
+  String? get diagnosticContext => problem?.diagnosticContext;
 
   factory EngineResponse.fromDynamic(Object? value) {
     final response = GeneratedEngineResponse.fromDynamic(value);
@@ -21,8 +26,7 @@ class EngineResponse {
       requestId: response.requestId,
       ok: response.ok,
       result: response.result,
-      errorCode: response.errorCode,
-      errorMessage: response.errorMessage,
+      problem: response.problem,
     );
   }
 }
