@@ -1,7 +1,7 @@
 use crate::{
     ClientRuntime, ContactStorage, FeatureResult, PairingCancelEffect, PairingPeerOutcome,
     PairingPreparation, PairingStorage, PointLookupStorage, RuntimeClock, RuntimeEvent,
-    RuntimeResult, RuntimeSendEffect, RuntimeTransport,
+    RuntimeResult, RuntimeSendEffect, RuntimeStorage, RuntimeTransport,
     features::pairing::PairingFeature,
 };
 
@@ -63,7 +63,7 @@ pub trait ClientPairingFeatureFacade {
 
 impl<S, T, C> ClientPairingFeatureFacade for ClientRuntime<S, T, C>
 where
-    S: PairingStorage + ContactStorage + PointLookupStorage,
+    S: RuntimeStorage + PairingStorage + ContactStorage + PointLookupStorage,
     T: RuntimeTransport,
     C: RuntimeClock,
 {
@@ -185,7 +185,7 @@ fn publish_pairing_change<S, T, C, V>(
     pairing_id: &str,
     result: &FeatureResult<V>,
 ) where
-    S: PairingStorage + ContactStorage + PointLookupStorage,
+    S: RuntimeStorage + PairingStorage + ContactStorage + PointLookupStorage,
     T: RuntimeTransport,
     C: RuntimeClock,
 {
