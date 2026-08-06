@@ -34,6 +34,11 @@ pub trait ClientRuntimeFeatureFacade {
         installation_id: &str,
         now_ms: i64,
     ) -> RuntimeResult<FeatureResult<ConversationSummary>>;
+    fn feature_promote_verified_contact(
+        &mut self,
+        contact: ContactRecord,
+        now_ms: i64,
+    ) -> RuntimeResult<FeatureResult<ConversationSummary>>;
     fn feature_contact_accepts_messages(&mut self, installation_id: &str) -> RuntimeResult<bool>;
     fn feature_contact_allows_notifications(
         &mut self,
@@ -178,6 +183,23 @@ where
         now_ms: i64,
     ) -> RuntimeResult<FeatureResult<ConversationSummary>> {
         let contact_result = ContactsFeature::new(self.storage_mut()).verify(installation_id)?;
+        let conversation_result = ConversationsFeature::new(self.storage_mut()).ensure_for_contact(
+            &contact_result.value,
+            ConversationState::Active,
+            now_ms,
+        )?;
+        let mut changes = contact_result.changes;
+        changes.merge(conversation_result.changes);
+        publish_changes(self.session_mut(), &changes);
+        Ok(FeatureResult::changed(conversation_result.value, changes))
+    }
+
+    fn feature_promote_verified_contact(
+        &mut self,
+        contact: ContactRecord,
+        now_ms: i64,
+    ) -> RuntimeResult<FeatureResult<ConversationSummary>> {
+        let contact_result = ContactsFeature::new(self.storage_mut()).promote_verified(contact)?;
         let conversation_result = ConversationsFeature::new(self.storage_mut()).ensure_for_contact(
             &contact_result.value,
             ConversationState::Active,
