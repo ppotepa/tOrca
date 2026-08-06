@@ -1,0 +1,102 @@
+name: Architecture 0.3
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches:
+      - main
+      - agent/refactor-0.3-completion
+
+concurrency:
+  group: architecture-0.3-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  architecture:
+    name: Architecture contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate architecture ownership
+        shell: pwsh
+        run: ./scripts/internal/check-0.3-architecture.ps1
+
+      - name: Validate SQL catalog generator
+        run: python -m py_compile scripts/internal/generate_sql_catalog.py
+
+      - name: Validate repository text encoding
+        shell: pwsh
+        run: ./scripts/internal/check-utf8.ps1
+
+  rust:
+    name: Rust workspace core
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Formatting
+        run: cargo fmt --all --check
+
+      - name: Check architecture crates
+        run: >-
+          cargo check
+          -p torchat-runtime
+          -p torchat-storage
+          -p torchat-client-engine
+          -p torchat-client-engine-ffi
+
+      - name: Test architecture crates
+        run: >-
+          cargo test
+          -p torchat-runtime
+          -p torchat-storage
+          -p torchat-client-engine
+          -p torchat-client-engine-ffi
+
+  flutter:
+    name: Flutter application contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: apps/mobile/flutter
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test
