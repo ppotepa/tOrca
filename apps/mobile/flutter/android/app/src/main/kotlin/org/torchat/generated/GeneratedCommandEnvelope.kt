@@ -4,6 +4,34 @@ package org.torchat.generated
 
 import org.json.JSONObject
 
-data class GeneratedCommandRequest(val type: String, val commandId: String? = null, val payload: JSONObject = JSONObject())
+data class GeneratedCommandRequest(
+    val type: String,
+    val commandId: String? = null,
+    val payload: JSONObject = JSONObject(),
+)
 
-data class GeneratedCommandResponse(val status: String, val payload: Any? = null, val code: String? = null, val retryable: Boolean? = null)
+data class GeneratedRuntimeProblem(
+    val code: String,
+    val category: String,
+    val retryable: Boolean,
+    val operationId: String? = null,
+    val entityId: String? = null,
+    val diagnosticContext: String? = null,
+) {
+    companion object {
+        fun fromJson(value: JSONObject): GeneratedRuntimeProblem = GeneratedRuntimeProblem(
+            code = value.getString("code"),
+            category = value.getString("category"),
+            retryable = value.getBoolean("retryable"),
+            operationId = value.optString("operationId").takeIf { it.isNotBlank() },
+            entityId = value.optString("entityId").takeIf { it.isNotBlank() },
+            diagnosticContext = value.optString("diagnosticContext").takeIf { it.isNotBlank() },
+        )
+    }
+}
+
+data class GeneratedCommandResponse(
+    val status: String,
+    val payload: Any? = null,
+    val problem: GeneratedRuntimeProblem? = null,
+)
