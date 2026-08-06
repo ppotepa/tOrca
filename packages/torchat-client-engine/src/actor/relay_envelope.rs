@@ -236,9 +236,13 @@ impl ClientEngineActor {
                         "WelcomeApplied does not match pending Welcome recipient".to_owned(),
                     ));
                 }
+                let runtime_events = self.complete_pairing_welcome_applied(
+                    &invite_id,
+                    &pending.recipient_installation_id,
+                )?;
                 self.database.remove_pending_welcome(&invite_id)?;
                 self.pending_welcomes.remove(&invite_id);
-                Ok(Vec::new())
+                Ok(runtime_events)
             }
             RelayPayloadV1::RelationshipRemovalApplied { .. } => {
                 let removal_id = payload
