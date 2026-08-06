@@ -142,13 +142,13 @@ pub trait RuntimeStorage {
 
     fn remove_relationship_with_id(
         &mut self,
-        installation_id: &str,
-        removed_at: i64,
-        preserve_history: bool,
+        _installation_id: &str,
+        _removed_at: i64,
+        _preserve_history: bool,
         _removal_id: &str,
         _relationship_epoch: i64,
     ) -> RuntimeResult<()> {
-        self.remove_relationship(installation_id, removed_at, preserve_history)
+        Err(unsupported("remove_relationship_with_id"))
     }
 
     fn apply_remote_relationship_removal(
