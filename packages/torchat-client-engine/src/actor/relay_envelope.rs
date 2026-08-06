@@ -48,8 +48,15 @@ impl ClientEngineActor {
                     offer_invite_id: Some(parsed.invite_id),
                     offer_payload: Some(invite.clone()),
                 };
-                let (_, runtime_events) =
-                    self.with_runtime(|runtime| runtime.receive_pairing_offer(item))?;
+                let now_secs = self.clock.now_ms() / 1_000;
+                let (_, runtime_events) = self.with_runtime(|runtime| {
+                    torchat_runtime::ClientPairingFeatureFacade::feature_receive_pairing_offer(
+                        runtime,
+                        item,
+                        now_secs,
+                    )
+                    .map(|_| ())
+                })?;
                 self.queue_notification(NotificationRequest {
                     id: pairing_id.clone(),
                     kind: NotificationKind::PairingRequest,
