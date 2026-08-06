@@ -59,6 +59,11 @@ pub trait ClientPairingFeatureFacade {
         pairing_id: &str,
         peer_installation_id: String,
     ) -> RuntimeResult<FeatureResult<()>>;
+    fn feature_complete_pairing_welcome_for_offer_invite(
+        &mut self,
+        offer_invite_id: &str,
+        peer_installation_id: String,
+    ) -> RuntimeResult<FeatureResult<String>>;
 }
 
 impl<S, T, C> ClientPairingFeatureFacade for ClientRuntime<S, T, C>
@@ -176,6 +181,18 @@ where
         let result = PairingFeature::new(self.storage_mut())
             .complete_welcome(pairing_id, peer_installation_id)?;
         publish_pairing_change(self, pairing_id, &result);
+        Ok(result)
+    }
+
+    fn feature_complete_pairing_welcome_for_offer_invite(
+        &mut self,
+        offer_invite_id: &str,
+        peer_installation_id: String,
+    ) -> RuntimeResult<FeatureResult<String>> {
+        let result = PairingFeature::new(self.storage_mut())
+            .complete_welcome_for_offer_invite(offer_invite_id, peer_installation_id)?;
+        let pairing_id = result.value.clone();
+        publish_pairing_change(self, &pairing_id, &result);
         Ok(result)
     }
 }
