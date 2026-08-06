@@ -1,11 +1,14 @@
-use crate::{ChatMessage, ContactRecord, ConversationSummary, PairingItem, RuntimeResult};
+use crate::{
+    ChatMessage, ContactRecord, ConversationSummary, PairingItem, RuntimeResult, RuntimeStorage,
+};
 
 /// Point-oriented reads required by domain features.
 ///
 /// Implementations must use direct storage lookups. Collection-scan fallbacks
 /// are intentionally forbidden so a feature cannot accidentally turn a single
-/// entity read into an unbounded projection load.
-pub trait PointLookupStorage {
+/// entity read into an unbounded projection load. `RuntimeStorage` remains a
+/// temporary supertrait only until every legacy runtime call site is migrated.
+pub trait PointLookupStorage: RuntimeStorage {
     fn contact_by_installation_id(
         &self,
         installation_id: &str,
