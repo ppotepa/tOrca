@@ -8,7 +8,7 @@ impl ClientEngineActor {
         body: String,
         reply_to_message_id: Option<String>,
     ) -> CommandHandlerResult {
-        let (effect, runtime_events) = self.send_message_command(
+        let (effect, runtime_events) = self.send_message_feature_command(
             idempotency,
             &conversation_id,
             body,
