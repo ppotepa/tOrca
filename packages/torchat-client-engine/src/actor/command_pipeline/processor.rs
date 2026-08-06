@@ -241,9 +241,25 @@ impl ClientEngineActor {
             | RelayEffectResult::PairingSubmitted(Err(error))
             | RelayEffectResult::WorkerFailed(error) => Err(EngineError::Transport(error)),
             RelayEffectResult::PairingCancelled {
+                pairing_id,
                 result: Err(error),
-                ..
-            } => Err(EngineError::Transport(error)),
+            } => {
+                let lifecycle_result = context
+                    .command_id
+                    .as_deref()
+                    .ok_or_else(|| {
+                        EngineError::InvalidCommand(
+                            "cancel pairing failure is missing its durable operation id".to_owned(),
+                        )
+                    })
+                    .and_then(|operation_id| {
+                        self.record_pairing_cancel_failure(operation_id, &pairing_id)
+                    });
+                match lifecycle_result {
+                    Ok(()) => Err(EngineError::Transport(error)),
+                    Err(lifecycle_error) => Err(lifecycle_error),
+                }
+            }
         };
 
         let mut result = EngineProcessingResult::empty();

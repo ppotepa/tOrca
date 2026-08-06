@@ -37,6 +37,10 @@ jobs:
         shell: pwsh
         run: ./scripts/internal/check-runtime-problem-wire.ps1
 
+      - name: Validate durable pairing lifecycle
+        shell: pwsh
+        run: ./scripts/internal/check-durable-pairing.ps1
+
       - name: Validate SQL catalog generator
         run: python -m py_compile scripts/internal/generate_sql_catalog.py
 
