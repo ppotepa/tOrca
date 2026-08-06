@@ -6,9 +6,17 @@ impl ClientEngineActor {
         idempotency: Option<&IdempotencyCommitContext>,
         message_id: String,
     ) -> CommandHandlerResult {
+        let now_ms = self.clock.now_ms();
         let (effect, runtime_events) = self.with_runtime_idempotent(
             idempotency,
-            |runtime| runtime.retry_message(&message_id),
+            |runtime| {
+                torchat_runtime::ClientRuntimeFeatureFacade::feature_retry_message(
+                    runtime,
+                    &message_id,
+                    now_ms,
+                )
+                .map(|result| result.value)
+            },
             |_| Ok(ResponsePayload::Empty),
         )?;
         self.deliver_send_effect(effect.into())?;
