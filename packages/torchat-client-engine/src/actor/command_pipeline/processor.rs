@@ -189,24 +189,70 @@ impl ClientEngineActor {
                 command_descriptor: context.command_descriptor.clone(),
             }
         });
+        let mut failure_runtime_events = Vec::new();
         let operation_result = match effect_result {
             RelayEffectResult::PairingCode(Ok(code)) => {
                 self.commit_pairing_code_outcome(idempotency.as_ref(), code)
             }
-            RelayEffectResult::PairingSubmitted(Ok(item)) => {
-                self.commit_pairing_submitted_outcome(idempotency.as_ref(), item)
-            }
+            RelayEffectResult::PairingSubmitted {
+                result: Ok(item), ..
+            } => self.commit_pairing_submitted_outcome(idempotency.as_ref(), item),
             RelayEffectResult::PairingCancelled {
                 pairing_id,
                 result: Ok(()),
             } => self.commit_pairing_cancelled_outcome(idempotency.as_ref(), pairing_id),
-            RelayEffectResult::PairingCode(Err(error))
-            | RelayEffectResult::PairingSubmitted(Err(error))
-            | RelayEffectResult::WorkerFailed(error) => Err(EngineError::Transport(error)),
-            RelayEffectResult::PairingCancelled {
+            RelayEffectResult::PairingCode(Err(error)) => {
+                Err(EngineError::Transport(error))
+            }
+            RelayEffectResult::PairingSubmitted {
+                pairing_id,
                 result: Err(error),
-                ..
-            } => Err(EngineError::Transport(error)),
+            } => match self.fail_pairing_operation(
+                &pairing_id,
+                torchat_runtime::RuntimeErrorCode::TransportUnavailable,
+            ) {
+                Ok(events) => {
+                    failure_runtime_events = events;
+                    Err(EngineError::Transport(error))
+                }
+                Err(state_error) => Err(EngineError::Storage(format!(
+                    "record pairing submit failure: {state_error}; relay error: {error}"
+                ))),
+            },
+            RelayEffectResult::PairingCancelled {
+                pairing_id,
+                result: Err(error),
+            } => match self.retry_pairing_operation(&pairing_id) {
+                Ok(events) => {
+                    failure_runtime_events = events;
+                    Err(EngineError::Transport(error))
+                }
+                Err(state_error) => Err(EngineError::Storage(format!(
+                    "record pairing cancel retry: {state_error}; relay error: {error}"
+                ))),
+            },
+            RelayEffectResult::WorkerFailed {
+                operation_id,
+                error,
+            } => {
+                if let Some(operation_id) = operation_id {
+                    match self.fail_pairing_operation(
+                        &operation_id,
+                        torchat_runtime::RuntimeErrorCode::Internal,
+                    ) {
+                        Ok(events) => failure_runtime_events = events,
+                        Err(state_error) => {
+                            return self.command_error_result(
+                                context.request_id,
+                                EngineError::Storage(format!(
+                                    "record relay worker failure: {state_error}; worker error: {error}"
+                                )),
+                            );
+                        }
+                    }
+                }
+                Err(EngineError::Transport(error))
+            }
         };
 
         let mut result = EngineProcessingResult::empty();
@@ -221,6 +267,7 @@ impl ClientEngineActor {
                 });
             }
             Err(error) => {
+                result.extend_runtime_events(failure_runtime_events);
                 self.pending_engine_events.clear();
                 result.events.push(EngineEvent::Response {
                     request_id: context.request_id,
