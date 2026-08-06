@@ -58,6 +58,30 @@ impl ClientEngineActor {
         Ok(runtime_events)
     }
 
+    pub(super) fn complete_pairing_welcome_applied(
+        &mut self,
+        offer_invite_id: &str,
+        peer_installation_id: &str,
+    ) -> EngineResult<Vec<torchat_runtime::RuntimeEvent>> {
+        let now_ms = self.clock.now_ms();
+        let (_, runtime_events) = self.with_runtime(|runtime| {
+            let pairing_id = torchat_runtime::ClientPairingFeatureFacade::feature_complete_pairing_welcome_for_offer_invite(
+                runtime,
+                offer_invite_id,
+                peer_installation_id.to_owned(),
+            )?
+            .value;
+            ensure_pairing_operation(runtime, &pairing_id, now_ms)?;
+            torchat_runtime::ClientOperationFeatureFacade::feature_complete_operation(
+                runtime,
+                &pairing_id,
+                now_ms,
+            )?;
+            Ok(())
+        })?;
+        Ok(runtime_events)
+    }
+
     pub(super) fn reconcile_outbox_pairing_contact_with_operations(
         &mut self,
         installation_id: &str,
