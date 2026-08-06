@@ -35,12 +35,12 @@ impl ClientEngineActor {
                         &self.identity.installation_id(),
                         &parsed.installation_id,
                     )),
-                    sender: Some(sender),
                     // Rendezvous authorization is bound to the live WebSocket
                     // and its side token. The runtime still requires a non-empty local
                     // capability to authorize the UI transition, but this
                     // value is never sent to the relay.
                     capability: Some(pairing_id.clone()),
+                    sender: Some(sender),
                     expires_at: parsed.expires_at as i64,
                     state: InviteState::Pending,
                     received: true,
@@ -60,7 +60,7 @@ impl ClientEngineActor {
             }
             RelayPayloadV1::PairingRejected { pairing_id, .. } => {
                 if let Ok(pairing_id) = uuid::Uuid::parse_str(pairing_id) {
-                    return self.apply_pairing_peer_outcome(
+                    return self.apply_pairing_peer_outcome_with_operation(
                         &pairing_id.to_string(),
                         PairingPeerOutcome::RejectionReceived,
                     );
@@ -72,9 +72,9 @@ impl ClientEngineActor {
                     .verify_welcome(&envelope.sender, &self.identity.installation_id())
                     .map_err(EngineError::InvalidCommand)?;
                 let peer_endpoint = payload.welcome_peer_endpoint().cloned();
-                let peer_capability = payload.welcome_peer_capability().map(|(id, secret)| {
-                    (id.to_owned(), secret.to_owned())
-                });
+                let peer_capability = payload
+                    .welcome_peer_capability()
+                    .map(|(id, secret)| (id.to_owned(), secret.to_owned()));
                 if let Some(endpoint) = &peer_endpoint {
                     endpoint
                         .validate(self.clock.now_ms() / 1_000)
@@ -95,9 +95,8 @@ impl ClientEngineActor {
                     &pairing_pair_key(&self.identity.installation_id(), &sender.installation_id),
                 )?;
                 // A relay reconnect can replay a Welcome which has already
-                // been committed.  MLS key packages are intentionally
-                // one-time material, so accepting that duplicate would fail
-                // with the misleading "No matching key package" error.
+                // been committed. MLS key packages are intentionally
+                // one-time material, so accepting that duplicate would fail.
                 if self.database.invite_used(&invite_id)? {
                     if let Err(error) =
                         self.queue_welcome_applied(&sender.installation_id, &invite_id)
@@ -157,7 +156,7 @@ impl ClientEngineActor {
                                 },
                             });
                             return Ok(vec![torchat_runtime::RuntimeEvent::RuntimeError {
-                                message: "Nie moÅ¼na dokoÅ„czyÄ‡ starego zaproszenia. PoproÅ› kontakt o wygenerowanie nowego kodu parowania.".to_owned(),
+                                message: "pairing_invite_expired".to_owned(),
                             }]);
                         }
                         return Err(EngineError::InvalidCommand(detail));
@@ -193,9 +192,10 @@ impl ClientEngineActor {
                                 &pending_invite.local_capability_secret,
                             )?;
                         }
-                        let (_, mut reconcile_events) = self.with_runtime(|runtime| {
-                            runtime.reconcile_outbox_pairing_contact(&sender.installation_id)
-                        })?;
+                        let mut reconcile_events = self
+                            .reconcile_outbox_pairing_contact_with_operations(
+                                &sender.installation_id,
+                            )?;
                         runtime_events.append(&mut reconcile_events);
                         if let Some(peer_endpoint) = peer_endpoint {
                             runtime_events.extend(self.apply_peer_endpoint(peer_endpoint)?);
@@ -252,9 +252,9 @@ impl ClientEngineActor {
                     )
                     .map_err(EngineError::InvalidCommand)?;
                 let contact = self
-                    .list_contacts()?
-                    .into_iter()
-                    .find(|contact| contact.installation_id == endpoint.installation_id);
+                    .database
+                    .contact_by_installation_id(&endpoint.installation_id)
+                    .map_err(runtime_error)?;
                 let Some(contact) = contact else {
                     self.database.put_pending_peer_endpoint_inbox(
                         &PendingPeerEndpointInboxRecord {
