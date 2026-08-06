@@ -32,6 +32,13 @@ foreach ($forbidden in @(
     }
 }
 
+$pointLookupPort = Get-Content -Raw -LiteralPath (Require-File 'packages/torchat-runtime/src/point_lookup_storage.rs')
+foreach ($forbidden in @('RuntimeStorage', 'impl<T:', '.into_iter().find(')) {
+    if ($pointLookupPort.Contains($forbidden)) {
+        throw "PointLookupStorage contains a forbidden compatibility fallback: $forbidden"
+    }
+}
+
 $problemClassifier = Get-Content -Raw -LiteralPath (Require-File 'apps/mobile/flutter/lib/core/problems/runtime_problem_classifier.dart')
 foreach ($forbidden in @('.toLowerCase()', '.contains(', 'String message')) {
     if ($problemClassifier.Contains($forbidden)) {
@@ -59,7 +66,9 @@ foreach ($feature in $requiredFeatures) {
 
 foreach ($required in @(
     'packages/torchat-runtime/src/storage_port.rs',
+    'packages/torchat-storage/src/storage/point_lookup_queries.rs',
     'packages/torchat-storage/src/storage/point_lookup_repository.rs',
+    'packages/torchat-storage/src/storage/transactional_point_lookup.rs',
     'packages/torchat-storage/src/storage/operation_repository.rs',
     'packages/torchat-storage/sql/migrations/004_durable_operations.sql',
     'packages/torchat-client-engine/src/actor/command_pipeline/stages.rs',
@@ -76,9 +85,16 @@ foreach ($required in @(
 }
 
 $pointLookupRepository = Get-Content -Raw -LiteralPath (Require-File 'packages/torchat-storage/src/storage/point_lookup_repository.rs')
-foreach ($required in @('impl PointLookupStorage for ClientDatabase', 'CONTACT_BY_INSTALLATION_ID', 'MESSAGE_BY_ID')) {
+foreach ($required in @('impl PointLookupStorage for ClientDatabase', 'point_lookup_queries::contact_by_installation_id', 'point_lookup_queries::message_by_id')) {
     if (-not $pointLookupRepository.Contains($required)) {
         throw "SQLite point lookup repository is not integrated: $required"
+    }
+}
+
+$transactionalPointLookup = Get-Content -Raw -LiteralPath (Require-File 'packages/torchat-storage/src/storage/transactional_point_lookup.rs')
+foreach ($required in @('impl PointLookupStorage for SqliteRuntimeStorage', 'point_lookup_queries::contact_by_installation_id', 'point_lookup_queries::message_by_id')) {
+    if (-not $transactionalPointLookup.Contains($required)) {
+        throw "transactional SQLite point lookup is not integrated: $required"
     }
 }
 
