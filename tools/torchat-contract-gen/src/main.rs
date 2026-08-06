@@ -295,5 +295,56 @@ fn write(path: &Path, content: &str) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
-    fs::write(path, content).map_err(|error| error.to_string())
+    fs::write(path, content).map_err(|error| error.to_string())?;
+    format_file(path)
+}
+
+/// Formats a generated file so that regeneration is deterministic and the
+/// repository's formatter gates (cargo fmt, dart format) remain green.
+fn format_file(path: &Path) -> Result<(), String> {
+    let extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or_default();
+    match extension {
+        "rs" => run(
+            "rustfmt",
+            &["--edition", "2024", "--", &path_to_string(path)?],
+        ),
+        "dart" => run("dart", &["format", &path_to_string(path)?]),
+        _ => Ok(()),
+    }
+}
+
+fn run(program: &str, args: &[&str]) -> Result<(), String> {
+    let status = run_command(program, args)?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("{program} failed with status {}", status))
+    }
+}
+
+fn run_command(program: &str, args: &[&str]) -> Result<std::process::ExitStatus, String> {
+    // On Windows, dart is a .bat shim in the Flutter SDK; Rust's Command cannot
+    // spawn .bat/.cmd directly, so invoke it through the command interpreter.
+    #[cfg(windows)]
+    if program == "dart" {
+        return std::process::Command::new("cmd")
+            .arg("/C")
+            .arg("dart")
+            .args(args)
+            .status()
+            .map_err(|error| format!("failed to run dart: {error}"));
+    }
+    std::process::Command::new(program)
+        .args(args)
+        .status()
+        .map_err(|error| format!("failed to run {program}: {error}"))
+}
+
+fn path_to_string(path: &Path) -> Result<String, String> {
+    path.to_str()
+        .map(str::to_owned)
+        .ok_or_else(|| format!("path is not valid UTF-8: {}", path.display()))
 }
