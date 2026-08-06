@@ -245,8 +245,9 @@ impl ClientEngineActor {
     }
 
     pub(super) fn flush_pending_receipt_effects(&mut self) -> EngineResult<()> {
-        let (effects, _) =
-            self.with_runtime(|runtime| runtime.prepare_pending_receipt_effects())?;
+        let (effects, _) = self.with_runtime(|runtime| {
+            torchat_runtime::ClientRuntimeFeatureFacade::feature_pending_receipts(runtime)
+        })?;
         for effect in effects {
             self.deliver_send_effect(RuntimeSendEffect::from(effect))?;
         }
