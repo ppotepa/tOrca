@@ -20,6 +20,14 @@ pub trait ClientPairingFeatureFacade {
         &mut self,
         item: PairingItem,
     ) -> RuntimeResult<FeatureResult<PairingItem>>;
+    fn feature_pending_pairing_send_effects(
+        &mut self,
+        now_secs: i64,
+    ) -> RuntimeResult<Vec<RuntimeSendEffect>>;
+    fn feature_reconcile_outbox_pairing_contact(
+        &mut self,
+        installation_id: &str,
+    ) -> RuntimeResult<FeatureResult<Vec<String>>>;
     fn feature_pairing_offer_payload(&mut self, pairing_id: &str) -> RuntimeResult<String>;
     fn feature_prepare_accept_pairing(
         &mut self,
@@ -120,6 +128,25 @@ where
         let pairing_id = item.pairing_id.clone();
         let result = PairingFeature::new(self.storage_mut()).commit_submitted(item)?;
         publish_pairing_change(self, Some(&pairing_id), &result);
+        Ok(result)
+    }
+
+    fn feature_pending_pairing_send_effects(
+        &mut self,
+        now_secs: i64,
+    ) -> RuntimeResult<Vec<RuntimeSendEffect>> {
+        PairingFeature::new(self.storage_mut()).pending_send_effects(now_secs)
+    }
+
+    fn feature_reconcile_outbox_pairing_contact(
+        &mut self,
+        installation_id: &str,
+    ) -> RuntimeResult<FeatureResult<Vec<String>>> {
+        let result = PairingFeature::new(self.storage_mut())
+            .reconcile_outbox_contact(installation_id)?;
+        for pairing_id in &result.value {
+            publish_pairing_change(self, Some(pairing_id), &result);
+        }
         Ok(result)
     }
 
