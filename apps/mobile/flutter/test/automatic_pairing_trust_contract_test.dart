@@ -19,7 +19,7 @@ void main() {
 
   test('release trust model is completed by the Rust pairing workflow', () {
     final enginePairing = File(
-      '../../../packages/torchat-client-engine/src/actor/pairing.rs',
+      '../../../packages/torchat-client-engine/src/actor/state/pairing.rs',
     ).readAsStringSync();
     final release = File('../../../README.md').readAsStringSync();
 
