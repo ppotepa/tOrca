@@ -16,7 +16,7 @@ impl ClientEngineActor {
         }
         match self.with_runtime(|runtime| {
             torchat_runtime::features::pairing_preparation::PairingPreparationFeature::new(
-                runtime.storage(),
+                runtime.storage_mut(),
             )
             .prepare_refresh_code()
         }) {
