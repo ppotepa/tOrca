@@ -43,16 +43,14 @@ impl ClientEngineActor {
     )> {
         match event {
             RelayEvent::PairingAvailable { pairing_id } => {
-                let events = self.apply_pairing_peer_outcome(
+                let events = self.apply_pairing_peer_outcome_with_operation(
                     &pairing_id.to_string(),
                     PairingPeerOutcome::RejectionReceived,
                 )?;
                 Ok((events, None, None))
             }
             RelayEvent::PairingFinalized { pairing_id } => {
-                let (_, events) = self.with_runtime(|runtime| {
-                    runtime.finalize_pairing(&pairing_id.to_string())
-                })?;
+                let events = self.finalize_pairing_with_operation(&pairing_id.to_string())?;
                 Ok((events, None, None))
             }
             RelayEvent::Envelope(envelope) => self
