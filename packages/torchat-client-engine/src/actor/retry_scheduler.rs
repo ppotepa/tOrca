@@ -18,9 +18,12 @@ impl ClientEngineActor {
             return Vec::new();
         }
         let result = match deadline.kind {
-            RetryKind::MessageSend | RetryKind::PairingResponse => {
-                self.flush_pending_send_effects().map(|_| "send flush")
-            }
+            RetryKind::MessageSend => self
+                .flush_pending_message_deliveries()
+                .map(|_| "message delivery flush"),
+            RetryKind::PairingResponse => self
+                .flush_pending_pairing_deliveries()
+                .map(|_| "pairing response flush"),
             RetryKind::MessageAckDeadline => self
                 .retry_expired_ack_deadlines()
                 .map(|_| "ack deadline handling"),
@@ -31,9 +34,12 @@ impl ClientEngineActor {
             RetryKind::ReadReceipt => self
                 .flush_pending_read_receipts()
                 .map(|_| "read receipt flush"),
-            RetryKind::RelationshipRemoval | RetryKind::RelationshipRemovalAck => self
-                .flush_pending_send_effects()
+            RetryKind::RelationshipRemoval => self
+                .flush_pending_relationship_removals()
                 .map(|_| "relationship removal flush"),
+            RetryKind::RelationshipRemovalAck => self
+                .flush_pending_relationship_removal_acks()
+                .map(|_| "relationship removal acknowledgement flush"),
         };
         match result {
             Ok(_) => Vec::new(),
@@ -62,10 +68,6 @@ impl ClientEngineActor {
             return Ok(None);
         };
         if !self.retry_is_runnable(retry_deadline.kind) {
-            // A durable deadline in the past must not turn `sleep_until` into
-            // a tight loop while Tor, SOCKS or the relay control plane is
-            // unavailable. Platform facts still wake the actor immediately;
-            // this is solely a bounded fallback when such a fact is absent.
             let delay = if !self.network_online {
                 RETRY_OFFLINE_RECHECK
             } else {
@@ -73,10 +75,6 @@ impl ClientEngineActor {
             };
             return Ok(Some(Instant::now() + delay));
         }
-        // Durable retry records use wall-clock milliseconds so they survive a
-        // restart. Convert that timestamp once into a process-local monotonic
-        // deadline; sleeping must not be affected by a wall-clock jump after
-        // this point.
         Ok(Some(monotonic_wakeup_at(
             retry_deadline.at_ms,
             self.clock.now_ms(),
@@ -206,9 +204,6 @@ impl ClientEngineActor {
 
     fn retry_is_runnable(&self, kind: RetryKind) -> bool {
         let _policy = super::RetryPolicy::for_kind(kind);
-        // No retry depends on a globally connected relay. Pairing retries use
-        // the short-lived V1 rendezvous connection; messages, receipts and
-        // relationship updates use direct peer transport.
         self.network_online && self.socks5_url.is_some()
     }
 
@@ -217,10 +212,15 @@ impl ClientEngineActor {
             .database
             .expired_ack_deadline_message_ids(self.clock.now_ms())?
         {
-            let _ = self.apply_message_transport_outcome(
+            let events = self.apply_message_delivery_outcome(
                 &message_id,
                 MessageTransportOutcome::RetryableFailure,
             )?;
+            self.pending_engine_events.extend(
+                events
+                    .into_iter()
+                    .map(|event| EngineEvent::Runtime { event }),
+            );
         }
         Ok(())
     }

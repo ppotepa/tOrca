@@ -17,7 +17,8 @@ $feature = Require-Text 'packages/torchat-runtime/src/features/messaging/mod.rs'
 foreach ($required in @(
     'pub trait ClientRuntimeMessagingFacade',
     'feature_retry_message',
-    'feature_delete_message_local',
+    'feature_queue_message_delivery',
+    'feature_apply_message_delivery_outcome',
     'message_by_id',
     'conversation_by_id',
     'contact_by_installation_id',
@@ -56,11 +57,12 @@ if ($retry.Contains('runtime.retry_message')) {
 
 $delete = Require-Text 'packages/torchat-client-engine/src/actor/commands/messages/delete_message_local.rs'
 foreach ($required in @(
-    'ClientRuntimeMessagingFacade',
-    'feature_delete_message_local'
+    'ClientRuntimeMessageDeletionFacade',
+    'feature_delete_message_delivery',
+    'self.clock.now_ms()'
 )) {
     if (-not $delete.Contains($required)) {
-        throw "delete-message handler bypasses the messaging feature: $required"
+        throw "delete-message handler bypasses transactional delivery cleanup: $required"
     }
 }
 if ($delete.Contains('runtime.delete_message_local')) {

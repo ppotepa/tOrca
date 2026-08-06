@@ -158,6 +158,13 @@ where
         ))
     }
 
+    pub fn pending_send_effects(
+        &self,
+        now_secs: i64,
+    ) -> RuntimeResult<Vec<RuntimeSendEffect>> {
+        process::pending_send_effects(self.storage.pairing_inbox()?, now_secs)
+    }
+
     fn inbox_required(&self, pairing_id: &str) -> RuntimeResult<PairingItem> {
         self.storage
             .pairing_inbox_by_id(pairing_id)?

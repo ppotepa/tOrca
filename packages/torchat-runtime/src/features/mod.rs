@@ -1,5 +1,6 @@
 pub mod contacts;
 pub mod conversations;
+pub mod message_deletion;
 pub mod messaging;
 pub mod operations;
 pub mod pairing;

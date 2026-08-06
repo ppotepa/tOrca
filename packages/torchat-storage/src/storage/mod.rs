@@ -11,6 +11,7 @@ pub mod runtime_storage {
     include!("runtime_storage.rs");
     include!("transactional_point_lookup.rs");
     include!("transactional_operation_storage.rs");
+    include!("transactional_message_delivery.rs");
 }
 mod settings;
 pub mod sqlite;

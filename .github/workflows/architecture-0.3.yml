@@ -53,6 +53,10 @@ jobs:
         shell: pwsh
         run: ./scripts/internal/check-conversation-focus.ps1
 
+      - name: Validate durable message delivery
+        shell: pwsh
+        run: ./scripts/internal/check-durable-message-delivery.ps1
+
       - name: Validate SQL catalog generator
         run: python -m py_compile scripts/internal/generate_sql_catalog.py
 
