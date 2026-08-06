@@ -129,6 +129,7 @@ impl ClientEngineActor {
         sequence: u64,
         payload: String,
     ) -> EngineResult<Vec<torchat_runtime::RuntimeEvent>> {
+        let mut runtime_events = self.begin_message_delivery_operation(&message.message_id)?;
         self.database.enqueue_outbound_delivery(
             &message.message_id,
             &message.recipient_installation_id,
@@ -155,13 +156,14 @@ impl ClientEngineActor {
             },
         );
         if let Err(error) = peer_result {
-            return self.handle_failed_peer_message_delivery(
+            let mut failed_events = self.handle_failed_peer_message_delivery(
                 &message.recipient_installation_id,
                 &message.message_id,
                 &error.to_string(),
-            );
+            )?;
+            runtime_events.append(&mut failed_events);
         }
-        Ok(Vec::new())
+        Ok(runtime_events)
     }
 
     pub(super) fn handle_failed_peer_message_delivery(
