@@ -201,18 +201,15 @@ impl ClientEngineActor {
                 match delivery {
                     PeerDeliveryTag::Message { message_id } => match kind {
                         PeerAckKind::Received => Ok(Vec::new()),
-                        PeerAckKind::Persisted => {
-                            self.database.complete_outbound_delivery(&message_id)?;
-                            self.apply_message_transport_outcome(
-                                &message_id,
-                                MessageTransportOutcome::PeerPersisted,
-                            )
-                        }
-                        PeerAckKind::Delivered => self.apply_message_transport_outcome(
+                        PeerAckKind::Persisted => self.apply_message_delivery_outcome(
+                            &message_id,
+                            MessageTransportOutcome::PeerPersisted,
+                        ),
+                        PeerAckKind::Delivered => self.apply_message_delivery_outcome(
                             &message_id,
                             MessageTransportOutcome::PeerDelivered,
                         ),
-                        PeerAckKind::Rejected => self.apply_message_transport_outcome(
+                        PeerAckKind::Rejected => self.apply_message_delivery_outcome(
                             &message_id,
                             MessageTransportOutcome::PeerRejected,
                         ),

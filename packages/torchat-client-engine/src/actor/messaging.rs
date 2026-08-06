@@ -1,4 +1,7 @@
 use super::*;
+use torchat_runtime::{
+    PointLookupStorage, features::messaging::ClientRuntimeMessagingFacade,
+};
 
 impl ClientEngineActor {
     pub(super) fn send_message_command(
@@ -8,12 +11,20 @@ impl ClientEngineActor {
         body: String,
         reply_to_message_id: Option<&str>,
     ) -> EngineResult<(MessageSendEffect, Vec<torchat_runtime::RuntimeEvent>)> {
-        let peer_installation_id = self
-            .list_conversations()?
-            .into_iter()
-            .find(|conversation| conversation.id == conversation_id)
-            .map(|conversation| conversation.contact_installation_id)
-            .ok_or_else(|| EngineError::InvalidCommand("conversation does not exist".to_owned()))?;
+        let idempotency = idempotency.ok_or_else(|| {
+            EngineError::InvalidCommand(
+                "send message requires a durable operation id".to_owned(),
+            )
+        })?;
+        let operation_id = idempotency.command_id.clone();
+        let command_descriptor = idempotency.command_descriptor.clone();
+        let conversation_summary = PointLookupStorage::conversation_by_id(
+            &self.database,
+            conversation_id,
+        )
+        .map_err(runtime_error)?
+        .ok_or_else(|| EngineError::InvalidCommand("conversation does not exist".to_owned()))?;
+        let peer_installation_id = conversation_summary.contact_installation_id;
         let mut conversation = self
             .conversations
             .remove(&peer_installation_id)
@@ -30,19 +41,27 @@ impl ClientEngineActor {
         let ack_deadline = Some(now_ms + 60_000);
 
         let transaction_result = self.with_runtime_idempotent(
-            idempotency,
+            Some(idempotency),
             |runtime| {
-                let effect =
-                    runtime.send_message_reply(conversation_id, body, reply_to_message_id)?;
-                let stored = runtime
-                    .storage()
-                    .message(&effect.message_id)?
-                    .ok_or_else(|| {
-                        RuntimeError::Storage(
-                            "new outgoing message is missing from the active transaction"
-                                .to_owned(),
-                        )
-                    })?;
+                let effect = runtime
+                    .feature_queue_message_delivery(
+                        &operation_id,
+                        &command_descriptor,
+                        conversation_id,
+                        body,
+                        reply_to_message_id,
+                        now_ms,
+                    )?
+                    .value;
+                let stored = PointLookupStorage::message_by_id(
+                    runtime.storage(),
+                    &effect.message_id,
+                )?
+                .ok_or_else(|| {
+                    RuntimeError::Storage(
+                        "new outgoing message is missing from the active transaction".to_owned(),
+                    )
+                })?;
                 let message_id = uuid::Uuid::parse_str(&effect.message_id)
                     .map_err(|error| RuntimeError::Storage(error.to_string()))?;
                 let plaintext = ApplicationPayloadV1::Message {
@@ -129,12 +148,6 @@ impl ClientEngineActor {
         sequence: u64,
         payload: String,
     ) -> EngineResult<Vec<torchat_runtime::RuntimeEvent>> {
-        self.database.enqueue_outbound_delivery(
-            &message.message_id,
-            &message.recipient_installation_id,
-            sequence,
-            self.clock.now_ms() / 1_000,
-        )?;
         self.pending_engine_events.push(EngineEvent::Log {
             log: EngineLogEvent {
                 level: "info".to_owned(),
@@ -149,7 +162,7 @@ impl ClientEngineActor {
             &message.recipient_installation_id,
             &message.conversation_id,
             sequence,
-            payload.clone().into_bytes(),
+            payload.into_bytes(),
             PeerDeliveryTag::Message {
                 message_id: message.message_id.clone(),
             },
@@ -179,21 +192,18 @@ impl ClientEngineActor {
             super::RetryPolicy::DELIVERY
                 .age_exhausted(record.created_at.saturating_mul(1_000), self.clock.now_ms())
         });
-        if matches!(
+        let terminal = matches!(
             super::classify_retry_error(error),
             super::RetryDisposition::Permanent | super::RetryDisposition::Protocol
         ) || super::RetryPolicy::DELIVERY.exhausted(attempt)
-            || age_exhausted
-        {
-            let error_code = match super::classify_retry_error(error) {
-                super::RetryDisposition::Protocol => "protocol",
-                super::RetryDisposition::Authentication => "authentication",
-                super::RetryDisposition::Permanent => "permanent",
-                super::RetryDisposition::Transient => "retry_exhausted",
-            };
-            self.database
-                .mark_message_dead_lettered(error_code, message_id)?;
-            self.database.complete_outbound_delivery(message_id)?;
+            || age_exhausted;
+        if terminal {
+            let events = self.apply_message_delivery_outcome_with_error(
+                message_id,
+                MessageTransportOutcome::PermanentFailure,
+                Some(error),
+                None,
+            )?;
             if super::RetryPolicy::DELIVERY.exhausted(attempt) || age_exhausted {
                 self.database.record_delivery_dead_letter(
                     "message",
@@ -203,19 +213,14 @@ impl ClientEngineActor {
                     error,
                 )?;
             }
-            self.apply_message_transport_outcome(
-                message_id,
-                MessageTransportOutcome::PermanentFailure,
-            )
+            Ok(events)
         } else {
-            self.database.requeue_outbound_delivery(
-                message_id,
-                self.clock.now_ms() + retry_backoff_ms(attempt),
-                error,
-            )?;
-            self.apply_message_transport_outcome(
+            let retry_at = self.clock.now_ms() + retry_backoff_ms(attempt);
+            self.apply_message_delivery_outcome_with_error(
                 message_id,
                 MessageTransportOutcome::PeerUnavailable,
+                Some(error),
+                Some(retry_at),
             )
         }
     }

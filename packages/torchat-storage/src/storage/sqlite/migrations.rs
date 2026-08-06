@@ -29,4 +29,9 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "004_durable_operations.sql",
         sql: include_str!("../../../sql/migrations/004_durable_operations.sql"),
     },
+    Migration {
+        version: 5,
+        name: "005_durable_operation_resume_context.sql",
+        sql: include_str!("../../../sql/migrations/005_durable_operation_resume_context.sql"),
+    },
 ];

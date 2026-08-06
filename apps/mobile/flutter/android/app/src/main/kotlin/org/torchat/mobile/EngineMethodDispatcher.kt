@@ -329,6 +329,9 @@ internal class EngineMethodDispatcher(
                 result.success(withContext(Dispatchers.IO) { block() })
             } catch (cancelled: CancellationException) {
                 throw cancelled
+            } catch (problem: EngineProblemException) {
+                val code = problem.problem["code"]?.toString() ?: "internal"
+                result.error(code, problem.message, problem.problem)
             } catch (error: Throwable) {
                 result.error("RUNTIME", error.message, null)
             }

@@ -6,6 +6,7 @@ use crate::{OperationId, RuntimeErrorCode};
 #[serde(rename_all = "snake_case")]
 pub enum OperationType {
     Pairing,
+    PairingCancellation,
     MessageDelivery,
     RelationshipRemoval,
     EndpointRotation,
@@ -46,6 +47,8 @@ pub struct DurableOperation {
     pub retry_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_code: Option<RuntimeErrorCode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command_descriptor: Option<String>,
 }
 
 impl DurableOperation {
@@ -65,7 +68,13 @@ impl DurableOperation {
             attempt_count: 0,
             retry_at: None,
             error_code: None,
+            command_descriptor: None,
         }
+    }
+
+    pub fn with_command_descriptor(mut self, descriptor: impl Into<String>) -> Self {
+        self.command_descriptor = Some(descriptor.into());
+        self
     }
 
     pub fn begin_attempt(&mut self, now_ms: i64) {

@@ -53,24 +53,34 @@ impl ClientEngineActor {
         let mut result = EngineProcessingResult::empty();
         result.scheduler_plan_changed = true;
 
-        if contract.idempotent
-            && let Some(command_id) = command_id.as_deref()
-            && let Ok(Some((stored_type, result_json, _revision))) =
-                self.database.load_processed_command(command_id)
-        {
+        let replay = if contract.idempotent {
+            match command_id.as_deref() {
+                Some(command_id) => match self.database.load_processed_command(command_id) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        return self.command_error_result(envelope.request_id, error);
+                    }
+                },
+                None => None,
+            }
+        } else {
+            None
+        };
+
+        if let Some((stored_type, result_json, _revision)) = replay {
             trace.complete(CommandPipelineStage::CheckIdempotency);
             let stored_result = if stored_type != command_descriptor {
-                ResponseResult::Error {
-                    code: "idempotency_conflict".to_owned(),
-                    message: "command id was already used for a different command".to_owned(),
-                }
+                ResponseResult::error(
+                    "idempotency_conflict",
+                    "command id was already used for a different command",
+                )
             } else {
                 match serde_json::from_str::<ResponsePayload>(&result_json) {
                     Ok(payload) => ResponseResult::Ok { payload },
-                    Err(_) => ResponseResult::Error {
-                        code: "idempotency_corrupt".to_owned(),
-                        message: "stored command result is invalid".to_owned(),
-                    },
+                    Err(_) => ResponseResult::error(
+                        "idempotency_corrupt",
+                        "stored command result is invalid",
+                    ),
                 }
             };
             trace.complete(CommandPipelineStage::EncodeResponse);
@@ -101,17 +111,57 @@ impl ClientEngineActor {
                 return self.command_cancel_pairing(input_id, deferred_context, pairing_id);
             }
             command => {
-                let idempotency = command_id.as_ref().map(|command_id| {
-                    IdempotencyCommitContext {
+                let idempotency = if contract.idempotent {
+                    command_id.as_ref().map(|command_id| IdempotencyCommitContext {
                         command_id: command_id.clone(),
                         command_descriptor: command_descriptor.clone(),
-                    }
-                });
+                    })
+                } else {
+                    None
+                };
                 trace.complete(CommandPipelineStage::OpenTransaction);
                 trace.complete(CommandPipelineStage::Execute);
                 match self.handle_command(command, idempotency.as_ref()) {
                     Ok((payload, runtime_events, connection_snapshot)) => {
                         trace.complete(CommandPipelineStage::Persist);
+
+                        // Runtime-backed handlers persist their replay result in
+                        // the same SQLite transaction as the domain mutation.
+                        // Legacy direct-database handlers are retained during
+                        // migration, but their fallback is now explicit and any
+                        // persistence failure becomes a command failure instead
+                        // of being discarded.
+                        let idempotency_result = (|| -> EngineResult<()> {
+                            if !contract.idempotent {
+                                return Ok(());
+                            }
+                            let Some(command_id) = command_id.as_deref() else {
+                                return Ok(());
+                            };
+                            match self.database.load_processed_command(command_id)? {
+                                Some((stored_type, _, _)) if stored_type == command_descriptor => {
+                                    Ok(())
+                                }
+                                Some((stored_type, _, _)) => Err(EngineError::Storage(format!(
+                                    "command id {command_id} was persisted for {stored_type} instead of {command_descriptor}"
+                                ))),
+                                None => {
+                                    let (_, revision) = self.projection_head()?;
+                                    let result_json = serde_json::to_string(&payload)?;
+                                    self.database.save_processed_command(
+                                        command_id,
+                                        &command_descriptor,
+                                        &result_json,
+                                        revision,
+                                    )
+                                }
+                            }
+                        })();
+                        if let Err(error) = idempotency_result {
+                            self.pending_engine_events.clear();
+                            return self.command_error_result(envelope.request_id, error);
+                        }
+
                         if let Some(snapshot) = connection_snapshot {
                             result.events.push(EngineEvent::Connection { snapshot });
                         }
@@ -120,18 +170,6 @@ impl ClientEngineActor {
                         trace.complete(CommandPipelineStage::CollectChanges);
                         trace.complete(CommandPipelineStage::Commit);
                         trace.complete(CommandPipelineStage::ScheduleEffects);
-                        if contract.idempotent
-                            && let Some(command_id) = command_id.as_deref()
-                            && let Ok((_, revision)) = self.projection_head()
-                            && let Ok(result_json) = serde_json::to_string(&payload)
-                        {
-                            let _ = self.database.save_processed_command(
-                                command_id,
-                                &command_descriptor,
-                                &result_json,
-                                revision,
-                            );
-                        }
                         trace.complete(CommandPipelineStage::PublishRevision);
                         trace.complete(CommandPipelineStage::EncodeResponse);
                         result.events.push(EngineEvent::Response {
@@ -143,10 +181,7 @@ impl ClientEngineActor {
                         self.pending_engine_events.clear();
                         result.events.push(EngineEvent::Response {
                             request_id: envelope.request_id,
-                            result: ResponseResult::Error {
-                                code: error_code(&error).to_owned(),
-                                message: error.to_string(),
-                            },
+                            result: ResponseResult::error(error_code(&error), error.to_string()),
                         });
                     }
                 }
@@ -206,9 +241,25 @@ impl ClientEngineActor {
             | RelayEffectResult::PairingSubmitted(Err(error))
             | RelayEffectResult::WorkerFailed(error) => Err(EngineError::Transport(error)),
             RelayEffectResult::PairingCancelled {
+                pairing_id,
                 result: Err(error),
-                ..
-            } => Err(EngineError::Transport(error)),
+            } => {
+                let lifecycle_result = context
+                    .command_id
+                    .as_deref()
+                    .ok_or_else(|| {
+                        EngineError::InvalidCommand(
+                            "cancel pairing failure is missing its durable operation id".to_owned(),
+                        )
+                    })
+                    .and_then(|operation_id| {
+                        self.record_pairing_cancel_failure(operation_id, &pairing_id)
+                    });
+                match lifecycle_result {
+                    Ok(()) => Err(EngineError::Transport(error)),
+                    Err(lifecycle_error) => Err(lifecycle_error),
+                }
+            }
         };
 
         let mut result = EngineProcessingResult::empty();
@@ -226,10 +277,7 @@ impl ClientEngineActor {
                 self.pending_engine_events.clear();
                 result.events.push(EngineEvent::Response {
                     request_id: context.request_id,
-                    result: ResponseResult::Error {
-                        code: error_code(&error).to_owned(),
-                        message: error.to_string(),
-                    },
+                    result: ResponseResult::error(error_code(&error), error.to_string()),
                 });
             }
         }
@@ -245,10 +293,7 @@ impl ClientEngineActor {
         let mut result = EngineProcessingResult::empty();
         result.events.push(EngineEvent::Response {
             request_id,
-            result: ResponseResult::Error {
-                code: error_code(&error).to_owned(),
-                message: error.to_string(),
-            },
+            result: ResponseResult::error(error_code(&error), error.to_string()),
         });
         result
     }

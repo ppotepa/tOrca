@@ -98,10 +98,7 @@ impl ClientEngineActor {
                 if let Some(request) = request {
                     result.events.push(EngineEvent::Response {
                         request_id: request.request_id,
-                        result: ResponseResult::Error {
-                            code: error_code(&error).to_owned(),
-                            message: error.to_string(),
-                        },
+                        result: ResponseResult::error(error_code(&error), error.to_string()),
                     });
                 } else {
                     result.events.push(EngineEvent::Log {
@@ -161,6 +158,12 @@ impl ClientEngineActor {
                         .extend(self.run_retry_scheduler_collect(deadline));
                     result.events.append(&mut self.pending_engine_events);
                 }
+                let resumed = self.resume_due_durable_operation(causation_id)?;
+                result.events.extend(resumed.events);
+                result.effects.extend(resumed.effects);
+                result.derived_inputs.extend(resumed.derived_inputs);
+                result.changes.merge(resumed.changes);
+                result.scheduler_plan_changed |= resumed.scheduler_plan_changed;
             }
         }
         Ok(result)
@@ -177,11 +180,16 @@ impl ClientEngineActor {
 
     pub(super) fn scheduler_plan(&self, generation: u64) -> EngineResult<EngineSchedulerPlan> {
         let retry_deadline = self.next_retry_deadline()?;
+        let ordinary_retry_at = self.next_retry_wakeup_at(retry_deadline)?;
+        let durable_retry_at = self.next_durable_operation_wakeup_at()?;
         Ok(EngineSchedulerPlan {
             generation,
             relay_poll_at: Some(self.relay_poll_at),
             peer_probe_at: Some(self.probe_coordinator.next_round_at()),
-            retry_at: self.next_retry_wakeup_at(retry_deadline)?,
+            retry_at: [ordinary_retry_at, durable_retry_at]
+                .into_iter()
+                .flatten()
+                .min(),
         })
     }
 

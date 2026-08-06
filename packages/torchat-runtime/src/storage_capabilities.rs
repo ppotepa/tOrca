@@ -80,6 +80,11 @@ pub trait CapabilityStorage {
     ) -> RuntimeResult<()>;
 }
 
+/// Durable operation persistence must be implemented by the active adapter.
+///
+/// Unlike the remaining transitional capabilities, this trait deliberately has
+/// no blanket `RuntimeStorage` implementation. Operation lifecycle changes must
+/// participate in the same transaction as the workflow mutation.
 pub trait OperationStorage {
     fn operation_by_id(
         &self,
@@ -244,22 +249,5 @@ impl<T: RuntimeStorage + ?Sized> CapabilityStorage for T {
         contact_installation_id: &str,
     ) -> RuntimeResult<()> {
         RuntimeStorage::revoke_peer_endpoint_capability(self, contact_installation_id)
-    }
-}
-
-impl<T: RuntimeStorage + ?Sized> OperationStorage for T {
-    fn operation_by_id(
-        &self,
-        operation_id: &OperationId,
-    ) -> RuntimeResult<Option<DurableOperation>> {
-        RuntimeStorage::operation_by_id(self, operation_id)
-    }
-
-    fn put_operation(&mut self, operation: DurableOperation) -> RuntimeResult<()> {
-        RuntimeStorage::put_operation(self, operation)
-    }
-
-    fn pending_operations(&self) -> RuntimeResult<Vec<DurableOperation>> {
-        RuntimeStorage::pending_operations(self)
     }
 }
