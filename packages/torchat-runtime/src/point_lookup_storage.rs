@@ -23,6 +23,11 @@ pub trait PointLookupStorage: RuntimeStorage {
 
     fn pairing_inbox_by_id(&self, pairing_id: &str) -> RuntimeResult<Option<PairingItem>>;
 
+    fn pairing_inbox_by_offer_invite_id(
+        &self,
+        offer_invite_id: &str,
+    ) -> RuntimeResult<Option<PairingItem>>;
+
     fn pairing_outbox_by_id(&self, pairing_id: &str) -> RuntimeResult<Option<PairingItem>>;
 
     fn message_by_id(&self, message_id: &str) -> RuntimeResult<Option<ChatMessage>>;
