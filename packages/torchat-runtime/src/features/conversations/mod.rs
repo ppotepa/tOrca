@@ -40,20 +40,23 @@ where
         installation_id: &str,
         now_ms: i64,
     ) -> RuntimeResult<FeatureResult<ConversationSummary>> {
-        let existing = self.storage.conversation_for_contact(installation_id)?;
-        let mut conversation = existing.unwrap_or_else(|| ConversationSummary {
-            id: installation_id.to_owned(),
-            contact_installation_id: installation_id.to_owned(),
-            status: ConversationState::Active,
-            last_message_preview: "Nowa rozmowa".to_owned(),
-            last_message_at: now_ms,
-            unread_count: 0,
-        });
-        if conversation.status == ConversationState::Active {
-            return Ok(FeatureResult::unchanged(conversation));
+        match self.storage.conversation_for_contact(installation_id)? {
+            Some(conversation) if conversation.status == ConversationState::Active => {
+                Ok(FeatureResult::unchanged(conversation))
+            }
+            Some(mut conversation) => {
+                conversation.status = ConversationState::Active;
+                self.save(conversation)
+            }
+            None => self.save(ConversationSummary {
+                id: installation_id.to_owned(),
+                contact_installation_id: installation_id.to_owned(),
+                status: ConversationState::Active,
+                last_message_preview: "Nowa rozmowa".to_owned(),
+                last_message_at: now_ms,
+                unread_count: 0,
+            }),
         }
-        conversation.status = ConversationState::Active;
-        self.save(conversation)
     }
 
     pub fn mark_read(&mut self, conversation_id: &str) -> RuntimeResult<FeatureResult<()>> {
