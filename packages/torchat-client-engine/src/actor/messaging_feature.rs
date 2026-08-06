@@ -133,11 +133,12 @@ impl ClientEngineActor {
             Ok(mut events) => {
                 runtime_events.append(&mut events);
                 if let Some(operation_id) = operation_id.as_deref() {
+                    let completed_at = self.clock.now_ms();
                     let (_, mut operation_events) = self.with_runtime(|runtime| {
                         torchat_runtime::ClientOperationFeatureFacade::feature_complete_operation(
                             runtime,
                             operation_id,
-                            self.clock.now_ms(),
+                            completed_at,
                         )
                         .map(|_| ())
                     })?;
@@ -147,13 +148,14 @@ impl ClientEngineActor {
             }
             Err(error) => {
                 if let Some(operation_id) = operation_id.as_deref() {
+                    let failed_at = self.clock.now_ms();
                     let _ = self.with_runtime(|runtime| {
                         torchat_runtime::ClientOperationFeatureFacade::feature_retry_operation(
                             runtime,
                             operation_id,
                             torchat_runtime::RetryClass::NetworkBackoff,
                             torchat_runtime::RuntimeErrorCode::TransportUnavailable,
-                            self.clock.now_ms(),
+                            failed_at,
                         )
                         .map(|_| ())
                     });
