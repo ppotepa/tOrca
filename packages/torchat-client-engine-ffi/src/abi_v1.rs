@@ -11,8 +11,10 @@ use serde_json::json;
 use crate::{
     abi::FfiStatus,
     c_api::{
-        OpaqueEngineHandle, torchat_client_engine_free, torchat_client_engine_free_string,
+        MlsEpochGetCallback, MlsEpochSetCallback, OpaqueEngineHandle,
+        torchat_client_engine_free, torchat_client_engine_free_string,
         torchat_client_engine_last_error, torchat_client_engine_new,
+        torchat_client_engine_new_with_mls_epoch_anchor,
         torchat_client_engine_platform_fact_json, torchat_client_engine_poll_json,
         torchat_client_engine_shutdown, torchat_client_engine_start,
         torchat_client_engine_submit_json,
@@ -80,7 +82,10 @@ unsafe fn protected_status(operation: impl FnOnce() -> FfiStatus) -> i32 {
     match catch_unwind(AssertUnwindSafe(operation)) {
         Ok(status) => status.code(),
         Err(_) => {
-            set_problem(FfiStatus::PanicContained, "client engine panic was contained at the ABI boundary");
+            set_problem(
+                FfiStatus::PanicContained,
+                "client engine panic was contained at the ABI boundary",
+            );
             FfiStatus::PanicContained.code()
         }
     }
@@ -112,10 +117,51 @@ pub unsafe extern "C" fn torca_engine_new_v1(
         }
         *out_handle = std::ptr::null_mut();
         if config_len > 0 && config_json.is_null() {
-            set_problem(FfiStatus::InvalidArgument, "config_json must not be null when config_len is non-zero");
+            set_problem(
+                FfiStatus::InvalidArgument,
+                "config_json must not be null when config_len is non-zero",
+            );
             return FfiStatus::InvalidArgument;
         }
         let handle = torchat_client_engine_new(config_json, config_len);
+        if handle.is_null() {
+            let message = take_legacy_error();
+            let status = status_from_legacy_error(FfiStatus::InvalidArgument, &message);
+            set_problem(status, message);
+            return status;
+        }
+        *out_handle = handle;
+        FfiStatus::Ok
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn torca_engine_new_with_mls_epoch_anchor_v1(
+    config_json: *const u8,
+    config_len: usize,
+    get_epoch: Option<MlsEpochGetCallback>,
+    set_epoch: Option<MlsEpochSetCallback>,
+    out_handle: *mut *mut OpaqueEngineHandle,
+) -> i32 {
+    protected_status(|| {
+        if out_handle.is_null() {
+            set_problem(FfiStatus::InvalidArgument, "out_handle must not be null");
+            return FfiStatus::InvalidArgument;
+        }
+        *out_handle = std::ptr::null_mut();
+        if get_epoch.is_none() || set_epoch.is_none() {
+            set_problem(
+                FfiStatus::InvalidArgument,
+                "MLS epoch callbacks must both be provided",
+            );
+            return FfiStatus::InvalidArgument;
+        }
+        let handle = torchat_client_engine_new_with_mls_epoch_anchor(
+            config_json,
+            config_len,
+            get_epoch,
+            set_epoch,
+        );
         if handle.is_null() {
             let message = take_legacy_error();
             let status = status_from_legacy_error(FfiStatus::InvalidArgument, &message);
@@ -156,7 +202,10 @@ pub unsafe extern "C" fn torca_engine_submit_json_v1(
             return FfiStatus::InvalidHandle;
         }
         if request_len > 0 && request_json.is_null() {
-            set_problem(FfiStatus::InvalidArgument, "request_json must not be null when request_len is non-zero");
+            set_problem(
+                FfiStatus::InvalidArgument,
+                "request_json must not be null when request_len is non-zero",
+            );
             return FfiStatus::InvalidArgument;
         }
         if torchat_client_engine_submit_json(handle, request_json, request_len) == 0 {
@@ -181,7 +230,10 @@ pub unsafe extern "C" fn torca_engine_platform_fact_json_v1(
             return FfiStatus::InvalidHandle;
         }
         if fact_len > 0 && fact_json.is_null() {
-            set_problem(FfiStatus::InvalidArgument, "fact_json must not be null when fact_len is non-zero");
+            set_problem(
+                FfiStatus::InvalidArgument,
+                "fact_json must not be null when fact_len is non-zero",
+            );
             return FfiStatus::InvalidArgument;
         }
         if torchat_client_engine_platform_fact_json(handle, fact_json, fact_len) == 0 {
