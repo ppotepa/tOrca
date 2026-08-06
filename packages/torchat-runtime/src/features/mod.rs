@@ -7,4 +7,5 @@ pub mod pairing;
 pub mod peer;
 pub mod presence;
 pub mod receipts;
+pub mod relationship_removal;
 pub mod relationships;
