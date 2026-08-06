@@ -177,11 +177,38 @@ where
         peer_installation_id: String,
     ) -> RuntimeResult<FeatureResult<()>> {
         let item = self.require_inbox(pairing_id)?;
-        let completed = process::complete_welcome(item, peer_installation_id)?;
-        if completed.state == InviteState::Completed {
-            self.storage.put_pairing_inbox(completed)?;
+        self.complete_welcome_item(item, peer_installation_id)
+    }
+
+    pub fn complete_welcome_for_offer_invite(
+        &mut self,
+        offer_invite_id: &str,
+        peer_installation_id: String,
+    ) -> RuntimeResult<FeatureResult<String>> {
+        let item = self
+            .storage
+            .pairing_inbox_by_offer_invite_id(offer_invite_id)?
+            .ok_or_else(|| RuntimeError::NotFound("pairing request does not exist".to_owned()))?;
+        let pairing_id = item.pairing_id.clone();
+        let result = self.complete_welcome_item(item, peer_installation_id)?;
+        if result.changes.sections.is_empty() {
+            return Ok(FeatureResult::unchanged(pairing_id));
         }
-        Ok(changed(pairing_id, ()))
+        Ok(FeatureResult::changed(pairing_id.clone(), result.changes))
+    }
+
+    fn complete_welcome_item(
+        &mut self,
+        item: crate::PairingItem,
+        peer_installation_id: String,
+    ) -> RuntimeResult<FeatureResult<()>> {
+        let pairing_id = item.pairing_id.clone();
+        if item.state == InviteState::Completed {
+            return Ok(FeatureResult::unchanged(()));
+        }
+        let completed = process::complete_welcome(item, peer_installation_id)?;
+        self.storage.put_pairing_inbox(completed)?;
+        Ok(changed(&pairing_id, ()))
     }
 
     fn require_inbox(&self, pairing_id: &str) -> RuntimeResult<crate::PairingItem> {
