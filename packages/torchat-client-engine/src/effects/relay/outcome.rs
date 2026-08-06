@@ -6,12 +6,18 @@ use super::DeferredCommandContext;
 
 pub(crate) enum RelayEffectResult {
     PairingCode(Result<InviteCode, String>),
-    PairingSubmitted(Result<PairingItem, String>),
+    PairingSubmitted {
+        pairing_id: String,
+        result: Result<PairingItem, String>,
+    },
     PairingCancelled {
         pairing_id: String,
         result: Result<(), String>,
     },
-    WorkerFailed(String),
+    WorkerFailed {
+        operation_id: Option<String>,
+        error: String,
+    },
 }
 
 pub(crate) struct RelayEffectOutcome {
