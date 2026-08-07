@@ -9,6 +9,7 @@ import java.io.File
 class RuntimeContractManifestTest {
     private fun manifest(): JSONObject {
         val candidates = listOf(
+            File("../../../../../common/client-engine-contract.json"),
             File("../../common/client-engine-contract.json"),
             File("../../../common/client-engine-contract.json"),
         )
@@ -44,6 +45,9 @@ class RuntimeContractManifestTest {
                 EngineContract.GET_PEER_ENDPOINT,
                 EngineContract.RETRY_PEER_CONNECTION,
                 EngineContract.ROTATE_PEER_ENDPOINT,
+                EngineContract.GET_CONTACT_ENDPOINT_CAPABILITY,
+                EngineContract.ROTATE_CONTACT_ENDPOINT_CAPABILITY,
+                EngineContract.REVOKE_CONTACT_ENDPOINT_CAPABILITY,
                 EngineContract.SET_NICKNAME,
                 EngineContract.REFRESH_PAIRING_CODE,
                 EngineContract.SUBMIT_PAIRING_CODE,
@@ -59,8 +63,11 @@ class RuntimeContractManifestTest {
                 EngineContract.CLOSE_CONVERSATION,
                 EngineContract.SEND_MESSAGE,
                 EngineContract.RETRY_MESSAGE,
+                EngineContract.RETRY_DEAD_LETTER,
+                EngineContract.LIST_DEAD_LETTERS,
                 EngineContract.DELETE_MESSAGE_LOCAL,
                 EngineContract.SET_TYPING,
+                EngineContract.SET_CONVERSATION_FOCUS,
                 EngineContract.SET_PRESENCE,
                 EngineContract.SEND_READ_RECEIPTS,
                 EngineContract.PLATFORM_FACT,
@@ -80,9 +87,11 @@ class RuntimeContractManifestTest {
                 EngineContract.MESSAGE_STATE_CHANGED,
                 EngineContract.CONVERSATION_READ_CHANGED,
                 EngineContract.TYPING_CHANGED,
+                EngineContract.CONVERSATION_FOCUS_CHANGED,
                 EngineContract.PRESENCE_CHANGED,
                 EngineContract.PEER_ENDPOINT_CHANGED,
                 EngineContract.PEER_CONNECTION_CHANGED,
+                EngineContract.CONTACT_CAPABILITY_CHANGED,
                 EngineContract.CHANGED,
                 EngineContract.RUNTIME_ERROR,
                 EngineContract.RUNTIME_LOG,
