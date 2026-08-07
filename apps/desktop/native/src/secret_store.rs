@@ -1,11 +1,11 @@
 use anyhow::{Context, Result, bail};
 #[cfg(feature = "os-vault")]
 use sha2::{Digest, Sha256};
-#[cfg(any(test, feature = "torka-file-secrets"))]
+#[cfg(any(test, all(not(feature = "os-vault"), feature = "torka-file-secrets")))]
 use std::fs;
 #[cfg(feature = "os-vault")]
 use std::path::Path;
-#[cfg(any(test, feature = "torka-file-secrets"))]
+#[cfg(any(test, all(not(feature = "os-vault"), feature = "torka-file-secrets")))]
 use std::path::PathBuf;
 use zeroize::Zeroizing;
 
@@ -92,20 +92,20 @@ impl DesktopSecretStore for OsVaultSecretStore {
     }
 }
 
-#[cfg(any(test, feature = "torka-file-secrets"))]
+#[cfg(any(test, all(not(feature = "os-vault"), feature = "torka-file-secrets")))]
 #[derive(Clone, Debug)]
 pub(crate) struct FileSecretStore {
     path: PathBuf,
 }
 
-#[cfg(any(test, feature = "torka-file-secrets"))]
+#[cfg(any(test, all(not(feature = "os-vault"), feature = "torka-file-secrets")))]
 impl FileSecretStore {
     pub(crate) fn new(path: impl Into<PathBuf>) -> Self {
         Self { path: path.into() }
     }
 }
 
-#[cfg(any(test, feature = "torka-file-secrets"))]
+#[cfg(any(test, all(not(feature = "os-vault"), feature = "torka-file-secrets")))]
 impl DesktopSecretStore for FileSecretStore {
     fn read(&self) -> Result<Option<Zeroizing<Vec<u8>>>> {
         if !self.path.exists() {

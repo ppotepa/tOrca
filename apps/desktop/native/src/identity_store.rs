@@ -1,5 +1,5 @@
 use crate::secret_store::DesktopSecretStore;
-#[cfg(feature = "torka-file-secrets")]
+#[cfg(all(not(feature = "os-vault"), feature = "torka-file-secrets"))]
 use crate::secret_store::FileSecretStore;
 #[cfg(feature = "os-vault")]
 use crate::secret_store::{DesktopSecretKind, OsVaultSecretStore};
